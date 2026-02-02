@@ -5,10 +5,11 @@ Revisar que el regulador de voltaje esté encendido y la luz sea verde.
 
 Encender primero la computadora y esperar a que cargue el Sistema Maestro.
 
-Encender la impresora principal (EPSON/Canon) y verificar que no tenga luces rojas.
+Encender la impresora principal (EPSON/HP) y verificar que no tenga luces rojas.
 
 Encender la Silhouette Cameo.
 
 
 Realizar una "Prueba de Inyectores" desde el mantenimiento de la impresora para asegurar que la tinta fluya.
+
 
