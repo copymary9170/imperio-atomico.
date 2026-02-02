@@ -1,0 +1,418 @@
+## 🧱 BLOQUE 1: INFRAESTRUCTURA Y HARDWARE (001 – 075)
+
+**Foco:** Cuidado de la inversión y mantenimiento técnico.
+
+1. **Protocolo de Encendido:** Secuencia eléctrica para proteger las placas lógicas.
+2. **Configuración de Red IP:** Estabilización de la conexión Wi-Fi/Ethernet de las máquinas.
+3. **Manual de Voltaje:** Uso correcto del regulador de picos de energía.
+4. **Limpieza de Cabezales:** Frecuencia y método para evitar rayas en la impresión.
+5. **Mantenimiento de Rodillos:** Eliminación de restos de pegamento en la impresora.
+6. **Calibración de la Cameo:** Ajuste del sensor de registro para cortes precisos.
+7. **Lubricación de Rieles:** Uso de aceite sintético en los ejes de movimiento.
+8. **Gestión de la Almohadilla:** Monitoreo del depósito de tinta de desecho.
+9. **Protocolo de Purga:** Cómo sacar burbujas de aire de las mangueras de tinta.
+10. **Alineación de Inyectores:** Ajuste bidireccional para nitidez de texto.
+11. **Manual de la Cuchilla Auto:** Configuración para papel bond y opalina.
+12. **Manual de la Cuchilla Manual:** Configuración para cartulinas gruesas.
+13. **Uso de Cuchilla Rotatoria:** Protocolo para corte de telas o materiales especiales.
+14. **Limpieza de Tapetes:** Método de lavado para recuperar el adhesivo.
+15. **Protección de Escáner:** Limpieza del cristal para copias sin manchas.
+16. **Control de Humedad:** Almacenamiento de papel en bolsas selladas.
+17. **Temperatura de Operación:** Ventilación necesaria para evitar sobrecalentamiento.
+18. **Actualización de Firmware:** Pasos para actualizar software sin bloquear equipos.
+19. **Respaldo de Drivers:** Carpeta física con los instaladores originales.
+20. **Diagnóstico de Ruidos:** Identificación de sonidos de alerta mecánica.
+21. **Configuración de Papel Foto:** Ajuste de absorción de tinta para secado rápido.
+22. **Configuración de Papel Mate:** Ajuste de contraste para documentos legales.
+23. **Configuración de Adhesivos:** Ajuste para que el corte no atraviese el liner.
+24. **Uso de la Impresora Vieja:** Trabajos de borrador y ahorro de tinta.
+25. **Uso de la Impresora Nueva:** Trabajos premium y de alta resolución.
+26. **Gestión de Bandejas:** Separación de tamaños Carta, A4 y Oficio.
+27. **Carga de Tintas:** Método de recarga sin derrames ni contaminación de color.
+28. **Limpieza de Sensores:** Uso de aire comprimido para sensores de papel.
+29. **Protocolo de Atascos:** Extracción segura de papel sin romper engranajes.
+30. **Inventario de Cables:** Control de conectores USB y de poder de repuesto.
+31. **Software Silhouette:** Instalación y configuración de preferencias.
+32. **Software de Impresión:** Ajustes de cola de impresión y spooler.
+33. **Control de Electricidad Estática:** Uso de paños antiestáticos en el papel.
+34. **Ergonomía de Máquinas:** Altura correcta para operar sin fatiga.
+35. **Iluminación del Área:** Uso de luz LED blanca para verificar colores.
+36. **Organización de Herramientas:** Sombras en la pared para tijeras y bisturís.
+37. **Uso de la Guillotina:** Seguridad y afilado de la cuchilla de corte.
+38. **Uso de Reglas de Acero:** Evitar cortes en las manos durante el refilado.
+39. **Manejo de Bisturí:** Cambio de hojas oxidadas o sin filo.
+40. **Manual de Espátulas:** Uso correcto para no rayar los vinilos.
+41. **Técnica de Depilado:** Cómo quitar excedentes de vinilo con pinzas.
+42. **Aplicación de Transfer:** Cómo pasar diseños de la mesa al producto final.
+43. **Laminado Manual:** Aplicación de vinilo protector sin burbujas.
+44. **Anillado – Perforación:** Ajuste de márgenes para espirales metálicos.
+45. **Anillado – Cierre:** Técnica de presión para anillos circulares perfectos.
+46. **Uso de Pegamentos:** Diferencia entre pegamento en cinta y líquido.
+47. **Técnica de Doblado:** Uso de hueso de plegado para no quebrar el papel.
+48. **Perforación de Esquinas:** Uso de redondeadoras para acabados finos.
+49. **Colocación de Ojalillos:** Uso de la Crop-A-Dile o remachadora.
+50. **Armado de Sobres:** Guía de pegado para sobres institucionales.
+51. **Armado de Carpetas:** Montaje de solapas y portatarjetas.
+52. **Encuadernación Simple:** Uso de grapas de brazo largo.
+53. **Corte de Tarjetas:** Guía para que el diseño quede centrado.
+54. **Producción de Stickers:** Proceso completo desde impresión a corte.
+55. **Producción de Diplomas:** Uso de papeles especiales y sellos secos.
+56. **Impresión de Tesis:** Configuración de márgenes para lomo.
+57. **Manejo de Acetatos:** Configuración de impresión en transparencias.
+58. **Manejo de Kraft:** Ajustes de saturación para papeles oscuros.
+59. **Manejo de Opalina:** Técnica para que el color no se vea “lavado”.
+60. **Impresión de Sobres Armados:** Cómo evitar atascos con solapas.
+61. **Limpieza de Estación:** Rutina de 5 minutos al finalizar el día.
+62. **Gestión de Residuos:** Separación de retazos de papel y plástico.
+63. **Seguridad Química:** Almacenamiento de alcohol isopropílico.
+64. **Botiquín de Taller:** Elementos básicos para cortes o quemaduras.
+65. **Protección de Archivos:** Uso de carpetas físicas para trabajos listos.
+66. **Protocolo de Empaque:** Uso de bolsas celofán para humedad.
+67. **Uso de Sellos:** Aplicación de tinta uniforme en sellos de goma.
+68. **Manual de Escaneo:** Resolución DPI según destino (web o impresión).
+69. **Digitalización de Fotos:** Restauración básica de brillo y contraste.
+70. **Manejo de USB de Clientes:** Escaneo obligatorio de virus.
+71. **Conversión de Archivos:** De Word a PDF para evitar movimientos de texto.
+72. **Optimización de Hoja:** Cómo meter más diseños en una sola página.
+73. **Prueba de Boquillas:** Verificación matutina del flujo de tinta.
+74. **Reinicio de Contador:** Cómo resetear la máquina tras mantenimiento.
+75. **Bitácora de Hardware:** Registro de compra y fin de garantía.
+
+---
+
+## 💼 BLOQUE 2: ADMINISTRACIÓN Y FINANZAS (076 – 150)
+
+**Foco:** Control del dinero.
+
+76. **Política de Precios:** Tabla base de costo por hoja y corte.
+77. **Costo Fijo de Luz:** Desglose del gasto mensual prorrateado.
+78. **Costo de Internet:** Uso de la red para el negocio.
+79. **Costo por ML de Tinta:** Cálculo exacto según recarga.
+80. **Costo por Gramaje:** Precio adicional por papel grueso.
+81. **Costo de Cuchilla:** Fracción cobrada por centímetro cortado.
+82. **Margen de Utilidad:** Porcentaje de ganancia neta deseada.
+83. **Fondo de Depreciación:** Ahorro para futuras máquinas.
+84. **Fondo de Pensión – Inversionista:** Ahorro personal.
+85. **Fondo de Pensión – Madre:** Retiro de la administradora.
+86. **Fondo de Pensión – Hermana:** Retiro del apoyo técnico.
+87. **Incentivo de Venta:** Comisión por captar clientes.
+88. **Hoja Maestra (Dashboard):** Registro central de la operación.
+89. **Libro de Caja Diario:** Entradas y salidas en efectivo.
+90. **Registro de Pagos Digitales:** Validación de transferencias.
+91. **Política de Anticipos:** Regla del 50 % previo a producción.
+92. **Caja Menor:** Gestión de vueltos.
+93. **Arqueo de Caja:** Revisión diaria de dinero.
+94. **Base de Datos de Clientes:** Historial y contactos.
+95. **Directorio de Proveedores:** Mejores precios y contactos.
+96. **Comparativa de Precios:** Análisis de competencia.
+97. **Lista de Compras:** Insumos del mes siguiente.
+98. **Stock Mínimo:** Alerta de reposición.
+99. **Registro de Facturas:** Soporte legal de gastos.
+100. **Utilidad Semanal:** Resumen de ganancias.
+101. **Gestión de Deudas:** Seguimiento a saldos pendientes.
+102. **Devoluciones:** Protocolo de reembolso.
+103. **Gastos Hormiga:** Control de consumibles pequeños.
+104. **Impuestos Locales:** Obligaciones tributarias.
+105. **Costo de Envío:** Cálculo de domicilios.
+106. **Fondo de Emergencia:** Reparaciones inesperadas.
+107. **Presupuesto de Marketing:** Publicidad y volantes.
+108. **Sueldos Base:** Pagos familiares fijos.
+109. **Horas Laboradas:** Registro de tiempo trabajado.
+110. **Ahorro de Reinversión:** Compra de nuevas máquinas.
+111. **Registro de Merma:** Pérdidas por error humano.
+112. **Conciliación Bancaria:** Cruce de extractos.
+113. **Seguridad de Efectivo:** Custodia del dinero.
+114. **Tarifario Mayorista:** Precios por volumen.
+115. **Tarifario Minorista:** Público general y estudiantes.
+116. **Costo de Diseño:** Cobro por edición.
+117. **Valor Hora-Máquina:** Costo operativo real.
+118. **Plan de Pagos a Plazos:** Reglas para clientes VIP.
+119. **Billetes Falsos:** Guía de detección.
+120. **Informe Mensual Inversionista:** Crecimiento del capital.
+121. **Optimización de Compras:** Comprar por volumen.
+122. **Gastos de Oficina:** Mobiliario y extras.
+123. **Seguro de Equipos:** Póliza o fondo propio.
+124. **Costo de Oportunidad:** Pedidos rechazados.
+125. **Punto de Equilibrio:** Venta mínima necesaria.
+126. **Proyecciones Anuales:** Metas de venta.
+127. **Fondo para Capacitación:** Cursos técnicos y diseño.
+128. **Gestión de Suscripciones:** Adobe, Silhouette, etc.
+129. **Auditoría Sorpresa:** Revisión interna.
+130. **Manual de Cobro:** Forma correcta de pedir pago.
+131. **Recibos de Pago:** Comprobante al cliente.
+132. **Costo de Empaque:** Bolsa, lazo y sticker.
+133. **Análisis de Rentabilidad:** Productos más rentables.
+134. **Registro de Inversión Inicial:** Capital inicial.
+135. **Cronograma de Pagos:** Fechas de pago familiar.
+136. **Fondo de Cumpleaños:** Detalles especiales.
+137. **Gestión de Garantías:** Reclamos a proveedores.
+138. **Control de Cambio:** Manejo de monedas.
+139. **Plan de Expansión:** Local físico futuro.
+140. **Costo de Muestrario:** Ejemplos para clientes.
+141. **Donaciones:** Trabajos sociales.
+142. **Multas y Recargos:** Pagos por mora.
+143. **Eficiencia de Tinta:** Original vs genérica.
+144. **Valor de la Marca:** Valor intangible del taller.
+145. **Flujo de Efectivo:** Dinero disponible real.
+146. **Registro de Préstamos:** Deudas familiares.
+147. **Sostenibilidad:** Uso de materiales reciclados.
+148. **Análisis de Temporada:** Meses altos y bajos.
+149. **Liquidación Anual:** Reparto extraordinario.
+150. **Acta de Cierre Contable:** Firma final de conformidad.
+
+## 🎯 BLOQUE 3: MARKETING, IMAGEN Y VENTAS (151 – 225)
+
+**Foco:** Cómo nos ve el mundo y cómo atraemos el dinero.
+
+151. **Identidad Visual:** Manual de uso del logo y colores para que todo se vea “caro”.
+152. **Psicología del Color:** Uso estratégico de tonos para transmitir confianza y profesionalismo.
+153. **Fotografía Hero:** Ángulo de 45° para resaltar brillo y calidad de impresión.
+154. **Fotografía Flatlay:** Composición con objetos (café, lapiceros) para redes sociales.
+155. **Iluminación Natural:** Uso de la ventana del taller para evitar sombras duras.
+156. **Edición Rápida:** Filtros estándar en celular para coherencia visual.
+157. **Catálogo de WhatsApp:** Carga de productos con descripción y precios claros.
+158. **Estados de WhatsApp:** Calendario de publicaciones diarias (procesos, entregas, promos).
+159. **Instagram Reels:** Grabación de procesos (Cameo cortando) con música en tendencia.
+160. **TikTok ASMR:** Grabación de sonidos de papel y guillotina para contenido relajante.
+161. **Scripts de Bienvenida:** Texto exacto para responder mensajes entrantes.
+162. **Script de Cotización:** Forma de dar precios sin generar rechazo.
+163. **Manejo de Objeciones:** Respuestas cuando el cliente dice “está muy caro”.
+164. **Cierre de Venta:** Frase final para solicitar el abono del 50 %.
+165. **Etiquetas de Marca:** Diseño de stickers incluidos en cada paquete.
+166. **Tarjetas de Agradecimiento:** Mensaje físico de gratitud al cliente.
+167. **Unboxing Experiencia:** Empaque con aroma, papel seda y presentación cuidada.
+168. **Base de Datos de Fechas:** Registro de cumpleaños para cupones personalizados.
+169. **Programa de Referidos:** Beneficios por traer nuevos clientes.
+170. **Alianza con Colegios:** Protocolo de contacto con representantes y directivos.
+171. **Alianza con Universidades:** Inserción en grupos académicos para tesis y trabajos.
+172. **Marketing de Guerrilla:** Uso de QR en puntos estratégicos del barrio.
+173. **Promoción “Hora Feliz”:** Descuentos en horas de baja demanda.
+174. **Paquetes Corporativos:** Precios especiales para profesionales locales.
+175. **Email Marketing:** Envío de portafolio a empresas (si aplica).
+176. **Gestión de Reseñas:** Solicitud activa de calificaciones en Google/Facebook.
+177. **Protocolo de Cliente Perdido:** Mensaje de recuperación tras 2 meses sin compra.
+178. **Uso de Hashtags:** Selección de hashtags locales y de servicio.
+179. **Publicidad en Facebook:** Guía básica para anuncios de bajo presupuesto.
+180. **Diseño de Volantes:** Estructura para volantes que no se desechen.
+181. **Muestrario Físico:** Carpeta táctil con tipos de papel y acabados.
+182. **Protocolo de Videollamada:** Mostrar diseños en vivo al cliente remoto.
+183. **Estrategia de Upselling:** Ofrecer mejoras al producto solicitado.
+184. **Estrategia de Cross-selling:** Ofrecer productos complementarios.
+185. **Venta de Saldos:** Comercialización de retazos como productos útiles.
+186. **Branding en el Local:** Decoración profesional del espacio de trabajo.
+187. **Uso de Canva:** Plantillas listas para anuncios rápidos.
+188. **Gestión de Concursos:** Sorteos en redes sin pérdidas económicas.
+189. **Influencers Locales:** Contacto con creadores del barrio.
+190. **Copywriting Emocional:** Textos que conectan con el esfuerzo del cliente.
+191. **Manual de Respuestas a Críticas:** Manejo profesional de comentarios negativos.
+192. **Protocolo de Entrega a Domicilio:** Imagen y discurso del repartidor.
+193. **Tarifario de Diseño:** Precios por correcciones simples.
+194. **Gestión de Urgencias:** Cobro extra por trabajos fuera de fila.
+195. **Fidelización VIP:** Beneficios para los mejores clientes.
+196. **Marketing Estacional:** Preparación anticipada de fechas clave.
+197. **Uso de Emojis:** Guía para comunicación amable pero profesional.
+198. **Firma de Correo:** Configuración de firma institucional.
+199. **Registro de Procedencia:** Pregunta obligatoria “¿Cómo nos encontró?”.
+200. **Mapa de Calor de Ventas:** Identificación de zonas con mayor demanda.
+201. **Catálogo Premium:** Servicios de alta gama.
+202. **Catálogo Express:** Servicios rápidos y económicos.
+203. **Pitch de Elevador:** Explicación del negocio en 30 segundos.
+204. **Gestión de Eventos:** Participación en ferias o eventos escolares.
+205. **Imagen Personal del Equipo:** Presentación limpia y profesional.
+206. **Garantía de Satisfacción:** Repetición sin costo por error interno.
+207. **Estrategia de Escasez:** Cupos limitados para aumentar conversión.
+208. **Uso de Linktree:** Centralización de enlaces importantes.
+209. **Seguimiento Post-Venta:** Contacto a los 3 días de la entrega.
+210. **Kit de Bienvenida a Alumnos:** Paquete inicial para estudiantes nuevos.
+211. **Suscripción de Impresiones:** Cobro mensual por volumen fijo.
+212. **Branding de Vehículos:** Stickers del taller en moto/carro.
+213. **Manual de Empatía:** Atención a clientes estresados.
+214. **Uso de Pinterest:** Investigación de tendencias visuales.
+215. **Gestión de Listas de Difusión:** Envío responsable de contenido.
+216. **Protocolo de Foto con Cliente:** Uso de fotos con autorización.
+217. **Costo de No Venta:** Análisis de consultas que no convierten.
+218. **Diferenciador Único:** Razón clara para elegir el taller.
+219. **Manual de Narrativa:** Historia del nacimiento del negocio.
+220. **Registro de Tendencias:** Colores y estilos del año.
+221. **Optimización de Bio:** Palabras clave para redes y Google.
+222. **Alianzas con Diseñadores:** Impresión para terceros creativos.
+223. **Protocolo de Muestras:** Regalos estratégicos de prueba.
+224. **Plan de Lanzamiento:** Comunicación de nuevas máquinas.
+225. **Auditoría de Imagen:** Revisión semestral de marca.
+
+---
+
+## 🧩 BLOQUE 4: PRODUCCIÓN Y CALIDAD DETALLADA (226 – 300)
+
+**Foco:** Que el producto salga perfecto y se arme correctamente.
+
+226. **Checklist de Archivos:** Revisión de resolución antes de imprimir.
+227. **Prueba de Sustrato:** Test de tinta en papel nuevo.
+228. **Laminado Térmico:** Control de temperatura y velocidad.
+229. **Laminado en Frío Pro:** Eliminación de burbujas con espátula.
+230. **Corte Die-Cut:** Sticker completamente suelto.
+231. **Corte Kiss-Cut:** Sticker adherido a la hoja.
+232. **Encuadernación de Tesis:** Pegado correcto del lomo.
+233. **Uso de Cinta Doble Cara:** Ubicación estratégica para carpetas.
+234. **Refilado de Tarjetas:** Uso correcto de marcas de corte.
+235. **Plegado Manual:** Uso de tabla de hendido.
+236. **Producción de Invitaciones:** Manejo de papeles texturizados.
+237. **Impresión en Vitela:** Secado mínimo de 24 horas.
+238. **Negro Enriquecido:** Valores CMYK exactos.
+239. **Manejo de Transparencias:** Evitar huellas en el centro.
+240. **Pegamento en Spray:** Uso en áreas ventiladas.
+241. **Limpieza de Exceso de Goma:** Uso de borrador de caucho.
+242. **Print & Cut Avanzado:** Corrección de descalces.
+243. **Carpetas con Solapa:** Corte, doblez y pegado.
+244. **Producción de Separadores:** Uso decorativo de ojales.
+245. **Armado de Cajas:** Pestañas a presión.
+246. **Papel Kraft:** Técnicas para resaltar colores claros.
+247. **Repujado (Embossing):** Relieve con Cameo.
+248. **Control de Calidad Final:** Revisión antes del empaque.
+249. **Registro de Errores de Corte:** Análisis de fallas.
+250. **Tintas Genéricas:** Precauciones de mezcla.
+251. **Banding:** Eliminación de rayas horizontales.
+252. **Resolución:** Uso correcto de 300 vs 600 dpi.
+253. **Papel Fotográfico:** Diferencias entre Glossy, Satin y Matte.
+254. **Producción de Diplomas:** Uso de sellos especiales.
+255. **Modo Silencioso:** Impresión nocturna.
+256. **Planos y Autocad:** Configuración de líneas finas.
+257. **Sobres Forrados:** Pegado interno sin arrugas.
+258. **Guillotina de Rodillo:** Cortes de precisión.
+259. **Cizalla de Palanca:** Cortes masivos.
+260. **Limpieza de Cuchillas:** Uso de alcohol.
+261. **Seguridad de Dedos:** Protocolo obligatorio.
+262. **Trabajo Manchado:** Repetición inmediata.
+263. **Paletas de Clientes:** Registro de colores VIP.
+264. **Diseño en Silhouette:** Uso de herramientas de réplica.
+265. **Uso de Capas:** Separar impresión y corte.
+266. **Sangrado (Bleed):** Evitar bordes blancos.
+267. **Optimización de Negro:** Uso exclusivo del cartucho negro.
+268. **Papel Autoadhesivo:** Prevención de atascos.
+269. **Weeding Veloz:** Atajos para vinilo.
+270. **Cinta de Enmascarar:** Sujeción en tapete.
+271. **Recuperación de Tapete:** Reaplicación de adhesivo.
+272. **Pasadas Múltiples:** Materiales gruesos.
+273. **Cuchilla 2 mm:** Corte de fomi y cartón paja.
+274. **Producción de Carnets:** Laminado rígido.
+275. **Bordes Redondeados:** Uso de Corner Chomper.
+276. **Papel Descontinuado:** Adaptación a nuevas marcas.
+277. **Ghosting:** Corrección de imagen duplicada.
+278. **Aire Comprimido:** Limpieza semanal interna.
+279. **Electricidad Estática:** Trucos de mitigación.
+280. **Modo Espejo:** Transfers y vinilos textiles.
+281. **Fuentes Pequeñas:** Legibilidad asegurada.
+282. **Color Crítico:** Protocolos de coincidencia exacta.
+283. **Pantone:** Referencia de color corporativo.
+284. **Armado de Agendas:** Perforado y elásticos.
+285. **Producción de Menús:** Laminado grueso.
+286. **Etiquetas de Vino:** Resistencia a humedad.
+287. **Barniz UV Casero:** Brillo localizado.
+288. **Papel Cebolla:** Alimentación correcta.
+289. **Scrapbooking:** Aplicación decorativa.
+290. **Pop-up:** Elementos sobresalientes.
+291. **Tiro y Retiro:** Alineación frente/dorso.
+292. **Moaré:** Prevención en escaneos.
+293. **Reglas de Acero:** Corte sobre vidrio.
+294. **Bases Self-healing:** Cuidado del tapete.
+295. **Ortografía:** Doble revisión.
+296. **Conversión de Unidades:** Puntos a mm.
+297. **Lupas de Hilo:** Revisión de puntos.
+298. **Empaque Anti-Lluvia:** Doble bolsa.
+299. **Trabajo Finalizado:** Notificación y foto.
+300. **Acta de Conformidad Técnica:** Firma interna de calidad.
+
+
+## 🧠 BLOQUE 8: INTELIGENCIA DE DATOS Y SOFTWARE AVANZADO (426 – 460)
+
+**Foco:** Usar la tecnología para predecir el futuro y no perder tiempo.
+
+426. **Matriz de Conversión:** Medición de cuántas personas que preguntan por WhatsApp terminan comprando.
+427. **Mapa de Calor de Pedidos:** Identificación de días y horas con mayor carga de trabajo.
+428. **Análisis de Abandono:** Investigación de por qué los clientes dejan de responder tras recibir el precio.
+429. **Optimización de Scripts de Diseño:** Uso de macros para automatizar tareas repetitivas en la PC.
+430. **Manual de Silhouette Business Edition:** Aprovechamiento de exportación SVG y manejo de múltiples máquinas.
+431. **Gestión de Fuentes Premium:** Repositorio organizado de tipografías pagas para diseños exclusivos.
+432. **Base de Datos de Medidas de Carpetas:** Archivo maestro con troqueles digitales listos para producción.
+433. **Protocolo de Actualización de Catálogo:** Frecuencia y criterios para renovar fotos de productos antiguos.
+434. **Seguimiento de Vida Útil de Tintas:** Registro de fecha de apertura para evitar sedimentos y daños.
+435. **Automatización Post-Venta:** Configuración de mensajes automáticos para pedir reseñas a las 48 horas.
+436. **Cruce Inventario vs Ventas:** Comparación entre hojas usadas y hojas vendidas para detectar fugas.
+437. **Gestión de Licencias de Software:** Control de claves, usuarios y fechas de renovación.
+438. **Recuperación de Archivos Corruptos:** Pasos técnicos para salvar diseños dañados.
+439. **Modo Ahorro en PC:** Optimización energética para largas jornadas de diseño.
+440. **Sincronización Cloud:** Configuración de Google Drive para monitoreo remoto del taller.
+441. **Registro de Palabras Clave Exitosas:** Identificación de términos publicitarios que convierten mejor.
+442. **Análisis de Rendimiento por Material:** Detección de papeles que generan más merma y por qué.
+443. **Control de Versiones de Diseño:** Conservación de versiones anteriores (V1, V2, V3).
+444. **Manual de Mockups:** Cómo mostrar al cliente el resultado final antes de imprimir.
+445. **Gestión de Plugins de Corte:** Uso de herramientas externas para mejorar precisión.
+446. **Ficha de Impresora Vieja:** Cálculo de vida útil financiera restante antes de retiro.
+447. **Ficha de Impresora Nueva:** Seguimiento del retorno de inversión (ROI).
+448. **Base de Datos de Competencia Indirecta:** Análisis de grandes papelerías para mejora interna.
+449. **Manual de Exportación para Redes:** Tamaños exactos de imagen sin pérdida de calidad.
+450. **Automatización de Cobros:** Configuración de enlaces de pago digitales.
+451. **Registro de Mejores Horas de Publicación:** Identificación de horarios óptimos en redes.
+452. **Control del Spooler de Impresión:** Limpieza de cola cuando el sistema se traba.
+453. **Manual de Preflight:** Revisión automática de colores, fuentes y resolución antes de imprimir.
+454. **Gestión de Archivos VIP:** Carpetas exclusivas de clientes frecuentes.
+455. **Seguridad de Contraseñas Maestro:** Almacenamiento seguro de todas las claves del negocio.
+456. **Optimización del Sistema Operativo:** Limpieza semanal de caché y archivos temporales.
+457. **Control de Procesos en Segundo Plano:** Eliminación de programas que ralentizan la PC.
+458. **Monitoreo de Espacio en Disco:** Prevención de fallos por falta de almacenamiento.
+459. **Registro de Errores de Software:** Bitácora de fallos recurrentes.
+460. **Plan de Actualización Tecnológica:** Decisión anual de qué software o hardware actualizar.
+
+---
+
+## ⚖️ BLOQUE 9: ÉTICA, LEGALIDAD Y ESCALABILIDAD FINAL (461 – 490)
+
+**Foco:** Blindar el nombre del negocio y preparar la salida de la socia mayoritaria.
+
+461. **Código de Confidencialidad:** Acuerdo firmado para proteger datos de clientes.
+462. **Propiedad Intelectual:** Uso responsable de imágenes y diseños sin copyright.
+463. **Política de Privacidad:** Manejo del teléfono y datos personales de clientes.
+464. **Gestión de Residuos Digitales:** Eliminación segura de archivos tras la entrega.
+465. **Formalización del Taller:** Pasos futuros para registro legal.
+466. **Identidad Verbal:** Definición del tono de comunicación de la marca.
+467. **Reglas de Canibalización:** Uso estratégico de piezas de máquinas antiguas.
+468. **Jubilación de Equipos:** Momento óptimo para vender maquinaria usada.
+469. **Impuestos sobre Ventas:** Separación correcta de impuestos desde el cobro.
+470. **Ética con la Competencia:** Prohibición de hablar mal de otros talleres.
+471. **Retiro de la Inversora:** Protocolo de delegación si se abre otro negocio.
+472. **Plan de Sucesión:** Preparación de la hermana como jefa total de producción.
+473. **Manual de Franquiciabilidad:** Empaquetar el modelo para replicarlo.
+474. **Criterios de Mudanza:** Requisitos técnicos para pasar a un local físico.
+475. **Seguro de Responsabilidad Civil:** Prevención ante daños a terceros.
+476. **Gestión Ecológica:** Alianzas con recicladores.
+477. **Donación de Material Escolar:** Uso social de retazos útiles.
+478. **Huella de Carbono:** Optimización energética del taller.
+479. **Compras Internacionales:** Importación de insumos cuando conviene.
+480. **Alianzas con el Estado:** Proceso para licitaciones públicas.
+481. **Salida de Emergencia:** Cómo cerrar el negocio sin pérdidas graves.
+482. **Liquidación de Activos:** Venta ordenada de equipos.
+483. **Archivo Histórico:** Conservación legal de documentos clave.
+484. **Protección del Nombre Comercial:** Evitar usos indebidos.
+485. **Cesión de Marca:** Procedimiento si se vende el negocio.
+486. **Manual de Crisis Reputacional:** Qué hacer ante un escándalo o reclamo grave.
+487. **Protocolo Legal Básico:** Contactos de asesoría jurídica.
+488. **Evaluación de Escalabilidad:** Decidir si crecer o mantenerse pequeño.
+489. **Blindaje Familiar:** Evitar conflictos internos por dinero.
+490. **Acta de Cierre Ético:** Compromiso final de buenas prácticas.
+
+---
+
+## 🧷 BLOQUE 10: CIERRE Y CONTROL MAESTRO (491 – 500)
+
+**Foco:** El pegamento que une las 500 hojas.
+
+491. **Auditoría Semanal:** Checklist firmado cada domingo.
+492. **Feedback Familiar:** Reunión mensual para expresar molestias y mejoras.
+493. **Plan de Paz Familiar:** Recordatorio de que la familia va primero.
+494. **Actualización del Manual:** Revisión semestral de las 500 hojas.
+495. **Contactos de Oro:** Técnicos, proveedores y clientes clave.
+496. **Mapa de Llaves y Claves:** Documento físico de emergencia.
+497. **Celebración Anual:** Presupuesto para aniversario del taller.
+498. **Fe de Erratas:** Registro de reglas obsoletas.
+499. **Última Revisión de Calidad:** Firma final de la inversionista mayoritaria.
+500. **Código Fuente:** Índice interactivo con enlaces a las 499 hojas.

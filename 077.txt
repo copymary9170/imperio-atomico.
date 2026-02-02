@@ -1,0 +1,8 @@
+📄 HOJA 077: Costo de Energía y Gastos Fijos
+Objetivo: Conciencia del gasto para la Administradora (Mamá).
+
+El negocio tiene un costo base de $28 USD/mes solo por existir (Luz + Internet).
+
+Se debe vender un mínimo de X productos al mes solo para cubrir este gasto.
+
+Apagar luces y equipos si no hay pedidos en la próxima hora para optimizar la utilidad.
