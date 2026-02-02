@@ -1,8 +1,9 @@
-📄 HOJA 005: Control de Humedad
+## 📄 HOJA 005: Control de Humedad
 Objetivo: Que las hojas no se peguen ni se atasquen.
 
 Mantener las resmas de papel dentro de sus bolsas originales o en cajas cerradas.
 
 Si el papel se siente "ondulado", no meterlo a la impresora; se puede atascar el cabezal.
+
 
 En días de mucha lluvia, colocar un deshumidificador pequeño (bolsitas de sílice) cerca del estante de papel.
