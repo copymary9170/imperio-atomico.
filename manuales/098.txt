@@ -1,8 +1,9 @@
-📄 HOJA 098: Stock Mínimo de Alerta
+## 📄 HOJA 098: Stock Mínimo de Alerta
 Objetivo: No quedarse sin material a mitad de un pedido.
 
 Cuando queden menos de 20 hojas de papel fotográfico, avisar a la Inversionista.
 
 Cuando el nivel de tinta llegue a la línea de "Mínimo", comprar recarga de inmediato.
+
 
 Nunca dejar que el tanque de tinta se vacíe por completo (entra aire y daña el cabezal).
