@@ -1,4 +1,4 @@
-📄 HOJA 003: Seguridad Industrial y Química
+## 📄 HOJA 003: Seguridad Industrial y Química
 Objetivo: Evitar manchas y accidentes.
 
 Mantener las tintas en un lugar fresco, lejos de la luz solar directa.
@@ -6,5 +6,6 @@ Mantener las tintas en un lugar fresco, lejos de la luz solar directa.
 No comer ni beber cerca de la Silhouette Cameo (las migajas dañan los rieles).
 
 En caso de derrame de tinta: Limpiar inmediatamente con alcohol isopropílico y papel absorbente.
+
 
 Uso obligatorio de guantes al recargar tanques para evitar manchas de piel por días.
