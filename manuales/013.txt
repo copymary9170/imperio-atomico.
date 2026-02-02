@@ -1,0 +1,7 @@
+## 📄HOJA 013: REGISTRO DE CORTE (MARCAS)
+
+Para stickers, el diseño debe tener las "Marcas de Registro" encendidas en el programa.
+
+Asegúrate de que no haya diseños tapando el cuadradito negro de la esquina.
+
+Si la máquina no lee las marcas, usa una lámpara o linterna para iluminar el sensor mientras busca. Alerta Pro: Si el papel está muy brillante, pon un poco de cinta mate sobre la marca de registro negra.

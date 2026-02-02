@@ -1,0 +1,7 @@
+## 📄 HOJA 018: ERRORES DE COLOR (CALIBRACIÓN)
+
+Si el azul sale morado, haz una limpieza de cabezales desde el menú de la impresora.
+
+Verifica que el perfil de color en la PC sea "Adobe RGB" o "sRGB".
+
+Si persiste, revisa que no haya burbujas de aire en las mangueras de tinta. Alerta Pro: Imprime siempre una "barra de colores" pequeña antes de un trabajo grande.

@@ -1,0 +1,7 @@
+## 📄 HOJA 015: MANEJO DE ARCHIVOS DEL CLIENTE
+
+El cliente siempre manda archivos movidos. Convertir todo a PDF antes de imprimir.
+
+Revisar que los textos no estén muy cerca del borde (margen de seguridad de 5mm).
+
+Si la imagen está borrosa, avisar al cliente antes de gastar tinta. Alerta Pro: Nunca borres un archivo del cliente hasta que hayan pasado 15 días de la entrega.
