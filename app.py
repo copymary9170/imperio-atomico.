@@ -26,14 +26,15 @@ if not check_password():
 
 # --- 2. CONFIGURACIÓN DE RUTAS Y DATOS ---
 CSV_VENTAS = "registro_ventas_088.csv"
+CSV_ALERTAS = "alertas_inventario.csv"
 CARPETA_MANUALES = "manuales"
 
-# Asegurar que el archivo de ventas exista con sus columnas
-if not os.path.exists(CSV_VENTAS) or os.path.getsize(CSV_VENTAS) == 0:
-    df_init = pd.DataFrame(columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
-    df_init.to_csv(CSV_VENTAS, index=False)
+# Asegurar que los archivos existan
+for archivo, columnas in {CSV_VENTAS: ["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"], 
+                          CSV_ALERTAS: ["Fecha", "Insumo", "Estado", "Responsable"]}.items():
+    if not os.path.exists(archivo) or os.path.getsize(archivo) == 0:
+        pd.DataFrame(columns=columnas).to_csv(archivo, index=False)
 
-# Función para identificar el Bloque según el número de hoja
 def obtener_nombre_bloque(numero):
     try:
         n = int(numero)
@@ -42,82 +43,70 @@ def obtener_nombre_bloque(numero):
         if 151 <= n <= 225: return "🎯 BLOQUE 3: MARKETING Y VENTAS"
         if 226 <= n <= 300: return "🧩 BLOQUE 4: PRODUCCIÓN Y CALIDAD"
         return "📚 BLOQUE ADICIONAL"
-    except:
-        return "❓ Número no válido"
+    except: return "❓ Número no válido"
 
 # --- 3. INTERFAZ VISUAL ---
 st.set_page_config(page_title="Imperio Atómico - VIVO", layout="wide")
-
 st.sidebar.title("💎 PANEL DE CONTROL")
 menu = st.sidebar.radio("Navegación:", 
-    ["📊 Dashboard Maestro", "💰 Registrar Venta (Hoja 088)", "🔍 Buscador de Protocolos"])
+    ["📊 Dashboard Maestro", "💰 Registrar Venta (088)", "📦 Alerta de Inventario", "🔍 Buscador de Protocolos"])
 
 # --- MODULO: DASHBOARD ---
 if menu == "📊 Dashboard Maestro":
-    st.title("📈 Estado del Imperio en Tiempo Real")
+    st.title("📈 Estado del Imperio")
     df = pd.read_csv(CSV_VENTAS)
+    df_inv = pd.read_csv(CSV_ALERTAS)
     
+    col1, col2 = st.columns(2)
     if not df.empty:
-        # Convertir monto a número por si acaso
         df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0)
-        
-        col1, col2, col3 = st.columns(3)
         col1.metric("Ingresos Totales", f"$ {df['Monto'].sum():,.2f}")
-        col2.metric("Total Pedidos", len(df))
-        col3.metric("Última Venta", f"$ {df['Monto'].iloc[-1]:,.2f}")
-        
-        st.subheader("Historial Reciente de Operaciones")
-        st.dataframe(df.tail(15), use_container_width=True)
-    else:
-        st.info("No hay ventas registradas todavía. El sistema está listo para recibir datos.")
+    
+    if not df_inv.empty:
+        criticos = len(df_inv[df_inv['Estado'] == 'Crítico'])
+        col2.metric("Alertas Críticas", criticos, delta_color="inverse")
+
+    st.subheader("Últimas Ventas")
+    st.dataframe(df.tail(10), use_container_width=True)
 
 # --- MODULO: REGISTRO 088 ---
-elif menu == "💰 Registrar Venta (Hoja 088)":
+elif menu == "💰 Registrar Venta (088)":
     st.title("📝 Registro de Entrada - Hoja 088")
-    st.write("Cada dato ingresado aquí se refleja instantáneamente en el Dashboard de la Inversionista.")
-    
     with st.form("registro_088"):
         c1, c2 = st.columns(2)
-        cliente = c1.text_input("Nombre del Cliente")
-        producto = c2.selectbox("Producto/Servicio", ["Stickers", "Carpetas", "Tesis", "Copias", "Diseño", "Otro"])
-        
-        c3, c4 = st.columns(2)
-        monto = c3.number_input("Monto Cobrado ($)", min_value=0.0, step=0.01)
-        metodo = c4.selectbox("Método de Pago", ["Efectivo", "Nequi", "Daviplata", "Transferencia"])
-        
-        responsable = st.text_input("Responsable de la Operación")
-        
-        if st.form_submit_button("GUARDAR REGISTRO"):
-            fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
-            nueva_fila = pd.DataFrame([[fecha_ahora, cliente, producto, monto, metodo, responsable]], 
-                                     columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
-            
-            nueva_fila.to_csv(CSV_VENTAS, mode='a', header=False, index=False)
-            st.success(f"✅ Registro guardado. Fecha: {fecha_ahora}")
-            st.balloons()
+        cliente = c1.text_input("Cliente")
+        producto = c2.selectbox("Servicio", ["Stickers", "Carpetas", "Tesis", "Copias", "Diseño", "Otro"])
+        monto = st.number_input("Monto ($)", min_value=0.0)
+        metodo = st.selectbox("Método", ["Efectivo", "Nequi", "Daviplata"])
+        responsable = st.text_input("Atendido por:")
+        if st.form_submit_button("GUARDAR VENTA"):
+            nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, producto, monto, metodo, responsable]], columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
+            nueva.to_csv(CSV_VENTAS, mode='a', header=False, index=False)
+            st.success("✅ Venta registrada.")
+
+# --- MODULO: INVENTARIO (EL QUE FALTABA) ---
+elif menu == "📦 Alerta de Inventario":
+    st.title("📦 Sensor de Insumos")
+    st.info("Registra aquí cuando algo se esté agotando para que la Inversionista lo vea en el Dashboard.")
+    with st.form("alerta_inv"):
+        insumo = st.text_input("¿Qué material falta? (Ej: Papel Fotográfico)")
+        estado = st.select_slider("Nivel de Urgencia", options=["Bajo", "Medio", "Crítico"])
+        quien = st.text_input("Reportado por:")
+        if st.form_submit_button("ENVIAR ALERTA"):
+            nueva_alerta = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), insumo, estado, quien]], columns=["Fecha", "Insumo", "Estado", "Responsable"])
+            nueva_alerta.to_csv(CSV_ALERTAS, mode='a', header=False, index=False)
+            st.error(f"⚠️ Alerta de {insumo} enviada al sistema.")
 
 # --- MODULO: BUSCADOR ---
 elif menu == "🔍 Buscador de Protocolos":
-    st.title("🔍 Central de Inteligencia (001 - 500)")
-    n_hoja = st.text_input("Digita el número de hoja para consultar el protocolo:")
-    
+    st.title("🔍 Central de Inteligencia")
+    n_hoja = st.text_input("Número de hoja (Ej: 001):")
     if n_hoja:
-        # Normalizar el número para que siempre tenga 3 cifras (ej: 1 -> 001)
-        try:
-            n_formateado = n_hoja.zfill(3)
-            nombre_bloque = obtener_nombre_bloque(n_formateado)
-            
-            st.subheader(nombre_bloque)
-            
-            ruta = f"{CARPETA_MANUALES}/{n_formateado}.txt"
-            
-            if os.path.exists(ruta):
-                with open(ruta, "r", encoding="utf-8") as f:
-                    contenido = f.read()
-                    st.info(f"📄 **Protocolo {n_formateado}**")
-                    st.markdown(f"```\n{contenido}\n```")
-            else:
-                st.warning(f"⚠️ La Hoja {n_formateado} aún no ha sido cargada al sistema.")
-                st.write("Socia: Recuerda subir el archivo .txt a la carpeta 'manuales' en GitHub.")
-        except:
-            st.error("Por favor, ingresa solo números.")
+        n_formateado = n_hoja.zfill(3)
+        st.caption(obtener_nombre_bloque(n_formateado))
+        ruta = f"{CARPETA_MANUALES}/{n_formateado}.txt"
+        if os.path.exists(ruta):
+            with open(ruta, "r", encoding="utf-8") as f:
+                st.info(f.read())
+        else:
+            st.warning("Hoja no encontrada.")
