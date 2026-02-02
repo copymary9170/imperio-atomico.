@@ -3,95 +3,121 @@ import pandas as pd
 import os
 from datetime import datetime
 
-# --- 1. BLOQUE DE SEGURIDAD (LA CERRADURA) ---
+# --- 1. CERRADURA DE SEGURIDAD ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
 
     if not st.session_state["password_correct"]:
-        st.title("🔐 Acceso al Imperio Atómico")
-        st.write("Bienvenida, Socia. Identifícate para entrar al centro de mando.")
-        password = st.text_input("Ingresa la clave maestra:", type="password")
-        if st.button("Entrar"):
-            if password == "mary": # CAMBIA ESTO POR TU CLAVE REAL
+        st.title("🔐 IMPERIO ATÓMICO: Acceso Restringido")
+        st.write("Bienvenida, Socia. Inicia el sistema para operar.")
+        password = st.text_input("Clave de Acceso:", type="password")
+        if st.button("Activar Sistema"):
+                if password == "mary": # <--- CAMBIA TU CLAVE AQUÍ
                 st.session_state["password_correct"] = True
                 st.rerun()
             else:
-                st.error("⚠️ Clave incorrecta.")
+                st.error("⚠️ Clave Incorrecta.")
         return False
     return True
 
 if not check_password():
-    st.stop() # Si no hay clave, no muestra nada de lo que sigue
+    st.stop()
 
-# --- 2. CONFIGURACIÓN DEL SISTEMA VIVO ---
+# --- 2. CONFIGURACIÓN DE RUTAS Y DATOS ---
 CSV_VENTAS = "registro_ventas_088.csv"
 CARPETA_MANUALES = "manuales"
 
-# Asegurar que el archivo de ventas tenga encabezados si está vacío
+# Asegurar que el archivo de ventas exista con sus columnas
 if not os.path.exists(CSV_VENTAS) or os.path.getsize(CSV_VENTAS) == 0:
-    pd.DataFrame(columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"]).to_csv(CSV_VENTAS, index=False)
+    df_init = pd.DataFrame(columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
+    df_init.to_csv(CSV_VENTAS, index=False)
 
-# --- 3. INTERFAZ Y NAVEGACIÓN ---
+# Función para identificar el Bloque según el número de hoja
+def obtener_nombre_bloque(numero):
+    try:
+        n = int(numero)
+        if 1 <= n <= 75: return "🛠️ BLOQUE 1: INFRAESTRUCTURA Y HARDWARE"
+        if 76 <= n <= 150: return "💼 BLOQUE 2: ADMINISTRACIÓN Y FINANZAS"
+        if 151 <= n <= 225: return "🎯 BLOQUE 3: MARKETING Y VENTAS"
+        if 226 <= n <= 300: return "🧩 BLOQUE 4: PRODUCCIÓN Y CALIDAD"
+        return "📚 BLOQUE ADICIONAL"
+    except:
+        return "❓ Número no válido"
+
+# --- 3. INTERFAZ VISUAL ---
 st.set_page_config(page_title="Imperio Atómico - VIVO", layout="wide")
 
-menu = st.sidebar.radio("CENTRAL DE MANDO", 
-    ["📈 Dashboard de Control", "💰 Registrar Venta (088)", "📦 Alerta de Inventario", "🔍 Buscador de Protocolos"])
+st.sidebar.title("💎 PANEL DE CONTROL")
+menu = st.sidebar.radio("Navegación:", 
+    ["📊 Dashboard Maestro", "💰 Registrar Venta (Hoja 088)", "🔍 Buscador de Protocolos"])
 
 # --- MODULO: DASHBOARD ---
-if menu == "📈 Dashboard de Control":
-    st.title("🏛️ Estado Real del Negocio")
+if menu == "📊 Dashboard Maestro":
+    st.title("📈 Estado del Imperio en Tiempo Real")
     df = pd.read_csv(CSV_VENTAS)
     
     if not df.empty:
-        df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce')
-        c1, c2 = st.columns(2)
-        c1.metric("Ventas Totales", f"$ {df['Monto'].sum():,.2f}")
-        c2.metric("Total Pedidos", len(df))
+        # Convertir monto a número por si acaso
+        df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0)
         
-        st.subheader("Últimos 10 registros")
-        st.dataframe(df.tail(10), use_container_width=True)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Ingresos Totales", f"$ {df['Monto'].sum():,.2f}")
+        col2.metric("Total Pedidos", len(df))
+        col3.metric("Última Venta", f"$ {df['Monto'].iloc[-1]:,.2f}")
+        
+        st.subheader("Historial Reciente de Operaciones")
+        st.dataframe(df.tail(15), use_container_width=True)
     else:
-        st.info("Esperando el primer registro del día...")
+        st.info("No hay ventas registradas todavía. El sistema está listo para recibir datos.")
 
 # --- MODULO: REGISTRO 088 ---
-elif menu == "💰 Registrar Venta (088)":
-    st.title("📝 Registro de Operación")
-    with st.form("venta_viva"):
+elif menu == "💰 Registrar Venta (Hoja 088)":
+    st.title("📝 Registro de Entrada - Hoja 088")
+    st.write("Cada dato ingresado aquí se refleja instantáneamente en el Dashboard de la Inversionista.")
+    
+    with st.form("registro_088"):
         c1, c2 = st.columns(2)
-        cliente = c1.text_input("Cliente")
-        producto = c2.selectbox("Servicio", ["Stickers", "Carpetas", "Tesis", "Copias", "Diseño", "Otros"])
+        cliente = c1.text_input("Nombre del Cliente")
+        producto = c2.selectbox("Producto/Servicio", ["Stickers", "Carpetas", "Tesis", "Copias", "Diseño", "Otro"])
         
         c3, c4 = st.columns(2)
-        monto = c3.number_input("Monto ($)", min_value=0.0)
-        metodo = c4.selectbox("Método", ["Efectivo", "Nequi", "Daviplata"])
+        monto = c3.number_input("Monto Cobrado ($)", min_value=0.0, step=0.01)
+        metodo = c4.selectbox("Método de Pago", ["Efectivo", "Nequi", "Daviplata", "Transferencia"])
         
-        responsable = st.text_input("¿Quién atiende?")
+        responsable = st.text_input("Responsable de la Operación")
         
-        if st.form_submit_button("GUARDAR EN HOJA 088"):
-            nueva_fila = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, producto, monto, metodo, responsable]], 
+        if st.form_submit_button("GUARDAR REGISTRO"):
+            fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
+            nueva_fila = pd.DataFrame([[fecha_ahora, cliente, producto, monto, metodo, responsable]], 
                                      columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
+            
             nueva_fila.to_csv(CSV_VENTAS, mode='a', header=False, index=False)
-            st.success("✅ Venta guardada físicamente en el servidor.")
+            st.success(f"✅ Registro guardado. Fecha: {fecha_ahora}")
             st.balloons()
-
-# --- MODULO: INVENTARIO ---
-elif menu == "📦 Alerta de Inventario":
-    st.title("📦 Reporte de Insumos Bajos")
-    st.warning("Usa esto para avisar a la Inversionista qué falta comprar.")
-    insumo = st.text_input("¿Qué material falta?")
-    nivel = st.select_slider("Nivel actual", options=["Crítico", "Bajo", "Medio"])
-    if st.button("Enviar Alerta"):
-        st.error(f"ALERTA: El material '{insumo}' está en nivel {nivel}.")
 
 # --- MODULO: BUSCADOR ---
 elif menu == "🔍 Buscador de Protocolos":
-    st.title("🔍 Consulta de Manuales")
-    hoja = st.text_input("Ingresa el número de hoja (Ej: 001)")
-    if hoja:
-        ruta = f"{CARPETA_MANUALES}/{hoja}.txt"
-        if os.path.exists(ruta):
-            with open(ruta, "r", encoding="utf-8") as f:
-                st.info(f.read())
-        else:
-            st.error("Esa hoja aún no ha sido creada en la carpeta manuales.")
+    st.title("🔍 Central de Inteligencia (001 - 500)")
+    n_hoja = st.text_input("Digita el número de hoja para consultar el protocolo:")
+    
+    if n_hoja:
+        # Normalizar el número para que siempre tenga 3 cifras (ej: 1 -> 001)
+        try:
+            n_formateado = n_hoja.zfill(3)
+            nombre_bloque = obtener_nombre_bloque(n_formateado)
+            
+            st.subheader(nombre_bloque)
+            
+            ruta = f"{CARPETA_MANUALES}/{n_formateado}.txt"
+            
+            if os.path.exists(ruta):
+                with open(ruta, "r", encoding="utf-8") as f:
+                    contenido = f.read()
+                    st.info(f"📄 **Protocolo {n_formateado}**")
+                    st.markdown(f"```\n{contenido}\n```")
+            else:
+                st.warning(f"⚠️ La Hoja {n_formateado} aún no ha sido cargada al sistema.")
+                st.write("Socia: Recuerda subir el archivo .txt a la carpeta 'manuales' en GitHub.")
+        except:
+            st.error("Por favor, ingresa solo números.")
