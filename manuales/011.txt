@@ -1,0 +1,7 @@
+## 📄 HOJA 011: CONFIGURACIÓN DE LA CUCHILLA (CAMEO)
+
+Papel Bond (Copias): Cuchilla en 1 o 2, Presión 10, Velocidad 5.
+
+Opalina/Cartulina: Cuchilla en 3 o 4, Presión 20, Velocidad 3.
+
+Papel Adhesivo (Stickers): Cuchilla en 1, Presión 14, Velocidad 8 (Para que no corte el papel de abajo). Alerta Pro: Si la cuchilla tiene restos de papel, el corte saldrá mordido. Limpia la punta con un soplido fuerte.
