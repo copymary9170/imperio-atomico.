@@ -1,4 +1,4 @@
-📄 HOJA 002: Configuración de Red e IP
+## 📄 HOJA 002: Configuración de Red e IP
 Objetivo: Que la impresora no aparezca como "Desconectada".
 
 No desconectar el cable USB ni cambiarlo de puerto (esto crea una copia "Copia 1" en el sistema).
@@ -6,5 +6,6 @@ No desconectar el cable USB ni cambiarlo de puerto (esto crea una copia "Copia 1
 Si la impresora no responde: Reiniciar el "Spooler de Impresión" en Windows.
 
 Verificar que la red Wi-Fi sea la misma en la PC y en la impresora.
+
 
 Si el error persiste, apagar el router 10 segundos y volver a encender.
