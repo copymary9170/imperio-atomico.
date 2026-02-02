@@ -6,10 +6,9 @@ from PIL import Image
 import fitz  # PyMuPDF
 from datetime import datetime
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Imperio Atómico - Pro", layout="wide")
+# --- 1. CONFIGURACIÓN Y SEGURIDAD ---
+st.set_page_config(page_title="Imperio Atómico - Full Pro", layout="wide")
 
-# --- SEGURIDAD ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
@@ -28,9 +27,11 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- GESTIÓN DE DATOS ---
+# --- 2. GESTIÓN DE DATOS ---
 CSV_VENTAS = "registro_ventas_088.csv"
 CSV_STOCK = "stock_actual.csv"
+CARPETA_MANUALES = "manuales"
+
 COL_STOCK = ["Material", "Cantidad", "Unidad", "Costo_Unit_USD", "Minimo_Alerta"]
 COL_VENTAS = ["Fecha", "Cliente", "Insumo", "Monto_USD", "Comisiones_USD", "Ganancia_Real_USD", "Responsable"]
 
@@ -45,116 +46,165 @@ def cargar_datos(archivo, columnas):
     except:
         return pd.DataFrame(columns=columnas)
 
+def guardar_datos(df, archivo):
+    df.to_csv(archivo, index=False)
+
 df_stock = cargar_datos(CSV_STOCK, COL_STOCK)
 df_ventas = cargar_datos(CSV_VENTAS, COL_VENTAS)
 
-# --- MENÚ PRINCIPAL ---
+# --- 3. MENÚ LATERAL ---
 menu = st.sidebar.radio("Navegación:", ["📊 Dashboard", "🎨 Analizador CMYK", "💰 Ventas", "📦 Inventario Pro", "🔍 Manuales"])
 
 # --- MÓDULO: ANALIZADOR CMYK ---
 if menu == "🎨 Analizador CMYK":
     st.title("🎨 Analizador de Cobertura de Tinta")
-    st.write("Calcula el porcentaje de Cyan, Magenta, Yellow y Black de tus diseños.")
+    st.info("Sube un diseño para calcular el porcentaje de tóner (CMYK) por canal.")
     
-    file = st.file_uploader("Sube una Imagen o PDF", type=["jpg", "png", "jpeg", "pdf"])
+    file = st.file_uploader("Subir Imagen o PDF", type=["jpg", "png", "jpeg", "pdf"])
     
     if file:
         img = None
-        if file.type == "application/pdf":
-            # Procesar PDF (Primera página)
-            doc = fitz.open(stream=file.read(), filetype="pdf")
-            page = doc.load_page(0)
-            pix = page.get_pixmap(colorspace=fitz.csCMYK)
-            img = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
-        else:
-            # Procesar Imagen
-            img = Image.open(file).convert("CMYK")
+        with st.spinner('Analizando píxeles...'):
+            if file.type == "application/pdf":
+                doc = fitz.open(stream=file.read(), filetype="pdf")
+                page = doc.load_page(0)
+                pix = page.get_pixmap(colorspace=fitz.csCMYK)
+                img = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
+            else:
+                img = Image.open(file).convert("CMYK")
         
         if img:
             st.image(img.convert("RGB"), caption="Vista previa del diseño", width=400)
             
-            # Cálculo de porcentajes
             pix_data = np.array(img)
-            # CMYK son los canales 0, 1, 2, 3
-            c_p = (pix_data[:,:,0].mean() / 255) * 100
-            m_p = (pix_data[:,:,1].mean() / 255) * 100
-            y_p = (pix_data[:,:,2].mean() / 255) * 100
-            k_p = (pix_data[:,:,3].mean() / 255) * 100
+            # CMYK son canales 0, 1, 2, 3
+            c = (pix_data[:,:,0].mean() / 255) * 100
+            m = (pix_data[:,:,1].mean() / 255) * 100
+            y = (pix_data[:,:,2].mean() / 255) * 100
+            k = (pix_data[:,:,3].mean() / 255) * 100
             
-            st.subheader("📊 Cobertura por Canal")
+            
+            
+            st.subheader("📊 Resultados de Cobertura")
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Cian", f"{c_p:.1f}%")
-            c2.metric("Magenta", f"{m_p:.1f}%")
-            c3.metric("Amarillo", f"{y_p:.1f}%")
-            c4.metric("Negro", f"{k_p:.1f}%")
+            c1.metric("Cian (C)", f"{c:.1f}%")
+            c2.metric("Magenta (M)", f"{m:.1f}%")
+            c3.metric("Amarillo (Y)", f"{y:.1f}%")
+            c4.metric("Negro (K)", f"{k:.1f}%")
             
-            total = c_p + m_p + y_p + k_p
-            st.info(f"**Cobertura Total Combinada:** {total:.1f}%")
+            total = c + m + y + k
+            st.write(f"**Cobertura Total Combinada:** {total:.1f}%")
             
             if total > 240:
-                st.warning("⚠️ ALTA DENSIDAD: Este diseño consumirá mucho tóner. Sugerencia: Cobrar recargo.")
+                st.warning("⚠️ ALTA DENSIDAD: Este diseño consumirá mucho material. Sugerencia: Cobrar recargo de tinta.")
+            elif total < 15:
+                st.success("✅ DISEÑO ECONÓMICO: Muy bajo consumo de tóner.")
 
 # --- MÓDULO: DASHBOARD ---
 elif menu == "📊 Dashboard":
-    st.title("📊 Resumen Atómico")
+    st.title("📊 Resumen del Imperio")
     if not df_ventas.empty:
-        df_v = df_ventas.copy()
         for c in ["Monto_USD", "Comisiones_USD", "Ganancia_Real_USD"]:
-            df_v[c] = pd.to_numeric(df_v[c], errors='coerce').fillna(0)
+            df_ventas[c] = pd.to_numeric(df_ventas[c], errors='coerce').fillna(0)
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Ventas Totales", f"$ {df_v['Monto_USD'].sum():,.2f}")
-        col2.metric("Gastos/Comisiones", f"$ {df_v['Comisiones_USD'].sum():,.2f}")
-        col3.metric("Ganancia Neta", f"$ {df_v['Ganancia_Real_USD'].sum():,.2f}")
+        col1.metric("Ventas Brutas", f"$ {df_ventas['Monto_USD'].sum():,.2f}")
+        col2.metric("Gastos/Comisiones", f"$ {df_ventas['Comisiones_USD'].sum():,.2f}", delta_color="inverse")
+        col3.metric("Utilidad Real", f"$ {df_ventas['Ganancia_Real_USD'].sum():,.2f}")
         
-        st.subheader("Alertas de Stock")
+        st.divider()
+        st.subheader("⚠️ Alertas de Reposición")
         bajo = df_stock[pd.to_numeric(df_stock["Cantidad"]) <= pd.to_numeric(df_stock["Minimo_Alerta"])]
         if not bajo.empty:
-            st.error("⚠️ Reponer estos materiales pronto:")
-            st.table(bajo[["Material", "Cantidad"]])
+            st.error("Materiales agotándose:")
+            st.dataframe(bajo[["Material", "Cantidad", "Minimo_Alerta"]])
+        else:
+            st.success("Stock en niveles óptimos.")
     else:
-        st.info("Aún no hay ventas para mostrar.")
+        st.info("Aún no hay registros de ventas.")
 
 # --- MÓDULO: VENTAS ---
 elif menu == "💰 Ventas":
-    st.title("💰 Nueva Venta")
+    st.title("💰 Registro de Venta")
     if not df_stock.empty:
         with st.form("v"):
             cliente = st.text_input("Cliente")
-            insumo = st.selectbox("Insumo", df_stock["Material"].unique())
-            cant_u = st.number_input("Cantidad", min_value=0.01)
-            monto = st.number_input("Cobrado ($ o equivalente)", min_value=0.0)
-            comi = st.number_input("% Comisión/IGTF pagado", value=3.0)
-            if st.form_submit_button("Registrar"):
-                # Lógica de costos
+            insumo = st.selectbox("Material usado", df_stock["Material"].unique())
+            cant_u = st.number_input("Cantidad usada", min_value=0.01)
+            monto = st.number_input("Monto Cobrado (USD o equiv.)", min_value=0.0)
+            comi = st.number_input("% Comisión/IGTF/Punto que te quitan", value=3.0)
+            
+            if st.form_submit_button("Finalizar Registro"):
                 costo_u = float(df_stock.loc[df_stock["Material"] == insumo, "Costo_Unit_USD"].values[0])
-                costo_total = cant_u * costo_u
+                costo_t = cant_u * costo_u
                 comi_usd = monto * (comi/100)
-                ganancia = monto - comi_usd - costo_total
+                ganancia = monto - comi_usd - costo_t
                 
                 nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cliente, insumo, monto, comi_usd, ganancia, "Socia"]], columns=COL_VENTAS)
                 nueva.to_csv(CSV_VENTAS, mode='a', header=not os.path.exists(CSV_VENTAS), index=False)
                 
                 df_stock.loc[df_stock["Material"] == insumo, "Cantidad"] -= cant_u
-                df_stock.to_csv(CSV_STOCK, index=False)
-                st.success(f"Ganancia: ${ganancia:.2f}")
+                guardar_datos(df_stock, CSV_STOCK)
+                st.success(f"Venta Guardada. Ganancia Real: ${ganancia:.2f}")
                 st.rerun()
+    else:
+        st.error("Carga materiales en el inventario primero.")
 
 # --- MÓDULO: INVENTARIO ---
 elif menu == "📦 Inventario Pro":
-    st.title("📦 Inventario y Ajustes")
-    t1, t2 = st.tabs(["📋 Stock Actual", "✏️ Ajustes/Compras"])
+    st.title("📦 Gestión de Inventario")
+    t1, t2, t3 = st.tabs(["📋 Existencias", "🛒 Compra", "✏️ Ajustes"])
+    
     with t1:
         st.dataframe(df_stock, use_container_width=True)
+    
     with t2:
-        st.write("Usa esta sección para añadir stock o corregir errores.")
-        # Aquí puedes replicar el formulario de compras anterior...
+        with st.form("c"):
+            nom = st.text_input("Material")
+            cant = st.number_input("Cantidad", min_value=0.1)
+            pago = st.number_input("Monto Pagado", min_value=0.0)
+            c1, c2 = st.columns(2)
+            iva = c1.checkbox("¿Paga IVA (16%)?")
+            igtf = c2.number_input("% IGTF/Comisión", value=0.0)
+            if st.form_submit_button("Ingresar Stock"):
+                costo_usd = pago
+                if iva: costo_usd *= 1.16
+                costo_usd *= (1 + (igtf/100))
+                costo_u = costo_usd / cant
+                
+                if nom in df_stock["Material"].values:
+                    df_stock.loc[df_stock["Material"] == nom, "Cantidad"] += cant
+                    df_stock.loc[df_stock["Material"] == nom, "Costo_Unit_USD"] = costo_u
+                else:
+                    nueva_s = pd.DataFrame([[nom, cant, "Unid", costo_u, 5]], columns=COL_STOCK)
+                    df_stock = pd.concat([df_stock, nueva_s], ignore_index=True)
+                guardar_datos(df_stock, CSV_STOCK)
+                st.success("Inventario actualizado.")
+                st.rerun()
+
+    with t3:
+        if not df_stock.empty:
+            mat = st.selectbox("Corregir Material", df_stock["Material"].unique())
+            idx = df_stock.index[df_stock["Material"] == mat][0]
+            n_c = st.number_input("Cantidad Real", value=float(df_stock.loc[idx, "Cantidad"]))
+            n_m = st.number_input("Mínimo Alerta", value=float(df_stock.loc[idx, "Minimo_Alerta"]))
+            if st.button("Guardar Cambios"):
+                df_stock.loc[idx, "Cantidad"] = n_c
+                df_stock.loc[idx, "Minimo_Alerta"] = n_m
+                guardar_datos(df_stock, CSV_STOCK)
+                st.rerun()
 
 # --- MÓDULO: MANUALES ---
 elif menu == "🔍 Manuales":
     st.title("🔍 Protocolos")
-    hoja = st.text_input("Nro de Hoja:")
+    hoja = st.text_input("Nro de Hoja (ej: 088):")
     if hoja:
+        if not os.path.exists(CARPETA_MANUALES): os.makedirs(CARPETA_MANUALES)
         ruta = f"{CARPETA_MANUALES}/{hoja.zfill(3)}.txt"
         if os.path.exists(ruta):
             with open(ruta, "r") as f: st.info(f.read())
+        else:
+            texto = st.text_area("Redactar Hoja:")
+            if st.button("Guardar"):
+                with open(ruta, "w") as f: f.write(texto)
+                st.success("Guardado.")
