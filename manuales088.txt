@@ -1,8 +1,9 @@
-📄 HOJA 088: El Dashboard Maestro (Guía)
+## 📄 HOJA 088: El Dashboard Maestro (Guía)
 Objetivo: Cómo llenar los datos correctamente.
 
 Registrar la venta en el momento exacto en que se recibe el dinero.
 
 Anotar el nombre del cliente para fidelización futura.
+
 
 Si es un abono del 50%, anotarlo en la sección de "Método de Pago" para cobrar el resto al entregar.
