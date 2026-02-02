@@ -39,98 +39,117 @@ def cargar_datos(archivo, columnas):
 def guardar_datos(df, archivo):
     df.to_csv(archivo, index=False)
 
-df_stock = cargar_datos(CSV_STOCK, ["Material", "Cantidad", "Unidad", "Costo_Unit_USD"])
-df_ventas = cargar_datos(CSV_VENTAS, ["Fecha", "Cliente", "Insumo", "Monto_Bs", "Tasa", "USD", "Responsable"])
+# Columnas robustas
+df_stock = cargar_datos(CSV_STOCK, ["Material", "Cantidad", "Unidad", "Costo_Unit_USD", "Minimo_Alerta"])
+df_ventas = cargar_datos(CSV_VENTAS, ["Fecha", "Cliente", "Insumo", "Monto_Bs", "Tasa", "USD", "Costo_Insumo_USD", "Ganancia_USD", "Responsable"])
 
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="Imperio Atómico - VIVO", layout="wide")
-menu = st.sidebar.radio("Menú:", ["📊 Dashboard", "💰 Ventas", "📦 Inventario Real", "🔍 Manuales"])
+menu = st.sidebar.radio("Menú:", ["📊 Dashboard Maestro", "💰 Ventas", "📦 Inventario Pro", "🔍 Manuales"])
 
-# --- MÓDULO: INVENTARIO (CON FUNCIÓN DE CORRECCIÓN) ---
-if menu == "📦 Inventario Real":
-    st.title("📦 Gestión de Inventario")
-    tab1, tab2, tab3 = st.tabs(["📋 Existencias", "🛒 Nueva Compra", "✏️ Corregir Error"])
+# --- MÓDULO: DASHBOARD (GANANCIA REAL) ---
+if menu == "📊 Dashboard Maestro":
+    st.title("📊 Análisis de Rentabilidad")
+    
+    if not df_ventas.empty:
+        # Limpieza de datos
+        for col in ["USD", "Costo_Insumo_USD", "Ganancia_USD"]:
+            df_ventas[col] = pd.to_numeric(df_ventas[col], errors='coerce').fillna(0)
+        
+        c1, c2, c3 = st.columns(3)
+        ingresos = df_ventas["USD"].sum()
+        costos = df_ventas["Costo_Insumo_USD"].sum()
+        utilidad = ingresos - costos
+        
+        c1.metric("Ingresos Totales", f"$ {ingresos:,.2f}")
+        c2.metric("Costo de Ventas (Reposición)", f"$ {costos:,.2f}", delta_color="inverse")
+        c3.metric("Utilidad Neta Real", f"$ {utilidad:,.2f}")
+        
+        # Alertas de Stock Bajo
+        if not df_stock.empty:
+            df_stock["Cantidad"] = pd.to_numeric(df_stock["Cantidad"], errors='coerce').fillna(0)
+            df_stock["Minimo_Alerta"] = pd.to_numeric(df_stock["Minimo_Alerta"], errors='coerce').fillna(5)
+            bajo_stock = df_stock[df_stock["Cantidad"] <= df_stock["Minimo_Alerta"]]
+            if not bajo_stock.empty:
+                st.error("⚠️ ¡ALERTA DE REPOSICIÓN! Los siguientes materiales se están agotando:")
+                st.table(bajo_stock[["Material", "Cantidad", "Minimo_Alerta"]])
+        
+        st.subheader("Historial de Operaciones")
+        st.dataframe(df_ventas.tail(10), use_container_width=True)
+    else:
+        st.info("Sin datos de ventas suficientes para el análisis.")
+
+# --- MÓDULO: INVENTARIO (CON MÍNIMOS) ---
+elif menu == "📦 Inventario Pro":
+    st.title("📦 Inventario con Alertas de Stock")
+    tab1, tab2, tab3 = st.tabs(["📋 Existencias", "🛒 Compra", "✏️ Editar/Mínimos"])
     
     with tab1:
         if not df_stock.empty:
-            df_stock["Cantidad"] = pd.to_numeric(df_stock["Cantidad"], errors='coerce').fillna(0)
-            df_stock["Costo_Unit_USD"] = pd.to_numeric(df_stock["Costo_Unit_USD"], errors='coerce').fillna(0)
-            df_stock["Valor_Total"] = df_stock["Cantidad"] * df_stock["Costo_Unit_USD"]
+            df_stock["Valor_Total"] = pd.to_numeric(df_stock["Cantidad"]) * pd.to_numeric(df_stock["Costo_Unit_USD"])
             st.dataframe(df_stock, use_container_width=True)
-            st.metric("Total Invertido", f"$ {df_stock['Valor_Total'].sum():,.2f}")
-        else:
-            st.info("Bodega vacía.")
-
+            st.metric("Capital en Mercancía", f"$ {df_stock['Valor_Total'].sum():,.2f}")
+    
     with tab2:
-        with st.form("compra"):
+        with st.form("nueva_compra"):
             nom = st.text_input("Material")
             cant = st.number_input("Cantidad", min_value=0.01)
-            precio = st.number_input("Precio base", min_value=0.0)
-            moneda = st.selectbox("Moneda", ["USD", "Bolívares"])
-            tasa = st.number_input("Tasa", min_value=1.0, value=40.0)
-            if st.form_submit_button("INGRESAR"):
-                costo_u = (precio if moneda == "USD" else precio / tasa) / cant
+            precio = st.number_input("Precio Total Pago", min_value=0.0)
+            tasa = st.number_input("Tasa Usada", value=40.0)
+            moneda = st.selectbox("Moneda Pago", ["USD", "Bs"])
+            if st.form_submit_button("REGISTRAR"):
+                costo_u = (precio if moneda=="USD" else precio/tasa) / cant
                 if nom in df_stock["Material"].values:
                     df_stock.loc[df_stock["Material"] == nom, "Cantidad"] += cant
                     df_stock.loc[df_stock["Material"] == nom, "Costo_Unit_USD"] = costo_u
                 else:
-                    nueva = pd.DataFrame([[nom, cant, "Unid", costo_u]], columns=df_stock.columns[:4])
+                    nueva = pd.DataFrame([[nom, cant, "Unid", costo_u, 5]], columns=df_stock.columns)
                     df_stock = pd.concat([df_stock, nueva], ignore_index=True)
                 guardar_datos(df_stock, CSV_STOCK)
-                st.success("Ingresado")
+                st.success("Inventario actualizado.")
                 st.rerun()
 
     with tab3:
-        st.subheader("⚠️ Corregir Cantidad o Precio")
         if not df_stock.empty:
-            mat_editar = st.selectbox("Selecciona el material a corregir", df_stock["Material"].unique())
-            fila_idx = df_stock.index[df_stock["Material"] == mat_editar][0]
-            
-            c1, c2 = st.columns(2)
-            nueva_cant = c1.number_input("Nueva Cantidad Correcta", value=float(df_stock.loc[fila_idx, "Cantidad"]))
-            nuevo_costo = c2.number_input("Nuevo Costo USD Unitario", value=float(df_stock.loc[fila_idx, "Costo_Unit_USD"]))
-            
-            if st.button("SOBRESCRIBIR DATOS"):
-                df_stock.loc[fila_idx, "Cantidad"] = nueva_cant
-                df_stock.loc[fila_idx, "Costo_Unit_USD"] = nuevo_costo
+            mat = st.selectbox("Material a editar", df_stock["Material"].unique())
+            idx = df_stock.index[df_stock["Material"] == mat][0]
+            new_cant = st.number_input("Corregir Cantidad", value=float(df_stock.loc[idx, "Cantidad"]))
+            new_min = st.number_input("Mínimo para Alerta (Punto de Re-orden)", value=float(df_stock.loc[idx, "Minimo_Alerta"]))
+            if st.button("ACTUALIZAR"):
+                df_stock.loc[idx, "Cantidad"] = new_cant
+                df_stock.loc[idx, "Minimo_Alerta"] = new_min
                 guardar_datos(df_stock, CSV_STOCK)
-                st.warning(f"Se ha corregido {mat_editar} a {nueva_cant} unidades.")
+                st.success("Datos actualizados.")
                 st.rerun()
-        else:
-            st.info("No hay materiales para editar.")
 
-# --- MÓDULO: VENTAS ---
+# --- MÓDULO: VENTAS (CON GANANCIA) ---
 elif menu == "💰 Ventas":
     st.title("💰 Registro de Venta")
-    with st.form("venta"):
-        cliente = st.text_input("Cliente")
-        insumo = st.selectbox("Material", df_stock["Material"].unique()) if not df_stock.empty else None
-        cant_u = st.number_input("Cantidad usada", min_value=0.0)
-        monto = st.number_input("Cobro", min_value=0.0)
-        tasa = st.number_input("Tasa", value=40.0)
-        if st.form_submit_button("REGISTRAR"):
-            eq_usd = monto / tasa
-            nueva_v = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, insumo, monto, tasa, eq_usd, "Socia"]], columns=df_ventas.columns)
-            df_ventas = pd.concat([df_ventas, nueva_v], ignore_index=True)
-            guardar_datos(df_ventas, CSV_VENTAS)
-            if insumo:
+    if not df_stock.empty:
+        with st.form("venta_ganancia"):
+            cliente = st.text_input("Cliente")
+            insumo = st.selectbox("Insumo usado", df_stock["Material"].unique())
+            cant_u = st.number_input("Cantidad consumida", min_value=0.0)
+            monto = st.number_input("Cobro Cliente", min_value=0.0)
+            tasa = st.number_input("Tasa Cobro", value=40.0)
+            moneda_v = st.selectbox("Moneda Cobro", ["Bs", "USD"])
+            
+            if st.form_submit_button("REGISTRAR VENTA"):
+                # Cálculo de ganancia
+                cobro_usd = monto if moneda_v == "USD" else monto / tasa
+                costo_u_usd = float(df_stock.loc[df_stock["Material"] == insumo, "Costo_Unit_USD"].values[0])
+                costo_total_v = cant_u * costo_u_usd
+                ganancia = cobro_usd - costo_total_v
+                
+                nueva_v = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, insumo, (monto if moneda_v=="Bs" else monto*tasa), tasa, cobro_usd, costo_total_v, ganancia, "Socia"]], columns=df_ventas.columns)
+                df_ventas = pd.concat([df_ventas, nueva_v], ignore_index=True)
+                guardar_datos(df_ventas, CSV_VENTAS)
+                
+                # Descontar stock
                 df_stock.loc[df_stock["Material"] == insumo, "Cantidad"] -= cant_u
                 guardar_datos(df_stock, CSV_STOCK)
-            st.success("Venta Exitosa")
-            st.rerun()
-
-# --- MÓDULO: DASHBOARD ---
-elif menu == "📊 Dashboard":
-    st.title("📊 Resumen")
-    if not df_ventas.empty:
-        st.metric("Ventas Totales ($)", f"$ {pd.to_numeric(df_ventas['USD']).sum():,.2f}")
-        st.dataframe(df_ventas)
-
-# --- MÓDULO: MANUALES ---
-elif menu == "🔍 Manuales":
-    st.title("🔍 Protocolos")
-    hoja = st.text_input("Hoja #")
-    if hoja:
-        ruta = f"{CARPETA_MANUALES}/{hoja.zfill(3)}.txt"
-        if os.path.exists(ruta):
-            with open(ruta, "r", encoding="utf-8") as f: st.info(f.read())
+                
+                st.success(f"Venta registrada. Ganancia estimada: $ {ganancia:.2f}")
+                st.rerun()
+    else:
+        st.warning("Debe haber productos en inventario para vender.")
