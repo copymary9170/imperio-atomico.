@@ -3,78 +3,85 @@ import pandas as pd
 import os
 from datetime import datetime
 
-# --- 1. CERRADURA DE SEGURIDAD (Esto va de primero) ---
-def check_password():
-    if "password_correct" not in st.session_state:
-        st.session_state["password_correct"] = False
-
-    if not st.session_state["password_correct"]:
-        st.title("🔐 Acceso al Sistema Maestro")
-        st.write("Bienvenida, Socia. Por favor identifícate.")
-        password = st.text_input("Ingresa la clave del Imperio:", type="password")
-        if st.button("Entrar"):
-            # CAMBIA '1234' POR LA CLAVE QUE TÚ QUIERAS
-            if password == "1234": 
-                st.session_state["password_correct"] = True
-                st.rerun()
-            else:
-                st.error("⚠️ Clave incorrecta. Acceso denegado.")
-        return False
-    return True
-
-# Si la clave no es correcta, el programa se detiene aquí y no muestra nada más
-if not check_password():
-    st.stop()
-
-# --- 2. CONFIGURACIÓN DE RUTAS Y DATOS (Tu código anterior) ---
+# --- CONFIGURACIÓN DE CORAZÓN DEL SISTEMA ---
 CSV_VENTAS = "registro_ventas_088.csv"
+CSV_INVENTARIO = "inventario_critico.csv"
 CARPETA_MANUALES = "manuales"
 
-if not os.path.exists(CARPETA_MANUALES):
-    os.makedirs(CARPETA_MANUALES)
+# Asegurar archivos base
+for file in [CSV_VENTAS, CSV_INVENTARIO]:
+    if not os.path.exists(file):
+        pd.DataFrame().to_csv(file, index=False)
 
-def cargar_datos():
-    if os.path.exists(CSV_VENTAS):
-        return pd.read_csv(CSV_VENTAS)
-    return pd.DataFrame(columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
+# --- INTERFAZ VIVA ---
+st.set_page_config(page_title="Imperio Atómico - VIVO", layout="wide")
 
-# --- 3. INTERFAZ VISUAL DEL SISTEMA ---
-st.sidebar.title("💎 IMPERIO ATÓMICO")
-menu = st.sidebar.radio("Navegación:", 
-    ["📊 Dashboard", "📝 Registro 088", "🔍 Buscador 001-500", "🧮 Calculadora"])
+# Estilos para que se vea profesional
+st.markdown("""
+    <style>
+    .stMetric { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4b4b; }
+    .stDataFrame { border: 1px solid #e6e9ef; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# (Aquí sigue el resto de la lógica de Dashboard, Registro y Buscador que ya tenías)
-if menu == "📊 Dashboard":
-    st.header("📈 Estado del Imperio")
-    df = cargar_datos()
+# --- NAVEGACIÓN VIVA ---
+menu = st.sidebar.radio("CENTRAL DE MANDO", 
+    ["📈 Dashboard de Control", "💰 Registrar Venta", "📦 Inventario Real", "🔍 Buscador de Protocolos"])
+
+# --- 1. DASHBOARD DE CONTROL (VIGILANCIA EN TIEMPO REAL) ---
+if menu == "📈 Dashboard de Control":
+    st.title("🏛️ Estado del Imperio")
+    df = pd.read_csv(CSV_VENTAS) if os.path.getsize(CSV_VENTAS) > 0 else pd.DataFrame()
+    
     if not df.empty:
-        st.metric("Ventas Totales", f"${df['Monto'].sum():,.2f}")
-        st.table(df.tail(10))
+        df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce')
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Dinero en Caja Today", f"$ {df['Monto'].sum():,.2f}")
+        c2.metric("Pedidos Realizados", len(df))
+        c3.metric("Ticket Promedio", f"$ {df['Monto'].mean():,.2f}")
+        
+        st.subheader("Últimos Movimientos")
+        st.table(df.tail(5))
     else:
-        st.info("Sin datos registrados.")
+        st.warning("El sistema está encendido pero no hay ventas hoy. ¡A vender!")
 
-elif menu == "📝 Registro 088":
-    st.header("📝 Entrada de Dinero")
-    # ... código de registro ...
-    with st.form("venta"):
-        c1, c2 = st.columns(2)
-        cli = c1.text_input("Cliente")
-        prod = c2.selectbox("Producto", ["Carpetas", "Stickers", "Otros"])
-        mon = st.number_input("Monto", min_value=0.0)
-        res = st.text_input("Responsable")
-        if st.form_submit_button("Guardar"):
-            df = cargar_datos()
-            nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cli, prod, mon, "Efectivo", res]], columns=df.columns)
-            pd.concat([df, nueva]).to_csv(CSV_VENTAS, index=False)
-            st.success("¡Venta guardada!")
+# --- 2. REGISTRAR VENTA (EL MOTOR) ---
+elif menu == "💰 Registrar Venta":
+    st.title("📝 Nueva Operación - Hoja 088")
+    with st.form("venta_viva"):
+        col1, col2 = st.columns(2)
+        cliente = col1.text_input("Nombre del Cliente")
+        producto = col2.selectbox("Servicio", ["Stickers", "Carpetas", "Tesis", "Copias", "Diseño"])
+        monto = st.number_input("Monto Cobrado ($)", min_value=0.0)
+        metodo = st.selectbox("Método de Pago", ["Efectivo", "Nequi", "Daviplata"])
+        vendedor = st.text_input("¿Quién operó la máquina?")
+        
+        if st.form_submit_button("REGISTRAR Y GUARDAR"):
+            nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, producto, monto, metodo, vendedor]], 
+                                 columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
+            nueva.to_csv(CSV_VENTAS, mode='a', header=not os.path.exists(CSV_VENTAS), index=False)
+            st.success("✅ Venta Guardada. La Inversionista ya puede ver este reporte.")
+            st.balloons()
 
-elif menu == "🔍 Buscador 001-500":
-    st.header("🔍 Manuales de Operación")
-    num = st.text_input("Número de hoja:")
-    if num:
-        ruta = os.path.join(CARPETA_MANUALES, f"{num}.txt")
+# --- 3. INVENTARIO REAL (ALERTA DE INSUMOS) ---
+elif menu == "📦 Inventario Real":
+    st.title("📦 Alertas de Insumos")
+    st.info("Cuando un material llegue al mínimo, regístralo aquí para que la Inversionista compre repuestos.")
+    # Lógica de inventario simple para avisarte a ti
+    item = st.text_input("Material que se está acabando")
+    cantidad = st.text_input("¿Cuánto queda? (Ej: 2 hojas, 10%)")
+    if st.button("Enviar Alerta de Compra"):
+        st.error(f"⚠️ ALERTA ENVIADA: Necesitamos comprar {item} urgente.")
+
+# --- 4. BUSCADOR DE PROTOCOLOS (EL CEREBRO) ---
+elif menu == "🔍 Buscador de Protocolos":
+    st.title("🔍 Consulta Técnica")
+    hoja = st.text_input("Número de Hoja (001-500)")
+    if hoja:
+        ruta = f"manuales/{hoja}.txt"
         if os.path.exists(ruta):
             with open(ruta, "r", encoding="utf-8") as f:
-                st.info(f.read())
+                st.markdown(f"### 📋 Manual {hoja}")
+                st.write(f.read())
         else:
-            st.warning("Hoja no encontrada.")
+            st.error("Esa hoja no existe aún. Por favor, crea el archivo .txt en GitHub.")
