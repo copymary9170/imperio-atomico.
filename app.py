@@ -29,7 +29,6 @@ CSV_ALERTAS = "alertas_inventario.csv"
 CARPETA_MANUALES = "manuales"
 
 def inicializar_archivos():
-    # Estructura actualizada con Precio_Unitario
     if not os.path.exists(CSV_VENTAS):
         pd.DataFrame(columns=["Fecha", "Cliente", "Insumo_Usado", "Monto", "Responsable"]).to_csv(CSV_VENTAS, index=False)
     if not os.path.exists(CSV_STOCK):
@@ -48,6 +47,10 @@ if menu == "💰 Venta y Descuento (088)":
     st.title("📝 Registrar Venta y Descontar Stock")
     df_stock = pd.read_csv(CSV_STOCK)
     
+    # Blindaje: Si falta la columna en el archivo físico, la agregamos al dataframe
+    if "Precio_Unitario" not in df_stock.columns:
+        df_stock["Precio_Unitario"] = 0
+
     with st.form("venta_descuento"):
         c1, c2 = st.columns(2)
         cliente = c1.text_input("Cliente")
@@ -65,49 +68,45 @@ if menu == "💰 Venta y Descuento (088)":
         
         if st.form_submit_button("REGISTRAR VENTA Y RESTAR STOCK"):
             if insumo_usado:
-                # 1. Registrar la venta
                 nueva_v = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, insumo_usado, monto, responsable]], 
                                        columns=["Fecha", "Cliente", "Insumo_Usado", "Monto", "Responsable"])
                 nueva_v.to_csv(CSV_VENTAS, mode='a', header=False, index=False)
                 
-                # 2. Descontar del Stock
                 df_stock.loc[df_stock["Material"] == insumo_usado, "Cantidad"] -= cantidad_usada
                 df_stock.to_csv(CSV_STOCK, index=False)
-                st.success(f"✅ Venta guardada. Se restaron {cantidad_usada} de {insumo_usado}.")
-                st.balloons()
-            else:
-                st.error("No se puede registrar venta sin insumos en stock.")
+                st.success("✅ Venta y descuento procesados.")
+                st.rerun()
 
 # --- MÓDULO: INVENTARIO CON PRECIOS ---
 elif menu == "📦 Inventario y Precios":
     st.title("📦 Valor del Inventario")
     df_stock = pd.read_csv(CSV_STOCK)
     
+    # Blindaje antierror
+    if "Precio_Unitario" not in df_stock.columns:
+        df_stock["Precio_Unitario"] = 0
+
     tab1, tab2 = st.tabs(["📋 Ver Bodega", "🛒 Nueva Compra"])
     
     with tab1:
         if not df_stock.empty:
-            # Cálculo seguro de valor total
             df_stock["Precio_Unitario"] = pd.to_numeric(df_stock["Precio_Unitario"], errors='coerce').fillna(0)
             df_stock["Cantidad"] = pd.to_numeric(df_stock["Cantidad"], errors='coerce').fillna(0)
             df_stock["Valor_Total"] = df_stock["Cantidad"] * df_stock["Precio_Unitario"]
-            
             st.dataframe(df_stock, use_container_width=True)
-            st.metric("Inversión Total en Bodega", f"$ {df_stock['Valor_Total'].sum():,.2f}")
+            st.metric("Inversión Total", f"$ {df_stock['Valor_Total'].sum():,.2f}")
         else:
-            st.info("La bodega está vacía. Ve a 'Nueva Compra' para empezar.")
+            st.info("Bodega vacía.")
 
     with tab2:
         with st.form("compra_precio"):
             c1, c2, c3 = st.columns(3)
-            nom = c1.text_input("Material (Ej: Papel Foto)")
+            nom = c1.text_input("Material")
             cant = c2.number_input("Cantidad", min_value=0.0)
-            pre = c3.number_input("Precio de Costo Unitario", min_value=0.0)
+            pre = c3.number_input("Precio Costo Unitario", min_value=0.0)
             uni = st.selectbox("Unidad", ["Hojas", "Metros", "Unidades"])
-            
-            if st.form_submit_button("AGREGAR A BODEGA"):
+            if st.form_submit_button("AGREGAR"):
                 if nom:
-                    # Si el material ya existe, lo actualizamos
                     if not df_stock.empty and nom in df_stock["Material"].values:
                         df_stock.loc[df_stock["Material"] == nom, "Cantidad"] += cant
                         df_stock.loc[df_stock["Material"] == nom, "Precio_Unitario"] = pre
@@ -115,27 +114,5 @@ elif menu == "📦 Inventario y Precios":
                     else:
                         nueva_c = pd.DataFrame([[nom, cant, uni, pre]], columns=["Material", "Cantidad", "Unidad", "Precio_Unitario"])
                         nueva_c.to_csv(CSV_STOCK, mode='a', header=False, index=False)
-                    st.success(f"✅ {nom} agregado con éxito.")
+                    st.success("Ingresado.")
                     st.rerun()
-
-# --- MÓDULO: DASHBOARD ---
-elif menu == "📊 Dashboard":
-    st.title("📈 Resumen del Negocio")
-    if os.path.exists(CSV_VENTAS):
-        df_v = pd.read_csv(CSV_VENTAS)
-        if not df_v.empty:
-            st.metric("Ventas Totales Registradas", f"$ {df_v['Monto'].sum():,.2f}")
-            st.subheader("Últimos Movimientos")
-            st.dataframe(df_v.tail(10), use_container_width=True)
-        else:
-            st.info("Sin ventas registradas aún.")
-
-# --- MÓDULO: MANUALES ---
-elif menu == "🔍 Manuales":
-    st.title("🔍 Protocolos")
-    hoja = st.text_input("Hoja # (Ej: 001)")
-    if hoja:
-        ruta = f"{CARPETA_MANUALES}/{hoja.zfill(3)}.txt"
-        if os.path.exists(ruta):
-            with open(ruta, "r", encoding="utf-8") as f: st.info(f.read())
-        else: st.error("Hoja no encontrada en la carpeta manuales.")
