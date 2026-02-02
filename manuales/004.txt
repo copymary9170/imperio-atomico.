@@ -1,4 +1,4 @@
-📄 HOJA 004: Mapa de Insumos (Papelería)
+## 📄 HOJA 004: Mapa de Insumos (Papelería)
 Objetivo: No desperdiciar material caro por error.
 
 Cajón 1: Papel Bond común (para copias y borradores).
@@ -8,3 +8,4 @@ Cajón 2: Opalina y Cartulinas (para carpetas y diplomas).
 Cajón 3: Papel Fotográfico y Adhesivos (¡Cuidado! Son los más caros).
 
 Regla: Siempre verificar que el lado "brillante" del papel fotográfico esté hacia el cabezal.
+
