@@ -1,16 +1,22 @@
 import streamlit as st
 import pandas as pd
 import os
+import numpy as np
+from PIL import Image
+import fitz  # PyMuPDF
 from datetime import datetime
 
-# --- 1. SEGURIDAD ---
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Imperio Atómico - Pro", layout="wide")
+
+# --- SEGURIDAD ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
     if not st.session_state["password_correct"]:
-        st.title("🔐 IMPERIO ATÓMICO: Acceso")
+        st.title("🔐 Acceso al Sistema")
         password = st.text_input("Clave de Acceso:", type="password")
-        if st.button("Activar"):
+        if st.button("Entrar"):
             if password == "1234":
                 st.session_state["password_correct"] = True
                 st.rerun()
@@ -22,13 +28,11 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 2. CONFIGURACIÓN ---
+# --- GESTIÓN DE DATOS ---
 CSV_VENTAS = "registro_ventas_088.csv"
 CSV_STOCK = "stock_actual.csv"
-CARPETA_MANUALES = "manuales"
-
 COL_STOCK = ["Material", "Cantidad", "Unidad", "Costo_Unit_USD", "Minimo_Alerta"]
-COL_VENTAS = ["Fecha", "Cliente", "Insumo", "Monto_Neto_USD", "Comisiones_USD", "Ganancia_Real_USD", "Responsable"]
+COL_VENTAS = ["Fecha", "Cliente", "Insumo", "Monto_USD", "Comisiones_USD", "Ganancia_Real_USD", "Responsable"]
 
 def cargar_datos(archivo, columnas):
     try:
@@ -41,137 +45,116 @@ def cargar_datos(archivo, columnas):
     except:
         return pd.DataFrame(columns=columnas)
 
-def guardar_datos(df, archivo):
-    df.to_csv(archivo, index=False)
-
 df_stock = cargar_datos(CSV_STOCK, COL_STOCK)
 df_ventas = cargar_datos(CSV_VENTAS, COL_VENTAS)
 
-# --- 3. INTERFAZ ---
-st.set_page_config(page_title="Imperio Atómico - VIVO", layout="wide")
-menu = st.sidebar.radio("Navegación:", ["📊 Dashboard", "💰 Ventas (Con Comisiones)", "📦 Inventario Pro", "🔍 Manuales"])
+# --- MENÚ PRINCIPAL ---
+menu = st.sidebar.radio("Navegación:", ["📊 Dashboard", "🎨 Analizador CMYK", "💰 Ventas", "📦 Inventario Pro", "🔍 Manuales"])
 
-# --- MÓDULO: INVENTARIO (CON AJUSTES RECUPERADOS) ---
-if menu == "📦 Inventario Pro":
-    st.title("📦 Gestión de Bodega y Costos Reales")
-    tab1, tab2, tab3 = st.tabs(["📋 Existencias", "🛒 Nueva Compra", "✏️ Ajustes y Mínimos"])
+# --- MÓDULO: ANALIZADOR CMYK ---
+if menu == "🎨 Analizador CMYK":
+    st.title("🎨 Analizador de Cobertura de Tinta")
+    st.write("Calcula el porcentaje de Cyan, Magenta, Yellow y Black de tus diseños.")
     
-    with tab1:
-        if not df_stock.empty:
-            df_stock["Valor_Total"] = pd.to_numeric(df_stock["Cantidad"]) * pd.to_numeric(df_stock["Costo_Unit_USD"])
-            st.dataframe(df_stock, use_container_width=True)
-            st.metric("Capital Invertido", f"$ {df_stock['Valor_Total'].sum():,.2f}")
+    file = st.file_uploader("Sube una Imagen o PDF", type=["jpg", "png", "jpeg", "pdf"])
+    
+    if file:
+        img = None
+        if file.type == "application/pdf":
+            # Procesar PDF (Primera página)
+            doc = fitz.open(stream=file.read(), filetype="pdf")
+            page = doc.load_page(0)
+            pix = page.get_pixmap(colorspace=fitz.csCMYK)
+            img = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
         else:
-            st.info("Inventario vacío.")
-
-    with tab2:
-        with st.form("compra_avanzada"):
-            nom = st.text_input("Nombre del Material")
-            cant = st.number_input("Cantidad Comprada", min_value=0.01)
-            precio = st.number_input("Precio en Factura/Etiqueta", min_value=0.0)
-            tasa = st.number_input("Tasa Pago (Bs/$)", value=45.0)
-            moneda = st.selectbox("Moneda de Compra", ["Dólares ($)", "Bolívares (Bs)"])
+            # Procesar Imagen
+            img = Image.open(file).convert("CMYK")
+        
+        if img:
+            st.image(img.convert("RGB"), caption="Vista previa del diseño", width=400)
             
-            c1, c2 = st.columns(2)
-            usa_iva = c1.checkbox("¿Pagaste IVA (16%)?")
-            comision_c = c2.number_input("% Comisión/IGTF pagado", min_value=0.0)
+            # Cálculo de porcentajes
+            pix_data = np.array(img)
+            # CMYK son los canales 0, 1, 2, 3
+            c_p = (pix_data[:,:,0].mean() / 255) * 100
+            m_p = (pix_data[:,:,1].mean() / 255) * 100
+            y_p = (pix_data[:,:,2].mean() / 255) * 100
+            k_p = (pix_data[:,:,3].mean() / 255) * 100
             
-            if st.form_submit_button("REGISTRAR COMPRA"):
-                costo_usd = precio if moneda == "Dólares ($)" else precio / tasa
-                if usa_iva: costo_usd *= 1.16
-                costo_usd *= (1 + (comision_c / 100))
-                costo_u_final = costo_usd / cant
-                
-                if nom in df_stock["Material"].values:
-                    df_stock.loc[df_stock["Material"] == nom, "Cantidad"] += cant
-                    df_stock.loc[df_stock["Material"] == nom, "Costo_Unit_USD"] = costo_u_final
-                else:
-                    nueva = pd.DataFrame([[nom, cant, "Unid", costo_u_final, 5]], columns=COL_STOCK)
-                    df_stock = pd.concat([df_stock, nueva], ignore_index=True)
-                
-                guardar_datos(df_stock, CSV_STOCK)
-                st.success(f"Ingresado: Costo Real Unitario ${costo_u_final:.4f}")
-                st.rerun()
-
-    with tab3:
-        st.subheader("🛠️ Corregir Errores y Alertas")
-        if not df_stock.empty:
-            mat_sel = st.selectbox("Selecciona material a corregir", df_stock["Material"].unique())
-            idx = df_stock.index[df_stock["Material"] == mat_sel][0]
+            st.subheader("📊 Cobertura por Canal")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Cian", f"{c_p:.1f}%")
+            c2.metric("Magenta", f"{m_p:.1f}%")
+            c3.metric("Amarillo", f"{y_p:.1f}%")
+            c4.metric("Negro", f"{k_p:.1f}%")
             
-            c1, c2, c3 = st.columns(3)
-            nueva_c = c1.number_input("Cantidad Real en Físico", value=float(df_stock.loc[idx, "Cantidad"]))
-            nuevo_p = c2.number_input("Costo Unitario USD", value=float(df_stock.loc[idx, "Costo_Unit_USD"]))
-            nuevo_m = c3.number_input("Mínimo para Alerta", value=float(df_stock.loc[idx, "Minimo_Alerta"]))
+            total = c_p + m_p + y_p + k_p
+            st.info(f"**Cobertura Total Combinada:** {total:.1f}%")
             
-            if st.button("GUARDAR CAMBIOS EN BODEGA"):
-                df_stock.loc[idx, "Cantidad"] = nueva_c
-                df_stock.loc[idx, "Costo_Unit_USD"] = nuevo_p
-                df_stock.loc[idx, "Minimo_Alerta"] = nuevo_m
-                guardar_datos(df_stock, CSV_STOCK)
-                st.warning(f"¡Ajuste realizado en {mat_sel}!")
-                st.rerun()
-        else:
-            st.info("Nada que ajustar aún.")
-
-# --- MÓDULO: VENTAS ---
-elif menu == "💰 Ventas (Con Comisiones)":
-    st.title("💰 Venta con Retención de Gastos")
-    if not df_stock.empty:
-        with st.form("venta_real"):
-            cliente = st.text_input("Cliente")
-            insumo = st.selectbox("Material usado", df_stock["Material"].unique())
-            cant_u = st.number_input("Cantidad usada", min_value=0.01)
-            monto = st.number_input("Cobro al cliente", min_value=0.0)
-            tasa_v = st.number_input("Tasa actual", value=45.0)
-            moneda_v = st.selectbox("Cobrado en:", ["Bolívares (Bs)", "Dólares ($)"])
-            comision_v = st.number_input("% Comisión que te quitan (Punto/IGTF)", value=3.0)
-            
-            if st.form_submit_button("REGISTRAR VENTA"):
-                ingreso_usd = monto if moneda_v == "Dólares ($)" else monto / tasa_v
-                perdida_banco = ingreso_usd * (comision_v / 100)
-                ingreso_neto = ingreso_usd - perdida_banco
-                
-                costo_u = float(df_stock.loc[df_stock["Material"] == insumo, "Costo_Unit_USD"].values[0])
-                costo_t_mat = cant_u * costo_u
-                ganancia = ingreso_neto - costo_t_mat
-                
-                nueva_v = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, insumo, ingreso_usd, perdida_banco, ganancia, "Socia"]], columns=COL_VENTAS)
-                df_ventas = pd.concat([df_ventas, nueva_v], ignore_index=True)
-                guardar_datos(df_ventas, CSV_VENTAS)
-                
-                df_stock.loc[df_stock["Material"] == insumo, "Cantidad"] -= cant_u
-                guardar_datos(df_stock, CSV_STOCK)
-                st.success(f"Ganancia Real: ${ganancia:.2f}")
-                st.rerun()
+            if total > 240:
+                st.warning("⚠️ ALTA DENSIDAD: Este diseño consumirá mucho tóner. Sugerencia: Cobrar recargo.")
 
 # --- MÓDULO: DASHBOARD ---
 elif menu == "📊 Dashboard":
-    st.title("📊 Resumen del Imperio")
+    st.title("📊 Resumen Atómico")
     if not df_ventas.empty:
         df_v = df_ventas.copy()
-        for c in ["Monto_Neto_USD", "Comisiones_USD", "Ganancia_Real_USD"]:
+        for c in ["Monto_USD", "Comisiones_USD", "Ganancia_Real_USD"]:
             df_v[c] = pd.to_numeric(df_v[c], errors='coerce').fillna(0)
-            
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Ventas Brutas", f"$ {df_v['Monto_Neto_USD'].sum():,.2f}")
-        c2.metric("Comisiones de Terceros", f"$ {df_v['Comisiones_USD'].sum():,.2f}", delta_color="inverse")
-        c3.metric("Utilidad LIMPIA", f"$ {df_v['Ganancia_Real_USD'].sum():,.2f}")
-
-        # ALERTAS VISUALES
-        st.divider()
-        bajo = df_stock[df_stock["Cantidad"] <= df_stock["Minimo_Alerta"]]
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Ventas Totales", f"$ {df_v['Monto_USD'].sum():,.2f}")
+        col2.metric("Gastos/Comisiones", f"$ {df_v['Comisiones_USD'].sum():,.2f}")
+        col3.metric("Ganancia Neta", f"$ {df_v['Ganancia_Real_USD'].sum():,.2f}")
+        
+        st.subheader("Alertas de Stock")
+        bajo = df_stock[pd.to_numeric(df_stock["Cantidad"]) <= pd.to_numeric(df_stock["Minimo_Alerta"])]
         if not bajo.empty:
-            st.error("🚨 MATERIALES EN NIVEL CRÍTICO")
-            st.table(bajo[["Material", "Cantidad", "Minimo_Alerta"]])
+            st.error("⚠️ Reponer estos materiales pronto:")
+            st.table(bajo[["Material", "Cantidad"]])
     else:
-        st.info("Sin datos registrados.")
+        st.info("Aún no hay ventas para mostrar.")
+
+# --- MÓDULO: VENTAS ---
+elif menu == "💰 Ventas":
+    st.title("💰 Nueva Venta")
+    if not df_stock.empty:
+        with st.form("v"):
+            cliente = st.text_input("Cliente")
+            insumo = st.selectbox("Insumo", df_stock["Material"].unique())
+            cant_u = st.number_input("Cantidad", min_value=0.01)
+            monto = st.number_input("Cobrado ($ o equivalente)", min_value=0.0)
+            comi = st.number_input("% Comisión/IGTF pagado", value=3.0)
+            if st.form_submit_button("Registrar"):
+                # Lógica de costos
+                costo_u = float(df_stock.loc[df_stock["Material"] == insumo, "Costo_Unit_USD"].values[0])
+                costo_total = cant_u * costo_u
+                comi_usd = monto * (comi/100)
+                ganancia = monto - comi_usd - costo_total
+                
+                nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cliente, insumo, monto, comi_usd, ganancia, "Socia"]], columns=COL_VENTAS)
+                nueva.to_csv(CSV_VENTAS, mode='a', header=not os.path.exists(CSV_VENTAS), index=False)
+                
+                df_stock.loc[df_stock["Material"] == insumo, "Cantidad"] -= cant_u
+                df_stock.to_csv(CSV_STOCK, index=False)
+                st.success(f"Ganancia: ${ganancia:.2f}")
+                st.rerun()
+
+# --- MÓDULO: INVENTARIO ---
+elif menu == "📦 Inventario Pro":
+    st.title("📦 Inventario y Ajustes")
+    t1, t2 = st.tabs(["📋 Stock Actual", "✏️ Ajustes/Compras"])
+    with t1:
+        st.dataframe(df_stock, use_container_width=True)
+    with t2:
+        st.write("Usa esta sección para añadir stock o corregir errores.")
+        # Aquí puedes replicar el formulario de compras anterior...
 
 # --- MÓDULO: MANUALES ---
 elif menu == "🔍 Manuales":
     st.title("🔍 Protocolos")
-    hoja = st.text_input("Hoja #")
+    hoja = st.text_input("Nro de Hoja:")
     if hoja:
         ruta = f"{CARPETA_MANUALES}/{hoja.zfill(3)}.txt"
         if os.path.exists(ruta):
-            with open(ruta, "r", encoding="utf-8") as f: st.info(f.read())
+            with open(ruta, "r") as f: st.info(f.read())
