@@ -22,111 +22,110 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 2. CONFIGURACIÓN DE ARCHIVOS ---
+# --- 2. GESTIÓN ROBUSTA DE ARCHIVOS ---
 CSV_VENTAS = "registro_ventas_088.csv"
 CSV_STOCK = "stock_actual.csv"
 CARPETA_MANUALES = "manuales"
 
-def inicializar_archivos():
-    if not os.path.exists(CSV_VENTAS):
-        pd.DataFrame(columns=["Fecha", "Cliente", "Insumo", "Monto_Bs", "Tasa_Usada", "Equiv_USD", "Responsable"]).to_csv(CSV_VENTAS, index=False)
-    if not os.path.exists(CSV_STOCK):
-        pd.DataFrame(columns=["Material", "Cantidad", "Unidad", "Costo_Unit_USD"]).to_csv(CSV_STOCK, index=False)
+def cargar_datos(archivo, columnas):
+    try:
+        if os.path.exists(archivo) and os.path.getsize(archivo) > 0:
+            return pd.read_csv(archivo)
+        else:
+            return pd.DataFrame(columns=columnas)
+    except Exception:
+        # Si el archivo está corrupto (ParserError), creamos uno nuevo limpio
+        return pd.DataFrame(columns=columnas)
 
-inicializar_archivos()
+def guardar_datos(df, archivo):
+    df.to_csv(archivo, index=False)
+
+# Inicializamos DataFrames limpios
+df_ventas = cargar_datos(CSV_VENTAS, ["Fecha", "Cliente", "Insumo", "Monto_Bs", "Tasa", "USD", "Responsable"])
+df_stock = cargar_datos(CSV_STOCK, ["Material", "Cantidad", "Unidad", "Costo_Unit_USD"])
 
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="Imperio Atómico - VIVO", layout="wide")
-menu = st.sidebar.radio("Navegación:", ["📊 Dashboard", "💰 Ventas (Tasa en Vivo)", "📦 Inventario (Costo Real)", "🔍 Manuales"])
+menu = st.sidebar.radio("Menú:", ["📊 Dashboard", "💰 Ventas", "📦 Inventario Real", "🔍 Manuales"])
 
-# --- MÓDULO: INVENTARIO CON CÁLCULO DE COMISIONES ---
-if menu == "📦 Inventario (Costo Real)":
-    st.title("📦 Inventario con Cálculo de Costo Real (Venezuela)")
-    df_stock = pd.read_csv(CSV_STOCK)
-    
-    if "Costo_Unit_USD" not in df_stock.columns:
-        df_stock["Costo_Unit_USD"] = 0.0
-
-    tab1, tab2 = st.tabs(["📋 Existencias", "🛒 Nueva Compra (Calculador)"])
+# --- MÓDULO: INVENTARIO (CON CALCULADOR VENEZUELA) ---
+if menu == "📦 Inventario Real":
+    st.title("📦 Compras y Costo Real")
+    tab1, tab2 = st.tabs(["📋 Existencias", "🛒 Nueva Compra"])
     
     with tab1:
-        df_stock["Cantidad"] = pd.to_numeric(df_stock["Cantidad"], errors='coerce').fillna(0)
-        df_stock["Costo_Unit_USD"] = pd.to_numeric(df_stock["Costo_Unit_USD"], errors='coerce').fillna(0)
-        df_stock["Valor_Total_USD"] = df_stock["Cantidad"] * df_stock["Costo_Unit_USD"]
-        st.dataframe(df_stock, use_container_width=True)
-        st.metric("Capital Real en Bodega", f"$ {df_stock['Valor_Total_USD'].sum():,.2f}")
+        if not df_stock.empty:
+            df_stock["Costo_Unit_USD"] = pd.to_numeric(df_stock["Costo_Unit_USD"], errors='coerce').fillna(0)
+            df_stock["Cantidad"] = pd.to_numeric(df_stock["Cantidad"], errors='coerce').fillna(0)
+            df_stock["Valor_Total"] = df_stock["Cantidad"] * df_stock["Costo_Unit_USD"]
+            st.dataframe(df_stock, use_container_width=True)
+            st.metric("Total Invertido", f"$ {df_stock['Valor_Total'].sum():,.2f}")
+        else:
+            st.info("Bodega vacía.")
 
     with tab2:
-        st.info("Este formulario calcula el costo neto después de impuestos y comisiones.")
         with st.form("compra_avanzada"):
+            nom = st.text_input("Material")
+            cant = st.number_input("Cantidad", min_value=0.01)
+            precio = st.number_input("Precio en Factura", min_value=0.0)
+            moneda = st.selectbox("Moneda", ["USD", "Bolívares"])
+            tasa = st.number_input("Tasa del día", min_value=1.0, value=40.0) # Valor ref sugerido
+            
             c1, c2 = st.columns(2)
-            nom = c1.text_input("Nombre del Material")
-            cant = c2.number_input("Cantidad Comprada", min_value=0.01)
-            
-            st.subheader("💰 Detalles del Pago")
-            c3, c4, c5 = st.columns(3)
-            precio_base = c3.number_input("Precio en Factura/Etiqueta", min_value=0.0)
-            moneda_pago = c4.selectbox("Moneda de Pago", ["USD", "Bolívares"])
-            tasa_dia = c5.number_input("Tasa del momento (Bs/$)", min_value=1.0, value=1.0)
-            
-            st.subheader("⚖️ Cargos Adicionales")
-            c6, c7 = st.columns(2)
-            usa_iva = c6.checkbox("¿Pagaste IVA (16%)?")
-            comision = c7.number_input("% Comisión Banco/IGTF (Ej: 3)", min_value=0.0)
+            iva = c1.checkbox("¿Paga IVA (16%)?")
+            comision = c2.number_input("% Comisión/IGTF", min_value=0.0)
             
             if st.form_submit_button("CALCULAR E INGRESAR"):
-                # 1. Convertir base a USD
-                costo_inicial_usd = precio_base if moneda_pago == "USD" else precio_base / tasa_dia
+                # Cálculo de costo real
+                base_usd = precio if moneda == "USD" else precio / tasa
+                if iva: base_usd *= 1.16
+                base_usd *= (1 + (comision/100))
+                costo_u = base_usd / cant
                 
-                # 2. Aplicar IVA si aplica
-                if usa_iva: costo_inicial_usd *= 1.16
-                
-                # 3. Aplicar comisiones bancarias
-                costo_final_usd = costo_inicial_usd * (1 + (comision/100))
-                
-                costo_unit_final = costo_final_usd / cant
-                
-                if not df_stock.empty and nom in df_stock["Material"].values:
+                # Actualizar o Crear
+                if nom in df_stock["Material"].values:
                     df_stock.loc[df_stock["Material"] == nom, "Cantidad"] += cant
-                    df_stock.loc[df_stock["Material"] == nom, "Costo_Unit_USD"] = costo_unit_final
-                    df_stock.to_csv(CSV_STOCK, index=False)
+                    df_stock.loc[df_stock["Material"] == nom, "Costo_Unit_USD"] = costo_u
                 else:
-                    nueva_c = pd.DataFrame([[nom, cant, "Unid", costo_unit_final]], columns=["Material", "Cantidad", "Unidad", "Costo_Unit_USD"])
-                    nueva_c.to_csv(CSV_STOCK, mode='a', header=False, index=False)
+                    nueva_fila = pd.DataFrame([[nom, cant, "Unid", costo_u]], columns=df_stock.columns[:4])
+                    df_stock = pd.concat([df_stock, nueva_fila], ignore_index=True)
                 
-                st.success(f"Costo unitario real calculado: ${costo_unit_final:.4f}")
+                guardar_datos(df_stock, CSV_STOCK)
+                st.success(f"Costo Real Unitario: ${costo_u:.4f}")
                 st.rerun()
 
 # --- MÓDULO: VENTAS ---
-elif menu == "💰 Ventas (Tasa en Vivo)":
-    st.title("💰 Registrar Venta")
-    df_stock = pd.read_csv(CSV_STOCK)
+elif menu == "💰 Ventas":
+    st.title("💰 Registro de Venta")
     with st.form("venta"):
         cliente = st.text_input("Cliente")
-        insumo = st.selectbox("Insumo", df_stock["Material"].unique()) if not df_stock.empty else None
+        insumo = st.selectbox("Material", df_stock["Material"].unique()) if not df_stock.empty else None
         c_u = st.number_input("Cantidad usada", min_value=0.0)
         monto = st.number_input("Monto Cobrado", min_value=0.0)
-        t_v = st.selectbox("Moneda", ["Bs", "USD"])
-        tasa = st.number_input("Tasa", min_value=1.0, value=1.0)
+        t_v = st.selectbox("Moneda de cobro", ["Bs", "USD"])
+        tasa = st.number_input("Tasa", min_value=1.0, value=40.0)
+        
         if st.form_submit_button("REGISTRAR"):
             eq_usd = monto / tasa if t_v == "Bs" else monto
-            pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, insumo, monto, tasa, eq_usd, "Socia"]], 
-                         columns=["Fecha", "Cliente", "Insumo", "Monto_Bs", "Tasa_Usada", "Equiv_USD", "Responsable"]).to_csv(CSV_VENTAS, mode='a', header=False, index=False)
+            nueva_v = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, insumo, monto, tasa, eq_usd, "Socia"]], 
+                                   columns=df_ventas.columns)
+            df_ventas = pd.concat([df_ventas, nueva_v], ignore_index=True)
+            guardar_datos(df_ventas, CSV_VENTAS)
+            
             if insumo:
                 df_stock.loc[df_stock["Material"] == insumo, "Cantidad"] -= c_u
-                df_stock.to_csv(CSV_STOCK, index=False)
-            st.success("Venta Exitosa")
+                guardar_datos(df_stock, CSV_STOCK)
+            
+            st.success("Operación Exitosa")
             st.rerun()
 
 # --- MÓDULO: DASHBOARD ---
 elif menu == "📊 Dashboard":
-    st.title("📊 Control de Capital")
-    if os.path.exists(CSV_VENTAS):
-        df_v = pd.read_csv(CSV_VENTAS)
-        if not df_v.empty:
-            df_v["Equiv_USD"] = pd.to_numeric(df_v["Equiv_USD"], errors='coerce')
-            st.metric("Ventas Totales ($)", f"$ {df_v['Equiv_USD'].sum():,.2f}")
-            st.dataframe(df_v)
+    st.title("📊 Resumen")
+    if not df_ventas.empty:
+        df_ventas["USD"] = pd.to_numeric(df_ventas["USD"], errors='coerce')
+        st.metric("Ventas Totales ($)", f"$ {df_ventas['USD'].sum():,.2f}")
+        st.dataframe(df_ventas)
 
 # --- MÓDULO: MANUALES ---
 elif menu == "🔍 Manuales":
