@@ -39,13 +39,7 @@ def inicializar_archivos():
         pd.DataFrame(columns=["Fecha", "Insumo", "Estado", "Responsable"]).to_csv(CSV_ALERTAS, index=False)
     
     if not os.path.exists(CSV_STOCK) or os.path.getsize(CSV_STOCK) == 0:
-        # Stock inicial de ejemplo
-        df_stock = pd.DataFrame([
-            ["Papel Fotográfico", 0, "Hojas"],
-            ["Papel Opalina", 0, "Hojas"],
-            ["Tinta Negra", 0, "%"],
-            ["Tinta Color", 0, "%"]
-        ], columns=["Material", "Cantidad", "Unidad"])
+        df_stock = pd.DataFrame(columns=["Material", "Cantidad", "Unidad"])
         df_stock.to_csv(CSV_STOCK, index=False)
 
 inicializar_archivos()
@@ -103,32 +97,56 @@ elif menu == "💰 Registrar Venta (088)":
             nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, producto, monto, metodo, responsable]], 
                                  columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
             nueva.to_csv(CSV_VENTAS, mode='a', header=False, index=False)
-            st.success("✅ Venta registrada y sumada al Dashboard.")
+            st.success("✅ Venta registrada correctamente.")
             st.balloons()
 
 # --- MODULO: GESTIÓN DE STOCK ---
 elif menu == "📦 Gestión de Stock e Inventario":
     st.title("📦 Gestión de Suministros")
-    tab1, tab2, tab3 = st.tabs(["📋 Ver Existencias", "🛒 Agregar Compra", "⚠️ Reportar Faltante"])
+    tab1, tab2, tab3 = st.tabs(["📋 Existencias Actuales", "🛒 Registrar Compra", "⚠️ Reportar Faltante"])
     
     with tab1:
         st.subheader("Estado de la Bodega")
         df_stock = pd.read_csv(CSV_STOCK)
-        st.dataframe(df_stock, use_container_width=True)
+        if not df_stock.empty:
+            st.dataframe(df_stock, use_container_width=True)
+        else:
+            st.info("La bodega está vacía. Registra una compra para empezar.")
     
     with tab2:
         st.subheader("Entrada de Nuevo Material")
         with st.form("nueva_compra"):
-            mat_nom = st.text_input("Nombre del Material (Ej: Resma Carta)")
-            mat_cant = st.number_input("Cantidad que llegó", min_value=0.0)
-            mat_unid = st.selectbox("Unidad", ["Hojas", "Metros", "Unidades", "%", "Rollos"])
+            mat_nom = st.text_input("Nombre del Material (Ej: Papel Fotográfico)")
+            mat_cant = st.number_input("Cantidad que ingresa", min_value=0.0)
+            mat_unid = st.selectbox("Unidad de Medida", ["Hojas", "Metros", "Unidades", "%", "Rollos"])
+            
             if st.form_submit_button("REGISTRAR INGRESO"):
-                # Crear la fila y guardarla en el CSV de stock
                 nueva_compra = pd.DataFrame([[mat_nom, mat_cant, mat_unid]], columns=["Material", "Cantidad", "Unidad"])
                 nueva_compra.to_csv(CSV_STOCK, mode='a', header=False, index=False)
                 st.success(f"✅ {mat_nom} añadido al inventario.")
 
     with tab3:
-        # Aquí queda el formulario de alertas que ya teníamos...
-        st.subheader("Sistema de Alerta")
-        # (El resto del código de alertas que ya tienes)
+        st.subheader("Sistema de Alerta de Compras")
+        with st.form("alerta_inv"):
+            insumo = st.text_input("Material que falta o se acabó")
+            estado = st.select_slider("Nivel de Urgencia", options=["Bajo", "Medio", "Crítico"])
+            quien = st.text_input("¿Quién detectó la falta?")
+            if st.form_submit_button("ENVIAR REQUERIMIENTO"):
+                nueva_alerta = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), insumo, estado, quien]], 
+                                            columns=["Fecha", "Insumo", "Estado", "Responsable"])
+                nueva_alerta.to_csv(CSV_ALERTAS, mode='a', header=False, index=False)
+                st.error(f"⚠️ Alerta por '{insumo}' enviada a la Inversionista.")
+
+# --- MODULO: BUSCADOR ---
+elif menu == "🔍 Buscador de Protocolos":
+    st.title("🔍 Central de Inteligencia (Manual 500)")
+    n_hoja = st.text_input("Número de hoja (Ej: 001):")
+    if n_hoja:
+        n_formateado = n_hoja.zfill(3)
+        st.subheader(obtener_nombre_bloque(n_formateado))
+        ruta = f"{CARPETA_MANUALES}/{n_formateado}.txt"
+        if os.path.exists(ruta):
+            with open(ruta, "r", encoding="utf-8") as f:
+                st.info(f.read())
+        else:
+            st.warning(f"La Hoja {n_formateado} no se encuentra cargada.")
