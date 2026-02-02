@@ -9,4 +9,5 @@ Encender la impresora principal (EPSON/Canon) y verificar que no tenga luces roj
 
 Encender la Silhouette Cameo.
 
+
 Realizar una "Prueba de Inyectores" desde el mantenimiento de la impresora para asegurar que la tinta fluya.
