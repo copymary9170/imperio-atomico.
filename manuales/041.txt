@@ -1,4 +1,4 @@
-📄 HOJA 041: Emergencia - Atasco de Papel
+## 📄 HOJA 041: Emergencia - Atasco de Papel
 Objetivo: Sacar el papel sin romper los engranajes.
 
 APAGAR la impresora de inmediato.
@@ -8,5 +8,6 @@ Abrir la tapa trasera o superior.
 Sujetar la hoja con AMBAS MANOS y tirar suavemente hacia afuera (nunca hacia adentro).
 
 Si el papel se rompe, usar una pinza de cejas para retirar los pedacitos restantes.
+
 
 Reiniciar la máquina y hacer una limpieza de rodillos.
