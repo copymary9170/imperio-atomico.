@@ -27,13 +27,28 @@ if not check_password():
 # --- 2. CONFIGURACIÓN DE RUTAS Y DATOS ---
 CSV_VENTAS = "registro_ventas_088.csv"
 CSV_ALERTAS = "alertas_inventario.csv"
+CSV_STOCK = "stock_actual.csv"
 CARPETA_MANUALES = "manuales"
 
-# Asegurar que los archivos existan
-for archivo, columnas in {CSV_VENTAS: ["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"], 
-                          CSV_ALERTAS: ["Fecha", "Insumo", "Estado", "Responsable"]}.items():
-    if not os.path.exists(archivo) or os.path.getsize(archivo) == 0:
-        pd.DataFrame(columns=columnas).to_csv(archivo, index=False)
+# Asegurar que los archivos existan con sus columnas correctas
+def inicializar_archivos():
+    if not os.path.exists(CSV_VENTAS) or os.path.getsize(CSV_VENTAS) == 0:
+        pd.DataFrame(columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"]).to_csv(CSV_VENTAS, index=False)
+    
+    if not os.path.exists(CSV_ALERTAS) or os.path.getsize(CSV_ALERTAS) == 0:
+        pd.DataFrame(columns=["Fecha", "Insumo", "Estado", "Responsable"]).to_csv(CSV_ALERTAS, index=False)
+    
+    if not os.path.exists(CSV_STOCK) or os.path.getsize(CSV_STOCK) == 0:
+        # Stock inicial de ejemplo
+        df_stock = pd.DataFrame([
+            ["Papel Fotográfico", 0, "Hojas"],
+            ["Papel Opalina", 0, "Hojas"],
+            ["Tinta Negra", 0, "%"],
+            ["Tinta Color", 0, "%"]
+        ], columns=["Material", "Cantidad", "Unidad"])
+        df_stock.to_csv(CSV_STOCK, index=False)
+
+inicializar_archivos()
 
 def obtener_nombre_bloque(numero):
     try:
@@ -49,64 +64,67 @@ def obtener_nombre_bloque(numero):
 st.set_page_config(page_title="Imperio Atómico - VIVO", layout="wide")
 st.sidebar.title("💎 PANEL DE CONTROL")
 menu = st.sidebar.radio("Navegación:", 
-    ["📊 Dashboard Maestro", "💰 Registrar Venta (088)", "📦 Alerta de Inventario", "🔍 Buscador de Protocolos"])
+    ["📊 Dashboard Maestro", "💰 Registrar Venta (088)", "📦 Gestión de Stock e Inventario", "🔍 Buscador de Protocolos"])
 
 # --- MODULO: DASHBOARD ---
 if menu == "📊 Dashboard Maestro":
-    st.title("📈 Estado del Imperio")
+    st.title("📈 Estado General del Imperio")
     df = pd.read_csv(CSV_VENTAS)
     df_inv = pd.read_csv(CSV_ALERTAS)
     
-    col1, col2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     if not df.empty:
         df['Monto'] = pd.to_numeric(df['Monto'], errors='coerce').fillna(0)
-        col1.metric("Ingresos Totales", f"$ {df['Monto'].sum():,.2f}")
+        c1.metric("Ingresos Totales", f"$ {df['Monto'].sum():,.2f}")
+        c2.metric("Total Pedidos", len(df))
     
     if not df_inv.empty:
         criticos = len(df_inv[df_inv['Estado'] == 'Crítico'])
-        col2.metric("Alertas Críticas", criticos, delta_color="inverse")
+        c3.metric("Alertas Críticas", criticos, delta_color="inverse")
 
-    st.subheader("Últimas Ventas")
+    st.subheader("Últimos Movimientos en Caja")
     st.dataframe(df.tail(10), use_container_width=True)
 
 # --- MODULO: REGISTRO 088 ---
 elif menu == "💰 Registrar Venta (088)":
-    st.title("📝 Registro de Entrada - Hoja 088")
+    st.title("📝 Registro de Operación - Hoja 088")
     with st.form("registro_088"):
         c1, c2 = st.columns(2)
-        cliente = c1.text_input("Cliente")
-        producto = c2.selectbox("Servicio", ["Stickers", "Carpetas", "Tesis", "Copias", "Diseño", "Otro"])
-        monto = st.number_input("Monto ($)", min_value=0.0)
-        metodo = st.selectbox("Método", ["Efectivo", "Nequi", "Daviplata"])
-        responsable = st.text_input("Atendido por:")
-        if st.form_submit_button("GUARDAR VENTA"):
-            nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, producto, monto, metodo, responsable]], columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
+        cliente = c1.text_input("Nombre del Cliente")
+        producto = c2.selectbox("Servicio Prestado", ["Stickers", "Carpetas", "Tesis", "Copias", "Diseño", "Otro"])
+        
+        c3, c4 = st.columns(2)
+        monto = c3.number_input("Monto Recibido ($)", min_value=0.0)
+        metodo = c4.selectbox("Método de Pago", ["Efectivo", "Nequi", "Daviplata", "Transferencia"])
+        
+        responsable = st.text_input("Operador responsable:")
+        
+        if st.form_submit_button("GUARDAR EN BASE DE DATOS"):
+            nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), cliente, producto, monto, metodo, responsable]], 
+                                 columns=["Fecha", "Cliente", "Producto", "Monto", "Metodo", "Responsable"])
             nueva.to_csv(CSV_VENTAS, mode='a', header=False, index=False)
-            st.success("✅ Venta registrada.")
+            st.success("✅ Venta registrada y sumada al Dashboard.")
+            st.balloons()
 
-# --- MODULO: INVENTARIO (EL QUE FALTABA) ---
-elif menu == "📦 Alerta de Inventario":
-    st.title("📦 Sensor de Insumos")
-    st.info("Registra aquí cuando algo se esté agotando para que la Inversionista lo vea en el Dashboard.")
-    with st.form("alerta_inv"):
-        insumo = st.text_input("¿Qué material falta? (Ej: Papel Fotográfico)")
-        estado = st.select_slider("Nivel de Urgencia", options=["Bajo", "Medio", "Crítico"])
-        quien = st.text_input("Reportado por:")
-        if st.form_submit_button("ENVIAR ALERTA"):
-            nueva_alerta = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), insumo, estado, quien]], columns=["Fecha", "Insumo", "Estado", "Responsable"])
-            nueva_alerta.to_csv(CSV_ALERTAS, mode='a', header=False, index=False)
-            st.error(f"⚠️ Alerta de {insumo} enviada al sistema.")
-
-# --- MODULO: BUSCADOR ---
-elif menu == "🔍 Buscador de Protocolos":
-    st.title("🔍 Central de Inteligencia")
-    n_hoja = st.text_input("Número de hoja (Ej: 001):")
-    if n_hoja:
-        n_formateado = n_hoja.zfill(3)
-        st.caption(obtener_nombre_bloque(n_formateado))
-        ruta = f"{CARPETA_MANUALES}/{n_formateado}.txt"
-        if os.path.exists(ruta):
-            with open(ruta, "r", encoding="utf-8") as f:
-                st.info(f.read())
-        else:
-            st.warning("Hoja no encontrada.")
+# --- MODULO: GESTIÓN DE STOCK ---
+elif menu == "📦 Gestión de Stock e Inventario":
+    st.title("📦 Inventario de Insumos")
+    tab1, tab2 = st.tabs(["📋 Existencias Actuales", "⚠️ Reportar Faltante"])
+    
+    with tab1:
+        st.subheader("Estado de la Bodega")
+        if os.path.exists(CSV_STOCK):
+            df_stock = pd.read_csv(CSV_STOCK)
+            st.dataframe(df_stock, use_container_width=True)
+            st.caption("Nota: Para modificar cantidades iniciales, edita el archivo 'stock_actual.csv' en GitHub.")
+    
+    with tab2:
+        st.subheader("Sistema de Alerta de Compras")
+        with st.form("alerta_inv"):
+            insumo = st.text_input("Material que falta o se acabó")
+            estado = st.select_slider("Nivel de Urgencia", options=["Bajo", "Medio", "Crítico"])
+            quien = st.text_input("¿Quién detectó la falta?")
+            if st.form_submit_button("ENVIAR REQUERIMIENTO"):
+                nueva_alerta = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M"), insumo, estado, quien]], 
+                                            columns=["Fecha", "Insumo", "Estado", "Responsable"])
+                nueva_alerta
