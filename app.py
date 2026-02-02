@@ -13,7 +13,7 @@ def check_password():
         st.write("Bienvenida, Socia. Inicia el sistema para operar.")
         password = st.text_input("Clave de Acceso:", type="password")
         if st.button("Activar Sistema"):
-                if password == "mary": # <--- CAMBIA TU CLAVE AQUÍ
+            if password == "1234": # <--- CAMBIA TU CLAVE AQUÍ
                 st.session_state["password_correct"] = True
                 st.rerun()
             else:
