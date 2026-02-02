@@ -7,3 +7,4 @@ Anotar el nombre del cliente para fidelización futura.
 
 
 Si es un abono del 50%, anotarlo en la sección de "Método de Pago" para cobrar el resto al entregar.
+
