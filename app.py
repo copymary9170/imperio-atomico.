@@ -61,12 +61,11 @@ df_clientes = cargar_datos(CSV_CLIENTES, COL_CLIENTES)
 df_prod = cargar_datos(CSV_PRODUCCION, COL_PRODUCCION)
 df_gastos = cargar_datos(CSV_GASTOS, COL_GASTOS)
 
-# --- 3. MOTOR CMYK REFORZADO ---
+# --- 3. MOTOR CMYK ---
 def analizar_cmyk_pro(img_pil):
     pix_rgb = np.array(img_pil.convert("RGB")) / 255.0
     r, g, b = pix_rgb[:,:,0], pix_rgb[:,:,1], pix_rgb[:,:,2]
     k = 1 - np.max(pix_rgb, axis=2)
-    # Evitamos división por cero con 1e-9
     c = (1 - r - k) / (1 - k + 1e-9)
     m = (1 - g - k) / (1 - k + 1e-9)
     y = (1 - b - k) / (1 - k + 1e-9)
@@ -86,36 +85,31 @@ if menu == "📊 Dashboard":
     if not df_ventas.empty:
         for c in ["Monto_USD", "Comisiones_USD", "Ganancia_Real_USD"]:
             df_ventas[c] = pd.to_numeric(df_ventas[c], errors='coerce').fillna(0)
-        
         total_ganancia = df_ventas["Ganancia_Real_USD"].sum()
         total_gastos = pd.to_numeric(df_gastos["Monto_Mensual_USD"], errors='coerce').sum()
-        
         c1, c2, c3 = st.columns(3)
         c1.metric("Utilidad Bruta", f"$ {total_ganancia:,.2f}")
         c2.metric("Gastos Fijos", f"$ {total_gastos:,.2f}")
         c3.metric("Balance Neto", f"$ {(total_ganancia - total_gastos):,.2f}")
-        
         st.divider()
         st.subheader("🏗️ Carga de Impresoras")
         if not df_prod.empty:
             pendientes = df_prod[df_prod["Estado"] != "Listo para Entrega"]
             if not pendientes.empty:
                 st.bar_chart(pendientes["Impresora"].value_counts())
-            else:
-                st.info("No hay trabajos pendientes.")
     else:
         st.info("Sin registros suficientes.")
 
 # --- MÓDULO: CLIENTES ---
 elif menu == "👥 Clientes":
     st.title("👥 Gestión de Clientes")
-    t1, t2 = st.tabs(["➕ Registrar Cliente", "📋 Cartera y Búsqueda"])
+    t1, t2 = st.tabs(["➕ Registrar Cliente", "📋 Cartera"])
     with t1:
         with st.form("form_clientes"):
-            nom = st.text_input("Nombre o Razón Social")
-            tel = st.text_input("WhatsApp / Teléfono")
-            proc = st.selectbox("¿Cómo nos contactó?", ["Instagram", "WhatsApp", "Recomendado", "TikTok", "Publicidad"])
-            if st.form_submit_button("Guardar Cliente"):
+            nom = st.text_input("Nombre")
+            tel = st.text_input("WhatsApp")
+            proc = st.selectbox("Origen", ["Instagram", "WhatsApp", "Recomendado", "TikTok", "Publicidad"])
+            if st.form_submit_button("Guardar"):
                 if nom:
                     nuevo_c = pd.DataFrame([[nom, tel, proc, datetime.now().strftime("%Y-%m-%d")]], columns=COL_CLIENTES)
                     df_clientes = pd.concat([df_clientes, nuevo_c], ignore_index=True)
@@ -123,48 +117,55 @@ elif menu == "👥 Clientes":
                     st.success("¡Cliente guardado!")
                     st.rerun()
     with t2:
-        busqueda = st.text_input("🔍 Buscar cliente por nombre...")
-        if busqueda:
-            df_f = df_clientes[df_clientes["Nombre"].str.contains(busqueda, case=False, na=False)]
-            st.dataframe(df_f, use_container_width=True)
-        else:
-            st.dataframe(df_clientes, use_container_width=True)
+        busqueda = st.text_input("🔍 Buscar cliente...")
+        df_f = df_clientes[df_clientes["Nombre"].str.contains(busqueda, case=False, na=False)] if busqueda else df_clientes
+        st.dataframe(df_f, use_container_width=True)
 
 # --- MÓDULO: PRODUCCIÓN ---
 elif menu == "🏗️ Producción":
     st.title("🏗️ Control de Máquinas")
     MIS_IMPRESORAS = ["Epson L1250 (Sublimación)", "HP Smart Tank 580w (Inyección)", "HP Deskjet J210a (Cartuchos)"]
     t1, t2 = st.tabs(["🆕 Nueva Orden", "🛤️ Taller Activo"])
-    
     with t1:
         with st.form("ot"):
             c = st.selectbox("Cliente", df_clientes["Nombre"].unique()) if not df_clientes.empty else st.text_input("Cliente")
             t = st.text_area("Trabajo")
             imp = st.selectbox("Asignar a", MIS_IMPRESORAS)
             prio = st.select_slider("Prioridad", ["Baja", "Normal", "Urgente"], "Normal")
-            if st.form_submit_button("Lanzar a Taller"):
+            if st.form_submit_button("Lanzar"):
                 new_id = len(df_prod) + 1
                 row = pd.DataFrame([[new_id, datetime.now().strftime("%d/%m"), c, t, imp, "En Cola", prio]], columns=COL_PRODUCCION)
                 df_prod = pd.concat([df_prod, row], ignore_index=True)
                 guardar_datos(df_prod, CSV_PRODUCCION)
-                st.success(f"Orden #{new_id} enviada.")
+                st.success("Orden enviada.")
                 st.rerun()
-    
     with t2:
         for imp_name in MIS_IMPRESORAS:
             st.subheader(f"🖨️ {imp_name}")
             maquina_df = df_prod[(df_prod["Impresora"] == imp_name) & (df_prod["Estado"] != "Listo para Entrega")]
             if not maquina_df.empty:
                 for i, r in maquina_df.iterrows():
-                    col1, col2 = st.columns([3, 1])
-                    p_icon = "🔴" if r['Prioridad'] == "Urgente" else "⚪"
-                    col1.write(f"{p_icon} **#{r['ID']} - {r['Cliente']}**: {r['Trabajo']}")
-                    n_st = col2.selectbox("Estado", ["En Cola", "Diseño", "Imprimiendo", "Acabado", "Listo para Entrega"], key=f"s_{i}")
-                    if col2.button("Actualizar", key=f"b_{i}"):
+                    c1, c2 = st.columns([3, 1])
+                    c1.write(f"**#{r['ID']} - {r['Cliente']}**: {r['Trabajo']}")
+                    n_st = c2.selectbox("Estado", ["En Cola", "Diseño", "Imprimiendo", "Acabado", "Listo para Entrega"], key=f"s_{i}")
+                    if c2.button("Update", key=f"b_{i}"):
                         df_prod.at[i, "Estado"] = n_st
                         guardar_datos(df_prod, CSV_PRODUCCION)
                         st.rerun()
-            else: st.write("✅ Sin pendientes.")
+
+# --- MÓDULO: FINANZAS PRO ---
+elif menu == "📈 Finanzas Pro":
+    st.title("📈 Análisis de Gastos")
+    with st.form("g"):
+        con = st.text_input("Concepto")
+        mon = st.number_input("Monto USD", min_value=0.0)
+        if st.form_submit_button("Añadir"):
+            df_gastos = pd.concat([df_gastos, pd.DataFrame([[con, mon]], columns=COL_GASTOS)], ignore_index=True)
+            guardar_datos(df_gastos, CSV_GASTOS)
+            st.rerun()
+    st.table(df_gastos)
+    total_f = pd.to_numeric(df_gastos["Monto_Mensual_USD"], errors='coerce').sum()
+    st.metric("Gastos Fijos Totales", f"$ {total_f:,.2f}")
 
 # --- MÓDULO: VENTAS ---
 elif menu == "💰 Ventas":
@@ -172,86 +173,78 @@ elif menu == "💰 Ventas":
     if not df_stock.empty:
         with st.form("form_ventas"):
             cli = st.selectbox("Cliente", df_clientes["Nombre"].unique()) if not df_clientes.empty else st.text_input("Cliente")
-            ins = st.selectbox("Material usado", df_stock["Material"].unique())
-            can = st.number_input("Cantidad usada", min_value=0.01)
+            ins = st.selectbox("Insumo", df_stock["Material"].unique())
+            can = st.number_input("Cantidad", min_value=0.01)
             mon = st.number_input("Monto Cobrado (USD)", min_value=0.0)
-            com = st.number_input("% Comisión/Punto/IGTF", value=3.0)
-            if st.form_submit_button("Guardar Venta"):
+            if st.form_submit_button("Guardar"):
                 costo_u = float(df_stock.loc[df_stock["Material"] == ins, "Costo_Unit_USD"].values[0])
-                c_usd = mon * (com/100)
-                gan = mon - c_usd - (can * costo_u)
-                nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cli, ins, mon, c_usd, gan, "Socia"]], columns=COL_VENTAS)
+                gan = mon - (mon * 0.03) - (can * costo_u)
+                nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cli, ins, mon, mon*0.03, gan, "Socia"]], columns=COL_VENTAS)
                 df_ventas = pd.concat([df_ventas, nueva], ignore_index=True)
                 guardar_datos(df_ventas, CSV_VENTAS)
-                idx = df_stock.index[df_stock["Material"] == ins][0]
-                df_stock.at[idx, "Cantidad"] -= can
-                guardar_datos(df_stock, CSV_STOCK)
-                st.success(f"Venta registrada. Ganancia: ${gan:.2f}")
+                st.success(f"Ganancia: ${gan:.2f}")
                 st.rerun()
-
-# --- MÓDULO: FINANZAS PRO ---
-elif menu == "📈 Finanzas Pro":
-    st.title("📈 Análisis de Gastos Fijos")
-    with st.form("g"):
-        c1, c2 = st.columns(2)
-        con = c1.text_input("Concepto")
-        mon = c2.number_input("Monto USD", min_value=0.0)
-        if st.form_submit_button("Añadir Gasto"):
-            df_gastos = pd.concat([df_gastos, pd.DataFrame([[con, mon]], columns=COL_GASTOS)], ignore_index=True)
-            guardar_datos(df_gastos, CSV_GASTOS)
-            st.rerun()
-    st.table(df_gastos)
-    total_f = pd.to_numeric(df_gastos["Monto_Mensual_USD"], errors='coerce').sum()
-    st.metric("Meta Mensual (Punto Equilibrio)", f"$ {total_f:,.2f}")
 
 # --- MÓDULO: INVENTARIO PRO ---
 elif menu == "📦 Inventario Pro":
-    st.title("📦 Inventario Reales")
-    t1, t2, t3 = st.tabs(["📋 Stock Actual", "🛒 Nueva Compra", "✏️ Ajustes"])
+    st.title("📦 Inventario")
+    t1, t2 = st.tabs(["📋 Stock", "🛒 Compra"])
     with t1: st.dataframe(df_stock, use_container_width=True)
     with t2:
         with st.form("compra"):
-            n = st.text_input("Material")
-            c = st.number_input("Cantidad", min_value=0.1)
-            p = st.number_input("Precio USD", min_value=0.0)
-            c1, c2 = st.columns(2)
-            iva = c1.checkbox("¿Pagaste IVA?")
-            igtf = c2.number_input("% Comisión/IGTF", value=3.0)
-            if st.form_submit_button("Ingresar"):
-                total = p
-                if iva: total *= 1.16
-                total *= (1 + (igtf/100))
-                c_u = total / c
+            n, c, p = st.text_input("Material"), st.number_input("Cant", min_value=0.1), st.number_input("Precio", min_value=0.0)
+            if st.form_submit_button("Cargar"):
+                c_u = p / c
                 if n in df_stock["Material"].values:
                     idx = df_stock.index[df_stock["Material"] == n][0]
-                    df_stock.at[idx, "Costo_Unit_USD"] = c_u
                     df_stock.at[idx, "Cantidad"] += c
                 else:
                     nueva = pd.DataFrame([[n, c, "Unid", c_u, 5]], columns=COL_STOCK)
                     df_stock = pd.concat([df_stock, nueva], ignore_index=True)
                 guardar_datos(df_stock, CSV_STOCK)
-                st.success("Stock actualizado.")
-                st.rerun()
-    with t3:
-        if not df_stock.empty:
-            m = st.selectbox("Seleccionar", df_stock["Material"].unique())
-            idx = df_stock.index[df_stock["Material"] == m][0]
-            nc = st.number_input("Stock Real", value=float(df_stock.at[idx, "Cantidad"]))
-            if st.button("Actualizar"):
-                df_stock.at[idx, "Cantidad"] = nc
-                guardar_datos(df_stock, CSV_STOCK)
-                st.success("Ajustado.")
                 st.rerun()
 
-# --- MÓDULO: ANALIZADOR (CORREGIDO CON TOTAL %) ---
+# --- MÓDULO: ANALIZADOR (CORREGIDO) ---
 elif menu == "🎨 Analizador Masivo":
-    st.title("🎨 Analizador CMYK de Precisión")
-    archivos = st.file_uploader("Subir archivos (JPG, PNG, PDF)", type=["jpg", "png", "jpeg", "pdf"], accept_multiple_files=True)
+    st.title("🎨 Analizador CMYK")
+    archivos = st.file_uploader("Subir archivos", type=["jpg", "png", "jpeg", "pdf"], accept_multiple_files=True)
     if archivos:
         resultados = []
         for archivo in archivos:
-            if archivo.type == "application/pdf":
-                doc = fitz.open(stream=archivo.read(), filetype="pdf")
-                for i in range(len(doc)):
-                    pix = doc.load_page(i).get_pixmap(colorspace=fitz.csRGB)
-                    img = Image.frombytes("RGB",
+            try:
+                if archivo.type == "application/pdf":
+                    doc = fitz.open(stream=archivo.read(), filetype="pdf")
+                    for i in range(len(doc)):
+                        pix = doc.load_page(i).get_pixmap(colorspace=fitz.csRGB)
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        res = analizar_cmyk_pro(img)
+                        res["Archivo"] = f"{archivo.name} (P{i+1})"
+                        resultados.append(res)
+                else:
+                    img = Image.open(archivo)
+                    res = analizar_cmyk_pro(img)
+                    res["Archivo"] = archivo.name
+                    resultados.append(res)
+            except Exception as e:
+                st.error(f"Error procesando {archivo.name}: {e}")
+        
+        df_res = pd.DataFrame(resultados)
+        if not df_res.empty:
+            for col in ["C", "M", "Y", "K"]:
+                df_res[col] = pd.to_numeric(df_res[col], errors='coerce').fillna(0)
+            df_res["Total %"] = df_res["C"] + df_res["M"] + df_res["Y"] + df_res["K"]
+            st.dataframe(df_res.style.format("{:.1f}%", subset=["C", "M", "Y", "K", "Total %"]), use_container_width=True)
+
+# --- MÓDULO: MANUALES ---
+elif menu == "🔍 Manuales":
+    st.title("🔍 Protocolos")
+    hoja = st.text_input("Hoja #")
+    if hoja:
+        ruta = f"{CARPETA_MANUALES}/{hoja.zfill(3)}.txt"
+        if os.path.exists(ruta): st.info(open(ruta, "r", encoding="utf-8").read())
+        else:
+            txt = st.text_area("Nuevo:")
+            if st.button("Guardar"):
+                if not os.path.exists(CARPETA_MANUALES): os.makedirs(CARPETA_MANUALES)
+                with open(ruta, "w", encoding="utf-8") as f: f.write(txt)
+                st.rerun()
