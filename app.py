@@ -52,33 +52,27 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
     menu = st.radio("Módulos", ["📦 Inventario", "📊 Dashboard", "⚙️ Configuración"])
 
-# --- 4. LÓGICA DE INVENTARIO (SELECTOR AUTOMÁTICO DE TASAS) ---
+# --- 4. LÓGICA DE INVENTARIO (CON COSTO POR UNIDAD) ---
 if menu == "📦 Inventario":
-    st.title("📦 Inventario Inteligente")
+    st.title("📦 Inventario con Desglose por Unidad")
     
     with st.expander("📥 Registrar Nueva Compra"):
-        with st.form("form_inv_auto"):
+        with st.form("form_inv_unidad"):
             col_info, col_tasa, col_imp = st.columns([2, 1, 1])
             
             with col_info:
-                it_nombre = st.text_input("Nombre del Producto")
-                it_cant = st.number_input("Cantidad", min_value=0.0, step=1.0)
-                it_unid = st.selectbox("Unidad", ["Hojas", "ml", "Unidad", "Resma"])
-                precio_base_usd = st.number_input("Precio Unitario (USD Limpio)", min_value=0.0, format="%.2f")
+                it_nombre = st.text_input("Nombre del Producto (Ej: Resma Bond A4)")
+                it_cant = st.number_input("Cantidad que trae el paquete (Ej: 500)", min_value=0.01, step=1.0)
+                it_unid = st.selectbox("Unidad de medida", ["Hojas", "ml", "Unidad", "Mts", "Resma"])
+                precio_paquete_usd = st.number_input("Precio del PAQUETE Completo (USD Limpio)", min_value=0.0, format="%.2f")
 
             with col_tasa:
                 st.markdown("### 💱 Tasa de Compra")
-                tipo_tasa = st.radio("Usar tasa de:", ["Binance", "BCV", "Manual"])
-                
-                # Lógica automática según la configuración
-                if tipo_tasa == "Binance":
-                    tasa_aplicada = t_bin
-                    st.caption(f"Valor actual: {t_bin} Bs")
-                elif tipo_tasa == "BCV":
-                    tasa_aplicada = t_bcv
-                    st.caption(f"Valor actual: {t_bcv} Bs")
-                else:
-                    tasa_aplicada = st.number_input("Tasa Personalizada", value=t_bin)
+                tipo_tasa = st.radio("Comprado a tasa:", ["Binance", "BCV", "Manual"])
+                if tipo_tasa == "Binance": tasa_aplicada = t_bin
+                elif tipo_tasa == "BCV": tasa_aplicada = t_bcv
+                else: tasa_aplicada = st.number_input("Tasa Especial", value=t_bin)
+                st.caption(f"Valor: {tasa_aplicada} Bs")
 
             with col_imp:
                 st.markdown("### 🧾 Impuestos")
@@ -87,50 +81,56 @@ if menu == "📦 Inventario":
                 pago_banco = st.checkbox(f"Banco ({banco*100}%)", value=False)
 
             if st.form_submit_button("🚀 Cargar a Inventario"):
-                if it_nombre:
-                    # Cálculo de impuestos seleccionados
+                if it_nombre and it_cant > 0:
+                    # Cálculo de impuestos de la compra
                     imp_total = 0
                     if pago_iva: imp_total += iva
                     if pago_gtf: imp_total += igtf
                     if pago_banco: imp_total += banco
                     
-                    # El costo real en USD incluyendo los impuestos de la compra
-                    costo_real_usd = precio_base_usd * (1 + imp_total)
-                    # Solo para tu información en el momento (Costo en Bolívares)
-                    costo_en_bs = costo_real_usd * tasa_aplicada
+                    # Costo total del paquete con impuestos
+                    costo_paquete_real_usd = precio_paquete_usd * (1 + imp_total)
+                    
+                    # GUARDAMOS: El precio_usd en la base de datos será el costo por unidad
+                    # Para que sea más fácil cotizar luego.
+                    costo_unitario_usd = costo_paquete_real_usd / it_cant
                     
                     c = conectar()
                     c.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", 
-                              (it_nombre, it_cant, it_unid, costo_real_usd))
+                              (it_nombre, it_cant, it_unid, costo_unitario_usd))
                     c.commit(); c.close()
                     
-                    st.success(f"✅ Registrado. Costo real: ${costo_real_usd:.2f} (Pagado a {tasa_aplicada} Bs)")
+                    st.success(f"✅ ¡Listo! Cada {it_unid[:-1]} de {it_nombre} te sale en ${costo_unitario_usd:.4f}")
                     st.rerun()
 
     st.divider()
 
-    # --- TABLA DE INVENTARIO ---
+    # --- TABLA DE INVENTARIO CON DESGLOSE ---
     if not df_inv.empty:
-        st.subheader("📋 Tu Mercancía")
+        st.subheader("📋 Tu Stock y Costos Unitarios")
         
-        # Selector de visualización: ¿En qué moneda quieres ver tu inventario hoy?
-        moneda_ver = st.segmented_control("Ver totales en:", ["USD", "BCV", "Binance"], default="USD")
-        
+        # Preparar tabla para mostrar
         df_ver = df_inv.copy()
-        if moneda_ver == "BCV":
-            df_ver['Total (Bs)'] = df_ver['cantidad'] * df_ver['precio_usd'] * t_bcv
-            col_ver = 'Total (Bs)'
-        elif moneda_ver == "Binance":
-            df_ver['Total (Bs)'] = df_ver['cantidad'] * df_ver['precio_usd'] * t_bin
-            col_ver = 'Total (Bs)'
-        else:
-            df_ver['Total (USD)'] = df_ver['cantidad'] * df_ver['precio_usd']
-            col_ver = 'Total (USD)'
-
-        st.dataframe(df_ver, use_container_width=True, hide_index=True)
+        df_ver.columns = ['Producto', 'Cantidad Stock', 'Unidad', 'Costo Unitario (USD)']
+        
+        # Cálculos de valorización para la tabla
+        df_ver['Inversión Total (USD)'] = df_ver['Cantidad Stock'] * df_ver['Costo Unitario (USD)']
+        df_ver['Costo Unitario (BCV)'] = df_ver['Costo Unitario (USD)'] * t_bcv
+        df_ver['Costo Unitario (BIN)'] = df_ver['Costo Unitario (USD)'] * t_bin
+        
+        # Reordenar para que lo primero sea el costo por unidad
+        columnas_orden = ['Producto', 'Costo Unitario (USD)', 'Costo Unitario (BCV)', 'Costo Unitario (BIN)', 'Cantidad Stock', 'Unidad', 'Inversión Total (USD)']
+        
+        st.dataframe(df_ver[columnas_orden].style.format({
+            'Costo Unitario (USD)': '{:.4f}',
+            'Costo Unitario (BCV)': '{:.2f} Bs',
+            'Costo Unitario (BIN)': '{:.2f} Bs',
+            'Inversión Total (USD)': '{:.2f}'
+        }), use_container_width=True, hide_index=True)
+        
+        st.info("💡 **Dato maestro:** El 'Costo Unitario' ya incluye los impuestos y la tasa que seleccionaste al comprar.")
     else:
-        st.info("Inventario vacío. ¡Carga tu primer material!")
-# ... (El resto de los elif se mantienen igual)
+        st.info("Inventario vacío. Carga un paquete para ver el desglose por unidad.")
 elif menu == "⚙️ Configuración":
     st.title("⚙️ Configuración de Tasas e Impuestos")
     with st.form("f_config"):
@@ -150,6 +150,7 @@ elif menu == "⚙️ Configuración":
 
 else:
     st.info("Módulo en construcción (Próxima parte).")
+
 
 
 
