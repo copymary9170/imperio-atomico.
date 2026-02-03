@@ -60,8 +60,12 @@ def analizar_cmyk_pro(img_pil):
     c = (1 - r - k) / (1 - k + 1e-9)
     m = (1 - g - k) / (1 - k + 1e-9)
     y = (1 - b - k) / (1 - k + 1e-9)
-    return {"C": np.clip(c, 0, 1).mean()*100, "M": np.clip(m, 0, 1).mean()*100, 
-            "Y": np.clip(y, 0, 1).mean()*100, "K": k.mean()*100}
+    return {
+        "C": np.clip(c, 0, 1).mean() * 100,
+        "M": np.clip(m, 0, 1).mean() * 100,
+        "Y": np.clip(y, 0, 1).mean() * 100,
+        "K": k.mean() * 100
+    }
 
 # --- 4. NAVEGACIÓN ---
 menu = st.sidebar.radio("Menú:", ["📊 Dashboard", "🎨 Analizador Masivo", "💰 Ventas", "📦 Inventario Pro", "🔍 Manuales"])
@@ -87,8 +91,8 @@ if menu == "🎨 Analizador Masivo":
                 res["Archivo"] = archivo.name
                 resultados.append(res)
         df_res = pd.DataFrame(resultados)
-        df_res["Total %"] = df_res["C"]+df_res["M"]+df_res["Y"]+df_res["K"]
-        st.dataframe(df_res.style.format("{:.1f}%", subset=["C","M","Y","K","Total %"]))
+        df_res["Total %"] = df_res["C"] + df_res["M"] + df_res["Y"] + df_res["K"]
+        st.dataframe(df_res.style.format("{:.1f}%", subset=["C", "M", "Y", "K", "Total %"]), use_container_width=True)
 
 # --- MÓDULO: DASHBOARD ---
 elif menu == "📊 Dashboard":
@@ -103,8 +107,71 @@ elif menu == "📊 Dashboard":
         st.divider()
         st.subheader("⚠️ Alertas de Stock")
         bajo = df_stock[pd.to_numeric(df_stock["Cantidad"]) <= pd.to_numeric(df_stock["Minimo_Alerta"])]
-        if not bajo.empty: st.error("⚠️ Reponer: " + ", ".join(bajo["Material"].tolist()))
-    else: st.info("Sin registros.")
+        if not bajo.empty:
+            st.error("⚠️ Reponer: " + ", ".join(bajo["Material"].tolist()))
+    else:
+        st.info("Sin registros de ventas aún.")
 
 # --- MÓDULO: VENTAS ---
-elif menu == "💰 Vent
+elif menu == "💰 Ventas":
+    st.title("💰 Registro de Venta")
+    if not df_stock.empty:
+        with st.form("form_ventas"):
+            cli = st.text_input("Cliente")
+            ins = st.selectbox("Material usado", df_stock["Material"].unique())
+            can = st.number_input("Cantidad usada", min_value=0.01)
+            mon = st.number_input("Monto Cobrado (USD)", min_value=0.0)
+            com = st.number_input("% Comisión/Punto/IGTF", value=3.0)
+            if st.form_submit_button("Guardar Venta"):
+                costo_u = float(df_stock.loc[df_stock["Material"] == ins, "Costo_Unit_USD"].values[0])
+                c_usd = mon * (com/100)
+                gan = mon - c_usd - (can * costo_u)
+                nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cli, ins, mon, c_usd, gan, "Socia"]], columns=COL_VENTAS)
+                df_ventas = pd.concat([df_ventas, nueva], ignore_index=True)
+                guardar_datos(df_ventas, CSV_VENTAS)
+                df_stock.loc[df_stock["Material"] == ins, "Cantidad"] -= can
+                guardar_datos(df_stock, CSV_STOCK)
+                st.success(f"Venta registrada. Ganancia: ${gan:.2f}")
+                st.rerun()
+    else:
+        st.warning("No hay materiales en stock.")
+
+# --- MÓDULO: INVENTARIO ---
+elif menu == "📦 Inventario Pro":
+    st.title("📦 Inventario y Costos Reales")
+    t1, t2, t3 = st.tabs(["📋 Stock Actual", "🛒 Nueva Compra", "✏️ Ajustes Manuales"])
+    
+    with t1:
+        st.dataframe(df_stock, use_container_width=True)
+    
+    with t2:
+        with st.form("form_compra"):
+            n = st.text_input("Material")
+            c = st.number_input("Cantidad", min_value=0.1)
+            p = st.number_input("Precio en Factura USD", min_value=0.0)
+            st.divider()
+            c1, c2 = st.columns(2)
+            iva = c1.checkbox("¿Pagaste IVA (16%)?")
+            igtf_banco = c2.number_input("% Comisión/IGTF/GTF", value=3.0)
+            if st.form_submit_button("Añadir al Stock"):
+                total_usd = p
+                if iva: total_usd *= 1.16
+                total_usd *= (1 + (igtf_banco/100))
+                c_u = total_usd / c
+                
+                if n in df_stock["Material"].values:
+                    idx = df_stock.index[df_stock["Material"] == n][0]
+                    df_stock.loc[idx, "Costo_Unit_USD"] = c_u
+                    df_stock.loc[idx, "Cantidad"] += c
+                else:
+                    nueva = pd.DataFrame([[n, c, "Unid", c_u, 5]], columns=COL_STOCK)
+                    df_stock = pd.concat([df_stock, nueva], ignore_index=True)
+                guardar_datos(df_stock, CSV_STOCK)
+                st.success(f"Ingresado. Costo Unitario Real: ${c_u:.4f}")
+                st.rerun()
+
+    with t3:
+        if not df_stock.empty:
+            m = st.selectbox("Seleccionar Material", df_stock["Material"].unique())
+            idx = df_stock.index[df_stock["Material"] == m][0]
+            nc = st.number_input("Stock Real en Físico",
