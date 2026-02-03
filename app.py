@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
+import numpy as np
+from PIL import Image
+import fitz
 
 # --- 1. BASE DE DATOS ---
 def conectar():
@@ -15,7 +18,7 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bcv REAL, monto_binance REAL, estado TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     
-    # Parámetros Base
+    # Parámetros base e impuestos
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_bcv', 36.50)")
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_binance', 42.00)")
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('iva_perc', 0.16)")
@@ -25,7 +28,23 @@ def inicializar_sistema():
     conn.commit()
     conn.close()
 
-# --- 2. INICIO ---
+def analizar_cmyk(file):
+    try:
+        if file.type == "application/pdf":
+            doc = fitz.open(stream=file.read(), filetype="pdf")
+            pix = doc.load_page(0).get_pixmap(colorspace=fitz.csRGB)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        else:
+            img = Image.open(file).convert("RGB")
+        pix_arr = np.array(img) / 255.0
+        k = 1 - np.max(pix_arr, axis=2)
+        c = (1-pix_arr[:,:,0]-k)/(1-k+1e-9)
+        m = (1-pix_arr[:,:,1]-k)/(1-k+1e-9)
+        y = (1-pix_arr[:,:,2]-k)/(1-k+1e-9)
+        return img, {"C": c.mean(), "M": m.mean(), "Y": y.mean(), "K": k.mean()}
+    except: return None, None
+
+# --- 2. CONFIGURACIÓN Y LOGIN ---
 st.set_page_config(page_title="Imperio Atómico - Master OS", layout="wide")
 inicializar_sistema()
 
@@ -45,9 +64,8 @@ conn = conectar()
 conf = pd.read_sql_query("SELECT * FROM configuracion", conn).set_index('parametro')
 t_bcv = conf.loc['tasa_bcv', 'valor']
 t_bin = conf.loc['tasa_binance', 'valor']
-iva = conf.loc['iva_perc', 'valor']
-igtf = conf.loc['igtf_perc', 'valor']
-banco = conf.loc['banco_perc', 'valor']
+iva, igtf, banco = conf.loc['iva_perc', 'valor'], conf.loc['igtf_perc', 'valor'], conf.loc['banco_perc', 'valor']
+t_tinta = conf.loc['costo_tinta_ml', 'valor']
 df_cots = pd.read_sql_query("SELECT * FROM cotizaciones", conn)
 df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
 conn.close()
@@ -55,42 +73,32 @@ conn.close()
 # --- 3. MENÚ LATERAL ---
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
-    st.success(f"🏦 BCV: {t_bcv} Bs")
-    st.warning(f"🔶 BIN: {t_bin} Bs")
-    st.divider()
-    menu = st.radio("Módulos", ["📊 Dashboard", "👥 Clientes", "📦 Inventario", "📝 Cotizaciones", "⚙️ Configuración"])
+    st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
+    menu = st.radio("Módulos", ["📊 Dashboard", "👥 Clientes", "📦 Inventario", "📝 Cotizaciones", "🎨 Analizador", "⚙️ Configuración"])
     if st.button("🚪 Salir"):
         st.session_state.login = False
         st.rerun()
 
-# --- 4. DASHBOARD (REPARADO Y COMPLETO) ---
+# --- 4. DASHBOARD ---
 if menu == "📊 Dashboard":
     st.title("📊 Resumen Financiero")
-    
-    # Métricas en USD
     k1, k2, k3 = st.columns(3)
     pagado = df_cots[df_cots['estado'] == 'Pagado']['monto_usd'].sum() if not df_cots.empty else 0
     pendiente = df_cots[df_cots['estado'] == 'Pendiente']['monto_usd'].sum() if not df_cots.empty else 0
-    
-    # Inversión de stock con todos los impuestos
     factor_rep = 1 + iva + igtf + banco
     inv_total = (df_inv['cantidad'] * (df_inv['precio_usd'] * factor_rep)).sum() if not df_inv.empty else 0
     
-    k1.metric("Ingresos Reales (USD)", f"$ {pagado:,.2f}")
-    k2.metric("Cuentas por Cobrar (USD)", f"$ {pendiente:,.2f}")
+    k1.metric("Ingresos (USD)", f"$ {pagado:,.2f}")
+    k2.metric("Pendiente (USD)", f"$ {pendiente:,.2f}")
     k3.metric("Stock Reposición (USD)", f"$ {inv_total:,.2f}")
     
     st.divider()
-    
-    # Conversión de Caja (Lo que tienes en mano)
     st.subheader("💰 Tu Caja en Bolívares")
     c_bcv, c_bin = st.columns(2)
-    with c_bcv:
-        st.info(f"🏦 **Total en BCV:**\n### {(pagado * t_bcv):,.2f} Bs")
-    with c_bin:
-        st.warning(f"🔶 **Total en Binance:**\n### {(pagado * t_bin):,.2f} Bs")
+    c_bcv.info(f"🏦 **Caja en BCV:** {(pagado * t_bcv):,.2f} Bs")
+    c_bin.warning(f"🔶 **Caja en Binance:** {(pagado * t_bin):,.2f} Bs")
 
-# --- 5. MÓDULO CLIENTES ---
+# --- 5. CLIENTES ---
 elif menu == "👥 Clientes":
     st.title("👥 Gestión de Clientes")
     with st.form("fcl"):
@@ -103,48 +111,55 @@ elif menu == "👥 Clientes":
     c = conectar(); df_c = pd.read_sql_query(f"SELECT * FROM clientes WHERE nombre LIKE '%{bus}%' ORDER BY id DESC", c); c.close()
     st.dataframe(df_c, use_container_width=True)
 
-# --- 6. MÓDULO INVENTARIO (CON IMPUESTOS) ---
+# --- 6. INVENTARIO ---
 elif menu == "📦 Inventario":
-    st.title("📦 Inventario y Costos de Reposición")
-    with st.expander("📥 Cargar Stock"):
-        with st.form("finv"):
-            it = st.text_input("Producto")
-            ca = st.number_input("Cantidad", min_value=0.0)
-            pr = st.number_input("Precio Costo USD (Base)", min_value=0.0, format="%.2f")
-            if st.form_submit_button("Guardar"):
-                c = conectar(); c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", (it, ca, 'Unid', pr)); c.commit(); c.close()
-                st.rerun()
-
+    st.title("📦 Inventario con Impuestos")
+    with st.form("finv"):
+        it = st.text_input("Producto")
+        ca, pr = st.number_input("Cant", min_value=0.0), st.number_input("Costo USD", min_value=0.0)
+        if st.form_submit_button("Guardar"):
+            c = conectar(); c.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", (it, ca, 'Unid', pr)); c.commit(); c.close(); st.rerun()
     if not df_inv.empty:
-        df_res = df_inv.copy()
-        df_res['Costo Reposición (USD)'] = df_res['precio_usd'] * factor_rep
-        df_res['Total Stock (USD)'] = df_res['cantidad'] * df_res['Costo Reposición (USD)']
-        st.dataframe(df_res, use_container_width=True)
-        st.info(f"**Nota:** El Costo de Reposición incluye {iva*100}% IVA, {igtf*100}% GTF y {banco*100}% Banco.")
+        df_inv['Repo USD'] = df_inv['precio_usd'] * factor_rep
+        st.dataframe(df_inv, use_container_width=True)
 
-# --- 7. CONFIGURACIÓN (PARA MODIFICAR IMPUESTOS) ---
+# --- 7. COTIZACIONES ---
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Nueva Cotización")
+    c = conectar(); clis = pd.read_sql_query("SELECT nombre FROM clientes", c)['nombre'].tolist(); c.close()
+    with st.form("fcot"):
+        sel = st.selectbox("Cliente", ["--"] + clis)
+        job, m_u = st.text_input("Trabajo"), st.number_input("Precio USD")
+        if st.form_submit_button("Guardar"):
+            if sel != "--":
+                c = conectar()
+                c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto_usd, monto_bcv, monto_binance, estado) VALUES (?,?,?,?,?,?,?)",
+                          (datetime.now().strftime("%d/%m/%Y"), sel, job, m_u, m_u*t_bcv, m_u*t_bin, "Pendiente"))
+                c.commit(); c.close(); st.success("Guardado"); st.rerun()
+    st.dataframe(df_cots.tail(10), use_container_width=True)
+
+# --- 8. ANALIZADOR ---
+elif menu == "🎨 Analizador":
+    st.title("🎨 Analizador de Costos")
+    f = st.file_uploader("Subir diseño", accept_multiple_files=True)
+    if f:
+        for file in f:
+            img, res = analizar_cmyk(file)
+            if img:
+                with st.expander(f"Costo: {file.name}"):
+                    costo = sum(res.values()) * t_tinta
+                    st.image(img, width=200)
+                    st.write(f"Costo Tinta: ${costo:.4f}")
+                    st.write(f"BCV: {costo*t_bcv:.2f} Bs | BIN: {costo*t_bin:.2f} Bs")
+
+# --- 9. CONFIGURACIÓN ---
 elif menu == "⚙️ Configuración":
-    st.title("⚙️ Ajustes de Tasas e Impuestos")
-    st.write("Aquí puedes actualizar los valores para que el sistema se ajuste a la inflación.")
-    with st.form("f_conf"):
-        col1, col2 = st.columns(2)
-        new_bcv = col1.number_input("Tasa BCV", value=t_bcv)
-        new_bin = col1.number_input("Tasa Binance", value=t_bin)
-        new_iva = col2.number_input("Porcentaje IVA (0.16 = 16%)", value=iva, format="%.2f")
-        new_igtf = col2.number_input("Porcentaje GTF (0.03 = 3%)", value=igtf, format="%.2f")
-        new_banco = col2.number_input("Comisión Banco (0.02 = 2%)", value=banco, format="%.2f")
-        
-        if st.form_submit_button("💾 Guardar Cambios Globales"):
+    st.title("⚙️ Ajustes Globales")
+    with st.form("fconf"):
+        b, bi = st.number_input("BCV", value=t_bcv), st.number_input("Binance", value=t_bin)
+        iv, ig, ba = st.number_input("IVA", value=iva), st.number_input("GTF", value=igtf), st.number_input("Banco", value=banco)
+        if st.form_submit_button("Guardar"):
             c = conectar()
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (new_bcv,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_binance'", (new_bin,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='iva_perc'", (new_iva,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='igtf_perc'", (new_igtf,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='banco_perc'", (new_banco,))
-            c.commit(); c.close()
-            st.success("✅ Sistema actualizado correctamente.")
-            st.rerun()
-
-# --- ESPACIO PARA COTIZACIONES ---
-else:
-    st.info("
+            for p, v in [('tasa_bcv', b), ('tasa_binance', bi), ('iva_perc', iv), ('igtf_perc', ig), ('banco_perc', ba)]:
+                c.execute("UPDATE configuracion SET valor=? WHERE parametro=?", (v, p))
+            c.commit(); c.close(); st.rerun()
