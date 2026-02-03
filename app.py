@@ -27,15 +27,15 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 2. GESTIÓN DE DATOS (Bases de datos en CSV) ---
+# --- 2. GESTIÓN DE DATOS ---
 CSV_VENTAS = "registro_ventas_088.csv"
 CSV_STOCK = "stock_actual.csv"
-CSV_CLIENTES = "clientes_imperio.csv" # <-- Nuevo: Base de datos de clientes
+CSV_CLIENTES = "clientes_imperio.csv"
 CARPETA_MANUALES = "manuales"
 
 COL_STOCK = ["Material", "Cantidad", "Unidad", "Costo_Unit_USD", "Minimo_Alerta"]
 COL_VENTAS = ["Fecha", "Cliente", "Insumo", "Monto_USD", "Comisiones_USD", "Ganancia_Real_USD", "Responsable"]
-COL_CLIENTES = ["Nombre", "WhatsApp", "Procedencia", "Fecha_Registro"] # <-- Nuevo: Columnas de clientes
+COL_CLIENTES = ["Nombre", "WhatsApp", "Procedencia", "Fecha_Registro"]
 
 def cargar_datos(archivo, columnas):
     try:
@@ -51,7 +51,6 @@ def cargar_datos(archivo, columnas):
 def guardar_datos(df, archivo):
     df.to_csv(archivo, index=False)
 
-# Carga inicial de datos
 df_stock = cargar_datos(CSV_STOCK, COL_STOCK)
 df_ventas = cargar_datos(CSV_VENTAS, COL_VENTAS)
 df_clientes = cargar_datos(CSV_CLIENTES, COL_CLIENTES)
@@ -72,7 +71,6 @@ def analizar_cmyk_pro(img_pil):
     }
 
 # --- 4. NAVEGACIÓN ---
-# He añadido "👥 Clientes" al menú
 menu = st.sidebar.radio("Menú:", ["📊 Dashboard", "👥 Clientes", "🎨 Analizador Masivo", "💰 Ventas", "📦 Inventario Pro", "🔍 Manuales"])
 
 # --- MÓDULO: DASHBOARD ---
@@ -93,7 +91,7 @@ if menu == "📊 Dashboard":
     else:
         st.info("Sin registros de ventas aún.")
 
-# --- MÓDULO: CLIENTES (NUEVO) ---
+# --- MÓDULO: CLIENTES ---
 elif menu == "👥 Clientes":
     st.title("👥 Gestión de Clientes")
     t1, t2 = st.tabs(["➕ Registrar Cliente", "📋 Cartera de Clientes"])
@@ -115,7 +113,12 @@ elif menu == "👥 Clientes":
                     st.warning("El nombre es obligatorio.")
     
     with t2:
-        st.dataframe(df_clientes, use_container_width=True)
+        busqueda = st.text_input("🔍 Buscar cliente por nombre...")
+        if busqueda:
+            df_filtrado = df_clientes[df_clientes["Nombre"].str.contains(busqueda, case=False, na=False)]
+            st.dataframe(df_filtrado, use_container_width=True)
+        else:
+            st.dataframe(df_clientes, use_container_width=True)
 
 # --- MÓDULO: ANALIZADOR ---
 elif menu == "🎨 Analizador Masivo":
@@ -146,11 +149,10 @@ elif menu == "💰 Ventas":
     st.title("💰 Registro de Venta")
     if not df_stock.empty:
         with st.form("form_ventas"):
-            # Ahora seleccionamos clientes de nuestra lista
             if not df_clientes.empty:
-                cli = st.selectbox("Cliente", df_clientes["Nombre"].unique())
+                cli = st.selectbox("Seleccionar Cliente", df_clientes["Nombre"].unique())
             else:
-                cli = st.text_input("Cliente (No hay lista aún)")
+                cli = st.text_input("Nombre del Cliente (Aún no tienes lista)")
                 
             ins = st.selectbox("Material usado", df_stock["Material"].unique())
             can = st.number_input("Cantidad usada", min_value=0.01)
@@ -165,7 +167,6 @@ elif menu == "💰 Ventas":
                 df_ventas = pd.concat([df_ventas, nueva], ignore_index=True)
                 guardar_datos(df_ventas, CSV_VENTAS)
                 
-                # Descontar del stock
                 idx_stock = df_stock.index[df_stock["Material"] == ins][0]
                 df_stock.at[idx_stock, "Cantidad"] -= can
                 guardar_datos(df_stock, CSV_STOCK)
@@ -218,7 +219,30 @@ elif menu == "📦 Inventario Pro":
                 st.success("Ajuste realizado.")
                 st.rerun()
 
-# --- MÓDULO: MANUALES ---
+# --- MÓDULO: MANUALES (CORREGIDO) ---
 elif menu == "🔍 Manuales":
     st.title("🔍 Protocolos del Imperio")
-    hoja = st.text
+    # Devolvemos el buscador por número de hoja
+    hoja = st.text_input("Ingresa Nro de Hoja (ej: 088)")
+    
+    if hoja:
+        if not os.path.exists(CARPETA_MANUALES): 
+            os.makedirs(CARPETA_MANUALES)
+        
+        # Normalizamos a 3 dígitos (ej: 88 -> 088)
+        nombre_archivo = hoja.zfill(3)
+        ruta = f"{CARPETA_MANUALES}/{nombre_archivo}.txt"
+        
+        if os.path.exists(ruta):
+            with open(ruta, "r", encoding="utf-8") as f:
+                contenido = f.read()
+                st.info(f"📄 Contenido de la Hoja {nombre_archivo}:")
+                st.markdown(f"> {contenido}")
+        else:
+            st.warning(f"La hoja {nombre_archivo} no existe.")
+            txt = st.text_area("Redactar protocolo ahora:")
+            if st.button("Guardar Manual"):
+                with open(ruta, "w", encoding="utf-8") as f:
+                    f.write(txt)
+                st.success(f"Manual {nombre_archivo} guardado con éxito.")
+                st.rerun()
