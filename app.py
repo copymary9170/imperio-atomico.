@@ -124,33 +124,6 @@ if menu == "📦 Inventario":
         st.info("No hay productos en inventario.")
 
 # ... (El resto de los elif se mantienen igual)
-    # Tabla con cálculos de impuestos
-    if not df_inv.empty:
-        # Cálculos matemáticos
-        df_calc = df_inv.copy()
-        df_calc['IVA (16%)'] = df_calc['precio_usd'] * iva
-        df_calc['GTF (3%)'] = df_calc['precio_usd'] * igtf
-        df_calc['Banco (2%)'] = df_calc['precio_usd'] * banco
-        
-        # Precio final que te cuesta a TI reponerlo
-        df_calc['Costo Reposición USD'] = df_calc['precio_usd'] + df_calc['IVA (16%)'] + df_calc['GTF (3%)'] + df_calc['Banco (2%)']
-        
-        # Valor total del stock que tienes guardado
-        df_calc['Inversión Total USD'] = df_calc['cantidad'] * df_calc['Costo Reposición USD']
-        
-        st.subheader("📋 Detalle de Mercancía")
-        st.dataframe(df_calc, use_container_width=True, hide_index=True)
-        
-        # Resumen inferior
-        st.divider()
-        col1, col2, col3 = st.columns(3)
-        total_inv_usd = df_calc['Inversión Total USD'].sum()
-        col1.metric("Inversión Total (USD)", f"$ {total_inv_usd:,.2f}")
-        col2.metric("Valor en BCV", f"{total_inv_usd * t_bcv:,.2f} Bs")
-        col3.metric("Valor en Binance", f"{total_inv_usd * t_bin:,.2f} Bs")
-    else:
-        st.info("No hay productos registrados aún.")
-
 elif menu == "⚙️ Configuración":
     st.title("⚙️ Configuración de Tasas e Impuestos")
     with st.form("f_config"):
@@ -170,5 +143,6 @@ elif menu == "⚙️ Configuración":
 
 else:
     st.info("Módulo en construcción (Próxima parte).")
+
 
 
