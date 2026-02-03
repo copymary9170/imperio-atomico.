@@ -15,12 +15,12 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bcv REAL, monto_binance REAL, estado TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     
-    # Asegurar configuración base e impuestos
+    # Parámetros de Inflación e Impuestos
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_bcv', 36.50)")
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_binance', 42.00)")
-    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('iva_perc', 0.16)") # 16% IVA
-    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('igtf_perc', 0.03)") # 3% IGTF
-    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('banco_perc', 0.02)") # 2% Comisión Banco
+    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('iva_perc', 0.16)")
+    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('igtf_perc', 0.03)")
+    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('banco_perc', 0.02)")
     conn.commit()
     conn.close()
 
@@ -39,7 +39,7 @@ if not st.session_state.login:
             st.rerun()
     st.stop()
 
-# Carga de datos y tasas
+# Carga de datos
 conn = conectar()
 conf = pd.read_sql_query("SELECT * FROM configuracion", conn).set_index('parametro')
 t_bcv = conf.loc['tasa_bcv', 'valor']
@@ -65,13 +65,13 @@ if menu == "📊 Dashboard":
     pagado = df_cots[df_cots['estado'] == 'Pagado']['monto_usd'].sum() if not df_cots.empty else 0
     pendiente = df_cots[df_cots['estado'] == 'Pendiente']['monto_usd'].sum() if not df_cots.empty else 0
     
-    # Valor de inventario ajustado con impuestos
-    factor_total = 1 + iva + igtf + banco
-    inv_total = (df_inv['cantidad'] * (df_inv['precio_usd'] * factor_total)).sum() if not df_inv.empty else 0
+    # Valor de stock con impuestos aplicados
+    factor = 1 + iva + igtf + banco
+    inv_total = (df_inv['cantidad'] * (df_inv['precio_usd'] * factor)).sum() if not df_inv.empty else 0
     
     k1.metric("Ingresos (USD)", f"$ {pagado:,.2f}")
     k2.metric("Pendiente (USD)", f"$ {pendiente:,.2f}")
-    k3.metric("Stock Real (USD)", f"$ {inv_total:,.2f}")
+    k3.metric("Stock Reposición (USD)", f"$ {inv_total:,.2f}")
 
 elif menu == "👥 Clientes":
     st.title("👥 Clientes")
@@ -87,25 +87,21 @@ elif menu == "👥 Clientes":
 
 elif menu == "📦 Inventario":
     st.title("📦 Inventario con Impuestos")
-    
-    with st.expander("📥 Cargar Stock (Precios sin Impuestos)"):
+    with st.expander("📥 Cargar Stock"):
         with st.form("finv"):
             it = st.text_input("Producto")
             ca = st.number_input("Cantidad", min_value=0.0)
-            pr = st.number_input("Precio Costo USD (Limpio)", min_value=0.0, format="%.2f")
-            if st.form_submit_button("Calcular y Guardar"):
+            pr = st.number_input("Precio Costo USD (Base)", min_value=0.0, format="%.2f")
+            if st.form_submit_button("Guardar"):
                 c = conectar()
                 c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", (it, ca, 'Unid', pr))
                 c.commit(); c.close()
                 st.rerun()
 
     if not df_inv.empty:
-        # Cálculo de costos reales
-        df_inv['Precio + IVA'] = df_inv['precio_usd'] * (1 + iva)
-        df_inv['Costo Final (+GTF+Banc)'] = df_inv['precio_usd'] * (1 + iva + igtf + banco)
-        df_inv['Inversión Total USD'] = df_inv['cantidad'] * df_inv['Costo Final (+GTF+Banc)']
-        
-        st.subheader("📋 Detalle de Costos de Reposición")
-        st.dataframe(df_inv, use_container_width=True)
-        
-        st.info(f"💡 **Nota:** El costo final incluye IVA ({iva*100}%), GTF ({igtf*100}%) y Comisión Bancaria ({banco*100}%
+        df_res = df_inv.copy()
+        df_res['Con IVA (16%)'] = df_res['precio_usd'] * 1.16
+        df_res['Costo Reposición'] = df_res['precio_usd'] * (1 + iva + igtf + banco)
+        df_res['Total USD'] = df_res['cantidad'] * df_res['Costo Reposición']
+        st.dataframe(df_res, use_container_width=True)
+        st.info(f"Impuestos aplicados: IVA {iva*100}%, GTF {igtf*100}%, Banco {banco*100}%")
