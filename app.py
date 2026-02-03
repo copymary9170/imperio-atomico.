@@ -1,4 +1,9 @@
 import streamlit as st
+import database  # <-- Esto llama al nuevo archivo que creaste
+from database import inicializar_sistema, guardar_cotizacion
+
+# Al arrancar la app, nos aseguramos de que la base de datos se cree si no existe
+inicializar_sistema()
 import pandas as pd
 import os
 import numpy as np
@@ -234,3 +239,4 @@ elif menu == "⚙️ Configuración":
     ed = st.data_editor(df_tintas, use_container_width=True)
     if st.button("Guardar Cambios Tintas"):
         guardar_datos(ed, archivos["tintas"][0]); st.success("Precios actualizados")
+
