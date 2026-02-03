@@ -52,77 +52,84 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
     menu = st.radio("Módulos", ["📦 Inventario", "📊 Dashboard", "⚙️ Configuración"])
 
-# --- 4. LÓGICA DE INVENTARIO (DETALLADO CON TASA DE COMPRA) ---
+# --- 4. LÓGICA DE INVENTARIO (SELECTOR AUTOMÁTICO DE TASAS) ---
 if menu == "📦 Inventario":
-    st.title("📦 Inventario y Costos de Adquisición")
+    st.title("📦 Inventario Inteligente")
     
-    with st.expander("📥 Registrar Compra de Material"):
-        with st.form("form_inventario_pro"):
-            c1, c2, c3 = st.columns(3)
+    with st.expander("📥 Registrar Nueva Compra"):
+        with st.form("form_inv_auto"):
+            col_info, col_tasa, col_imp = st.columns([2, 1, 1])
             
-            # Datos básicos
-            it_nombre = c1.text_input("Nombre del Producto")
-            it_cant = c1.number_input("Cantidad Comprada", min_value=0.0, step=1.0)
-            it_unid = c1.selectbox("Unidad", ["Hojas", "ml", "Unidad", "Resma"])
-            
-            # Datos de la Compra (Tasa)
-            precio_base_usd = c2.number_input("Precio Unitario (USD Limpio)", min_value=0.0, format="%.2f")
-            tasa_compra = c2.number_input("Tasa de Cambio aplicada (Bs/$)", value=t_bin, format="%.2f")
-            
-            # Impuestos Pagados en la compra
-            st.markdown("### Impuestos Pagados en esta compra:")
-            pago_iva = c3.checkbox(f"IVA ({iva*100}%)", value=True)
-            pago_gtf = c3.checkbox(f"GTF ({igtf*100}%)", value=True)
-            pago_banco = c3.checkbox(f"Comisión Banco ({banco*100}%)", value=False)
-            
-            if st.form_submit_button("💾 Registrar Entrada"):
+            with col_info:
+                it_nombre = st.text_input("Nombre del Producto")
+                it_cant = st.number_input("Cantidad", min_value=0.0, step=1.0)
+                it_unid = st.selectbox("Unidad", ["Hojas", "ml", "Unidad", "Resma"])
+                precio_base_usd = st.number_input("Precio Unitario (USD Limpio)", min_value=0.0, format="%.2f")
+
+            with col_tasa:
+                st.markdown("### 💱 Tasa de Compra")
+                tipo_tasa = st.radio("Usar tasa de:", ["Binance", "BCV", "Manual"])
+                
+                # Lógica automática según la configuración
+                if tipo_tasa == "Binance":
+                    tasa_aplicada = t_bin
+                    st.caption(f"Valor actual: {t_bin} Bs")
+                elif tipo_tasa == "BCV":
+                    tasa_aplicada = t_bcv
+                    st.caption(f"Valor actual: {t_bcv} Bs")
+                else:
+                    tasa_aplicada = st.number_input("Tasa Personalizada", value=t_bin)
+
+            with col_imp:
+                st.markdown("### 🧾 Impuestos")
+                pago_iva = st.checkbox(f"IVA ({iva*100}%)", value=True)
+                pago_gtf = st.checkbox(f"GTF ({igtf*100}%)", value=True)
+                pago_banco = st.checkbox(f"Banco ({banco*100}%)", value=False)
+
+            if st.form_submit_button("🚀 Cargar a Inventario"):
                 if it_nombre:
-                    # Calcular el costo real de esta compra específica
-                    impuestos_totales = 0
-                    if pago_iva: impuestos_totales += iva
-                    if pago_gtf: impuestos_totales += igtf
-                    if pago_banco: impuestos_totales += banco
+                    # Cálculo de impuestos seleccionados
+                    imp_total = 0
+                    if pago_iva: imp_total += iva
+                    if pago_gtf: imp_total += igtf
+                    if pago_banco: imp_total += banco
                     
-                    costo_real_usd = precio_base_usd * (1 + impuestos_totales)
-                    costo_real_bs = costo_real_usd * tasa_compra
+                    # El costo real en USD incluyendo los impuestos de la compra
+                    costo_real_usd = precio_base_usd * (1 + imp_total)
+                    # Solo para tu información en el momento (Costo en Bolívares)
+                    costo_en_bs = costo_real_usd * tasa_aplicada
                     
                     c = conectar()
-                    # Guardamos el precio_usd como el costo real ya con sus impuestos de compra
                     c.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", 
                               (it_nombre, it_cant, it_unid, costo_real_usd))
                     c.commit(); c.close()
                     
-                    st.success(f"✅ Registrado: {it_nombre}")
-                    st.info(f"Costo Real: ${costo_real_usd:.2f} | Tasa: {tasa_compra} Bs")
+                    st.success(f"✅ Registrado. Costo real: ${costo_real_usd:.2f} (Pagado a {tasa_aplicada} Bs)")
                     st.rerun()
 
     st.divider()
 
-    # Tabla de Existencias
+    # --- TABLA DE INVENTARIO ---
     if not df_inv.empty:
-        df_calc = df_inv.copy()
+        st.subheader("📋 Tu Mercancía")
         
-        # Ahora el 'precio_usd' en la DB ya es el costo real con impuestos de compra
-        df_calc['Costo Unitario (USD)'] = df_calc['precio_usd']
-        df_calc['Total en Bolívares (Tasa Hoy)'] = df_calc['cantidad'] * df_calc['precio_usd'] * t_bin
-        df_calc['Inversión Total (USD)'] = df_calc['cantidad'] * df_calc['precio_usd']
+        # Selector de visualización: ¿En qué moneda quieres ver tu inventario hoy?
+        moneda_ver = st.segmented_control("Ver totales en:", ["USD", "BCV", "Binance"], default="USD")
         
-        st.subheader("📋 Inventario Actualizado")
-        st.dataframe(df_calc[['item', 'cantidad', 'unidad', 'Costo Unitario (USD)', 'Inversión Total (USD)', 'Total en Bolívares (Tasa Hoy)']], 
-                     use_container_width=True, hide_index=True)
-        
-        # Resumen de Valor de Reposición (Usando tasas actuales de configuración)
-        st.divider()
-        st.subheader("🔄 Valor de Reposición (Precios de Hoy)")
-        r1, r2, r3 = st.columns(3)
-        total_inv_usd = df_calc['Inversión Total (USD)'].sum()
-        
-        r1.metric("Inversión en Stock", f"$ {total_inv_usd:,.2f}")
-        r2.metric("Valor a Tasa BCV", f"{total_inv_usd * t_bcv:,.2f} Bs")
-        r3.metric("Valor a Tasa Binance", f"{total_inv_usd * t_bin:,.2f} Bs")
-    else:
-        st.info("No hay productos en inventario.")
+        df_ver = df_inv.copy()
+        if moneda_ver == "BCV":
+            df_ver['Total (Bs)'] = df_ver['cantidad'] * df_ver['precio_usd'] * t_bcv
+            col_ver = 'Total (Bs)'
+        elif moneda_ver == "Binance":
+            df_ver['Total (Bs)'] = df_ver['cantidad'] * df_ver['precio_usd'] * t_bin
+            col_ver = 'Total (Bs)'
+        else:
+            df_ver['Total (USD)'] = df_ver['cantidad'] * df_ver['precio_usd']
+            col_ver = 'Total (USD)'
 
+        st.dataframe(df_ver, use_container_width=True, hide_index=True)
+    else:
+        st.info("Inventario vacío. ¡Carga tu primer material!")
 # ... (El resto de los elif se mantienen igual)
 elif menu == "⚙️ Configuración":
     st.title("⚙️ Configuración de Tasas e Impuestos")
@@ -143,6 +150,7 @@ elif menu == "⚙️ Configuración":
 
 else:
     st.info("Módulo en construcción (Próxima parte).")
+
 
 
 
