@@ -32,7 +32,8 @@ CSV_VENTAS = "registro_ventas_088.csv"
 CSV_STOCK = "stock_actual.csv"
 CSV_CLIENTES = "clientes_imperio.csv"
 CSV_PRODUCCION = "ordenes_produccion.csv"
-CSV_GASTOS = "gastos_fijos.csv" # <-- Nuevo: Para Finanzas
+CSV_GASTOS = "gastos_fijos.csv"
+CARPETA_MANUALES = "manuales"
 
 COL_STOCK = ["Material", "Cantidad", "Unidad", "Costo_Unit_USD", "Minimo_Alerta"]
 COL_VENTAS = ["Fecha", "Cliente", "Insumo", "Monto_USD", "Comisiones_USD", "Ganancia_Real_USD", "Responsable"]
@@ -54,7 +55,6 @@ def cargar_datos(archivo, columnas):
 def guardar_datos(df, archivo):
     df.to_csv(archivo, index=False)
 
-# Carga de datos
 df_stock = cargar_datos(CSV_STOCK, COL_STOCK)
 df_ventas = cargar_datos(CSV_VENTAS, COL_VENTAS)
 df_clientes = cargar_datos(CSV_CLIENTES, COL_CLIENTES)
@@ -70,8 +70,10 @@ def analizar_cmyk_pro(img_pil):
     m = (1 - g - k) / (1 - k + 1e-9)
     y = (1 - b - k) / (1 - k + 1e-9)
     return {
-        "C": np.clip(c, 0, 1).mean() * 100, "M": np.clip(m, 0, 1).mean() * 100,
-        "Y": np.clip(y, 0, 1).mean() * 100, "K": k.mean() * 100
+        "C": np.clip(c, 0, 1).mean() * 100, 
+        "M": np.clip(m, 0, 1).mean() * 100,
+        "Y": np.clip(y, 0, 1).mean() * 100, 
+        "K": k.mean() * 100
     }
 
 # --- 4. NAVEGACIÓN ---
@@ -101,15 +103,18 @@ if menu == "📊 Dashboard":
 elif menu == "👥 Clientes":
     st.title("👥 Directorio")
     with st.form("nuevo_c"):
-        n, w, p = st.text_input("Nombre"), st.text_input("WhatsApp"), st.selectbox("Origen", ["Instagram", "WhatsApp", "Local"])
+        n = st.text_input("Nombre")
+        w = st.text_input("WhatsApp")
+        p = st.selectbox("Origen", ["Instagram", "WhatsApp", "Local"])
         if st.form_submit_button("Registrar"):
             nuevo = pd.DataFrame([[n, w, p, datetime.now().strftime("%Y-%m-%d")]], columns=COL_CLIENTES)
             df_clientes = pd.concat([df_clientes, nuevo], ignore_index=True)
             guardar_datos(df_clientes, CSV_CLIENTES)
             st.success("Cliente guardado.")
-    st.dataframe(df_clientes)
+            st.rerun()
+    st.dataframe(df_clientes, use_container_width=True)
 
-# --- MÓDULO: PRODUCCIÓN (CON 3 IMPRESORAS) ---
+# --- MÓDULO: PRODUCCIÓN ---
 elif menu == "🏗️ Producción":
     st.title("🏗️ Control de Máquinas")
     t1, t2 = st.tabs(["🆕 Nueva Orden", "🛤️ Taller Activo"])
@@ -117,7 +122,7 @@ elif menu == "🏗️ Producción":
     with t1:
         with st.form("ot"):
             c = st.selectbox("Cliente", df_clientes["Nombre"].unique()) if not df_clientes.empty else st.text_input("Cliente")
-            t = st.text_area("Trabajo (Ej: 50 Afiches)")
+            t = st.text_area("Trabajo")
             imp = st.selectbox("Asignar Impresora", ["Impresora 1 (Láser)", "Impresora 2 (Inyección)", "Impresora 3 (Gran Formato)"])
             prio = st.select_slider("Prioridad", ["Baja", "Normal", "Urgente"], "Normal")
             if st.form_submit_button("Enviar a Taller"):
@@ -125,7 +130,8 @@ elif menu == "🏗️ Producción":
                 row = pd.DataFrame([[new_id, datetime.now().strftime("%d/%m"), c, t, imp, "En Cola", prio]], columns=COL_PRODUCCION)
                 df_prod = pd.concat([df_prod, row], ignore_index=True)
                 guardar_datos(df_prod, CSV_PRODUCCION)
-                st.success(f"Orden #{new_id} enviada a {imp}")
+                st.success(f"Orden #{new_id} enviada.")
+                st.rerun()
     
     with t2:
         for imp_name in ["Impresora 1 (Láser)", "Impresora 2 (Inyección)", "Impresora 3 (Gran Formato)"]:
@@ -134,33 +140,30 @@ elif menu == "🏗️ Producción":
             if not maquina_df.empty:
                 for i, r in maquina_df.iterrows():
                     col_ot1, col_ot2 = st.columns([3, 1])
-                    col_ot1.write(f"**#{r['ID']} - {r['Cliente']}**: {r['Trabajo']} ({r['Prioridad']})")
-                    new_st = col_ot2.selectbox("Estado", ["En Cola", "Imprimiendo", "Acabado", "Listo para Entrega"], key=f"st_{i}")
-                    if col_ot2.button("OK", key=f"ok_{i}"):
+                    col_ot1.write(f"**#{r['ID']} - {r['Cliente']}**: {r['Trabajo']}")
+                    new_st = col_ot2.selectbox("Estado", ["En Cola", "Imprimiendo", "Acabado", "Listo para Entrega"], key=f"st_{i}", index=0)
+                    if col_ot2.button("Actualizar", key=f"btn_{i}"):
                         df_prod.at[i, "Estado"] = new_st
                         guardar_datos(df_prod, CSV_PRODUCCION)
                         st.rerun()
             else:
                 st.write("Sin trabajos pendientes.")
 
-# --- MÓDULO: FINANZAS PRO (PUNTO DE EQUILIBRIO) ---
+# --- MÓDULO: FINANZAS PRO ---
 elif menu == "📈 Finanzas Pro":
     st.title("📈 Análisis de Rentabilidad")
-    
-
-[Image of break-even analysis chart showing fixed costs, variable costs, and revenue]
-
-    st.subheader("💰 Gastos Fijos Mensuales (Alquiler, Luz, Internet, Sueldos)")
+    st.subheader("💰 Gastos Fijos Mensuales")
     with st.form("gastos"):
         con = st.text_input("Concepto")
         mon = st.number_input("Monto USD", min_value=0.0)
         if st.form_submit_button("Añadir Gasto"):
             df_gastos = pd.concat([df_gastos, pd.DataFrame([[con, mon]], columns=COL_GASTOS)], ignore_index=True)
             guardar_datos(df_gastos, CSV_GASTOS)
+            st.rerun()
     
     st.table(df_gastos)
-    total_fijo = pd.to_numeric(df_gastos["Monto_Mensual_USD"]).sum()
-    st.metric("Meta Mensual (Para no perder dinero)", f"$ {total_fijo:,.2f}")
+    total_fijo = pd.to_numeric(df_gastos["Monto_Mensual_USD"], errors='coerce').sum()
+    st.metric("Meta Mensual (Punto de Equilibrio)", f"$ {total_fijo:,.2f}")
 
 # --- MÓDULO: VENTAS ---
 elif menu == "💰 Ventas":
@@ -171,20 +174,48 @@ elif menu == "💰 Ventas":
         cant = st.number_input("Cantidad", min_value=0.1)
         monto = st.number_input("Precio Cobrado USD", min_value=0.0)
         if st.form_submit_button("Cobrar"):
-            # Lógica de cálculo simplificada para el ejemplo
+            # Cálculo de ganancia rápida (puedes ajustar esta lógica)
             gan = monto * 0.4 
             v = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cli, ins, monto, monto*0.03, gan, "Socia"]], columns=COL_VENTAS)
             df_ventas = pd.concat([df_ventas, v], ignore_index=True)
             guardar_datos(df_ventas, CSV_VENTAS)
-            st.success(f"Venta guardada. Ganancia estimada: ${gan:.2f}")
+            st.success("Venta guardada.")
+            st.rerun()
 
-# (Módulos de Inventario, Analizador y Manuales se mantienen igual que la versión anterior)
+# --- MANTENIMIENTO DE OTROS MÓDULOS ---
 elif menu == "📦 Inventario":
     st.title("📦 Almacén")
-    st.dataframe(df_stock)
+    st.dataframe(df_stock, use_container_width=True)
 elif menu == "🎨 Analizador":
     st.title("🎨 Analizador CMYK")
-    # ... (código del analizador anterior)
+    archivos = st.file_uploader("Subir archivos", type=["jpg", "png", "jpeg", "pdf"], accept_multiple_files=True)
+    if archivos:
+        resultados = []
+        for archivo in archivos:
+            if archivo.type == "application/pdf":
+                doc = fitz.open(stream=archivo.read(), filetype="pdf")
+                for i in range(len(doc)):
+                    pix = doc.load_page(i).get_pixmap(colorspace=fitz.csRGB)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    res = analizar_cmyk_pro(img)
+                    res["Archivo"] = f"{archivo.name} (Pág {i+1})"
+                    resultados.append(res)
+            else:
+                img = Image.open(archivo)
+                res = analizar_cmyk_pro(img)
+                res["Archivo"] = archivo.name
+                resultados.append(res)
+        st.dataframe(pd.DataFrame(resultados), use_container_width=True)
 elif menu == "🔍 Manuales":
     st.title("🔍 Base de Conocimiento")
-    # ... (código de manuales anterior)
+    hoja = st.text_input("Nro de Hoja")
+    if hoja:
+        ruta = f"{CARPETA_MANUALES}/{hoja.zfill(3)}.txt"
+        if os.path.exists(ruta):
+            with open(ruta, "r", encoding="utf-8") as f: st.info(f.read())
+        else:
+            txt = st.text_area("Crear nuevo manual:")
+            if st.button("Guardar"):
+                if not os.path.exists(CARPETA_MANUALES): os.makedirs(CARPETA_MANUALES)
+                with open(ruta, "w", encoding="utf-8") as f: f.write(txt)
+                st.success("Guardado.")
