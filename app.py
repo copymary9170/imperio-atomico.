@@ -45,9 +45,19 @@ elif menu == "📊 Dashboard":
 
 # --- MÓDULO: ANALIZADOR (TU MOTOR CMYK) ---
 elif menu == "🎨 Analizador":
-    st.title("🎨 Analizador de Costos Real")
-    # (Aquí va tu lógica de subir PDF/Imagen que ya conoces)
-    st.write("Sube tu archivo para calcular el gasto de gota.")
+    st.title("🎨 Analizador de Costos Múltiple")
+    
+    # Aquí está el cambio clave
+    archivos = st.file_uploader("Subir diseños", type=["jpg","png","pdf"], accept_multiple_files=True)
+    
+    if archivos:
+        for f in archivos:
+            with st.expander(f"Análisis de: {f.name}"):
+                img, res = analizar_cmyk_pro(f) # Tu función que ya funciona
+                if img:
+                    st.image(img, use_container_width=True)
+                    # Aquí el sistema te mostrará el costo de cada una por separado
+                    st.write(f"Costo estimado de tinta para esta imagen...")
 
 # --- MÓDULO: MANUALES ---
 elif menu == "🔍 Manuales":
@@ -56,3 +66,4 @@ elif menu == "🔍 Manuales":
     st.write("Resultados para:", busqueda)
 
 # (Los demás módulos irán apareciendo según los necesites usar hoy)
+
