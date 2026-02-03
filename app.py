@@ -4,13 +4,39 @@ import numpy as np
 from PIL import Image
 import fitz  # PyMuPDF
 from datetime import datetime
-import database  # Tu cerebro de datos
+import sqlite3
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- 1. CONFIGURACIÓN Y BASE DE DATOS INTERNA ---
 st.set_page_config(page_title="Imperio Atómico - Master", layout="wide")
-database.inicializar_sistema() 
 
-# --- FUNCIÓN TÉCNICA: ANALIZADOR CMYK ---
+def inicializar_db():
+    conn = sqlite3.connect('imperio_data.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS cotizaciones 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                  fecha TEXT, cliente TEXT, trabajo TEXT, 
+                  monto REAL, estado TEXT)''')
+    conn.commit()
+    conn.close()
+
+def guardar_cotizacion_db(cliente, trabajo, monto):
+    conn = sqlite3.connect('imperio_data.db')
+    c = conn.cursor()
+    fecha = datetime.now().strftime('%Y-%m-%d')
+    c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto, estado) VALUES (?,?,?,?,?)",
+              (fecha, cliente, trabajo, monto, 'Pendiente'))
+    conn.commit()
+    conn.close()
+
+def obtener_cotizaciones_db():
+    conn = sqlite3.connect('imperio_data.db')
+    df = pd.read_sql_query("SELECT * FROM cotizaciones ORDER BY id DESC", conn)
+    conn.close()
+    return df
+
+inicializar_db()
+
+# --- 2. FUNCIÓN DEL ANALIZADOR ---
 def analizar_cmyk_pro(file):
     try:
         if file.type == "application/pdf":
@@ -20,93 +46,66 @@ def analizar_cmyk_pro(file):
         else:
             img = Image.open(file).convert("RGB")
         pix_arr = np.array(img) / 255.0
-        # Fórmula de conversión a CMYK
         k = 1 - np.max(pix_arr, axis=2)
         c = (1-pix_arr[:,:,0]-k)/(1-k+1e-9)
         m = (1-pix_arr[:,:,1]-k)/(1-k+1e-9)
         y = (1-pix_arr[:,:,2]-k)/(1-k+1e-9)
         return img, {"C": c.mean(), "M": m.mean(), "Y": y.mean(), "K": k.mean()}
-    except Exception as e:
-        st.error(f"Error en análisis: {e}")
-        return None, None
+    except: return None, None
 
-# --- MENÚ LATERAL ---
+# --- 3. MENÚ LATERAL ---
 with st.sidebar:
     st.title("🛡️ Panel de Control")
     menu = st.radio("Navegación:", 
         ["📊 Dashboard", "📝 Cotizaciones", "👥 Clientes", "🏗️ Producción", "📦 Inventario", "🎨 Analizador", "🔍 Manuales", "⚙️ Configuración"])
 
-# --- 1. DASHBOARD ---
+# --- 4. LÓGICA DE LAS PESTAÑAS (Módulos) ---
+
 if menu == "📊 Dashboard":
-    st.title("📊 Estado del Imperio")
-    st.info("Esperando datos de diagnóstico de esta tarde (niveles de inyectores).")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Tasa BCV", "36.50")
-    col2.metric("Tasa Binance", "45.00")
-    col3.metric("Cotizaciones Hoy", len(database.obtener_cotizaciones()))
+    st.title("📊 Dashboard")
+    st.info("Aquí irán las barras de tinta de esta tarde.")
 
-# --- 2. COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
-    st.title("📝 Generador de Presupuestos")
-    with st.form("nueva_cot"):
-        c1, c2 = st.columns(2)
-        with c1:
-            nom = st.text_input("Cliente")
-            trab = st.text_input("Trabajo")
-        with c2:
-            prec = st.number_input("Monto USD", min_value=0.0)
-            enviar = st.form_submit_button("Guardar Cotización")
-        if enviar:
-            database.guardar_cotizacion(nom, trab, prec)
-            st.success("✅ Guardado.")
-    st.dataframe(database.obtener_cotizaciones(), use_container_width=True)
+    st.title("📝 Cotizaciones")
+    with st.form("f_cot"):
+        cli = st.text_input("Cliente")
+        tra = st.text_input("Trabajo")
+        mon = st.number_input("Monto USD", min_value=0.0)
+        if st.form_submit_button("Guardar"):
+            guardar_cotizacion_db(cli, tra, mon)
+            st.success("¡Guardado!")
+    st.dataframe(obtener_cotizaciones_db(), use_container_width=True)
 
-# --- 3. CLIENTES ---
 elif menu == "👥 Clientes":
-    st.title("👥 Directorio de Clientes")
-    st.write("Registra y busca clientes aquí.")
-    # Por ahora lectura simple, luego migramos a DB
-    nombre = st.text_input("Nuevo Cliente")
-    if st.button("Registrar"):
-        st.success(f"Cliente {nombre} registrado (Simulado)")
+    st.title("👥 Clientes")
+    st.text_input("Buscar Cliente")
+    st.button("Registrar Nuevo")
 
-# --- 4. PRODUCCIÓN ---
 elif menu == "🏗️ Producción":
-    st.title("🏗️ Taller y Máquinas")
-    st.selectbox("Ver impresora:", ["Epson L1250", "HP Smart Tank", "J210a"])
-    st.warning("No hay órdenes en cola.")
+    st.title("🏗️ Producción")
+    st.selectbox("Impresora", ["Epson", "HP", "J210a"])
+    st.write("Cola de impresión vacía.")
 
-# --- 5. INVENTARIO ---
 elif menu == "📦 Inventario":
-    st.title("📦 Almacén de Insumos")
-    with st.expander("➕ Agregar Material"):
-        mat = st.text_input("Insumo")
-        cant = st.number_input("Cantidad")
-        if st.button("Guardar en Stock"):
-            st.success(f"Agregado {mat}")
+    st.title("📦 Inventario")
+    st.write("Materiales en stock:")
+    st.table(pd.DataFrame({"Material": ["Papel", "Tinta"], "Stock": [0, 0]}))
 
-# --- 6. ANALIZADOR (EL QUE TENÍA PROBLEMAS) ---
 elif menu == "🎨 Analizador":
-    st.title("🎨 Analizador Atómico Múltiple")
-    files = st.file_uploader("Sube tus diseños", type=["jpg","png","pdf"], accept_multiple_files=True)
+    st.title("🎨 Analizador")
+    files = st.file_uploader("Sube imágenes", type=["jpg","png","pdf"], accept_multiple_files=True)
     if files:
         for f in files:
-            with st.expander(f"🖼️ Resultado: {f.name}", expanded=True):
-                img, res = analizar_cmyk_pro(f)
-                if img:
-                    col_i, col_d = st.columns([1,1])
-                    with col_i: st.image(img, use_container_width=True)
-                    with col_d:
-                        st.write("**Uso de Tinta:**")
-                        st.write(f"💧 C: {res['C']:.2%} | 🌸 M: {res['M']:.2%}")
-                        st.write(f"🟡 Y: {res['Y']:.2%} | ⚫ K: {res['K']:.2%}")
+            img, res = analizar_cmyk_pro(f)
+            if img:
+                st.image(img, caption=f.name, width=300)
+                st.write(f"C:{res['C']:.1%} M:{res['M']:.1%} Y:{res['Y']:.1%} K:{res['K']:.1%}")
 
-# --- 7. CONFIGURACIÓN ---
+elif menu == "🔍 Manuales":
+    st.title("🔍 Manuales")
+    st.text_input("Error a buscar...")
+
 elif menu == "⚙️ Configuración":
-    st.title("⚙️ Ajustes y Tasas")
-    st.subheader("Modificar Precios de Tintas")
-    # Aquí puedes modificar precios por inflación como pediste
-    st.info("Aquí aparecerá la tabla de precios que podrás editar y guardar.")
-    t_bcv = st.number_input("Editar Tasa BCV", value=36.50)
-    if st.button("Actualizar Tasas"):
-        st.success(f"Tasa actualizada a {t_bcv}")
+    st.title("⚙️ Configuración")
+    st.number_input("Tasa BCV", value=36.50)
+    st.button("Guardar Cambios")
