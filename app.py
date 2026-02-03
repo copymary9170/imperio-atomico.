@@ -7,31 +7,28 @@ from PIL import Image
 import fitz
 
 # ==========================================
-# 1. MOTOR DE BASE DE DATOS (Auto-Reparable)
+# 1. MOTOR DE BASE DE DATOS (Conexión Segura)
 # ==========================================
 def conectar():
     return sqlite3.connect('imperio_data.db', check_same_thread=False)
 
 def inicializar_sistema():
-    conn = conectar()
-    c = conn.cursor()
-    # Tabla Usuarios
-    c.execute('CREATE TABLE IF NOT EXISTS usuarios (user TEXT PRIMARY KEY, pw TEXT, rol TEXT)')
-    # ASEGURAR ADMIN
-    c.execute("INSERT OR IGNORE INTO usuarios VALUES ('admin', '1234', 'master')")
-    # Tabla Clientes
-    c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
-    # Tabla Inventario
-    c.execute('CREATE TABLE IF NOT EXISTS inventario (item TEXT PRIMARY KEY, cantidad REAL, unidad TEXT, precio_usd REAL)')
-    # Tabla Cotizaciones
-    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto REAL, estado TEXT)')
-    conn.commit()
-    conn.close()
+    try:
+        conn = conectar()
+        c = conn.cursor()
+        # Creamos las tablas necesarias
+        c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
+        c.execute('CREATE TABLE IF NOT EXISTS inventario (item TEXT PRIMARY KEY, cantidad REAL, unidad TEXT, precio_usd REAL)')
+        c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto REAL, estado TEXT)')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"Error al inicializar DB: {e}")
 
 # ==========================================
-# 2. INICIO Y SEGURIDAD
+# 2. SISTEMA DE LOGIN (HARD-CODED / VIRTUAL)
 # ==========================================
-st.set_page_config(page_title="Imperio Atómico v3", layout="wide")
+st.set_page_config(page_title="Imperio Atómico - Master OS", layout="wide")
 inicializar_sistema()
 
 if 'login' not in st.session_state:
@@ -39,85 +36,73 @@ if 'login' not in st.session_state:
 
 # --- PANTALLA DE LOGIN ---
 if not st.session_state.login:
-    st.title("🔐 Acceso Master")
+    st.title("🛡️ Acceso de Seguridad Imperio Atómico")
+    
     col1, col2 = st.columns([1, 1])
     with col1:
+        # Definimos las credenciales maestras aquí mismo
+        USUARIO_MAESTRO = "admin"
+        CLAVE_MAESTRA = "1234"
+        
         u = st.text_input("Usuario")
         p = st.text_input("Contraseña", type="password")
         
-        # TRUCO DE EMERGENCIA: Si el DB falla, esto te deja pasar
-        if st.button("Ingresar"):
-            if (u == "admin" and p == "1234"): # Validación directa
+        if st.button("🔓 Entrar al Sistema"):
+            # Validación directa (No depende de la base de datos)
+            if u == USUARIO_MAESTRO and p == CLAVE_MAESTRA:
                 st.session_state.login = True
                 st.session_state.user = "admin"
+                st.success("Acceso concedido. Cargando...")
                 st.rerun()
             else:
-                st.error("Credenciales incorrectas")
+                st.error("❌ Usuario o Clave incorrectos")
     st.stop()
 
 # ==========================================
-# 3. INTERFAZ Y MÓDULOS REALES
+# 3. INTERFAZ PRINCIPAL (Solo si logueó)
 # ==========================================
 with st.sidebar:
     st.title("⚛️ Imperio Atómico")
-    st.write(f"Conectado como: **{st.session_state.user}**")
+    st.write(f"Sesión activa: **{st.session_state.user}**")
     st.divider()
     menu = st.radio("Módulos", ["📊 Dashboard", "👥 Clientes", "📝 Cotizaciones", "📦 Inventario", "🎨 Analizador", "⚙️ Configuración"])
-    if st.button("Cerrar Sesión"):
+    if st.button("🚪 Cerrar Sesión"):
         st.session_state.login = False
         st.rerun()
 
 # --- MÓDULO CLIENTES ---
 if menu == "👥 Clientes":
-    st.title("👥 Gestión de Clientes")
+    st.title("👥 Directorio de Clientes")
     with st.form("cli_f"):
         n = st.text_input("Nombre")
         w = st.text_input("WhatsApp")
-        if st.form_submit_button("Registrar"):
-            conn = conectar()
-            conn.execute("INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)", (n, w))
-            conn.commit()
-            conn.close()
-            st.success("Guardado.")
+        if st.form_submit_button("Guardar"):
+            try:
+                conn = conectar()
+                conn.execute("INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)", (n, w))
+                conn.commit()
+                conn.close()
+                st.success(f"✅ {n} guardado con éxito")
+            except:
+                st.error("No se pudo guardar. Revisa permisos de DB.")
 
-    conn = conectar()
-    df_cl = pd.read_sql_query("SELECT * FROM clientes", conn)
-    conn.close()
-    st.dataframe(df_cl, use_container_width=True)
+    try:
+        conn = conectar()
+        df_cl = pd.read_sql_query("SELECT * FROM clientes", conn)
+        conn.close()
+        st.dataframe(df_cl, use_container_width=True)
+    except:
+        st.info("Directorio vacío.")
 
-# --- MÓDULO INVENTARIO (Con Persistencia) ---
-elif menu == "📦 Inventario":
-    st.title("📦 Inventario Real")
-    with st.expander("📥 Cargar Stock"):
-        item = st.text_input("Insumo")
-        cant = st.number_input("Cantidad", min_value=0.0)
-        unid = st.selectbox("Unidad", ["Hojas", "ml", "Unid"])
-        prec = st.number_input("Precio USD", min_value=0.0)
-        if st.button("Actualizar"):
-            conn = conectar()
-            conn.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", (item, cant, unid, prec))
-            conn.commit()
-            conn.close()
-            st.rerun()
-
-    conn = conectar()
-    df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
-    conn.close()
-    st.table(df_inv)
-
-# --- MÓDULO ANALIZADOR (Configurable) ---
-elif menu == "🎨 Analizador":
-    st.title("🎨 Analizador Atómico")
-    impresora = st.selectbox("Máquina", ["Epson L1250", "HP Smart Tank", "J210a"])
-    # Aquí puedes ajustar el multiplicador de costo según la máquina seleccionada
-    st.info(f"Configuración de goteo optimizada para {impresora}")
-    
 # --- MÓDULO CONFIGURACIÓN (Inflación) ---
 elif menu == "⚙️ Configuración":
-    st.title("⚙️ Ajustes Globales")
-    st.subheader("Control de Inflación")
-    tasa = st.number_input("Tasa Dólar (Bs)", value=36.50)
+    st.title("⚙️ Ajustes y Finanzas")
+    st.subheader("💰 Control de Inflación")
+    tasa = st.number_input("Dólar BCV (Bs)", value=36.50)
+    costo_tinta = st.number_input("Costo Tinta USD/ml", value=0.05, format="%.4f")
+    
     st.divider()
-    st.write("Copia de seguridad de la Base de Datos")
-    if st.button("Generar Backup"):
-        st.download_button("Descargar DB", data=open("imperio_data.db", "rb"), file_name="respaldo.db")
+    st.subheader("💾 Base de Datos")
+    if st.button("Descargar Respaldo (.db)"):
+        with open("imperio_data.db", "rb") as f:
+            st.download_button("Click para bajar archivo", f, file_name="imperio_backup.db")
