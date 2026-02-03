@@ -15,14 +15,12 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bcv REAL, monto_binance REAL, estado TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     
-    # Asegurar columnas duales
-    for col in ['monto_bcv', 'monto_binance']:
-        try: c.execute(f'ALTER TABLE cotizaciones ADD COLUMN {col} REAL')
-        except: pass
-        
+    # Asegurar configuración base e impuestos
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_bcv', 36.50)")
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_binance', 42.00)")
-    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('costo_tinta_ml', 0.05)")
+    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('iva_perc', 0.16)") # 16% IVA
+    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('igtf_perc', 0.03)") # 3% IGTF
+    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('banco_perc', 0.02)") # 2% Comisión Banco
     conn.commit()
     conn.close()
 
@@ -41,11 +39,14 @@ if not st.session_state.login:
             st.rerun()
     st.stop()
 
-# Carga de datos
+# Carga de datos y tasas
 conn = conectar()
 conf = pd.read_sql_query("SELECT * FROM configuracion", conn).set_index('parametro')
 t_bcv = conf.loc['tasa_bcv', 'valor']
 t_bin = conf.loc['tasa_binance', 'valor']
+iva = conf.loc['iva_perc', 'valor']
+igtf = conf.loc['igtf_perc', 'valor']
+banco = conf.loc['banco_perc', 'valor']
 df_cots = pd.read_sql_query("SELECT * FROM cotizaciones", conn)
 df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
 conn.close()
@@ -54,10 +55,7 @@ conn.close()
 with st.sidebar:
     st.header("⚛️ Menú Imperio")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
-    menu = st.radio("Módulos", ["📊 Dashboard", "👥 Clientes", "📦 Inventario", "📝 Cotizaciones", "🎨 Analizador", "🔍 Manuales", "⚙️ Configuración"])
-    if st.button("Salir"):
-        st.session_state.login = False
-        st.rerun()
+    menu = st.radio("Módulos", ["📊 Dashboard", "👥 Clientes", "📦 Inventario", "📝 Cotizaciones", "⚙️ Configuración"])
 
 # --- 4. LÓGICA DE MÓDULOS ---
 
@@ -66,41 +64,48 @@ if menu == "📊 Dashboard":
     k1, k2, k3 = st.columns(3)
     pagado = df_cots[df_cots['estado'] == 'Pagado']['monto_usd'].sum() if not df_cots.empty else 0
     pendiente = df_cots[df_cots['estado'] == 'Pendiente']['monto_usd'].sum() if not df_cots.empty else 0
-    inv_total = (df_inv['cantidad'] * df_inv['precio_usd']).sum() if not df_inv.empty else 0
+    
+    # Valor de inventario ajustado con impuestos
+    factor_total = 1 + iva + igtf + banco
+    inv_total = (df_inv['cantidad'] * (df_inv['precio_usd'] * factor_total)).sum() if not df_inv.empty else 0
     
     k1.metric("Ingresos (USD)", f"$ {pagado:,.2f}")
     k2.metric("Pendiente (USD)", f"$ {pendiente:,.2f}")
-    k3.metric("Stock (USD)", f"$ {inv_total:,.2f}")
-    
-    st.divider()
-    c_bcv, c_bin = st.columns(2)
-    c_bcv.info(f"🏦 **Caja en BCV:** {(pagado * t_bcv):,.2f} Bs")
-    c_bin.warning(f"🔶 **Caja en Binance:** {(pagado * t_bin):,.2f} Bs")
+    k3.metric("Stock Real (USD)", f"$ {inv_total:,.2f}")
 
 elif menu == "👥 Clientes":
     st.title("👥 Clientes")
-    with st.expander("➕ Nuevo"):
-        with st.form("fcl"):
-            n, w = st.text_input("Nombre"), st.text_input("WhatsApp")
-            if st.form_submit_button("Guardar"):
-                if n:
-                    c = conectar(); c.execute("INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)", (n, w)); c.commit(); c.close()
-                    st.rerun()
+    with st.form("fcl"):
+        n, w = st.text_input("Nombre"), st.text_input("WhatsApp")
+        if st.form_submit_button("Guardar"):
+            if n:
+                c = conectar(); c.execute("INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)", (n, w)); c.commit(); c.close()
+                st.rerun()
     bus = st.text_input("🔍 Buscar")
     c = conectar(); df_c = pd.read_sql_query(f"SELECT * FROM clientes WHERE nombre LIKE '%{bus}%'", c); c.close()
     st.dataframe(df_c, use_container_width=True)
 
 elif menu == "📦 Inventario":
-    st.title("📦 Inventario")
-    with st.expander("📥 Cargar Stock"):
+    st.title("📦 Inventario con Impuestos")
+    
+    with st.expander("📥 Cargar Stock (Precios sin Impuestos)"):
         with st.form("finv"):
-            it = st.text_input("Item")
+            it = st.text_input("Producto")
             ca = st.number_input("Cantidad", min_value=0.0)
-            pr = st.number_input("Precio USD", min_value=0.0)
-            if st.form_submit_button("Actualizar"):
-                c = conectar(); c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", (it, ca, 'Unid', pr)); c.commit(); c.close()
+            pr = st.number_input("Precio Costo USD (Limpio)", min_value=0.0, format="%.2f")
+            if st.form_submit_button("Calcular y Guardar"):
+                c = conectar()
+                c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", (it, ca, 'Unid', pr))
+                c.commit(); c.close()
                 st.rerun()
-    st.dataframe(df_inv, use_container_width=True)
 
-else:
-    st.info(f"Módulo {menu} listo para la Parte 3.")
+    if not df_inv.empty:
+        # Cálculo de costos reales
+        df_inv['Precio + IVA'] = df_inv['precio_usd'] * (1 + iva)
+        df_inv['Costo Final (+GTF+Banc)'] = df_inv['precio_usd'] * (1 + iva + igtf + banco)
+        df_inv['Inversión Total USD'] = df_inv['cantidad'] * df_inv['Costo Final (+GTF+Banc)']
+        
+        st.subheader("📋 Detalle de Costos de Reposición")
+        st.dataframe(df_inv, use_container_width=True)
+        
+        st.info(f"💡 **Nota:** El costo final incluye IVA ({iva*100}%), GTF ({igtf*100}%) y Comisión Bancaria ({banco*100}%
