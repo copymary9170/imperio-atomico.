@@ -15,7 +15,7 @@ def inicializar_sistema():
     c = conn.cursor()
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (item TEXT PRIMARY KEY, cantidad REAL, unidad TEXT, precio_usd REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto REAL, estado TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bs REAL, estado TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_bcv', 36.50)")
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('costo_tinta_ml', 0.05)")
@@ -39,7 +39,7 @@ def analizar_cmyk(file):
     except: return None, None
 
 # --- 2. CONFIGURACIÓN ---
-st.set_page_config(page_title="Imperio Atómico - Enterprise", layout="wide")
+st.set_page_config(page_title="Imperio Atómico - Full Control", layout="wide")
 inicializar_sistema()
 
 if 'login' not in st.session_state: st.session_state.login = False
@@ -63,7 +63,7 @@ conn.close()
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
     st.metric("Tasa BCV", f"{tasa_val} Bs")
-    menu = st.radio("Menú", ["📊 Dashboard", "👥 Clientes", "📝 Cotizaciones", "📦 Inventario", "🎨 Analizador", "💰 Finanzas Pro", "🔍 Manuales", "⚙️ Configuración"])
+    menu = st.radio("Menú", ["📊 Dashboard", "👥 Clientes", "📝 Cotizaciones", "📦 Inventario", "🎨 Analizador", "🔍 Manuales", "⚙️ Configuración"])
     if st.button("Cerrar Sesión"):
         st.session_state.login = False
         st.rerun()
@@ -71,11 +71,21 @@ with st.sidebar:
 # --- 4. MÓDULOS ---
 
 if menu == "📊 Dashboard":
-    st.title("📊 Dashboard")
-    st.write(f"Resumen del día: {datetime.now().strftime('%d/%m/%Y')}")
-    col1, col2 = st.columns(2)
-    col1.metric("Dólar Hoy", f"{tasa_val} Bs")
-    col2.info("💡 Pendiente: Conexión de niveles de tinta.")
+    st.title("📊 Resumen Financiero")
+    conn = conectar()
+    df_cots = pd.read_sql_query("SELECT * FROM cotizaciones", conn)
+    conn.close()
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Tasa del Día", f"{tasa_val} Bs")
+    if not df_cots.empty:
+        total_usd = df_cots[df_cots['estado'] != 'Cancelado']['monto_usd'].sum()
+        c2.metric("Ventas Totales (USD)", f"$ {total_usd:,.2f}")
+        c3.metric("Ventas Totales (Bs)", f"{total_usd * tasa_val:,.2f} Bs")
+    
+    st.divider()
+    st.subheader("📋 Últimos Movimientos")
+    st.dataframe(df_cots.tail(5), use_container_width=True)
 
 elif menu == "👥 Clientes":
     st.title("👥 Gestión de Clientes")
@@ -90,34 +100,34 @@ elif menu == "👥 Clientes":
     st.dataframe(df, use_container_width=True)
 
 elif menu == "📝 Cotizaciones":
-    st.title("📝 Generar Cotización")
-    # Traer clientes para el selector
+    st.title("📝 Nueva Cotización")
     c = conectar()
     lista_clis = pd.read_sql_query("SELECT nombre FROM clientes", c)['nombre'].tolist()
     c.close()
 
     with st.form("form_cot"):
-        cliente_sel = st.selectbox("Seleccionar Cliente", ["--"] + lista_clis)
-        trabajo = st.text_input("Descripción del Trabajo")
-        monto_usd = st.number_input("Precio en USD", min_value=0.0)
-        submit_cot = st.form_submit_button("Registrar Cotización")
+        col_a, col_b = st.columns(2)
+        cliente_sel = col_a.selectbox("Cliente", ["--"] + lista_clis)
+        trabajo = col_a.text_input("Descripción del Trabajo")
+        monto_usd = col_b.number_input("Precio en USD", min_value=0.0, step=0.5)
+        monto_bs_sugerido = monto_usd * tasa_val
+        col_b.write(f"**Equivalente en Bs: {monto_bs_sugerido:,.2f}**")
+        estado = col_b.selectbox("Estado", ["Pendiente", "Pagado", "Cancelado"])
         
-        if submit_cot:
+        if st.form_submit_button("💾 Guardar Cotización"):
             if cliente_sel != "--":
                 c = conectar()
-                fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
-                c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto, estado) VALUES (?,?,?,?,?)",
-                          (fecha, cliente_sel, trabajo, monto_usd, "Pendiente"))
+                c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto_usd, monto_bs, estado) VALUES (?,?,?,?,?,?)",
+                          (datetime.now().strftime("%d/%m/%Y"), cliente_sel, trabajo, monto_usd, monto_bs_sugerido, estado))
                 c.commit(); c.close()
-                st.success("✅ Cotización guardada con éxito")
-            else:
-                st.error("Debes seleccionar un cliente.")
+                st.success(f"✅ Guardado: $ {monto_usd} / {monto_bs_sugerido} Bs")
+                st.rerun()
 
-    st.subheader("Historial de Cotizaciones")
+    st.subheader("🗂️ Historial de Precios")
     c = conectar()
-    df_cot = pd.read_sql_query("SELECT * FROM cotizaciones ORDER BY id DESC", c)
+    df_hist = pd.read_sql_query("SELECT fecha, cliente, trabajo, monto_usd, monto_bs, estado FROM cotizaciones ORDER BY id DESC", c)
     c.close()
-    st.dataframe(df_cot, use_container_width=True)
+    st.dataframe(df_hist, use_container_width=True)
 
 elif menu == "📦 Inventario":
     st.title("📦 Inventario")
@@ -142,7 +152,7 @@ elif menu == "🎨 Analizador":
                 with st.expander(f"Análisis: {file.name}"):
                     st.image(img, width=200)
                     costo = sum(res.values()) * tinta_val
-                    st.write(f"Costo {imp}: ${costo:.4f} / {costo*tasa_val:.2f} Bs")
+                    st.write(f"Costo {imp}: **${costo:.4f}** / **{costo*tasa_val:.2f} Bs**")
 
 elif menu == "🔍 Manuales":
     st.title("🔍 Biblioteca Técnica")
@@ -159,5 +169,5 @@ elif menu == "⚙️ Configuración":
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (nt,))
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='costo_tinta_ml'", (ni,))
             c.commit(); c.close()
-            st.success("✅ Datos de inflación actualizados")
+            st.success("✅ Tasas actualizadas")
             st.rerun()
