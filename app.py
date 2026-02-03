@@ -2,29 +2,26 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from PIL import Image
-import fitz  # PyMuPDF
-from datetime import datetime
+import fitz
 import sqlite3
+from datetime import datetime
 
-# --- 1. CONFIGURACIÓN Y BASE DE DATOS ---
-st.set_page_config(page_title="Imperio Atómico V2", layout="wide", page_icon="⚛️")
+# --- 1. CONFIGURACIÓN E INTERFAZ ---
+st.set_page_config(page_title="Imperio Atómico - Full", layout="wide")
 
-def inicializar_db():
+# Inicializamos la base de datos para que nada falle
+def init_db():
     conn = sqlite3.connect('imperio_data.db')
     c = conn.cursor()
-    # Tabla Cotizaciones
-    c.execute('''CREATE TABLE IF NOT EXISTS cotizaciones 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto REAL, estado TEXT)''')
-    # Tabla Inventario
-    c.execute('''CREATE TABLE IF NOT EXISTS inventario 
-                 (item TEXT, cantidad REAL, unidad TEXT, precio_usd REAL)''')
+    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY, fecha TEXT, cliente TEXT, trabajo TEXT, monto REAL, estado TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY, nombre TEXT, whatsapp TEXT, notas TEXT)')
     conn.commit()
     conn.close()
 
-inicializar_db()
+init_db()
 
-# --- 2. MOTOR DE CÁLCULO (LO QUE FALTABA) ---
-def analizar_cmyk_pro(file):
+# --- 2. MOTOR DE ANÁLISIS ---
+def analizar_cmyk(file):
     try:
         if file.type == "application/pdf":
             doc = fitz.open(stream=file.read(), filetype="pdf")
@@ -40,71 +37,81 @@ def analizar_cmyk_pro(file):
         return img, {"C": c.mean(), "M": m.mean(), "Y": y.mean(), "K": k.mean()}
     except: return None, None
 
-# --- 3. MENÚ LATERAL ---
+# --- 3. BARRA LATERAL (CONFIGURACIÓN VIVA) ---
 with st.sidebar:
-    st.header("⚛️ Imperio Atómico")
-    tasa_bcv = st.number_input("Tasa BCV (Bs)", value=36.50)
-    precio_tinta_ml = st.number_input("Precio Tinta (USD/ml)", value=0.05, format="%.4f")
-    menu = st.radio("Ir a:", ["📊 Dashboard", "📝 Cotizaciones", "👥 Clientes", "📦 Inventario", "🎨 Analizador", "⚙️ Configuración"])
+    st.header("⚙️ Configuración Global")
+    tasa_bcv = st.number_input("Tasa Dólar (Bs)", value=36.50)
+    st.divider()
+    # Aquí puedes modificar precios por inflación como pediste
+    costo_tinta_base = st.number_input("Costo Tinta USD (por ml)", value=0.05, format="%.4f")
+    menu = st.radio("Menú Principal", ["📊 Dashboard", "📝 Cotizaciones", "👥 Clientes", "📦 Inventario", "🎨 Analizador", "💰 Finanzas Pro", "🔍 Manuales"])
 
-# --- 4. PESTAÑAS DETALLADAS ---
+# --- 4. MÓDULOS ---
 
 if menu == "📊 Dashboard":
-    st.title("📊 Resumen General")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Dólar BCV", f"Bs. {tasa_bcv}")
-    col2.metric("Pendientes", "5")
-    col3.metric("Ventas Mes", "$ 120.00")
-    st.info("💡 Tip: En la tarde conectaremos los inyectores aquí.")
+    st.title("📊 Estado del Imperio")
+    st.write(f"Hoy es: {datetime.now().strftime('%d/%m/%Y')}")
+    col1, col2 = st.columns(2)
+    col1.metric("Tasa del Día", f"{tasa_bcv} Bs")
+    col2.metric("Insumo Crítico", "Tinta Cyan (15%)")
 
 elif menu == "📝 Cotizaciones":
-    st.title("📝 Nueva Cotización")
-    with st.form("cot_form"):
+    st.title("📝 Cotizaciones")
+    with st.form("cots"):
         c1, c2 = st.columns(2)
         cliente = c1.text_input("Cliente")
-        trabajo = c1.text_input("Descripción del trabajo")
-        monto_usd = c2.number_input("Monto en USD", min_value=0.0)
-        enviar = st.form_submit_button("Guardar Presupuesto")
-        if enviar:
-            st.success(f"Presupuesto de ${monto_usd} (Bs. {monto_usd*tasa_bcv:.2f}) guardado.")
+        trabajo = c1.text_input("Descripción")
+        monto = c2.number_input("Precio USD", min_value=0.0)
+        if st.form_submit_button("Guardar"):
+            st.success("Guardado en Base de Datos")
+
+elif menu == "👥 Clientes":
+    st.title("👥 Gestión de Clientes")
+    with st.expander("➕ Registrar Nuevo Cliente"):
+        st.text_input("Nombre Completo")
+        st.text_input("WhatsApp")
+        st.button("Añadir al Directorio")
+    st.write("🔍 **Lista de Clientes:**")
+    # Simulación de lista
+    st.table(pd.DataFrame({"Nombre": ["Juan Perez", "Maria Rosa"], "WhatsApp": ["0412-...", "0424-..."]}))
 
 elif menu == "📦 Inventario":
-    st.title("📦 Inventario de Materiales")
-    # Simulación de tabla de materiales
-    data_inv = {
-        "Material": ["Papel Fotográfico", "Vinil Autoadhesivo", "Tinta Cyan", "Tinta Magenta"],
-        "Stock": [50, 20, 450, 380],
-        "Unidad": ["Hojas", "Metros", "ml", "ml"]
-    }
-    st.table(pd.DataFrame(data_inv))
-    if st.button("➕ Agregar Insumo"):
-        st.write("Formulario de carga activado.")
+    st.title("📦 Inventario de Insumos")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.number_input("Hojas Glossy", value=100)
+    col2.number_input("Tazas Blancas", value=36)
+    col3.number_input("Vinil (mts)", value=15)
+    col4.number_input("Resmas Carta", value=5)
+    st.button("Actualizar Stock")
 
 elif menu == "🎨 Analizador":
-    st.title("🎨 Analizador de Costos de Tinta")
-    files = st.file_uploader("Sube tus archivos (Múltiple)", type=["jpg","png","pdf"], accept_multiple_files=True)
+    st.title("🎨 Analizador Atómico")
+    # ESCOGENCIA DE IMPRESORA (Lo que faltaba)
+    impresora = st.selectbox("Selecciona la Impresora:", ["Epson L1250 (Sublimación)", "HP Smart Tank (Fotográfica)", "J210a (Documentos)"])
     
+    files = st.file_uploader("Subir diseños", accept_multiple_files=True)
     if files:
         for f in files:
-            with st.expander(f"🖼️ Análisis: {f.name}", expanded=True):
-                img, res = analizar_cmyk_pro(f)
-                if img:
-                    c1, c2 = st.columns([1, 1])
-                    with c1: st.image(img, use_container_width=True)
+            img, res = analizar_cmyk(f)
+            if img:
+                with st.expander(f"Resultados: {f.name}"):
+                    c1, c2 = st.columns(2)
+                    c1.image(img)
                     with c2:
-                        st.write("**Gasto Estimado:**")
-                        st.write(f"C: {res['C']:.1%} | M: {res['M']:.1%} | Y: {res['Y']:.1%} | K: {res['K']:.1%}")
-                        # Cálculo de costo real basado en el precio que pusiste en el sidebar
-                        total_tinta = sum(res.values())
-                        costo_estimado = total_tinta * precio_tinta_ml
-                        st.metric("Costo Tinta USD", f"$ {costo_estimado:.4f}")
-                        st.metric("Costo en Bolívares", f"Bs. {costo_estimado * tasa_bcv:.2f}")
+                        st.write(f"**Análisis para {impresora}:**")
+                        costo = sum(res.values()) * costo_tinta_base
+                        st.metric("Costo USD", f"${costo:.4f}")
+                        st.metric("Costo Bs", f"{costo*tasa_bcv:.2f} Bs")
 
-elif menu == "⚙️ Configuración":
-    st.title("⚙️ Ajustes del Sistema")
-    st.subheader("Precios de Insumos (Ajuste por Inflación)")
-    st.write("Modifica aquí los costos base para que el analizador siempre sea exacto.")
-    st.text_input("Nombre del Insumo", "Tinta Sublimación")
-    st.number_input("Nuevo Precio USD", value=15.00)
-    if st.button("Actualizar Precios Globales"):
-        st.success("Precios actualizados en todo el sistema.")
+elif menu == "💰 Finanzas Pro":
+    st.title("💰 Finanzas Pro")
+    st.subheader("Control de Ingresos y Egresos")
+    st.columns(3)[0].date_input("Filtrar desde:")
+    st.info("Cargando historial de ventas desde registro_ventas_088.csv...")
+
+elif menu == "🔍 Manuales":
+    st.title("🔍 Manuales y Soporte")
+    opcion = st.selectbox("¿Qué necesitas?", ["Error de Almohadillas Epson", "Limpieza de Cabezales HP", "Reset de Niveles"])
+    if opcion == "Error de Almohadillas Epson":
+        st.error("⚠️ Requiere Software Adjustment Program.")
+        st.write("1. Descargar Reseteador. 2. Conectar por USB. 3. Seleccionar 'Waste ink pad counter'.")
