@@ -108,3 +108,84 @@ if menu == "📊 Dashboard":
 # --- ESPACIO PARA LAS SIGUIENTES PARTES ---
 else:
     st.info(f"Módulo **{menu}** en proceso de carga. Por favor, solicita la siguiente parte del código.")
+
+# --- 7. MÓDULO CLIENTES ---
+elif menu == "👥 Clientes":
+    st.title("👥 Gestión de Clientes")
+    
+    # Formulario de registro
+    with st.expander("➕ Registrar Nuevo Cliente"):
+        with st.form("form_cliente"):
+            nom = st.text_input("Nombre Completo")
+            wha = st.text_input("WhatsApp (Ej: +58412...)")
+            if st.form_submit_button("Guardar Cliente"):
+                if nom:
+                    c = conectar()
+                    c.execute("INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)", (nom, wha))
+                    c.commit(); c.close()
+                    st.success(f"✅ {nom} registrado con éxito.")
+                    st.rerun()
+                else:
+                    st.error("El nombre es obligatorio.")
+
+    st.divider()
+    
+    # Buscador dinámico
+    bus = st.text_input("🔍 Buscar cliente por nombre...")
+    c = conectar()
+    query = f"SELECT id as ID, nombre as Nombre, whatsapp as WhatsApp FROM clientes WHERE nombre LIKE '%{bus}%' ORDER BY id DESC"
+    df_busqueda = pd.read_sql_query(query, c)
+    c.close()
+    
+    if not df_busqueda.empty:
+        st.dataframe(df_busqueda, use_container_width=True, hide_index=True)
+    else:
+        st.info("No se encontraron clientes con ese nombre.")
+
+# --- 8. MÓDULO INVENTARIO ---
+elif menu == "📦 Inventario":
+    st.title("📦 Inventario de Materiales")
+    
+    # Formulario de carga
+    with st.expander("📥 Cargar / Actualizar Stock"):
+        with st.form("form_inv"):
+            col_a, col_b = st.columns(2)
+            item_name = col_a.text_input("Nombre del Insumo (Papel, Tinta, etc.)")
+            cantidad = col_a.number_input("Cantidad actual", min_value=0.0, step=1.0)
+            unidad = col_b.selectbox("Unidad", ["Hojas", "ml", "Unidades", "Mts", "Resmas"])
+            precio_u = col_b.number_input("Precio Costo USD (Unidad)", min_value=0.0, format="%.2f")
+            
+            if st.form_submit_button("💾 Actualizar Inventario"):
+                if item_name:
+                    c = conectar()
+                    c.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", (item_name, cantidad, unidad, precio_u))
+                    c.commit(); c.close()
+                    st.success(f"✅ Stock de {item_name} actualizado.")
+                    st.rerun()
+
+    st.divider()
+
+    # Visualización y Valorización
+    if not df_inv.empty:
+        # Creamos una copia para mostrar cálculos sin alterar la DB
+        df_display = df_inv.copy()
+        df_display['Inversión USD'] = df_display['cantidad'] * df_display['precio_usd']
+        df_display['Valor BCV'] = df_display['Inversión USD'] * t_bcv
+        df_display['Valor BIN'] = df_display['Inversión USD'] * t_bin
+        
+        st.subheader("📋 Resumen de Existencias")
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        
+        # Totales de inventario
+        st.divider()
+        t1, t2, t3 = st.columns(3)
+        total_usd = df_display['Inversión USD'].sum()
+        t1.metric("Total Invertido (USD)", f"$ {total_usd:,.2f}")
+        t2.info(f"🏦 Valor BCV: {total_usd * t_bcv:,.2f} Bs")
+        t3.warning(f"🔶 Valor Binance: {total_usd * t_bin:,.2f} Bs")
+    else:
+        st.info("Aún no tienes productos en inventario.")
+
+# --- MÓDULOS RESTANTES (PARTE 3) ---
+else:
+    st.info(f"Módulo **{menu}** pendiente por cargar en la siguiente parte.")
