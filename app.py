@@ -44,21 +44,41 @@ elif menu == "📊 Dashboard":
     # Aquí pondremos las barras CMYK más tarde
 
 # --- MÓDULO: ANALIZADOR (TU MOTOR CMYK) ---
+# --- MÓDULO: ANALIZADOR (VERSIÓN MÚLTIPLE) ---
 elif menu == "🎨 Analizador":
-    st.title("🎨 Analizador de Costos Múltiple")
+    st.title("🎨 Analizador de Costos Atómico (Múltiple)")
     
-    # Aquí está el cambio clave
-    archivos = st.file_uploader("Subir diseños", type=["jpg","png","pdf"], accept_multiple_files=True)
+    # 1. El selector ahora acepta varios archivos
+    archivos_subidos = st.file_uploader("Arrastra aquí todos tus diseños", 
+                                        type=["jpg","png","pdf"], 
+                                        accept_multiple_files=True)
     
-    if archivos:
-        for f in archivos:
-            with st.expander(f"Análisis de: {f.name}"):
-                img, res = analizar_cmyk_pro(f) # Tu función que ya funciona
+    if archivos_subidos:
+        st.success(f"Se han cargado {len(archivos_subidos)} archivos.")
+        
+        # 2. Esto hace que el sistema analice uno por uno
+        for f in archivos_subidos:
+            # Usamos un expander para que no se haga una lista infinita hacia abajo
+            with st.expander(f"🖼️ Analizando: {f.name}", expanded=True):
+                img, res = analizar_cmyk_pro(f)
+                
                 if img:
-                    st.image(img, use_container_width=True)
-                    # Aquí el sistema te mostrará el costo de cada una por separado
-                    st.write(f"Costo estimado de tinta para esta imagen...")
-
+                    col_img, col_datos = st.columns([1, 1])
+                    
+                    with col_img:
+                        st.image(img, use_container_width=True)
+                    
+                    with col_datos:
+                        st.write("**Gasto de Tinta Estimado:**")
+                        # Aquí mostramos los porcentajes que calcula tu función
+                        st.write(f"💧 Cian: {res['C']:.2%}")
+                        st.write(f"🌸 Magenta: {res['M']:.2%}")
+                        st.write(f"🟡 Amarillo: {res['Y']:.2%}")
+                        st.write(f"⚫ Negro: {res['K']:.2%}")
+                        
+                        # Cálculo de costo rápido (puedes ajustar el margen aquí)
+                        costo_aprox = (res['C'] + res['M'] + res['Y'] + res['K']) * 0.50 
+                        st.metric("Costo Tinta USD", f"$ {costo_aprox:.4f}")
 # --- MÓDULO: MANUALES ---
 elif menu == "🔍 Manuales":
     st.title("🔍 Biblioteca Técnica")
@@ -66,4 +86,5 @@ elif menu == "🔍 Manuales":
     st.write("Resultados para:", busqueda)
 
 # (Los demás módulos irán apareciendo según los necesites usar hoy)
+
 
