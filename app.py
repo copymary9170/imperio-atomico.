@@ -140,10 +140,8 @@ elif menu == "💰 Ventas":
 elif menu == "📦 Inventario Pro":
     st.title("📦 Inventario y Costos Reales")
     t1, t2, t3 = st.tabs(["📋 Stock Actual", "🛒 Nueva Compra", "✏️ Ajustes Manuales"])
-    
     with t1:
         st.dataframe(df_stock, use_container_width=True)
-    
     with t2:
         with st.form("form_compra"):
             n = st.text_input("Material")
@@ -158,7 +156,6 @@ elif menu == "📦 Inventario Pro":
                 if iva: total_usd *= 1.16
                 total_usd *= (1 + (igtf_banco/100))
                 c_u = total_usd / c
-                
                 if n in df_stock["Material"].values:
                     idx = df_stock.index[df_stock["Material"] == n][0]
                     df_stock.loc[idx, "Costo_Unit_USD"] = c_u
@@ -169,9 +166,30 @@ elif menu == "📦 Inventario Pro":
                 guardar_datos(df_stock, CSV_STOCK)
                 st.success(f"Ingresado. Costo Unitario Real: ${c_u:.4f}")
                 st.rerun()
-
     with t3:
         if not df_stock.empty:
             m = st.selectbox("Seleccionar Material", df_stock["Material"].unique())
             idx = df_stock.index[df_stock["Material"] == m][0]
-            nc = st.number_input("Stock Real en Físico",
+            nc = st.number_input("Stock Real en Físico", value=float(df_stock.loc[idx, "Cantidad"]))
+            nu = st.number_input("Costo Unit. USD Manual", value=float(df_stock.loc[idx, "Costo_Unit_USD"]))
+            nm = st.number_input("Mínimo para Alerta", value=float(df_stock.loc[idx, "Minimo_Alerta"]))
+            if st.button("Actualizar Valores"):
+                df_stock.loc[idx, ["Cantidad", "Costo_Unit_USD", "Minimo_Alerta"]] = [nc, nu, nm]
+                guardar_datos(df_stock, CSV_STOCK)
+                st.success("Ajuste realizado.")
+                st.rerun()
+
+# --- MÓDULO: MANUALES ---
+elif menu == "🔍 Manuales":
+    st.title("🔍 Protocolos del Imperio")
+    hoja = st.text_input("Ingresa Nro de Hoja (ej: 088)")
+    if hoja:
+        if not os.path.exists(CARPETA_MANUALES): os.makedirs(CARPETA_MANUALES)
+        ruta = f"{CARPETA_MANUALES}/{hoja.zfill(3)}.txt"
+        if os.path.exists(ruta):
+            with open(ruta, "r") as f: st.info(f.read())
+        else:
+            txt = st.text_area("Esta hoja no existe. Redactar ahora:")
+            if st.button("Guardar Hoja"):
+                with open(ruta, "w") as f: f.write(txt)
+                st.success("Manual guardado con éxito.")
