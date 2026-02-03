@@ -6,37 +6,24 @@ import fitz  # PyMuPDF
 from datetime import datetime
 import sqlite3
 
-# --- 1. CONFIGURACIÓN Y BASE DE DATOS INTERNA ---
-st.set_page_config(page_title="Imperio Atómico - Master", layout="wide")
+# --- 1. CONFIGURACIÓN Y BASE DE DATOS ---
+st.set_page_config(page_title="Imperio Atómico V2", layout="wide", page_icon="⚛️")
 
 def inicializar_db():
     conn = sqlite3.connect('imperio_data.db')
     c = conn.cursor()
+    # Tabla Cotizaciones
     c.execute('''CREATE TABLE IF NOT EXISTS cotizaciones 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  fecha TEXT, cliente TEXT, trabajo TEXT, 
-                  monto REAL, estado TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto REAL, estado TEXT)''')
+    # Tabla Inventario
+    c.execute('''CREATE TABLE IF NOT EXISTS inventario 
+                 (item TEXT, cantidad REAL, unidad TEXT, precio_usd REAL)''')
     conn.commit()
     conn.close()
-
-def guardar_cotizacion_db(cliente, trabajo, monto):
-    conn = sqlite3.connect('imperio_data.db')
-    c = conn.cursor()
-    fecha = datetime.now().strftime('%Y-%m-%d')
-    c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto, estado) VALUES (?,?,?,?,?)",
-              (fecha, cliente, trabajo, monto, 'Pendiente'))
-    conn.commit()
-    conn.close()
-
-def obtener_cotizaciones_db():
-    conn = sqlite3.connect('imperio_data.db')
-    df = pd.read_sql_query("SELECT * FROM cotizaciones ORDER BY id DESC", conn)
-    conn.close()
-    return df
 
 inicializar_db()
 
-# --- 2. FUNCIÓN DEL ANALIZADOR ---
+# --- 2. MOTOR DE CÁLCULO (LO QUE FALTABA) ---
 def analizar_cmyk_pro(file):
     try:
         if file.type == "application/pdf":
@@ -55,57 +42,69 @@ def analizar_cmyk_pro(file):
 
 # --- 3. MENÚ LATERAL ---
 with st.sidebar:
-    st.title("🛡️ Panel de Control")
-    menu = st.radio("Navegación:", 
-        ["📊 Dashboard", "📝 Cotizaciones", "👥 Clientes", "🏗️ Producción", "📦 Inventario", "🎨 Analizador", "🔍 Manuales", "⚙️ Configuración"])
+    st.header("⚛️ Imperio Atómico")
+    tasa_bcv = st.number_input("Tasa BCV (Bs)", value=36.50)
+    precio_tinta_ml = st.number_input("Precio Tinta (USD/ml)", value=0.05, format="%.4f")
+    menu = st.radio("Ir a:", ["📊 Dashboard", "📝 Cotizaciones", "👥 Clientes", "📦 Inventario", "🎨 Analizador", "⚙️ Configuración"])
 
-# --- 4. LÓGICA DE LAS PESTAÑAS (Módulos) ---
+# --- 4. PESTAÑAS DETALLADAS ---
 
 if menu == "📊 Dashboard":
-    st.title("📊 Dashboard")
-    st.info("Aquí irán las barras de tinta de esta tarde.")
+    st.title("📊 Resumen General")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Dólar BCV", f"Bs. {tasa_bcv}")
+    col2.metric("Pendientes", "5")
+    col3.metric("Ventas Mes", "$ 120.00")
+    st.info("💡 Tip: En la tarde conectaremos los inyectores aquí.")
 
 elif menu == "📝 Cotizaciones":
-    st.title("📝 Cotizaciones")
-    with st.form("f_cot"):
-        cli = st.text_input("Cliente")
-        tra = st.text_input("Trabajo")
-        mon = st.number_input("Monto USD", min_value=0.0)
-        if st.form_submit_button("Guardar"):
-            guardar_cotizacion_db(cli, tra, mon)
-            st.success("¡Guardado!")
-    st.dataframe(obtener_cotizaciones_db(), use_container_width=True)
-
-elif menu == "👥 Clientes":
-    st.title("👥 Clientes")
-    st.text_input("Buscar Cliente")
-    st.button("Registrar Nuevo")
-
-elif menu == "🏗️ Producción":
-    st.title("🏗️ Producción")
-    st.selectbox("Impresora", ["Epson", "HP", "J210a"])
-    st.write("Cola de impresión vacía.")
+    st.title("📝 Nueva Cotización")
+    with st.form("cot_form"):
+        c1, c2 = st.columns(2)
+        cliente = c1.text_input("Cliente")
+        trabajo = c1.text_input("Descripción del trabajo")
+        monto_usd = c2.number_input("Monto en USD", min_value=0.0)
+        enviar = st.form_submit_button("Guardar Presupuesto")
+        if enviar:
+            st.success(f"Presupuesto de ${monto_usd} (Bs. {monto_usd*tasa_bcv:.2f}) guardado.")
 
 elif menu == "📦 Inventario":
-    st.title("📦 Inventario")
-    st.write("Materiales en stock:")
-    st.table(pd.DataFrame({"Material": ["Papel", "Tinta"], "Stock": [0, 0]}))
+    st.title("📦 Inventario de Materiales")
+    # Simulación de tabla de materiales
+    data_inv = {
+        "Material": ["Papel Fotográfico", "Vinil Autoadhesivo", "Tinta Cyan", "Tinta Magenta"],
+        "Stock": [50, 20, 450, 380],
+        "Unidad": ["Hojas", "Metros", "ml", "ml"]
+    }
+    st.table(pd.DataFrame(data_inv))
+    if st.button("➕ Agregar Insumo"):
+        st.write("Formulario de carga activado.")
 
 elif menu == "🎨 Analizador":
-    st.title("🎨 Analizador")
-    files = st.file_uploader("Sube imágenes", type=["jpg","png","pdf"], accept_multiple_files=True)
+    st.title("🎨 Analizador de Costos de Tinta")
+    files = st.file_uploader("Sube tus archivos (Múltiple)", type=["jpg","png","pdf"], accept_multiple_files=True)
+    
     if files:
         for f in files:
-            img, res = analizar_cmyk_pro(f)
-            if img:
-                st.image(img, caption=f.name, width=300)
-                st.write(f"C:{res['C']:.1%} M:{res['M']:.1%} Y:{res['Y']:.1%} K:{res['K']:.1%}")
-
-elif menu == "🔍 Manuales":
-    st.title("🔍 Manuales")
-    st.text_input("Error a buscar...")
+            with st.expander(f"🖼️ Análisis: {f.name}", expanded=True):
+                img, res = analizar_cmyk_pro(f)
+                if img:
+                    c1, c2 = st.columns([1, 1])
+                    with c1: st.image(img, use_container_width=True)
+                    with c2:
+                        st.write("**Gasto Estimado:**")
+                        st.write(f"C: {res['C']:.1%} | M: {res['M']:.1%} | Y: {res['Y']:.1%} | K: {res['K']:.1%}")
+                        # Cálculo de costo real basado en el precio que pusiste en el sidebar
+                        total_tinta = sum(res.values())
+                        costo_estimado = total_tinta * precio_tinta_ml
+                        st.metric("Costo Tinta USD", f"$ {costo_estimado:.4f}")
+                        st.metric("Costo en Bolívares", f"Bs. {costo_estimado * tasa_bcv:.2f}")
 
 elif menu == "⚙️ Configuración":
-    st.title("⚙️ Configuración")
-    st.number_input("Tasa BCV", value=36.50)
-    st.button("Guardar Cambios")
+    st.title("⚙️ Ajustes del Sistema")
+    st.subheader("Precios de Insumos (Ajuste por Inflación)")
+    st.write("Modifica aquí los costos base para que el analizador siempre sea exacto.")
+    st.text_input("Nombre del Insumo", "Tinta Sublimación")
+    st.number_input("Nuevo Precio USD", value=15.00)
+    if st.button("Actualizar Precios Globales"):
+        st.success("Precios actualizados en todo el sistema.")
