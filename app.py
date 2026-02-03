@@ -6,31 +6,33 @@ import numpy as np
 from PIL import Image
 import fitz
 
-# --- 1. MOTOR DE BASE DE DATOS (Con Reparación de Columnas) ---
+# --- 1. MOTOR DE BASE DE DATOS (Reparador de Tasas) ---
 def conectar():
     return sqlite3.connect('imperio_data.db', check_same_thread=False)
 
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
-    # Tablas base
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (item TEXT PRIMARY KEY, cantidad REAL, unidad TEXT, precio_usd REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bs REAL, estado TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bcv REAL, monto_binance REAL, estado TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     
-    # --- REPARADOR DE EMERGENCIA ---
-    # Si la tabla cotizaciones existe pero es vieja, le faltará monto_bs. La agregamos:
-    try:
-        c.execute('ALTER TABLE cotizaciones ADD COLUMN monto_bs REAL')
-    except:
-        pass # Si ya existe, no hace nada
+    # REPARADOR: Asegurar que existan ambas columnas de tasa
+    columnas = [('monto_bcv', 'REAL'), ('monto_binance', 'REAL')]
+    for col, tipo in columnas:
+        try:
+            c.execute(f'ALTER TABLE cotizaciones ADD COLUMN {col} {tipo}')
+        except: pass
         
+    # Valores por defecto de las tasas
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_bcv', 36.50)")
+    c.execute("INSERT OR IGNORE INTO configuracion VALUES ('tasa_binance', 42.00)")
     c.execute("INSERT OR IGNORE INTO configuracion VALUES ('costo_tinta_ml', 0.05)")
     conn.commit()
     conn.close()
 
+# --- 2. LOGICA DE ANALISIS ---
 def analizar_cmyk(file):
     try:
         if file.type == "application/pdf":
@@ -47,8 +49,8 @@ def analizar_cmyk(file):
         return img, {"C": c.mean(), "M": m.mean(), "Y": y.mean(), "K": k.mean()}
     except: return None, None
 
-# --- 2. CONFIGURACIÓN Y LOGIN ---
-st.set_page_config(page_title="Imperio Atómico OS", layout="wide")
+# --- 3. INICIO Y SEGURIDAD ---
+st.set_page_config(page_title="Imperio Atómico - Tasas Duales", layout="wide")
 inicializar_sistema()
 
 if 'login' not in st.session_state: st.session_state.login = False
@@ -62,52 +64,40 @@ if not st.session_state.login:
             st.rerun()
     st.stop()
 
-# Carga de Precios Actuales
+# Carga de Tasas Reales
 conn = conectar()
-try:
-    tasa_val = pd.read_sql_query("SELECT valor FROM configuracion WHERE parametro='tasa_bcv'", conn).iloc[0,0]
-    tinta_val = pd.read_sql_query("SELECT valor FROM configuracion WHERE parametro='costo_tinta_ml'", conn).iloc[0,0]
-except:
-    tasa_val, tinta_val = 36.50, 0.05
+conf = pd.read_sql_query("SELECT * FROM configuracion", conn).set_index('parametro')
+t_bcv = conf.loc['tasa_bcv', 'valor']
+t_bin = conf.loc['tasa_binance', 'valor']
+t_tinta = conf.loc['costo_tinta_ml', 'valor']
 conn.close()
 
-# --- 3. MENÚ LATERAL ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
-    st.metric("Tasa Actual", f"{tasa_val} Bs")
+    st.info(f"🏦 **BCV:** {t_bcv} Bs\n\n🔶 **Binance:** {t_bin} Bs")
+    st.divider()
     menu = st.radio("Módulos", ["📊 Dashboard", "👥 Clientes", "📝 Cotizaciones", "📦 Inventario", "🎨 Analizador", "🔍 Manuales", "⚙️ Configuración"])
-    if st.button("Cerrar Sesión"):
+    if st.button("🚪 Cerrar Sesión"):
         st.session_state.login = False
         st.rerun()
 
-# --- 4. MÓDULOS ---
+# --- 5. MODULOS ---
 
 if menu == "📊 Dashboard":
-    st.title("📊 Estado Financiero")
-    conn = conectar()
-    df_cots = pd.read_sql_query("SELECT * FROM cotizaciones", conn)
-    conn.close()
-    
+    st.title("📊 Resumen General")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Dólar BCV", f"{tasa_val} Bs")
-    if not df_cots.empty:
-        # Usamos fillna(0) por si hay registros viejos sin monto
-        total_usd = df_cots['monto_usd'].fillna(0).sum()
-        c2.metric("Total Cotizado (USD)", f"$ {total_usd:,.2f}")
-        c3.metric("Total en Bolívares", f"{total_usd * tasa_val:,.2f} Bs")
-    
-    st.divider()
-    st.subheader("Últimas Cotizaciones")
-    st.dataframe(df_cots.tail(10), use_container_width=True)
+    c1.metric("Tasa BCV", f"{t_bcv} Bs")
+    c2.metric("Tasa Binance", f"{t_bin} Bs")
+    c3.metric("Diferencia", f"{round(t_bin - t_bcv, 2)} Bs")
 
 elif menu == "👥 Clientes":
-    st.title("👥 Gestión de Clientes")
-    with st.form("f_cli"):
+    st.title("👥 Clientes")
+    with st.form("fc"):
         n, w = st.text_input("Nombre"), st.text_input("WhatsApp")
         if st.form_submit_button("Guardar"):
             c = conectar(); c.execute("INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)", (n, w)); c.commit(); c.close()
-            st.success("Registrado")
-            st.rerun()
+            st.success("Guardado"); st.rerun()
     bus = st.text_input("🔍 Buscar")
     c = conectar(); df = pd.read_sql_query(f"SELECT * FROM clientes WHERE nombre LIKE '%{bus}%'", c); c.close()
     st.dataframe(df, use_container_width=True)
@@ -120,57 +110,45 @@ elif menu == "📝 Cotizaciones":
 
     with st.form("f_cot"):
         cli = st.selectbox("Cliente", ["--"] + lista_clis)
-        trab = st.text_input("Trabajo")
-        m_usd = st.number_input("Precio USD", min_value=0.0)
-        est = st.selectbox("Estado", ["Pendiente", "Pagado"])
-        if st.form_submit_button("💾 Guardar"):
+        trab = st.text_input("Descripción del Trabajo")
+        m_usd = st.number_input("Precio en USD", min_value=0.0)
+        
+        st.write(f"💵 **Cobro BCV:** {round(m_usd * t_bcv, 2)} Bs")
+        st.write(f"🔶 **Cobro Binance:** {round(m_usd * t_bin, 2)} Bs")
+        
+        if st.form_submit_button("💾 Guardar Cotización"):
             if cli != "--":
-                m_bs = m_usd * tasa_val
                 c = conectar()
-                c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto_usd, monto_bs, estado) VALUES (?,?,?,?,?,?)",
-                          (datetime.now().strftime("%d/%m/%Y"), cli, trab, m_usd, m_bs, est))
+                c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto_usd, monto_bcv, monto_binance, estado) VALUES (?,?,?,?,?,?,?)",
+                          (datetime.now().strftime("%d/%m/%Y"), cli, trab, m_usd, m_usd*t_bcv, m_usd*t_bin, "Pendiente"))
                 c.commit(); c.close()
-                st.success("Cotización guardada")
+                st.success("✅ Cotización Registrada")
                 st.rerun()
-
-elif menu == "📦 Inventario":
-    st.title("📦 Inventario")
-    with st.form("f_inv"):
-        it = st.text_input("Item")
-        ca = st.number_input("Cant")
-        un = st.selectbox("Unid", ["ml", "Hojas", "Unid"])
-        pr = st.number_input("Precio USD")
-        if st.form_submit_button("Actualizar"):
-            c = conectar(); c.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", (it, ca, un, pr)); c.commit(); c.close()
-            st.rerun()
-    c = conectar(); st.dataframe(pd.read_sql_query("SELECT * FROM inventario", c), use_container_width=True); c.close()
 
 elif menu == "🎨 Analizador":
     st.title("🎨 Analizador Atómico")
-    imp = st.selectbox("Impresora", ["Epson L1250", "HP Smart Tank", "J210a"])
-    f = st.file_uploader("Subir archivos", accept_multiple_files=True)
+    f = st.file_uploader("Diseños", accept_multiple_files=True)
     if f:
         for file in f:
             img, res = analizar_cmyk(file)
             if img:
                 with st.expander(f"Resultado: {file.name}"):
+                    costo = sum(res.values()) * t_tinta
                     st.image(img, width=200)
-                    costo = sum(res.values()) * tinta_val
-                    st.write(f"Costo: **${costo:.4f}** / **{costo*tasa_val:.2f} Bs**")
-
-elif menu == "🔍 Manuales":
-    st.title("🔍 Manuales Técnicos")
-    with st.expander("🛠️ Reset Epson"): st.write("Instrucciones de reset...")
+                    st.write(f"Costo: ${costo:.4f}")
+                    st.write(f"BCV: {round(costo*t_bcv, 2)} Bs | Binance: {round(costo*t_bin, 2)} Bs")
 
 elif menu == "⚙️ Configuración":
-    st.title("⚙️ Ajustes de Inflación")
+    st.title("⚙️ Centro de Inflación")
     with st.form("f_conf"):
-        nt = st.number_input("Tasa BCV", value=tasa_val)
-        ni = st.number_input("Precio Tinta ml", value=tinta_val, format="%.4f")
-        if st.form_submit_button("Guardar"):
+        nbcv = st.number_input("Tasa BCV Hoy", value=t_bcv)
+        nbin = st.number_input("Tasa Binance Hoy", value=t_bin)
+        ntin = st.number_input("Precio Tinta (USD/ml)", value=t_tinta, format="%.4f")
+        if st.form_submit_button("Actualizar Tasas"):
             c = conectar()
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (nt,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='costo_tinta_ml'", (ni,))
+            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (nbcv,))
+            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_binance'", (nbin,))
+            c.execute("UPDATE configuracion SET valor=? WHERE parametro='costo_tinta_ml'", (ntin,))
             c.commit(); c.close()
-            st.success("Actualizado")
+            st.success("Tasas actualizadas con éxito")
             st.rerun()
