@@ -27,13 +27,15 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 2. GESTIÓN DE DATOS ---
+# --- 2. GESTIÓN DE DATOS (Bases de datos en CSV) ---
 CSV_VENTAS = "registro_ventas_088.csv"
 CSV_STOCK = "stock_actual.csv"
+CSV_CLIENTES = "clientes_imperio.csv" # <-- Nuevo: Base de datos de clientes
 CARPETA_MANUALES = "manuales"
 
 COL_STOCK = ["Material", "Cantidad", "Unidad", "Costo_Unit_USD", "Minimo_Alerta"]
 COL_VENTAS = ["Fecha", "Cliente", "Insumo", "Monto_USD", "Comisiones_USD", "Ganancia_Real_USD", "Responsable"]
+COL_CLIENTES = ["Nombre", "WhatsApp", "Procedencia", "Fecha_Registro"] # <-- Nuevo: Columnas de clientes
 
 def cargar_datos(archivo, columnas):
     try:
@@ -49,8 +51,10 @@ def cargar_datos(archivo, columnas):
 def guardar_datos(df, archivo):
     df.to_csv(archivo, index=False)
 
+# Carga inicial de datos
 df_stock = cargar_datos(CSV_STOCK, COL_STOCK)
 df_ventas = cargar_datos(CSV_VENTAS, COL_VENTAS)
+df_clientes = cargar_datos(CSV_CLIENTES, COL_CLIENTES)
 
 # --- 3. MOTOR CMYK ---
 def analizar_cmyk_pro(img_pil):
@@ -68,10 +72,53 @@ def analizar_cmyk_pro(img_pil):
     }
 
 # --- 4. NAVEGACIÓN ---
-menu = st.sidebar.radio("Menú:", ["📊 Dashboard", "🎨 Analizador Masivo", "💰 Ventas", "📦 Inventario Pro", "🔍 Manuales"])
+# He añadido "👥 Clientes" al menú
+menu = st.sidebar.radio("Menú:", ["📊 Dashboard", "👥 Clientes", "🎨 Analizador Masivo", "💰 Ventas", "📦 Inventario Pro", "🔍 Manuales"])
+
+# --- MÓDULO: DASHBOARD ---
+if menu == "📊 Dashboard":
+    st.title("📊 Resumen Económico")
+    if not df_ventas.empty:
+        for c in ["Monto_USD", "Comisiones_USD", "Ganancia_Real_USD"]:
+            df_ventas[c] = pd.to_numeric(df_ventas[c], errors='coerce').fillna(0)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Ventas Brutas", f"$ {df_ventas['Monto_USD'].sum():,.2f}")
+        c2.metric("Comisiones Pagadas", f"$ {df_ventas['Comisiones_USD'].sum():,.2f}", delta_color="inverse")
+        c3.metric("Utilidad Real", f"$ {df_ventas['Ganancia_Real_USD'].sum():,.2f}")
+        st.divider()
+        st.subheader("⚠️ Alertas de Stock")
+        bajo = df_stock[pd.to_numeric(df_stock["Cantidad"]) <= pd.to_numeric(df_stock["Minimo_Alerta"])]
+        if not bajo.empty:
+            st.error("⚠️ Reponer: " + ", ".join(bajo["Material"].tolist()))
+    else:
+        st.info("Sin registros de ventas aún.")
+
+# --- MÓDULO: CLIENTES (NUEVO) ---
+elif menu == "👥 Clientes":
+    st.title("👥 Gestión de Clientes")
+    t1, t2 = st.tabs(["➕ Registrar Cliente", "📋 Cartera de Clientes"])
+    
+    with t1:
+        with st.form("form_clientes"):
+            nom = st.text_input("Nombre o Razón Social")
+            tel = st.text_input("WhatsApp / Teléfono")
+            proc = st.selectbox("¿Cómo nos contactó?", ["Instagram", "WhatsApp", "Recomendado", "TikTok", "Publicidad Directa"])
+            if st.form_submit_button("Guardar Cliente"):
+                if nom:
+                    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+                    nuevo_c = pd.DataFrame([[nom, tel, proc, fecha_hoy]], columns=COL_CLIENTES)
+                    df_clientes = pd.concat([df_clientes, nuevo_c], ignore_index=True)
+                    guardar_datos(df_clientes, CSV_CLIENTES)
+                    st.success(f"¡{nom} registrado con éxito!")
+                    st.rerun()
+                else:
+                    st.warning("El nombre es obligatorio.")
+    
+    with t2:
+        st.dataframe(df_clientes, use_container_width=True)
 
 # --- MÓDULO: ANALIZADOR ---
-if menu == "🎨 Analizador Masivo":
+elif menu == "🎨 Analizador Masivo":
     st.title("🎨 Analizador Multitarea")
     archivos = st.file_uploader("Subir archivos", type=["jpg", "png", "jpeg", "pdf"], accept_multiple_files=True)
     if archivos:
@@ -94,34 +141,22 @@ if menu == "🎨 Analizador Masivo":
         df_res["Total %"] = df_res["C"] + df_res["M"] + df_res["Y"] + df_res["K"]
         st.dataframe(df_res.style.format("{:.1f}%", subset=["C", "M", "Y", "K", "Total %"]), use_container_width=True)
 
-# --- MÓDULO: DASHBOARD ---
-elif menu == "📊 Dashboard":
-    st.title("📊 Resumen Económico")
-    if not df_ventas.empty:
-        for c in ["Monto_USD", "Comisiones_USD", "Ganancia_Real_USD"]:
-            df_ventas[c] = pd.to_numeric(df_ventas[c], errors='coerce').fillna(0)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Ventas Brutas", f"$ {df_ventas['Monto_USD'].sum():,.2f}")
-        c2.metric("Comisiones Pagadas", f"$ {df_ventas['Comisiones_USD'].sum():,.2f}", delta_color="inverse")
-        c3.metric("Utilidad Real", f"$ {df_ventas['Ganancia_Real_USD'].sum():,.2f}")
-        st.divider()
-        st.subheader("⚠️ Alertas de Stock")
-        bajo = df_stock[pd.to_numeric(df_stock["Cantidad"]) <= pd.to_numeric(df_stock["Minimo_Alerta"])]
-        if not bajo.empty:
-            st.error("⚠️ Reponer: " + ", ".join(bajo["Material"].tolist()))
-    else:
-        st.info("Sin registros de ventas aún.")
-
 # --- MÓDULO: VENTAS ---
 elif menu == "💰 Ventas":
     st.title("💰 Registro de Venta")
     if not df_stock.empty:
         with st.form("form_ventas"):
-            cli = st.text_input("Cliente")
+            # Ahora seleccionamos clientes de nuestra lista
+            if not df_clientes.empty:
+                cli = st.selectbox("Cliente", df_clientes["Nombre"].unique())
+            else:
+                cli = st.text_input("Cliente (No hay lista aún)")
+                
             ins = st.selectbox("Material usado", df_stock["Material"].unique())
             can = st.number_input("Cantidad usada", min_value=0.01)
             mon = st.number_input("Monto Cobrado (USD)", min_value=0.0)
             com = st.number_input("% Comisión/Punto/IGTF", value=3.0)
+            
             if st.form_submit_button("Guardar Venta"):
                 costo_u = float(df_stock.loc[df_stock["Material"] == ins, "Costo_Unit_USD"].values[0])
                 c_usd = mon * (com/100)
@@ -129,8 +164,12 @@ elif menu == "💰 Ventas":
                 nueva = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), cli, ins, mon, c_usd, gan, "Socia"]], columns=COL_VENTAS)
                 df_ventas = pd.concat([df_ventas, nueva], ignore_index=True)
                 guardar_datos(df_ventas, CSV_VENTAS)
-                df_stock.loc[df_stock["Material"] == ins, "Cantidad"] -= can
+                
+                # Descontar del stock
+                idx_stock = df_stock.index[df_stock["Material"] == ins][0]
+                df_stock.at[idx_stock, "Cantidad"] -= can
                 guardar_datos(df_stock, CSV_STOCK)
+                
                 st.success(f"Venta registrada. Ganancia: ${gan:.2f}")
                 st.rerun()
     else:
@@ -182,14 +221,4 @@ elif menu == "📦 Inventario Pro":
 # --- MÓDULO: MANUALES ---
 elif menu == "🔍 Manuales":
     st.title("🔍 Protocolos del Imperio")
-    hoja = st.text_input("Ingresa Nro de Hoja (ej: 088)")
-    if hoja:
-        if not os.path.exists(CARPETA_MANUALES): os.makedirs(CARPETA_MANUALES)
-        ruta = f"{CARPETA_MANUALES}/{hoja.zfill(3)}.txt"
-        if os.path.exists(ruta):
-            with open(ruta, "r") as f: st.info(f.read())
-        else:
-            txt = st.text_area("Esta hoja no existe. Redactar ahora:")
-            if st.button("Guardar Hoja"):
-                with open(ruta, "w") as f: f.write(txt)
-                st.success("Manual guardado con éxito.")
+    hoja = st.text
