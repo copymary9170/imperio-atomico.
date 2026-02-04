@@ -15,6 +15,7 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bcv REAL, monto_binance REAL, estado TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     
+    # Parámetros base (Aseguramos que existan todos)
     params = [('tasa_bcv', 36.50), ('tasa_binance', 42.00), ('iva_perc', 0.16), 
               ('igtf_perc', 0.03), ('banco_perc', 0.02), ('costo_tinta_ml', 0.05)]
     for p, v in params:
@@ -56,41 +57,56 @@ with st.sidebar:
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
     
-    with st.expander("📥 Registrar Nueva Compra"):
+    with st.expander("📥 Registrar Nueva Compra (Paquetes/Lotes)"):
         with st.form("form_inv"):
-            c_i, c_t, c_p = st.columns([2, 1, 1])
-            with c_i:
+            c_info, c_tasa, c_imp = st.columns([2, 1, 1])
+            with c_info:
                 it_nombre = st.text_input("Nombre del Producto")
-                it_cant = st.number_input("¿Unidades del lote?", min_value=1, value=500, step=1)
+                it_cant = st.number_input("¿Unidades que trae el lote?", min_value=1, value=500, step=1)
                 it_unid = st.selectbox("Unidad", ["Hojas", "ml", "Unidad", "Resma"])
-                precio_lote = st.number_input("Precio Total (USD)", min_value=0.0, format="%.2f")
-            with c_t:
-                tipo_t = st.radio("Tasa compra:", ["Binance", "BCV"])
+                precio_lote = st.number_input("Precio TOTAL Lote (USD)", min_value=0.0, format="%.2f")
+            with c_tasa:
+                st.markdown("### 💱 Tasa")
+                tipo_t = st.radio("Tasa de compra:", ["Binance", "BCV"])
                 tasa_a = t_bin if tipo_t == "Binance" else t_bcv
-            with c_p:
+            with c_imp:
+                st.markdown("### 🧾 Impuestos")
                 p_iva = st.checkbox(f"IVA ({iva*100}%)", value=True)
                 p_gtf = st.checkbox(f"GTF ({igtf*100}%)", value=True)
+                p_banco = st.checkbox(f"Banco ({banco*100}%)", value=False)
 
-            if st.form_submit_button("🚀 Cargar"):
+            if st.form_submit_button("🚀 Cargar a Inventario"):
                 if it_nombre:
-                    imp = (iva if p_iva else 0) + (igtf if p_gtf else 0)
-                    costo_u = (precio_lote * (1 + imp)) / it_cant
+                    imp_t = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
+                    costo_u = (precio_lote * (1 + imp_t)) / it_cant
                     c = conectar()
                     c.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", (it_nombre, float(it_cant), it_unid, costo_u))
-                    c.commit(); c.close(); st.success("✅ Cargado"); st.rerun()
+                    c.commit(); c.close()
+                    st.success(f"✅ Guardado: {it_nombre}")
+                    st.rerun()
 
+    st.divider()
     if not df_inv.empty:
-        moneda = st.radio("Ver en:", ["USD", "BCV", "Binance"], horizontal=True)
+        moneda = st.radio("Ver precios en:", ["USD", "BCV", "Binance"], horizontal=True)
         df_audit = df_inv.copy()
         df_audit.columns = ['Producto', 'Stock', 'Unidad', 'Costo Unitario']
         f = t_bcv if moneda == "BCV" else (t_bin if moneda == "Binance" else 1.0)
         sim = "Bs" if moneda != "USD" else "$"
-        df_audit['Costo Unit.'] = df_audit['Costo Unitario'] * f
-        df_audit['Inversión'] = (df_audit['Stock'] * df_audit['Costo Unitario']) * f
         
-        st.dataframe(df_audit[['Producto', 'Stock', 'Unidad', 'Costo Unit.', 'Inversión']].style.format({
-            'Stock': '{:,.0f}', 'Costo Unit.': f"{sim} {{:.4f}}", 'Inversión': f"{sim} {{:.2f}}"
+        df_audit['Costo Unit.'] = df_audit['Costo Unitario'] * f
+        df_audit['Inversión Stock'] = (df_audit['Stock'] * df_audit['Costo Unitario']) * f
+        
+        st.dataframe(df_audit[['Producto', 'Stock', 'Unidad', 'Costo Unit.', 'Inversión Stock']].style.format({
+            'Stock': '{:,.0f}', 'Costo Unit.': f"{sim} {{:.4f}}", 'Inversión Stock': f"{sim} {{:.2f}}"
         }), use_container_width=True, hide_index=True)
+        
+        # --- SECCIÓN PARA CORREGIR ERRORES ---
+        st.divider()
+        with st.expander("🗑️ Borrar o Corregir Insumos"):
+            prod_b = st.selectbox("Selecciona producto a eliminar:", df_inv['item'].tolist())
+            if st.button("❌ Eliminar Producto"):
+                c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (prod_b,))
+                c.commit(); c.close(); st.warning(f"Producto {prod_b} eliminado."); st.rerun()
 
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
@@ -103,53 +119,58 @@ elif menu == "📝 Cotizaciones":
     with st.form("form_cot"):
         c1, c2 = st.columns(2)
         cli = c1.selectbox("Cliente", ["--"] + clis)
-        trab = c1.text_input("Descripción")
-        mat = c2.selectbox("Material", ["--"] + inv_l['item'].tolist())
-        cant_m = c2.number_input("Cantidad", min_value=0, step=1)
-        monto_f = st.number_input("Precio Final (USD)", min_value=0.0)
-        estado = st.selectbox("Estado", ["Pendiente", "Pagado"])
+        trab = c1.text_input("Trabajo")
+        mat = c2.selectbox("Material a usar", ["--"] + inv_l['item'].tolist())
+        cant_m = c2.number_input("Cantidad (unidades completas)", min_value=0, step=1)
+        monto_f = st.number_input("Precio Final a Cobrar (USD)", min_value=0.0)
+        est = st.selectbox("Estado", ["Pendiente", "Pagado"])
         
-        if st.form_submit_button("📋 Guardar"):
-            if cli != "--":
+        if st.form_submit_button("📋 Guardar Cotización"):
+            if cli != "--" and monto_f > 0:
                 c = conectar()
                 c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto_usd, monto_bcv, monto_binance, estado) VALUES (?,?,?,?,?,?,?)",
-                          (datetime.now().strftime("%d/%m/%Y"), cli, trab, monto_f, monto_f*t_bcv, monto_f*t_bin, estado))
+                          (datetime.now().strftime("%d/%m/%Y"), cli, trab, monto_f, monto_f*t_bcv, monto_f*t_bin, est))
                 if mat != "--":
                     c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_m, mat))
-                c.commit(); c.close(); st.rerun()
+                c.commit(); c.close(); st.success("✅ Guardado"); st.rerun()
 
-    st.subheader("📑 Historial a Color")
+    st.subheader("📑 Historial de Movimientos")
     if not df_cots_global.empty:
-        def resaltar_estado(val):
+        def color_est(val):
             color = '#ff4b4b' if val == 'Pendiente' else '#28a745'
             return f'background-color: {color}; color: white; font-weight: bold'
-        
-        st.dataframe(df_cots_global.sort_values('id', ascending=False).style.applymap(resaltar_estado, subset=['estado']), use_container_width=True)
+        st.dataframe(df_cots_global.sort_values('id', ascending=False).style.applymap(color_est, subset=['estado']), use_container_width=True)
 
 # --- 6. DASHBOARD ---
 elif menu == "📊 Dashboard":
     st.title("📊 Resumen del Imperio")
     if not df_cots_global.empty:
         c1, c2, c3 = st.columns(3)
-        ingreso = df_cots_global['monto_usd'].sum()
-        c1.metric("Ingresos Totales", f"$ {ingreso:.2f}")
-        c2.metric("En Bs (BCV)", f"{ingreso * t_bcv:.2f} Bs")
+        total = df_cots_global['monto_usd'].sum()
+        c1.metric("Ingresos Totales", f"$ {total:.2f}")
+        c2.metric("Total en Bs (BCV)", f"{total * t_bcv:.2f} Bs")
         c3.metric("Cotizaciones", len(df_cots_global))
-        
-        st.subheader("📈 Ventas por Fecha")
+        st.subheader("📈 Ventas Recientes")
         df_g = df_cots_global.groupby('fecha')['monto_usd'].sum()
         st.area_chart(df_g)
     else:
-        st.info("Sin ventas aún.")
+        st.info("No hay datos registrados.")
 
 # --- 7. CONFIGURACIÓN ---
 elif menu == "⚙️ Configuración":
-    st.title("⚙️ Tasas")
+    st.title("⚙️ Tasas e Impuestos")
     with st.form("f_conf"):
-        n_bcv = st.number_input("Tasa BCV", value=t_bcv)
-        n_bin = st.number_input("Tasa Binance", value=t_bin)
-        if st.form_submit_button("💾 Guardar"):
+        c1, c2 = st.columns(2)
+        n_bcv = c1.number_input("Tasa BCV", value=t_bcv)
+        n_bin = c1.number_input("Tasa Binance", value=t_bin)
+        n_iva = c2.number_input("IVA (0.16)", value=iva)
+        n_igtf = c2.number_input("IGTF (0.03)", value=igtf)
+        n_banco = c2.number_input("Banco (0.02)", value=banco)
+        if st.form_submit_button("💾 Guardar Cambios"):
             c = conectar()
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (n_bcv,))
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_binance'", (n_bin,))
-            c.commit(); c.close(); st.success("Actualizado"); st.rerun()
+            c.execute("UPDATE configuracion SET valor=? WHERE parametro='iva_perc'", (n_iva,))
+            c.execute("UPDATE configuracion SET valor=? WHERE parametro='igtf_perc'", (n_igtf,))
+            c.execute("UPDATE configuracion SET valor=? WHERE parametro='banco_perc'", (n_banco,))
+            c.commit(); c.close(); st.success("✅ Configuración actualizada"); st.rerun()
