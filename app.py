@@ -153,6 +153,75 @@ elif menu == "⚙️ Configuración":
 
 else:
     st.info("Módulo en construcción (Próxima parte).")
+# --- 5. LÓGICA DE COTIZACIONES (INTEGRADA CON INVENTARIO) ---
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Generador de Cotizaciones")
+    
+    # 1. Traer lista de clientes y materiales
+    c = conectar()
+    clis = pd.read_sql_query("SELECT nombre FROM clientes", c)['nombre'].tolist()
+    inv_data = pd.read_sql_query("SELECT item, precio_usd, unidad FROM inventario", c)
+    c.close()
+
+    with st.form("form_cotizacion"):
+        c1, c2 = st.columns(2)
+        cliente_sel = c1.selectbox("Selecciona el Cliente", ["--"] + clis)
+        trabajo = c1.text_input("Descripción del trabajo (Ej: 100 Tarjetas de Presentación)")
+        
+        # Selección de material del inventario
+        material_sel = c2.selectbox("Material a usar", ["--"] + inv_data['item'].tolist())
+        cantidad_material = c2.number_input("Cantidad de material a usar", min_value=0.0, step=1.0)
+        
+        # Precio de Venta
+        st.divider()
+        st.markdown("### 💰 Definición de Precio")
+        col_p1, col_p2 = st.columns(2)
+        
+        # Sugerencia de costo base
+        if material_sel != "--":
+            costo_u = inv_data[inv_data['item'] == material_sel]['precio_usd'].values[0]
+            costo_total_material = costo_u * cantidad_material
+            col_p1.info(f"Costo base del material: ${costo_total_material:.4f}")
+        
+        monto_final_usd = col_p2.number_input("Precio Final a Cobrar (USD)", min_value=0.0, format="%.2f")
+        metodo_pago = col_p2.selectbox("Método de Pago", ["Pendiente", "Pagado (BCV)", "Pagado (Binance)", "Pagado (Zelle/USD)"])
+
+        if st.form_submit_button("📋 Generar y Guardar Cotización"):
+            if cliente_sel != "--" and monto_final_usd > 0:
+                # Determinar estado
+                estado = "Pagado" if "Pagado" in metodo_pago else "Pendiente"
+                
+                c = conectar()
+                c.execute("""INSERT INTO cotizaciones 
+                          (fecha, cliente, trabajo, monto_usd, monto_bcv, monto_binance, estado) 
+                          VALUES (?,?,?,?,?,?,?)""",
+                          (datetime.now().strftime("%d/%m/%Y"), cliente_sel, trabajo, 
+                           monto_final_usd, monto_final_usd * t_bcv, monto_final_usd * t_bin, estado))
+                
+                # RESTAR DEL INVENTARIO (Opcional: puedes activarlo si quieres que descuente)
+                if material_sel != "--" and cantidad_material > 0:
+                    c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", 
+                              (cantidad_material, material_sel))
+                
+                c.commit(); c.close()
+                st.success(f"✅ Cotización guardada para {cliente_sel}")
+                st.rerun()
+
+    st.divider()
+    
+    # --- HISTORIAL DE VENTAS ---
+    st.subheader("📑 Últimos Movimientos")
+    if not df_cots.empty:
+        # Filtro rápido
+        estado_filtro = st.segmented_control("Ver por estado:", ["Todos", "Pendiente", "Pagado"], default="Todos")
+        
+        df_hist = df_cots.copy()
+        if estado_filtro != "Todos":
+            df_hist = df_hist[df_hist['estado'] == estado_filtro]
+            
+        st.dataframe(df_hist.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
+    else:
+        st.info("Aún no hay cotizaciones registradas.")
 
 
 
