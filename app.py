@@ -156,39 +156,38 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado y Registrado en Historial: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA TOTALMENTE CORREGIDA ---
+    # --- TABLA DE AUDITORÍA SIN ERRORES ---
     st.divider()
     if not df_inv.empty:
-        # 1. Filtramos primero por la búsqueda
         df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
         
         moneda = st.radio("Ver precios en:", ["USD", "BCV", "Binance"], horizontal=True)
         
-        # 2. Definimos la tasa correctamente
-        # Si es USD, la tasa es 1. Si es BCV/Binance, usamos la variable de configuración
-        f_tasa = 1.0
+        # Asignamos la tasa manualmente para evitar errores de pandas
         if moneda == "BCV":
-            f_tasa = t_bcv
+            tasa_actual = t_bcv
         elif moneda == "Binance":
-            f_tasa = t_bin
+            tasa_actual = t_bin
+        else:
+            tasa_actual = 1.0
             
-        simbolo = "Bs" if moneda != "USD" else "$"
+        sim = "Bs" if moneda != "USD" else "$"
         
-        # 3. CALCULOS REALES (Asegurando la multiplicación)
-        # Costo de 1 unidad en la moneda elegida
-        df_inv_filtrado['Costo Unit.'] = df_inv_filtrado['precio_usd'] * f_tasa
+        # --- LOS CÁLCULOS LÓGICOS ---
+        # 1. Costo de UNA sola unidad (Hoja/ml)
+        df_inv_filtrado['Unitario'] = df_inv_filtrado['precio_usd'] * tasa_actual
         
-        # Inversión Total = (Cantidad de hojas * Precio Unitario USD) * Tasa
-        df_inv_filtrado['Inversión Total'] = (df_inv_filtrado['cantidad'] * df_inv_filtrado['precio_usd']) * f_tasa
+        # 2. Inversión TOTAL (Toda la resma/lote)
+        df_inv_filtrado['Total_Stock'] = (df_inv_filtrado['cantidad'] * df_inv_filtrado['precio_usd']) * tasa_actual
         
-        # 4. LIMPIEZA DE COLUMNAS PARA MOSTRAR
-        df_final = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Costo Unit.', 'Inversión Total']].copy()
-        df_final.columns = ['Producto', 'Stock', 'Und', f'Unit. ({simbolo})', f'Total Stock ({simbolo})']
+        # --- PREPARAR TABLA PARA MOSTRAR ---
+        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Unitario', 'Total_Stock']].copy()
+        df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
 
-        st.dataframe(df_final.style.format({
+        st.dataframe(df_ver.style.format({
             'Stock': '{:,.2f}', 
-            f'Unit. ({simbolo})': f"{{:.4f}}", 
-            f'Total Stock ({simbolo})': f"{{:.2f}}"
+            f'Unit. ({sim})': "{:.4f}", 
+            f'Total Stock ({sim})': "{:.2f}"
         }), use_container_width=True, hide_index=True)
     # --- SECCIÓN PARA CORREGIR ERRORES ---
     st.divider()
@@ -633,6 +632,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
