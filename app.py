@@ -348,57 +348,56 @@ elif menu == "🎨 Análisis CMYK":
     else:
         st.info("💡 Arrastra varios archivos para compararlos y ver cuál gasta más tinta.")
 
-# --- 12. LÓGICA DE ACTIVOS CON SELECTOR DE TASA BCV/BINANCE ---
+# --- 12. LÓGICA DE ACTIVOS CLASIFICADOS ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
-    st.markdown("Registra tus máquinas usando la tasa oficial o paralela de forma automática.")
+    st.markdown("Clasifica tus equipos para que el sistema sepa cuáles gastan tinta y cuáles solo se deprecian.")
 
     if 'lista_equipos' not in st.session_state:
         st.session_state.lista_equipos = []
 
-    with st.expander("➕ Registrar Nuevo Equipo (Cameo, Plastificadora, etc.)"):
+    with st.expander("➕ Registrar Nuevo Equipo"):
         c1, c2 = st.columns(2)
-        nombre_eq = c1.text_input("Nombre del Equipo")
-        tipo_uso = c2.selectbox("Unidad de Desgaste", ["Hojas", "Cortes", "Metros", "Minutos", "Usos"])
+        nombre_eq = c1.text_input("Nombre del Equipo (Ej: Epson L1250, Cameo 5)")
+        
+        # AQUÍ ESTÁ EL TRUCO: Clasificamos el equipo
+        categoria = c2.selectbox("Categoría de Equipo", 
+                                ["Impresora (Gasta Tinta)", "Maquinaria (Solo Desgaste)", "Herramienta Manual"])
         
         c3, c4 = st.columns(2)
-        moneda = c3.radio("¿En qué moneda lo pagaste?", ["USD ($)", "BS (Bs)"], horizontal=True)
+        moneda = c3.radio("¿Moneda de pago?", ["USD ($)", "BS (Bs)"], horizontal=True)
         monto = c4.number_input("Monto Pagado", min_value=0.0)
         
-        # --- Lógica de Tasa Inteligente ---
         costo_usd = 0.0
         if moneda == "BS (Bs)":
-            tipo_tasa = st.selectbox("Selecciona la Tasa que usaste", ["BCV", "Binance / Paralelo"])
-            # Usamos las tasas que ya tienes configuradas en tu app
+            tipo_tasa = st.selectbox("Tasa usada", ["BCV", "Binance / Paralelo"])
             tasa_a_usar = bcv if tipo_tasa == "BCV" else paralelo
-            
-            st.caption(f"📢 Usando tasa {tipo_tasa}: **{tasa_a_usar} Bs/$**")
             costo_usd = monto / tasa_a_usar
         else:
             costo_usd = monto
 
-        st.info(f"💰 Inversión calculada: **$ {costo_usd:.2f}**")
+        # Definimos la unidad según la categoría
+        if categoria == "Impresora (Gasta Tinta)":
+            unidad_medida = "Hojas"
+        else:
+            unidad_medida = st.selectbox("Se desgasta por cada:", ["Corte", "Laminado", "Uso", "Metro", "Minuto"])
+
+        vida_util = st.number_input(f"Vida Útil Total (en {unidad_medida})", min_value=1, value=5000)
         
-        vida_util = st.number_input(f"Vida Útil (Total de {tipo_uso})", min_value=1, value=1000)
-        
-        if st.button("💾 Guardar en Inventario de Activos"):
-            if nombre_eq and costo_usd > 0:
+        if st.button("💾 Guardar Equipo"):
+            if nombre_eq:
                 nuevo_eq = {
                     "Equipo": nombre_eq,
+                    "Categoría": categoria,
                     "Inversión ($)": round(costo_usd, 2),
-                    "Unidad": tipo_uso,
-                    "Desgaste x Unidad ($)": round(costo_usd / vida_util, 4)
+                    "Desgaste x {0}".format(unidad_medida): round(costo_usd / vida_util, 4)
                 }
                 st.session_state.lista_equipos.append(nuevo_eq)
-                st.success(f"✅ {nombre_eq} registrado con éxito.")
+                st.success(f"✅ {nombre_eq} guardado como {categoria}.")
                 st.rerun()
 
-    # --- Tabla de Activos ---
+    # --- Mostrar Tabla Clasificada ---
     if st.session_state.lista_equipos:
-        st.subheader("📋 Lista de Equipos Actual")
         df_act = pd.DataFrame(st.session_state.lista_equipos)
+        st.subheader("📋 Inventario de Activos")
         st.dataframe(df_act, use_container_width=True, hide_index=True)
-        
-        if st.button("🗑️ Borrar Todo"):
-            st.session_state.lista_equipos = []
-            st.rerun()
