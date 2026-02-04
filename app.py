@@ -144,17 +144,14 @@ elif menu == "⚙️ Configuración":
         n_igtf = c2.number_input("GTF (0.03 = 3%)", value=igtf)
         n_banco = c2.number_input("Banco (0.02 = 2%)", value=banco)
         
-        if st.form_submit_button("Guardar Cambios"):
+       if st.form_submit_button("Guardar Cambios"):
             c = conectar()
             for p, v in [('tasa_bcv', n_bcv), ('tasa_binance', n_bin), ('iva_perc', n_iva), 
                          ('igtf_perc', n_igtf), ('banco_perc', n_banco)]:
                 c.execute("UPDATE configuracion SET valor=? WHERE parametro=?", (v, p))
             c.commit(); c.close(); st.rerun()
 
-else:
-    st.info("Módulo en construcción (Próxima parte).")
-
-# --- 5. LÓGICA DE COTIZACIONES (INTEGRADA CON INVENTARIO) ---
+# --- 5. LÓGICA DE COTIZACIONES (ASÍ DEBE EMPEZAR) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
@@ -223,6 +220,7 @@ elif menu == "📝 Cotizaciones":
         st.dataframe(df_hist.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
     else:
         st.info("Aún no hay cotizaciones registradas.")
+
 
 
 
