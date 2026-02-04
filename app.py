@@ -304,20 +304,68 @@ elif menu == "💰 Caja y Gastos":
                 c.commit(); c.close()
                 st.warning("📉 Gasto registrado.")
 
-# --- 6. DASHBOARD ---
+# --- 6. DASHBOARD FINANCIERO PROFESIONAL ---
 elif menu == "📊 Dashboard":
-    st.title("📊 Resumen del Imperio")
-    if not df_cots_global.empty:
-        c1, c2, c3 = st.columns(3)
-        total = df_cots_global['monto_usd'].sum()
-        c1.metric("Ingresos Totales", f"$ {total:.2f}")
-        c2.metric("Total en Bs (BCV)", f"{total * t_bcv:.2f} Bs")
-        c3.metric("Cotizaciones", len(df_cots_global))
-        st.subheader("📈 Ventas Recientes")
-        df_g = df_cots_global.groupby('fecha')['monto_usd'].sum()
-        st.area_chart(df_g)
-    else:
-        st.info("No hay datos registrados.")
+    st.title("📊 Centro de Control Financiero")
+    st.markdown("Análisis en tiempo real de ingresos, egresos y rentabilidad.")
+
+    conn = conectar()
+    # 1. Cargar datos de Ventas, Gastos e Inventario
+    df_ventas = pd.read_sql_query("SELECT * FROM ventas", conn)
+    df_gastos = pd.read_sql_query("SELECT * FROM gastos", conn)
+    df_inv_dash = pd.read_sql_query("SELECT cantidad, precio_usd FROM inventario", conn)
+    conn.close()
+
+    # --- FILA 1: MÉTRICAS PRINCIPALES ---
+    c1, c2, c3, c4 = st.columns(4)
+    
+    ingresos_totales = df_ventas['monto_total'].sum() if not df_ventas.empty else 0.0
+    gastos_totales = df_gastos['monto'].sum() if not df_gastos.empty else 0.0
+    balance_neto = ingresos_totales - gastos_totales
+    valor_inventario = (df_inv_dash['cantidad'] * df_inv_dash['precio_usd']).sum()
+
+    c1.metric("💰 Ingresos Totales", f"$ {ingresos_totales:.2f}")
+    c2.metric("📉 Gastos Totales", f"$ {gastos_totales:.2f}", delta=f"-{gastos_totales:.2f}", delta_color="inverse")
+    
+    # Color dinámico para el balance
+    c3.metric("⚖️ Balance Neto", f"$ {balance_neto:.2f}", 
+              delta=f"{((balance_neto/ingresos_totales)*100 if ingresos_totales > 0 else 0):.1f}% Margen")
+    
+    c4.metric("📦 Valor Inventario", f"$ {valor_inventario:.2f}")
+
+    # --- FILA 2: GRÁFICOS ---
+    st.divider()
+    col_izq, col_der = st.columns(2)
+
+    with col_izq:
+        st.subheader("📈 Histórico de Ventas ($)")
+        if not df_ventas.empty:
+            # Convertir fecha a formato datetime para graficar
+            df_ventas['fecha'] = pd.to_datetime(df_ventas['fecha']).dt.date
+            ventas_diarias = df_ventas.groupby('fecha')['monto_total'].sum().reset_index()
+            st.area_chart(data=ventas_diarias, x='fecha', y='monto_total', color="#28a745")
+        else:
+            st.info("Aún no hay ventas registradas.")
+
+    with col_der:
+        st.subheader("🍕 Distribución de Gastos")
+        if not df_gastos.empty:
+            gastos_cat = df_gastos.groupby('categoria')['monto'].sum().reset_index()
+            st.bar_chart(data=gastos_cat, x='categoria', y='monto', color="#ff4b4b")
+        else:
+            st.info("No hay gastos registrados.")
+
+    # --- FILA 3: TABLAS DE DETALLE ---
+    st.divider()
+    exp1 = st.expander("📄 Ver Últimos Movimientos de Caja")
+    with exp1:
+        col_v, col_g = st.columns(2)
+        with col_v:
+            st.write("**Últimas Ventas**")
+            st.dataframe(df_ventas.tail(10), use_container_width=True, hide_index=True)
+        with col_g:
+            st.write("**Últimos Gastos**")
+            st.dataframe(df_gastos.tail(10), use_container_width=True, hide_index=True)
 
 # --- 7. CONFIGURACIÓN ---
 elif menu == "⚙️ Configuración":
@@ -552,6 +600,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
