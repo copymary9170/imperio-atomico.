@@ -51,8 +51,8 @@ conn.close()
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
-    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "⚙️ Configuración"])
-
+    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "⚙️ Configuración"])
+    
 # --- 4. LÓGICA DE INVENTARIO ---
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
@@ -174,3 +174,33 @@ elif menu == "⚙️ Configuración":
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='igtf_perc'", (n_igtf,))
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='banco_perc'", (n_banco,))
             c.commit(); c.close(); st.success("✅ Configuración actualizada"); st.rerun()
+
+# --- 8. LÓGICA DE CLIENTES (NUEVO) ---
+elif menu == "👥 Clientes":
+    st.title("👥 Registro de Clientes")
+    
+    with st.form("form_clientes"):
+        col1, col2 = st.columns(2)
+        nombre_cli = col1.text_input("Nombre del Cliente o Negocio")
+        whatsapp_cli = col2.text_input("WhatsApp (Ej: 04121234567)")
+        
+        if st.form_submit_button("✅ Registrar Cliente"):
+            if nombre_cli:
+                c = conectar()
+                c.execute("INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)", (nombre_cli, whatsapp_cli))
+                c.commit()
+                c.close()
+                st.success(f"Cliente {nombre_cli} guardado con éxito.")
+                st.rerun()
+            else:
+                st.error("El nombre es obligatorio.")
+
+    # Mostrar lista de clientes registrados
+    c = conectar()
+    df_clis = pd.read_sql_query("SELECT nombre as 'Nombre', whatsapp as 'WhatsApp' FROM clientes", c)
+    c.close()
+    
+    if not df_clis.empty:
+        st.subheader("📋 Directorio de Clientes")
+        st.dataframe(df_clis, use_container_width=True, hide_index=True)
+
