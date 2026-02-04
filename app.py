@@ -294,11 +294,17 @@ elif menu == "👥 Clientes":
 # --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (INTELIGENTE) ---
 elif menu == "🎨 Análisis CMYK":
     st.title("🎨 Analizador de Cobertura y Desgaste")
-    st.markdown("Analiza tus diseños y calcula el costo real (Tinta + Equipo).")
 
-    # 1. Filtramos solo los equipos que son impresoras de la lista de activos
-    lista_activos = st.session_state.get('lista_equipos', [])
-    impresoras_disponibles = [e['Equipo'] for e in lista_activos if e['Categoría'] == "Impresora (Gasta Tinta)"]
+    # --- AQUÍ VA LA PARTE 3 (Versión para CMYK) ---
+    conn = conectar()
+    # Traemos los activos de la base de datos
+    df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
+    conn.close()
+    
+    # Convertimos a la lista que el resto del código ya sabe usar
+    lista_activos = df_act_db.to_dict('records')
+    # Filtramos solo impresoras
+    impresoras_disponibles = [e['equipo'] for e in lista_activos if e['categoria'] == "Impresora (Gasta Tinta)"]
 
     if not impresoras_disponibles:
         st.warning("⚠️ No has registrado ninguna Impresora en el módulo de '🏗️ Activos'.")
@@ -421,11 +427,16 @@ elif menu == "🏗️ Activos":
 # --- 13. LÓGICA DE OTROS PROCESOS (CAMEO, PLASTIFICADORA, ETC.) ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
-    st.markdown("Calcula el costo de acabados como corte, laminado o encuadernación.")
 
-    # Filtramos activos que NO son impresoras
-    lista_activos = st.session_state.get('lista_equipos', [])
-    otros_equipos = [e for e in lista_activos if e['Categoría'] != "Impresora (Gasta Tinta)"]
+    # --- AQUÍ VA LA PARTE 3 (Versión para Otros Procesos) ---
+    conn = conectar()
+    df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
+    conn.close()
+    
+    lista_activos = df_act_db.to_dict('records')
+    # Filtramos todo lo que NO sea impresora
+    otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
+
 
     if not otros_equipos:
         st.warning("⚠️ No hay maquinaria registrada (Cameo, Plastificadora, etc.) en el módulo de '🏗️ Activos'.")
@@ -473,6 +484,7 @@ elif menu == "🛠️ Otros Procesos":
                 c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
                 
                 st.success(f"💡 Para este proceso, tu costo base es **$ {costo_total:.2f}**. Sugerimos cobrar al menos el doble para tener ganancia.")
+
 
 
 
