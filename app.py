@@ -11,54 +11,30 @@ def conectar():
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
-    # Activar claves foráneas para integridad referencial
     c.execute("PRAGMA foreign_keys = ON")
     
-    # Clientes (Sin cambios, pero ahora es el padre de Ventas)
+    # 1. Crear todas las tablas (asegúrate de incluir todas las que ya definimos)
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
-    
-    # Inventario
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL)')
-    
-    # NUEVA: Historial de Movimientos de Inventario (Trazabilidad)
-    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_id INTEGER,
-                tipo TEXT, -- 'ENTRADA' o 'SALIDA'
-                cantidad REAL,
-                motivo TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(item_id) REFERENCES inventario(id))''')
-
-    # Cotizaciones (Ahora con referencia a cliente_id en lugar de solo texto)
-    c.execute('''CREATE TABLE IF NOT EXISTS cotizaciones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                fecha TEXT, 
-                cliente_id INTEGER, 
-                trabajo TEXT, 
-                monto_usd REAL, 
-                estado TEXT,
-                FOREIGN KEY(cliente_id) REFERENCES clientes(id))''')
-
-    # NUEVA: Ventas Reales y Pagos
-    c.execute('''CREATE TABLE IF NOT EXISTS ventas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cliente_id INTEGER,
-                monto_total REAL,
-                metodo_pago TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(cliente_id) REFERENCES clientes(id))''')
-
-    # NUEVA: Gastos Operativos
-    c.execute('''CREATE TABLE IF NOT EXISTS gastos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                descripcion TEXT,
-                monto REAL,
-                categoria TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
+    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente_id INTEGER, trabajo TEXT, monto_usd REAL, estado TEXT, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
+    c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo_pago TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
+    c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
+    
+    # 2. SEEDER: Insertar valores por defecto en CONFIGURACIÓN si no existen
+    # Esto evita el KeyError: 'tasa_bcv'
+    configuraciones_iniciales = [
+        ('tasa_bcv', 36.50),
+        ('tasa_binance', 38.00),
+        ('iva_perc', 0.16),
+        ('igtf_perc', 0.03),
+        ('banco_perc', 0.02),
+        ('costo_tinta_ml', 0.10) # Valor base para el análisis CMYK
+    ]
+    
+    for param, valor in configuraciones_iniciales:
+        c.execute("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", (param, valor))
     
     conn.commit()
     conn.close()
@@ -576,6 +552,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
