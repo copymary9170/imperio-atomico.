@@ -144,7 +144,6 @@ with st.form("f_config"):
         n_igtf = c2.number_input("GTF (0.03 = 3%)", value=igtf)
         n_banco = c2.number_input("Banco (0.02 = 2%)", value=banco)
         
-        # Corregido: Alineación exacta con los campos anteriores
         if st.form_submit_button("💾 Guardar Cambios Globales"):
             c = conectar()
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (n_bcv,))
@@ -157,15 +156,15 @@ with st.form("f_config"):
             st.success("✅ Sistema actualizado correctamente.")
             st.rerun()
 
-# --- 5. LÓGICA DE COTIZACIONES (Pegado al borde izquierdo) ---
+# --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
-    # Cargar datos para el formulario
     c = conectar()
-    df_cots = pd.read_sql_query("SELECT * FROM cotizaciones", c) # Necesario para el historial
+    # Cargamos los datos necesarios para el formulario
     clis = pd.read_sql_query("SELECT nombre FROM clientes", c)['nombre'].tolist()
     inv_data = pd.read_sql_query("SELECT item, precio_usd, unidad FROM inventario", c)
+    df_cots_vista = pd.read_sql_query("SELECT * FROM cotizaciones", c)
     c.close()
 
     with st.form("form_cotizacion"):
@@ -181,34 +180,26 @@ elif menu == "📝 Cotizaciones":
         
         if material_sel != "--" and not inv_data.empty:
             costo_u = inv_data[inv_data['item'] == material_sel]['precio_usd'].values[0]
-            total_costo_m = costo_u * cantidad_material
-            col_p1.info(f"Costo base de material: ${total_costo_m:.4f}")
+            total_m = costo_u * cantidad_material
+            col_p1.info(f"Costo material: ${total_m:.4f}")
         
-        monto_final_usd = col_p2.number_input("Precio Final a Cobrar (USD)", min_value=0.0, format="%.2f")
-        estado_pago = col_p2.selectbox("Estado del Pago", ["Pendiente", "Pagado"])
+        monto_f = col_p2.number_input("Precio Final (USD)", min_value=0.0, format="%.2f")
+        metodo = col_p2.selectbox("Estado", ["Pendiente", "Pagado"])
 
         if st.form_submit_button("📋 Guardar Cotización"):
-            if cliente_sel != "--" and monto_final_usd > 0:
+            if cliente_sel != "--" and monto_f > 0:
                 c = conectar()
                 c.execute("""INSERT INTO cotizaciones 
                           (fecha, cliente, trabajo, monto_usd, monto_bcv, monto_binance, estado) 
                           VALUES (?,?,?,?,?,?,?)""",
                           (datetime.now().strftime("%d/%m/%Y"), cliente_sel, trabajo, 
-                           monto_final_usd, monto_final_usd * t_bcv, monto_final_usd * t_bin, estado_pago))
-                
+                           monto_f, monto_f*t_bcv, monto_f*t_bin, metodo))
                 if material_sel != "--" and cantidad_material > 0:
                     c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", 
                               (cantidad_material, material_sel))
-                
-                c.commit()
-                c.close()
-                st.success(f"✅ Cotización guardada para {cliente_sel}")
-                st.rerun()
+                c.commit(); c.close()
+                st.success("✅ Cotización guardada"); st.rerun()
 
     st.divider()
-    st.subheader("📑 Historial de Movimientos")
-    if not df_cots.empty:
-        st.dataframe(df_cots.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
-    else:
-        st.info("No hay cotizaciones registradas.")
-
+    if not df_cots_vista.empty:
+        st.dataframe(df_cots_vista.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
