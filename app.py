@@ -5,7 +5,8 @@ from datetime import datetime
 
 # --- 1. MOTOR DE BASE DE DATOS PROFESIONAL ---
 def conectar():
-    return sqlite3.connect('imperio_data.db', check_same_thread=False)
+    # Cambiamos 'imperio_data.db' por 'imperio_v2.db'
+    return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
 def inicializar_sistema():
     conn = conectar()
@@ -575,6 +576,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
