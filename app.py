@@ -410,65 +410,65 @@ elif menu == "🏗️ Activos":
 # --- 13. LÓGICA DE OTROS PROCESOS (CAMEO, PLASTIFICADORA, ETC.) ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
+    st.markdown("Calcula el costo de acabados usando los activos guardados.")
 
-    # --- AQUÍ VA LA PARTE 3 (Versión para Otros Procesos) ---
+    # 1. Cargar activos desde la base de datos
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
     conn.close()
     
     lista_activos = df_act_db.to_dict('records')
-    # Filtramos todo lo que NO sea impresora
+    # Filtramos activos que NO son impresoras
     otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
 
-
     if not otros_equipos:
-        st.warning("⚠️ No hay maquinaria registrada (Cameo, Plastificadora, etc.) en el módulo de '🏗️ Activos'.")
+        st.warning("⚠️ No hay maquinaria registrada (Cameo, Plastificadora, etc.) en '🏗️ Activos'.")
     else:
-        with st.form("form_procesos"):
+        # TODO el formulario debe estar dentro de este 'with'
+        with st.form("form_procesos_fijo"):
             col1, col2, col3 = st.columns(3)
             
-            # 1. Seleccionar la máquina
-            nombres_eq = [e['Equipo'] for e in otros_equipos]
+            # Nombres de equipos usando minúsculas 'equipo'
+            nombres_eq = [e['equipo'] for e in otros_equipos]
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
             
             # Buscamos los datos de esa máquina
-            datos_eq = next(e for e in otros_equipos if e['Equipo'] == eq_sel)
+            datos_eq = next(e for e in otros_equipos if e['equipo'] == eq_sel)
             
-            # 2. Cantidad de usos
-            unidad = "Usos"
-            for clave in datos_eq:
-                if "Desgaste x" in clave:
-                    unidad = clave.replace("Desgaste x ", "")
-                    costo_u = datos_eq[clave]
+            unidad = datos_eq['unidad']
+            costo_u = datos_eq['desgaste']
 
             cantidad_uso = col2.number_input(f"Cantidad de {unidad}", min_value=1, value=1)
             
-            # 3. Material adicional (Opcional, de tu inventario)
+            # Insumos (usando el df_inv que cargas al inicio de la app)
             insumos = ["-- Ninguno --"] + df_inv['item'].tolist()
-            insumo_sel = col3.selectbox("Insumo extra (Ej: Vinil, Foil)", insumos)
+            insumo_sel = col3.selectbox("Insumo extra", insumos)
             cant_insumo = col3.number_input("Cantidad de insumo", min_value=0.0, value=0.0)
 
-            if st.form_submit_button("💎 Calcular Costo de Proceso"):
-                # Cálculo de desgaste
-                total_desgaste = costo_u * cantidad_uso
-                
-                # Cálculo de insumo
-                total_insumo = 0.0
-                if insumo_sel != "-- Ninguno --":
-                    precio_u_insumo = df_inv[df_inv['item'] == insumo_sel]['precio_usd'].values[0]
-                    total_insumo = precio_u_insumo * cant_insumo
-                
-                costo_total = total_desgaste + total_insumo
-                
-                st.divider()
-                c1, c2, c3 = st.columns(3)
-                c1.metric(f"Desgaste {eq_sel}", f"$ {total_desgaste:.4f}")
-                c2.metric("Costo Insumos", f"$ {total_insumo:.4f}")
-                c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
-                
-                st.success(f"💡 Para este proceso, tu costo base es **$ {costo_total:.2f}**. Sugerimos cobrar al menos el doble para tener ganancia.")
+            # EL BOTÓN DEBE ESTAR DENTRO DEL FORMULARIO
+            boton_calcular = st.form_submit_button("💎 Calcular Costo de Proceso")
 
-
+        # Lógica después de presionar el botón
+        if boton_calcular:
+            # Cálculo de desgaste
+            total_desgaste = costo_u * cantidad_uso
+            
+            # Cálculo de insumo
+            total_insumo = 0.0
+            if insumo_sel != "-- Ninguno --":
+                # Buscamos el precio en el inventario
+                precio_u_insumo = df_inv[df_inv['item'] == insumo_sel]['precio_usd'].values[0]
+                total_insumo = precio_u_insumo * cant_insumo
+            
+            costo_total = total_desgaste + total_insumo
+            
+            st.divider()
+            c1, c2, c3 = st.columns(3)
+            c1.metric(f"Desgaste {eq_sel}", f"$ {total_desgaste:.4f}")
+            c2.metric("Costo Insumos", f"$ {total_insumo:.4f}")
+            c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
+            
+            st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
 
 
 
