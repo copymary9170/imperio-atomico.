@@ -3,23 +3,62 @@ import pandas as pd
 import sqlite3
 from datetime import datetime
 
-# --- 1. MOTOR DE BASE DE DATOS ---
+# --- 1. MOTOR DE BASE DE DATOS PROFESIONAL ---
 def conectar():
     return sqlite3.connect('imperio_data.db', check_same_thread=False)
 
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
+    # Activar claves foráneas para integridad referencial
+    c.execute("PRAGMA foreign_keys = ON")
+    
+    # Clientes (Sin cambios, pero ahora es el padre de Ventas)
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS inventario (item TEXT PRIMARY KEY, cantidad REAL, unidad TEXT, precio_usd REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bcv REAL, monto_binance REAL, estado TEXT)')
+    
+    # Inventario
+    c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL)')
+    
+    # NUEVA: Historial de Movimientos de Inventario (Trazabilidad)
+    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER,
+                tipo TEXT, -- 'ENTRADA' o 'SALIDA'
+                cantidad REAL,
+                motivo TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(item_id) REFERENCES inventario(id))''')
+
+    # Cotizaciones (Ahora con referencia a cliente_id en lugar de solo texto)
+    c.execute('''CREATE TABLE IF NOT EXISTS cotizaciones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                fecha TEXT, 
+                cliente_id INTEGER, 
+                trabajo TEXT, 
+                monto_usd REAL, 
+                estado TEXT,
+                FOREIGN KEY(cliente_id) REFERENCES clientes(id))''')
+
+    # NUEVA: Ventas Reales y Pagos
+    c.execute('''CREATE TABLE IF NOT EXISTS ventas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cliente_id INTEGER,
+                monto_total REAL,
+                metodo_pago TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(cliente_id) REFERENCES clientes(id))''')
+
+    # NUEVA: Gastos Operativos
+    c.execute('''CREATE TABLE IF NOT EXISTS gastos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                descripcion TEXT,
+                monto REAL,
+                categoria TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
+    c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
     
-    # NUEVA TABLA PARA TUS EQUIPOS
-    c.execute('''CREATE TABLE IF NOT EXISTS activos 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)''')
-    
-    # ... (el resto de tus params se queda igual)
     conn.commit()
     conn.close()
 
@@ -220,6 +259,49 @@ elif menu == "📝 Cotizaciones":
             st.link_button(f"🚀 Enviar WhatsApp a {datos_c['cliente']}", link_ws)
         else:
             st.warning("Este cliente no tiene un número de WhatsApp registrado.")
+
+
+# --- NUEVO MÓDULO: CAJA Y VENTAS ---
+elif menu == "💰 Caja y Gastos":
+    st.title("💰 Gestión de Flujo de Caja")
+    
+    tab1, tab2 = st.tabs(["💵 Registrar Venta", "📉 Registrar Gasto"])
+    
+    with tab1:
+        st.subheader("Convertir Cotización en Cobro")
+        # Solo mostramos cotizaciones pendientes
+        c = conectar()
+        df_pendientes = pd.read_sql_query("SELECT id, cliente_id, trabajo, monto_usd FROM cotizaciones WHERE estado='Pendiente'", c)
+        
+        if not df_pendientes.empty:
+            sel_cot = st.selectbox("Selecciona Cotización para cobrar", df_pendientes['id'].tolist())
+            m_pago = st.selectbox("Método de Pago", ["Efectivo", "Zelle", "Pago Móvil", "Binance"])
+            
+            if st.button("Confirmar Cobro"):
+                datos = df_pendientes[df_pendientes['id'] == sel_cot].iloc[0]
+                # 1. Crear la venta
+                c.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)", 
+                          (int(datos['cliente_id']), datos['monto_usd'], m_pago))
+                # 2. Marcar cotización como Pagada
+                c.execute("UPDATE cotizaciones SET estado='Pagado' WHERE id=?", (sel_cot,))
+                c.commit()
+                st.success("✅ Venta registrada en caja.")
+                st.rerun()
+        else:
+            st.info("No hay cotizaciones pendientes de cobro.")
+        c.close()
+
+    with tab2:
+        st.subheader("Registro de Gastos Operativos")
+        with st.form("form_gastos"):
+            desc_g = st.text_input("Descripción del gasto (Ej: Pago de luz, Alquiler, Comida)")
+            monto_g = st.number_input("Monto (USD)", min_value=0.0)
+            cat_g = st.selectbox("Categoría", ["Servicios", "Materiales", "Mantenimiento", "Otros"])
+            if st.form_submit_button("Registrar Gasto"):
+                c = conectar()
+                c.execute("INSERT INTO gastos (descripcion, monto, categoria) VALUES (?,?,?)", (desc_g, monto_g, cat_g))
+                c.commit(); c.close()
+                st.warning("📉 Gasto registrado.")
 
 # --- 6. DASHBOARD ---
 elif menu == "📊 Dashboard":
@@ -469,6 +551,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
