@@ -189,6 +189,27 @@ if menu == "📦 Inventario":
                 st.warning(f"Producto {prod_b} eliminado.")
                 st.rerun()
 
+# --- NUEVA SECCIÓN: HISTORIAL DE MOVIMIENTOS ---
+        st.divider()
+        with st.expander("📜 Ver Historial de Movimientos (Auditoría)"):
+            conn = conectar()
+            # Unimos la tabla de movimientos con la de inventario para ver los nombres
+            query_movs = '''
+                SELECT m.fecha, i.item, m.tipo, m.cantidad, m.motivo 
+                FROM inventario_movs m
+                JOIN inventario i ON m.item_id = i.id
+                ORDER BY m.fecha DESC LIMIT 50
+            '''
+            df_movs_hist = pd.read_sql_query(query_movs, conn)
+            conn.close()
+
+            if not df_movs_hist.empty:
+                st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
+            else:
+                st.info("No hay movimientos registrados todavía.")
+
+
+
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
@@ -600,6 +621,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
