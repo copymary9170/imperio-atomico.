@@ -348,47 +348,39 @@ elif menu == "🎨 Análisis CMYK":
     else:
         st.info("💡 Arrastra varios archivos para compararlos y ver cuál gasta más tinta.")
 
-# --- 12. LÓGICA DE ACTIVOS (COSTO DE EQUIPO) ---
+# --- 12. LÓGICA DE ACTIVOS CON TASA DE COMPRA ---
 elif menu == "🏗️ Activos":
-    st.title("🏗️ Gestión de Equipos y Depreciación")
-    st.markdown("Calcula cuánto debes cobrar por el uso de tus máquinas para poder reponerlas en el futuro.")
+    st.title("🏗️ Gestión de Equipos y Activos")
+    st.markdown("Registra cuánto te costaron tus equipos para recuperar la inversión con cada trabajo.")
 
-    # Creamos un diccionario con tus 3 equipos
-    equipos_data = [
-        {"nombre": "HP Advantage J210a", "tipo": "Cartucho"},
-        {"nombre": "HP Smart Tank 580w", "tipo": "Continua"},
-        {"nombre": "Epson L1250", "tipo": "Sublimación"}
+    equipos = [
+        "HP Advantage J210a (Cartuchos)", 
+        "HP Smart Tank 580w (Continua)", 
+        "Epson L1250 (Sublimación)"
     ]
 
-    col_equipo = st.columns(3)
-    desgaste_total = {}
-
-    for i, eq in enumerate(equipos_data):
-        with col_equipo[i]:
-            st.subheader(eq['nombre'])
-            precio = st.number_input(f"Costo Compra ($)", key=f"p_{i}", value=150.0)
-            vida_util = st.number_input(f"Vida Útil (Hojas)", key=f"v_{i}", value=10000)
+    for eq in equipos:
+        with st.expander(f"⚙️ Configurar {eq}"):
+            c1, c2, c3 = st.columns(3)
             
-            # Cálculo de depreciación por página
-            if vida_util > 0:
-                costo_hoja = precio / vida_util
-            else:
-                costo_hoja = 0.0
+            with c1:
+                moneda = st.radio("¿Cómo lo pagaste?", ["Dólares ($)", "Bolívares (Bs)"], key=f"mon_{eq}")
             
-            st.metric("Costo por Hoja", f"$ {costo_hoja:.4f}")
-            desgaste_total[eq['nombre']] = costo_hoja
+            with c2:
+                monto_pagado = st.number_input(f"Monto Pagado", min_value=0.0, key=f"monto_{eq}")
+            
+            with c3:
+                if moneda == "Bolívares (Bs)":
+                    tasa_compra = st.number_input("Tasa de ese día (Bs/$)", min_value=0.01, value=36.0, key=f"tasa_{eq}")
+                    costo_dolares = monto_pagado / tasa_compra
+                else:
+                    costo_dolares = monto_pagado
+                
+                st.metric("Inversión en USD", f"$ {costo_dolares:.2f}")
 
-    st.divider()
-    
-    # Análisis de "Mantenimiento Preventivo"
-    st.subheader("🛠️ Fondo de Mantenimiento")
-    porcentaje_mtto = st.slider("Ahorro adicional para reparaciones (%)", 0, 20, 5)
-    
-    st.info(f"""
-    **Estrategia de Cobro Sugerida:**
-    - Por cada impresión en la **{equipos_data[1]['nombre']}**, deberías sumar al menos **$ {(desgaste_total[equipos_data[1]['nombre']] * (1 + porcentaje_mtto/100)):.4f}** para cubrir el equipo y su futuro técnico.
-    """)
-    
-    # Botón para guardar estos valores (puedes conectarlo a tu base de datos después)
-    if st.button("💾 Guardar Configuración de Equipos"):
-        st.success("Configuración guardada. Ahora las cotizaciones pueden usar estos valores.")
+            # Cálculo de Desgaste
+            v_util = st.number_input("Vida Útil estimada (Cant. Impresiones)", value=10000, key=f"vida_{eq}")
+            if v_util > 0:
+                desgaste = costo_dolares / v_util
+                st.write(f"🟢 Por cada hoja debes cobrar: **$ {desgaste:.4f}**")
+
