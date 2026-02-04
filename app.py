@@ -56,6 +56,12 @@ with st.sidebar:
 # --- 4. LÓGICA DE INVENTARIO ---
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
+
+    # --- BUSCADOR DE INVENTARIO ---
+    busqueda_inv = st.text_input("🔍 Buscar producto en inventario...", placeholder="Ej: Resma, Tinta...")
+
+    # Modificamos la carga del DataFrame para que filtre
+    df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)] if not df_inv.empty else df_inv
     
     with st.expander("📥 Registrar Nueva Compra (Paquetes/Lotes)"):
         with st.form("form_inv"):
@@ -210,5 +216,6 @@ elif menu == "👥 Clientes":
         st.dataframe(df_clis, use_container_width=True, hide_index=True)
     else:
         st.info("No se encontraron clientes con ese nombre.")
+
 
 
