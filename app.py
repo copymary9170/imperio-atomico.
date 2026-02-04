@@ -60,6 +60,24 @@ if menu == "📦 Inventario":
     # --- BUSCADOR DE INVENTARIO ---
     busqueda_inv = st.text_input("🔍 Buscar producto en inventario...", placeholder="Ej: Resma, Tinta...")
 
+    # --- BLOQUE DE ALERTAS DE STOCK BAJO (SOLO AGREGAR) ---
+    st.divider()
+    
+    # Definimos el límite de alerta (puedes cambiar el 10 por el número que prefieras)
+    limite_alerta = 10 
+    
+    # Buscamos los productos que tienen 10 o menos unidades
+    if not df_inv.empty:
+        df_bajo_stock = df_inv[df_inv['cantidad'] <= limite_alerta]
+        
+        if not df_bajo_stock.empty:
+            st.subheader("⚠️ Materiales por Agotarse")
+            for index, row in df_bajo_stock.iterrows():
+                # Mostramos un mensaje llamativo por cada producto bajo
+                st.warning(f"🚨 **¡Atención!** Quedan pocas unidades de: **{row['item']}** (Solo hay {int(row['cantidad'])} {row['unidad']})")
+        else:
+            st.success("✅ Tienes suficiente stock de todos tus materiales.")
+
     # Modificamos la carga del DataFrame para que filtre
     df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)] if not df_inv.empty else df_inv
     
@@ -105,6 +123,23 @@ if menu == "📦 Inventario":
         st.dataframe(df_audit[['Producto', 'Stock', 'Unidad', 'Costo Unit.', 'Inversión Stock']].style.format({
             'Stock': '{:,.0f}', 'Costo Unit.': f"{sim} {{:.4f}}", 'Inversión Stock': f"{sim} {{:.2f}}"
         }), use_container_width=True, hide_index=True)
+
+
+        # --- BLOQUE DE ALERTAS DE STOCK BAJO (SOLO AGREGAR) ---
+        st.subheader("⚠️ Alertas de Reposición")
+        
+        # Definimos el límite de alerta (puedes cambiar el 10 por el número que prefieras)
+        limite_alerta = 10 
+        
+        # Filtramos los productos que tienen poco stock
+        df_bajo_stock = df_inv[df_inv['cantidad'] <= limite_alerta]
+        
+        if not df_bajo_stock.empty:
+            for index, row in df_bajo_stock.iterrows():
+                # Mostramos un mensaje llamativo por cada producto bajo
+                st.warning(f"🚨 **¡Atención!** Quedan pocas unidades de: **{row['item']}** (Solo hay {int(row['cantidad'])} {row['unidad']})")
+        else:
+            st.success("✅ Tienes suficiente stock de todos tus productos.")
         
         # --- SECCIÓN PARA CORREGIR ERRORES ---
         st.divider()
@@ -255,6 +290,7 @@ elif menu == "👥 Clientes":
         st.dataframe(df_clis, use_container_width=True, hide_index=True)
     else:
         st.info("No se encontraron clientes con ese nombre.")
+
 
 
 
