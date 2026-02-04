@@ -156,36 +156,40 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado y Registrado en Historial: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA SIN ERRORES ---
+    # --- TABLA DE AUDITORÍA TOTALMENTE BLINDADA ---
     st.divider()
     if not df_inv.empty:
+        # 1. Filtramos y limpiamos
         df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
         
-        moneda = st.radio("Ver precios en:", ["USD", "BCV", "Binance"], horizontal=True)
+        moneda = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True)
         
-        # Asignamos la tasa manualmente para evitar errores de pandas
-        if moneda == "BCV":
-            tasa_actual = t_bcv
-        elif moneda == "Binance":
-            tasa_actual = t_bin
-        else:
-            tasa_actual = 1.0
+        # 2. Obtenemos la tasa exacta (aseguramos que sea un número)
+        try:
+            if moneda == "BCV":
+                tasa_v = float(t_bcv)
+            elif moneda == "Binance":
+                tasa_v = float(t_bin)
+            else:
+                tasa_v = 1.0
+        except:
+            tasa_v = 1.0 # Por si la base de datos devuelve algo raro
             
         sim = "Bs" if moneda != "USD" else "$"
         
-        # --- LOS CÁLCULOS LÓGICOS ---
-        # 1. Costo de UNA sola unidad (Hoja/ml)
-        df_inv_filtrado['Unitario'] = df_inv_filtrado['precio_usd'] * tasa_actual
+        # 3. CÁLCULOS UNITARIOS Y TOTALES
+        # Convertimos el precio unitario guardado en USD a la moneda elegida
+        df_inv_filtrado['Unitario'] = df_inv_filtrado['precio_usd'].astype(float) * tasa_v
         
-        # 2. Inversión TOTAL (Toda la resma/lote)
-        df_inv_filtrado['Total_Stock'] = (df_inv_filtrado['cantidad'] * df_inv_filtrado['precio_usd']) * tasa_actual
+        # Calculamos la inversión total: (Cantidad * Precio USD) * Tasa
+        df_inv_filtrado['Total_Stock'] = (df_inv_filtrado['cantidad'].astype(float) * df_inv_filtrado['precio_usd'].astype(float)) * tasa_v
         
-        # --- PREPARAR TABLA PARA MOSTRAR ---
+        # 4. FORMATEO FINAL
         df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Unitario', 'Total_Stock']].copy()
-        df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
+        df_ver.columns = ['Producto', 'Stock (Unds)', 'Unidad', f'Unit. ({sim})', f'Total Stock ({sim})']
 
         st.dataframe(df_ver.style.format({
-            'Stock': '{:,.2f}', 
+            'Stock (Unds)': '{:,.0f}', 
             f'Unit. ({sim})': "{:.4f}", 
             f'Total Stock ({sim})': "{:.2f}"
         }), use_container_width=True, hide_index=True)
@@ -632,6 +636,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
