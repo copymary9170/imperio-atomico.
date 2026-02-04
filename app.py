@@ -51,7 +51,7 @@ conn.close()
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
-    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🏗️ Activos", "⚙️ Configuración"])
+    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración"])
     
 # --- 4. LÓGICA DE INVENTARIO ---
 if menu == "📦 Inventario":
@@ -424,4 +424,61 @@ elif menu == "🏗️ Activos":
         df_act = pd.DataFrame(st.session_state.lista_equipos)
         st.subheader("📋 Inventario de Activos")
         st.dataframe(df_act, use_container_width=True, hide_index=True)
+
+# --- 13. LÓGICA DE OTROS PROCESOS (CAMEO, PLASTIFICADORA, ETC.) ---
+elif menu == "🛠️ Otros Procesos":
+    st.title("🛠️ Calculadora de Procesos Especiales")
+    st.markdown("Calcula el costo de acabados como corte, laminado o encuadernación.")
+
+    # Filtramos activos que NO son impresoras
+    lista_activos = st.session_state.get('lista_equipos', [])
+    otros_equipos = [e for e in lista_activos if e['Categoría'] != "Impresora (Gasta Tinta)"]
+
+    if not otros_equipos:
+        st.warning("⚠️ No hay maquinaria registrada (Cameo, Plastificadora, etc.) en el módulo de '🏗️ Activos'.")
+    else:
+        with st.form("form_procesos"):
+            col1, col2, col3 = st.columns(3)
+            
+            # 1. Seleccionar la máquina
+            nombres_eq = [e['Equipo'] for e in otros_equipos]
+            eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
+            
+            # Buscamos los datos de esa máquina
+            datos_eq = next(e for e in otros_equipos if e['Equipo'] == eq_sel)
+            
+            # 2. Cantidad de usos
+            unidad = "Usos"
+            for clave in datos_eq:
+                if "Desgaste x" in clave:
+                    unidad = clave.replace("Desgaste x ", "")
+                    costo_u = datos_eq[clave]
+
+            cantidad_uso = col2.number_input(f"Cantidad de {unidad}", min_value=1, value=1)
+            
+            # 3. Material adicional (Opcional, de tu inventario)
+            insumos = ["-- Ninguno --"] + df_inv['item'].tolist()
+            insumo_sel = col3.selectbox("Insumo extra (Ej: Vinil, Foil)", insumos)
+            cant_insumo = col3.number_input("Cantidad de insumo", min_value=0.0, value=0.0)
+
+            if st.form_submit_button("💎 Calcular Costo de Proceso"):
+                # Cálculo de desgaste
+                total_desgaste = costo_u * cantidad_uso
+                
+                # Cálculo de insumo
+                total_insumo = 0.0
+                if insumo_sel != "-- Ninguno --":
+                    precio_u_insumo = df_inv[df_inv['item'] == insumo_sel]['precio_usd'].values[0]
+                    total_insumo = precio_u_insumo * cant_insumo
+                
+                costo_total = total_desgaste + total_insumo
+                
+                st.divider()
+                c1, c2, c3 = st.columns(3)
+                c1.metric(f"Desgaste {eq_sel}", f"$ {total_desgaste:.4f}")
+                c2.metric("Costo Insumos", f"$ {total_insumo:.4f}")
+                c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
+                
+                st.success(f"💡 Para este proceso, tu costo base es **$ {costo_total:.2f}**. Sugerimos cobrar al menos el doble para tener ganancia.")
+
 
