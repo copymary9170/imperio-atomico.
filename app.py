@@ -61,6 +61,30 @@ def inicializar_sistema():
     
     conn.commit()
     conn.close()
+def migrar_base_datos():
+    conn = conectar()
+    cursor = conn.cursor()
+    try:
+        # Intentamos agregar la columna cliente_id a cotizaciones
+        cursor.execute("ALTER TABLE cotizaciones ADD COLUMN cliente_id INTEGER")
+        # Intentamos agregar la tabla de movimientos si no existe
+        cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_id INTEGER,
+                    tipo TEXT,
+                    cantidad REAL,
+                    motivo TEXT,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        conn.commit()
+    except:
+        # Si ya existe, no hará nada y no dará error
+        pass
+    finally:
+        conn.close()
+
+# Llama a la migración después de inicializar
+inicializar_sistema()
+migrar_base_datos()
 
 # --- 2. CONFIGURACIÓN INICIAL ---
 st.set_page_config(page_title="Imperio Atómico - Sistema Pro", layout="wide")
@@ -551,6 +575,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
