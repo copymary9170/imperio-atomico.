@@ -136,7 +136,8 @@ if menu == "📦 Inventario":
         st.info("Inventario vacío.")
 elif menu == "⚙️ Configuración":
     st.title("⚙️ Configuración de Tasas e Impuestos")
-with st.form("f_config"):
+    # Todo lo que sigue tiene 4 espacios de sangría
+    with st.form("f_config"):
         c1, c2 = st.columns(2)
         n_bcv = c1.number_input("Tasa BCV", value=t_bcv)
         n_bin = c1.number_input("Tasa Binance", value=t_bin)
@@ -144,6 +145,7 @@ with st.form("f_config"):
         n_igtf = c2.number_input("GTF (0.03 = 3%)", value=igtf)
         n_banco = c2.number_input("Banco (0.02 = 2%)", value=banco)
         
+        # El botón debe estar dentro del bloque 'with' (8 espacios)
         if st.form_submit_button("💾 Guardar Cambios Globales"):
             c = conectar()
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (n_bcv,))
@@ -156,12 +158,11 @@ with st.form("f_config"):
             st.success("✅ Sistema actualizado correctamente.")
             st.rerun()
 
-       # --- 5. LÓGICA DE COTIZACIONES ---
+# --- 5. LÓGICA DE COTIZACIONES (PEGADO AL BORDE IZQUIERDO) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
 
     c = conectar()
-    # Cargamos los datos necesarios para el formulario
     clis = pd.read_sql_query("SELECT nombre FROM clientes", c)['nombre'].tolist()
     inv_data = pd.read_sql_query("SELECT item, precio_usd, unidad FROM inventario", c)
     df_cots_vista = pd.read_sql_query("SELECT * FROM cotizaciones", c)
@@ -203,5 +204,3 @@ elif menu == "📝 Cotizaciones":
     st.divider()
     if not df_cots_vista.empty:
         st.dataframe(df_cots_vista.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
-
-
