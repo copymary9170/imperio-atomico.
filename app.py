@@ -51,7 +51,7 @@ conn.close()
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
-    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "⚙️ Configuración"])
+    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🏗️ Activos", "⚙️ Configuración"])
     
 # --- 4. LÓGICA DE INVENTARIO ---
 if menu == "📦 Inventario":
@@ -348,3 +348,47 @@ elif menu == "🎨 Análisis CMYK":
     else:
         st.info("💡 Arrastra varios archivos para compararlos y ver cuál gasta más tinta.")
 
+# --- 12. LÓGICA DE ACTIVOS (COSTO DE EQUIPO) ---
+elif menu == "🏗️ Activos":
+    st.title("🏗️ Gestión de Equipos y Depreciación")
+    st.markdown("Calcula cuánto debes cobrar por el uso de tus máquinas para poder reponerlas en el futuro.")
+
+    # Creamos un diccionario con tus 3 equipos
+    equipos_data = [
+        {"nombre": "HP Advantage J210a", "tipo": "Cartucho"},
+        {"nombre": "HP Smart Tank 580w", "tipo": "Continua"},
+        {"nombre": "Epson L1250", "tipo": "Sublimación"}
+    ]
+
+    col_equipo = st.columns(3)
+    desgaste_total = {}
+
+    for i, eq in enumerate(equipos_data):
+        with col_equipo[i]:
+            st.subheader(eq['nombre'])
+            precio = st.number_input(f"Costo Compra ($)", key=f"p_{i}", value=150.0)
+            vida_util = st.number_input(f"Vida Útil (Hojas)", key=f"v_{i}", value=10000)
+            
+            # Cálculo de depreciación por página
+            if vida_util > 0:
+                costo_hoja = precio / vida_util
+            else:
+                costo_hoja = 0.0
+            
+            st.metric("Costo por Hoja", f"$ {costo_hoja:.4f}")
+            desgaste_total[eq['nombre']] = costo_hoja
+
+    st.divider()
+    
+    # Análisis de "Mantenimiento Preventivo"
+    st.subheader("🛠️ Fondo de Mantenimiento")
+    porcentaje_mtto = st.slider("Ahorro adicional para reparaciones (%)", 0, 20, 5)
+    
+    st.info(f"""
+    **Estrategia de Cobro Sugerida:**
+    - Por cada impresión en la **{equipos_data[1]['nombre']}**, deberías sumar al menos **$ {(desgaste_total[equipos_data[1]['nombre']] * (1 + porcentaje_mtto/100)):.4f}** para cubrir el equipo y su futuro técnico.
+    """)
+    
+    # Botón para guardar estos valores (puedes conectarlo a tu base de datos después)
+    if st.button("💾 Guardar Configuración de Equipos"):
+        st.success("Configuración guardada. Ahora las cotizaciones pueden usar estos valores.")
