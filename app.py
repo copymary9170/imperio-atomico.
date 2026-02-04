@@ -147,6 +147,33 @@ elif menu == "📝 Cotizaciones":
             return f'background-color: {color}; color: white; font-weight: bold'
         st.dataframe(df_cots_global.sort_values('id', ascending=False).style.applymap(color_est, subset=['estado']), use_container_width=True)
 
+    st.divider()
+    st.subheader("📲 Enviar Cotización por WhatsApp")
+    
+    if not df_cots_global.empty:
+        # Seleccionamos la última cotización para enviar
+        c_envio = st.selectbox("Selecciona la cotización a enviar:", df_cots_global['id'].tolist())
+        datos_c = df_cots_global[df_cots_global['id'] == c_envio].iloc[0]
+        
+        # Buscamos el teléfono del cliente
+        c = conectar()
+        tel = pd.read_sql_query(f"SELECT whatsapp FROM clientes WHERE nombre = '{datos_c['cliente']}'", c)
+        c.close()
+        
+        if not tel.empty and tel['whatsapp'].iloc[0]:
+            numero = tel['whatsapp'].iloc[0].replace(" ", "").replace("+", "")
+            # Creamos el mensaje
+            mensaje = f"¡Hola! *Imperio Atómico* te saluda. 👋%0A%0A" \
+                      f"Detalle de tu pedido: *{datos_c['trabajo']}*%0A" \
+                      f"Total a pagar: *{datos_c['monto_usd']:.2f} USD* (o al cambio del día).%0A%0A" \
+                      f"Estado: *{datos_c['estado']}*%0A" \
+                      f"¡Gracias por tu confianza! ⚛️"
+            
+            link_ws = f"https://wa.me/{numero}?text={mensaje}"
+            st.link_button(f"🚀 Enviar a {datos_c['cliente']} vía WhatsApp", link_ws)
+        else:
+            st.warning("Este cliente no tiene un número de WhatsApp registrado.")
+
 # --- 6. DASHBOARD ---
 elif menu == "📊 Dashboard":
     st.title("📊 Resumen del Imperio")
@@ -216,6 +243,7 @@ elif menu == "👥 Clientes":
         st.dataframe(df_clis, use_container_width=True, hide_index=True)
     else:
         st.info("No se encontraron clientes con ese nombre.")
+
 
 
 
