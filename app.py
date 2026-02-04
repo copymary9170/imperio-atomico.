@@ -291,58 +291,60 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
-# --- 10. LÓGICA DE ANÁLISIS CMYK (PDF + IMAGEN SIN GUARDAR) ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK ---
 elif menu == "🎨 Análisis CMYK":
-    st.title("🎨 Análisis de Cobertura (PDF e Imágenes)")
-    st.markdown("Sube el archivo para calcular el gasto de tinta. Nada se guardará en tu PC.")
+    st.title("🎨 Analizador de Cobertura Múltiple")
+    st.markdown("Arrastra todos los diseños aquí para obtener los porcentajes de tinta de cada uno.")
 
-    impresora = st.selectbox("🖨️ Selecciona tu Impresora", 
+    impresora = st.selectbox("🖨️ Configuración de Impresora", 
                              ["HP Advantage J210a (Cartuchos)", 
                               "HP Smart Tank 580w (Tinta Continua)", 
                               "Epson L1250 (Sublimación)"])
     
-    # Aquí permitimos subir PDF o Imagen para ANALIZAR
-    archivo_analizar = st.file_uploader("🖼️ Sube el PDF o Imagen del cliente", type=['pdf', 'png', 'jpg', 'jpeg'])
+    # ACTIVAMOS LA CARGA MÚLTIPLE
+    archivos_multiples = st.file_uploader("Sube uno o varios archivos (JPG/PNG)", 
+                                          type=['png', 'jpg', 'jpeg'], 
+                                          accept_multiple_files=True)
 
-    if archivo_analizar:
+    if archivos_multiples:
         from PIL import Image
         import numpy as np
+        import pandas as pd
+
+        resultados = []
         
-        # Lógica para procesar PDF o Imagen
-        img_para_analisis = None
+        with st.spinner('Analizando cobertura de todos los archivos...'):
+            for arc in archivos_multiples:
+                # Abrir y procesar internamente
+                img = Image.open(arc).convert('CMYK')
+                datos = np.array(img)
+                
+                # Calcular promedios de CMYK
+                c = (np.mean(datos[:,:,0]) / 255) * 100
+                m = (np.mean(datos[:,:,1]) / 255) * 100
+                y = (np.mean(datos[:,:,2]) / 255) * 100
+                k = (np.mean(datos[:,:,3]) / 255) * 100
+                
+                # Cálculo de costo rápido
+                multiplicador = 2.5 if "J210a" in impresora else (1.5 if "L1250" in impresora else 1.0)
+                costo_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
+                costo_est = ((c+m+y+k)/400) * 0.8 * costo_base * multiplicador
+
+                resultados.append({
+                    "Archivo": arc.name,
+                    "Cian %": f"{c:.1f}%",
+                    "Magenta %": f"{m:.1f}%",
+                    "Amarillo %": f"{y:.1f}%",
+                    "Negro %": f"{k:.1f}%",
+                    "Costo Est. ($)": round(costo_est, 4)
+                })
+
+        # Mostramos la tabla técnica final
+        st.subheader("📋 Resultados del Análisis")
+        df_res = pd.DataFrame(resultados)
+        st.table(df_res)
         
-        if archivo_analizar.type == "application/pdf":
-            try:
-                from pdf2image import convert_from_bytes
-                # Convertimos solo la primera página del PDF para analizar
-                paginas = convert_from_bytes(archivo_analizar.read(), first_page=1, last_page=1)
-                img_para_analisis = paginas[0].convert('CMYK')
-                st.info("📄 PDF detectado: Analizando la primera página...")
-            except:
-                st.error("❌ Para analizar PDFs directamente necesito la librería 'pdf2image'. Por ahora, intenta subir el diseño como imagen (JPG/PNG).")
-        else:
-            img_para_analisis = Image.open(archivo_analizar).convert('CMYK')
+        st.success("✅ Análisis completado. No se guardó ningún archivo en el sistema.")
+    else:
+        st.info("💡 Arrastra varios archivos para compararlos y ver cuál gasta más tinta.")
 
-        if img_para_analisis:
-            st.image(img_para_analisis, caption="Vista previa del análisis", width=250)
-            
-            # Análisis de Pixeles
-            datos = np.array(img_para_analisis)
-            c_prom, m_prom, y_prom, k_prom = [np.mean(datos[:,:,i]) / 255 for i in range(4)]
-
-            st.subheader("📊 Porcentajes de Tinta Reales")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Cian", f"{c_prom*100:.1f}%")
-            c2.metric("Magenta", f"{m_prom*100:.1f}%")
-            c3.metric("Amarillo", f"{y_prom*100:.1f}%")
-            c4.metric("Negro", f"{k_prom*100:.1f}%")
-
-            # Cálculo de costo (usando tus multiplicadores de impresora)
-            st.divider()
-            multiplicador = 2.5 if "J210a" in impresora else (1.5 if "L1250" in impresora else 1.0)
-            costo_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
-            
-            gasto_final = (c_prom + m_prom + y_prom + k_prom) * 0.5 * costo_base * multiplicador
-            
-            st.success(f"💵 Gasto estimado de tinta: **$ {gasto_final:.4f}**")
-            st.warning("⚠️ Este archivo NO ha sido guardado. Al salir de este módulo se borrará de la memoria.")
