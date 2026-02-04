@@ -15,11 +15,11 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, trabajo TEXT, monto_usd REAL, monto_bcv REAL, monto_binance REAL, estado TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     
-    # Parámetros base (Aseguramos que existan todos)
-    params = [('tasa_bcv', 36.50), ('tasa_binance', 42.00), ('iva_perc', 0.16), 
-              ('igtf_perc', 0.03), ('banco_perc', 0.02), ('costo_tinta_ml', 0.05)]
-    for p, v in params:
-        c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
+    # NUEVA TABLA PARA TUS EQUIPOS
+    c.execute('''CREATE TABLE IF NOT EXISTS activos 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)''')
+    
+    # ... (el resto de tus params se queda igual)
     conn.commit()
     conn.close()
 
@@ -371,60 +371,53 @@ elif menu == "🎨 Análisis CMYK":
         st.success(f"✅ El precio 'TOTAL' es lo que te cuesta a ti producir la hoja. ¡No olvides sumarle tu ganancia!")
     elif not archivos_multiples:
         st.info("💡 Arrastra los archivos para ver cuánto te cuesta imprimirlos en la máquina seleccionada.")
-# --- 12. LÓGICA DE ACTIVOS CLASIFICADOS ---
+# --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
-    st.markdown("Clasifica tus equipos para que el sistema sepa cuáles gastan tinta y cuáles solo se deprecian.")
-
-    if 'lista_equipos' not in st.session_state:
-        st.session_state.lista_equipos = []
+    st.markdown("Los equipos registrados aquí se guardan permanentemente en la base de datos.")
 
     with st.expander("➕ Registrar Nuevo Equipo"):
         c1, c2 = st.columns(2)
-        nombre_eq = c1.text_input("Nombre del Equipo (Ej: Epson L1250, Cameo 5)")
-        
-        # AQUÍ ESTÁ EL TRUCO: Clasificamos el equipo
-        categoria = c2.selectbox("Categoría de Equipo", 
-                                ["Impresora (Gasta Tinta)", "Maquinaria (Solo Desgaste)", "Herramienta Manual"])
+        nombre_eq = c1.text_input("Nombre del Equipo")
+        categoria = c2.selectbox("Categoría", ["Impresora (Gasta Tinta)", "Maquinaria (Solo Desgaste)", "Herramienta Manual"])
         
         c3, c4 = st.columns(2)
-        moneda = c3.radio("¿Moneda de pago?", ["USD ($)", "BS (Bs)"], horizontal=True)
+        moneda = c3.radio("¿Moneda?", ["USD ($)", "BS (Bs)"], horizontal=True)
         monto = c4.number_input("Monto Pagado", min_value=0.0)
         
-        costo_usd = 0.0
-        if moneda == "BS (Bs)":
-            tipo_tasa = st.selectbox("Tasa usada", ["BCV", "Binance / Paralelo"])
-            tasa_a_usar = bcv if tipo_tasa == "BCV" else paralelo
-            costo_usd = monto / tasa_a_usar
-        else:
-            costo_usd = monto
+        # Usamos t_bcv y t_bin que ya cargamos arriba
+        costo_usd = monto if moneda == "USD ($)" else (monto / t_bcv if st.checkbox("¿Usar Tasa BCV?") else monto / t_bin)
 
-        # Definimos la unidad según la categoría
         if categoria == "Impresora (Gasta Tinta)":
             unidad_medida = "Hojas"
         else:
-            unidad_medida = st.selectbox("Se desgasta por cada:", ["Corte", "Laminado", "Uso", "Metro", "Minuto"])
+            unidad_medida = st.selectbox("Se desgasta por cada:", ["Corte", "Laminado", "Uso", "Metro"])
 
-        vida_util = st.number_input(f"Vida Útil Total (en {unidad_medida})", min_value=1, value=5000)
+        vida_util = st.number_input(f"Vida Útil Total ({unidad_medida})", min_value=1, value=5000)
         
         if st.button("💾 Guardar Equipo"):
             if nombre_eq:
-                nuevo_eq = {
-                    "Equipo": nombre_eq,
-                    "Categoría": categoria,
-                    "Inversión ($)": round(costo_usd, 2),
-                    "Desgaste x {0}".format(unidad_medida): round(costo_usd / vida_util, 4)
-                }
-                st.session_state.lista_equipos.append(nuevo_eq)
-                st.success(f"✅ {nombre_eq} guardado como {categoria}.")
+                desgaste_u = costo_usd / vida_util
+                conn = conectar()
+                c = conn.cursor()
+                c.execute("INSERT INTO activos (equipo, categoria, inversion, unidad, desgaste) VALUES (?,?,?,?,?)",
+                          (nombre_eq, categoria, costo_usd, unidad_medida, desgaste_u))
+                conn.commit(); conn.close()
+                st.success(f"✅ {nombre_eq} guardado en la base de datos.")
                 st.rerun()
 
-    # --- Mostrar Tabla Clasificada ---
-    if st.session_state.lista_equipos:
-        df_act = pd.DataFrame(st.session_state.lista_equipos)
-        st.subheader("📋 Inventario de Activos")
-        st.dataframe(df_act, use_container_width=True, hide_index=True)
+    # --- Cargar y Mostrar de la Base de Datos ---
+    conn = conectar()
+    df_activos_db = pd.read_sql_query("SELECT id, equipo as 'Equipo', categoria as 'Categoría', inversion as 'Inversión ($)', unidad as 'Unidad', desgaste as 'Desgaste ($)' FROM activos", conn)
+    conn.close()
 
+    if not df_activos_db.empty:
+        st.subheader("📋 Tus Activos Guardados")
+        st.dataframe(df_activos_db.drop(columns=['id']), use_container_width=True, hide_index=True)
+        
+        if st.button("🗑️ Borrar Todos los Activos"):
+            conn = conectar(); c = conn.cursor(); c.execute("DELETE FROM activos"); conn.commit(); conn.close()
+            st.rerun()
 # --- 13. LÓGICA DE OTROS PROCESOS (CAMEO, PLASTIFICADORA, ETC.) ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
@@ -480,5 +473,6 @@ elif menu == "🛠️ Otros Procesos":
                 c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
                 
                 st.success(f"💡 Para este proceso, tu costo base es **$ {costo_total:.2f}**. Sugerimos cobrar al menos el doble para tener ganancia.")
+
 
 
