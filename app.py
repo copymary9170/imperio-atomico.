@@ -198,13 +198,17 @@ elif menu == "👥 Clientes":
             else:
                 st.error("El nombre es obligatorio.")
 
-    # Mostrar lista de clientes registrados
+    # Mostrar lista de clientes registrados CON FILTRO
     c = conectar()
-    df_clis = pd.read_sql_query("SELECT nombre as 'Nombre', whatsapp as 'WhatsApp' FROM clientes", c)
+    # Esta línea busca en la base de datos lo que escribiste arriba
+    query = f"SELECT nombre as 'Nombre', whatsapp as 'WhatsApp' FROM clientes WHERE nombre LIKE '%{busqueda}%'"
+    df_clis = pd.read_sql_query(query, c)
     c.close()
     
     if not df_clis.empty:
         st.subheader("📋 Directorio de Clientes")
         st.dataframe(df_clis, use_container_width=True, hide_index=True)
+    else:
+        st.info("No se encontraron clientes con ese nombre.")
 
 
