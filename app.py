@@ -295,86 +295,78 @@ elif menu == "👥 Clientes":
 elif menu == "🎨 Análisis CMYK":
     st.title("🎨 Analizador de Cobertura y Desgaste")
 
-    # --- AQUÍ VA LA PARTE 3 (Versión para CMYK) ---
+    # --- CARGA DESDE BASE DE DATOS ---
     conn = conectar()
     # Traemos los activos de la base de datos
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
     conn.close()
     
-    # Convertimos a la lista que el resto del código ya sabe usar
     lista_activos = df_act_db.to_dict('records')
-    # Filtramos solo impresoras
+    # Filtramos solo impresoras (usando minúsculas como vienen de la DB)
     impresoras_disponibles = [e['equipo'] for e in lista_activos if e['categoria'] == "Impresora (Gasta Tinta)"]
 
     if not impresoras_disponibles:
         st.warning("⚠️ No has registrado ninguna Impresora en el módulo de '🏗️ Activos'.")
         st.info("Ve a 'Activos' y registra tus máquinas para que aparezcan aquí.")
-        # Fallback por si acaso para que no dé error
-        impresoras_disponibles = ["Configura una impresora en Activos"]
-
-    c_printer, c_file = st.columns([1, 2])
-    
-    with c_printer:
-        impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
+    else:
+        c_printer, c_file = st.columns([1, 2])
         
-        # Obtenemos el costo de desgaste de la impresora seleccionada
-        datos_imp = next((e for e in lista_activos if e['Equipo'] == impresora_sel), None)
-        # Buscamos la columna de desgaste (que tiene nombre dinámico)
-        costo_desgaste = 0.0
-        if datos_imp:
-            for clave in datos_imp:
-                if "Desgaste" in clave:
-                    costo_desgaste = datos_imp[clave]
+        with c_printer:
+            impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
+            
+            # Buscamos los datos de la impresora seleccionada
+            datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
+            
+            # El desgaste ahora es directo porque lo guardamos así en la tabla 'activos'
+            costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
-    with c_file:
-        archivos_multiples = st.file_uploader("Sube tus diseños (JPG/PNG)", 
-                                              type=['png', 'jpg', 'jpeg'], 
-                                              accept_multiple_files=True)
+        with c_file:
+            archivos_multiples = st.file_uploader("Sube tus diseños (JPG/PNG)", 
+                                                 type=['png', 'jpg', 'jpeg'], 
+                                                 accept_multiple_files=True)
 
-    if archivos_multiples and datos_imp:
-        from PIL import Image
-        import numpy as np
+        if archivos_multiples and datos_imp:
+            from PIL import Image
+            import numpy as np
 
-        resultados = []
-        with st.spinner('Analizando píxeles y calculando costos...'):
-            for arc in archivos_multiples:
-                img = Image.open(arc).convert('CMYK')
-                datos = np.array(img)
-                
-                # Porcentajes de cobertura
-                c = (np.mean(datos[:,:,0]) / 255) * 100
-                m = (np.mean(datos[:,:,1]) / 255) * 100
-                y = (np.mean(datos[:,:,2]) / 255) * 100
-                k = (np.mean(datos[:,:,3]) / 255) * 100
-                
-                # Lógica de multiplicador por tecnología (Automatizada)
-                # Si es cartucho (J210) cobramos más por gota, si es continua menos.
-                nombre_low = impresora_sel.lower()
-                multi = 2.5 if "j210" in nombre_low else (1.5 if "l1250" in nombre_low or "subli" in nombre_low else 1.0)
-                
-                # Cálculo de Tinta
-                costo_tinta_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
-                costo_tinta_final = ((c+m+y+k)/400) * 0.8 * costo_tinta_base * multi
-                
-                # COSTO TOTAL = Tinta + Desgaste de la máquina
-                costo_total_obra = costo_tinta_final + costo_desgaste
+            resultados = []
+            with st.spinner('Analizando píxeles y calculando costos...'):
+                for arc in archivos_multiples:
+                    img = Image.open(arc).convert('CMYK')
+                    datos = np.array(img)
+                    
+                    # Porcentajes de cobertura
+                    c = (np.mean(datos[:,:,0]) / 255) * 100
+                    m = (np.mean(datos[:,:,1]) / 255) * 100
+                    y = (np.mean(datos[:,:,2]) / 255) * 100
+                    k = (np.mean(datos[:,:,3]) / 255) * 100
+                    
+                    # Lógica de multiplicador
+                    nombre_low = impresora_sel.lower()
+                    multi = 2.5 if "j210" in nombre_low else (1.5 if "l1250" in nombre_low or "subli" in nombre_low else 1.0)
+                    
+                    # Cálculo de Tinta (usando el valor de configuración que ya tienes)
+                    costo_tinta_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
+                    costo_tinta_final = ((c+m+y+k)/400) * 0.8 * costo_tinta_base * multi
+                    
+                    # COSTO TOTAL = Tinta + Desgaste
+                    costo_total_obra = costo_tinta_final + costo_desgaste
 
-                resultados.append({
-                    "Diseño": arc.name,
-                    "Cian %": f"{c:.1f}%",
-                    "Magenta %": f"{m:.1f}%",
-                    "Amarillo %": f"{y:.1f}%",
-                    "Negro %": f"{k:.1f}%",
-                    "Costo Tinta": f"$ {costo_tinta_final:.4f}",
-                    "Desgaste Máq.": f"$ {costo_desgaste:.4f}",
-                    "TOTAL": round(costo_total_obra, 4)
-                })
+                    resultados.append({
+                        "Diseño": arc.name,
+                        "Cian %": f"{c:.1f}%",
+                        "Magenta %": f"{m:.1f}%",
+                        "Amarillo %": f"{y:.1f}%",
+                        "Negro %": f"{k:.1f}%",
+                        "Costo Tinta": f"$ {costo_tinta_final:.4f}",
+                        "Desgaste Máq.": f"$ {costo_desgaste:.4f}",
+                        "TOTAL": round(costo_total_obra, 4)
+                    })
 
-        st.subheader(f"📋 Reporte para {impresora_sel}")
-        df_res = pd.DataFrame(resultados)
-        st.table(df_res)
-        
-        st.success(f"✅ El precio 'TOTAL' es lo que te cuesta a ti producir la hoja. ¡No olvides sumarle tu ganancia!")
+            st.subheader(f"📋 Reporte para {impresora_sel}")
+            df_res = pd.DataFrame(resultados)
+            st.table(df_res)
+            st.success(f"✅ Análisis completado. Costo base calculado.")
     elif not archivos_multiples:
         st.info("💡 Arrastra los archivos para ver cuánto te cuesta imprimirlos en la máquina seleccionada.")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
@@ -484,6 +476,7 @@ elif menu == "🛠️ Otros Procesos":
                 c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
                 
                 st.success(f"💡 Para este proceso, tu costo base es **$ {costo_total:.2f}**. Sugerimos cobrar al menos el doble para tener ganancia.")
+
 
 
 
