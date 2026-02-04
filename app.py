@@ -156,7 +156,7 @@ with st.form("f_config"):
             st.success("✅ Sistema actualizado correctamente.")
             st.rerun()
 
-# --- 5. LÓGICA DE COTIZACIONES ---
+       # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
@@ -203,3 +203,4 @@ elif menu == "📝 Cotizaciones":
     st.divider()
     if not df_cots_vista.empty:
         st.dataframe(df_cots_vista.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
+
