@@ -156,27 +156,35 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado y Registrado en Historial: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA ---
+    # --- TABLA DE AUDITORÍA CORREGIDA ---
     st.divider()
     if not df_inv.empty:
-        # Filtrado por búsqueda
-        df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)]
+        # 1. Filtramos por la búsqueda del usuario
+        df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
         
         moneda = st.radio("Ver precios en:", ["USD", "BCV", "Binance"], horizontal=True)
-        df_audit = df_inv_filtrado.copy()
         
-        # Ajustamos los nombres de columnas para que se vea profesional
-        # Nota: Asegúrate que df_inv traiga [id, item, cantidad, unidad, precio_usd]
+        # 2. Definimos el factor de conversión según la moneda elegida
         f = t_bcv if moneda == "BCV" else (t_bin if moneda == "Binance" else 1.0)
         sim = "Bs" if moneda != "USD" else "$"
         
-        df_audit['Costo Unit.'] = df_audit['precio_usd'] * f
-        df_audit['Inversión Stock'] = (df_audit['cantidad'] * df_audit['precio_usd']) * f
+        # 3. CREAMOS LAS COLUMNAS DE CÁLCULO REAL
+        # Costo de 1 sola unidad (Hoja/ml) en la moneda seleccionada
+        df_inv_filtrado['Costo Unit.'] = df_inv_filtrado['precio_usd'] * f
         
-        st.dataframe(df_audit[['item', 'cantidad', 'unidad', 'Costo Unit.', 'Inversión Stock']].style.format({
-            'cantidad': '{:,.2f}', 'Costo Unit.': f"{sim} {{:.4f}}", 'Inversión Stock': f"{sim} {{:.2f}}"
-        }), use_container_width=True, hide_index=True)
+        # Inversión total (Cantidad que tienes x Precio Unitario) en la moneda seleccionada
+        df_inv_filtrado['Inversión Stock'] = (df_inv_filtrado['cantidad'] * df_inv_filtrado['precio_usd']) * f
+        
+        # 4. MOSTRAMOS LA TABLA CON LOS NOMBRES LIMPIOS
+        # Cambiamos nombres para que sean fáciles de leer
+        df_mostrar = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Costo Unit.', 'Inversión Stock']].copy()
+        df_mostrar.columns = ['Producto', 'Cant.', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
 
+        st.dataframe(df_mostrar.style.format({
+            'Cant.': '{:,.2f}', 
+            f'Unit. ({sim})': f"{{:.4f}}", 
+            f'Total Stock ({sim})': f"{{:.2f}}"
+        }), use_container_width=True, hide_index=True)
     # --- SECCIÓN PARA CORREGIR ERRORES ---
     st.divider()
     with st.expander("🗑️ Borrar o Corregir Insumos"):
@@ -620,6 +628,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
