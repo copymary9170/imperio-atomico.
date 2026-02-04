@@ -348,53 +348,57 @@ elif menu == "🎨 Análisis CMYK":
     else:
         st.info("💡 Arrastra varios archivos para compararlos y ver cuál gasta más tinta.")
 
-# --- 12. LÓGICA DE ACTIVOS DINÁMICA (EQUIPOS INFINITOS) ---
+# --- 12. LÓGICA DE ACTIVOS CON SELECTOR DE TASA BCV/BINANCE ---
 elif menu == "🏗️ Activos":
-    st.title("🏗️ Inventario de Maquinaria y Equipos")
-    st.markdown("Registra aquí cada máquina de tu taller para calcular su desgaste.")
+    st.title("🏗️ Gestión de Equipos y Activos")
+    st.markdown("Registra tus máquinas usando la tasa oficial o paralela de forma automática.")
 
-    # Inicializamos la lista de equipos en la sesión si no existe
     if 'lista_equipos' not in st.session_state:
         st.session_state.lista_equipos = []
 
-    # --- Formulario para agregar nuevo equipo ---
     with st.expander("➕ Registrar Nuevo Equipo (Cameo, Plastificadora, etc.)"):
         c1, c2 = st.columns(2)
-        nombre_eq = c1.text_input("Nombre del Equipo", placeholder="Ej: Cameo 5")
+        nombre_eq = c1.text_input("Nombre del Equipo")
         tipo_uso = c2.selectbox("Unidad de Desgaste", ["Hojas", "Cortes", "Metros", "Minutos", "Usos"])
         
-        c3, c4, c5 = st.columns(3)
-        moneda = c3.radio("Pago en:", ["USD ($)", "BS (Bs)"])
+        c3, c4 = st.columns(2)
+        moneda = c3.radio("¿En qué moneda lo pagaste?", ["USD ($)", "BS (Bs)"], horizontal=True)
         monto = c4.number_input("Monto Pagado", min_value=0.0)
-        tasa = c5.number_input("Tasa de cambio (si fue en Bs)", min_value=1.0, value=tasa_dia)
         
-        # Cálculo de costo base en USD
-        costo_usd = monto if moneda == "USD ($)" else (monto / tasa)
-        
-        vida_util = st.number_input(f"Vida Útil estimada (Total de {tipo_uso})", min_value=1)
-        
-        if st.button("💾 Guardar Equipo en el Sistema"):
-            nuevo_eq = {
-                "Equipo": nombre_eq,
-                "Inversión": costo_usd,
-                "Unidad": tipo_uso,
-                "Desgaste x Unidad": costo_usd / vida_util
-            }
-            st.session_state.lista_equipos.append(nuevo_eq)
-            st.success(f"✅ {nombre_eq} agregado con éxito.")
+        # --- Lógica de Tasa Inteligente ---
+        costo_usd = 0.0
+        if moneda == "BS (Bs)":
+            tipo_tasa = st.selectbox("Selecciona la Tasa que usaste", ["BCV", "Binance / Paralelo"])
+            # Usamos las tasas que ya tienes configuradas en tu app
+            tasa_a_usar = bcv if tipo_tasa == "BCV" else paralelo
+            
+            st.caption(f"📢 Usando tasa {tipo_tasa}: **{tasa_a_usar} Bs/$**")
+            costo_usd = monto / tasa_a_usar
+        else:
+            costo_usd = monto
 
-    # --- Tabla de Activos Registrados ---
+        st.info(f"💰 Inversión calculada: **$ {costo_usd:.2f}**")
+        
+        vida_util = st.number_input(f"Vida Útil (Total de {tipo_uso})", min_value=1, value=1000)
+        
+        if st.button("💾 Guardar en Inventario de Activos"):
+            if nombre_eq and costo_usd > 0:
+                nuevo_eq = {
+                    "Equipo": nombre_eq,
+                    "Inversión ($)": round(costo_usd, 2),
+                    "Unidad": tipo_uso,
+                    "Desgaste x Unidad ($)": round(costo_usd / vida_util, 4)
+                }
+                st.session_state.lista_equipos.append(nuevo_eq)
+                st.success(f"✅ {nombre_eq} registrado con éxito.")
+                st.rerun()
+
+    # --- Tabla de Activos ---
     if st.session_state.lista_equipos:
-        st.subheader("📋 Tus Equipos Registrados")
-        df_activos = pd.DataFrame(st.session_state.lista_equipos)
+        st.subheader("📋 Lista de Equipos Actual")
+        df_act = pd.DataFrame(st.session_state.lista_equipos)
+        st.dataframe(df_act, use_container_width=True, hide_index=True)
         
-        st.table(df_activos.style.format({
-            "Inversión": "$ {:.2f}",
-            "Desgaste x Unidad": "$ {:.4f}"
-        }))
-        
-        if st.button("🗑️ Limpiar Lista de Equipos"):
+        if st.button("🗑️ Borrar Todo"):
             st.session_state.lista_equipos = []
             st.rerun()
-    else:
-        st.info("Aún no tienes equipos registrados. Usa el formulario de arriba para empezar con tu Cameo 5 o tu Plastificadora.")
