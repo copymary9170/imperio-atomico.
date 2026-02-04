@@ -136,7 +136,7 @@ if menu == "📦 Inventario":
         st.info("Inventario vacío.")
 elif menu == "⚙️ Configuración":
     st.title("⚙️ Configuración de Tasas e Impuestos")
-    with st.form("f_config"):
+with st.form("f_config"):
         c1, c2 = st.columns(2)
         n_bcv = c1.number_input("Tasa BCV", value=t_bcv)
         n_bin = c1.number_input("Tasa Binance", value=t_bin)
@@ -144,7 +144,8 @@ elif menu == "⚙️ Configuración":
         n_igtf = c2.number_input("GTF (0.03 = 3%)", value=igtf)
         n_banco = c2.number_input("Banco (0.02 = 2%)", value=banco)
         
-      if st.form_submit_button("💾 Guardar Cambios Globales"):
+        # Corregido: Alineación exacta con los campos anteriores
+        if st.form_submit_button("💾 Guardar Cambios Globales"):
             c = conectar()
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (n_bcv,))
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_binance'", (n_bin,))
@@ -156,12 +157,13 @@ elif menu == "⚙️ Configuración":
             st.success("✅ Sistema actualizado correctamente.")
             st.rerun()
 
-# --- 5. LÓGICA DE COTIZACIONES ---
+# --- 5. LÓGICA DE COTIZACIONES (Pegado al borde izquierdo) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
-    # Traer datos necesarios
+    # Cargar datos para el formulario
     c = conectar()
+    df_cots = pd.read_sql_query("SELECT * FROM cotizaciones", c) # Necesario para el historial
     clis = pd.read_sql_query("SELECT nombre FROM clientes", c)['nombre'].tolist()
     inv_data = pd.read_sql_query("SELECT item, precio_usd, unidad FROM inventario", c)
     c.close()
@@ -177,7 +179,6 @@ elif menu == "📝 Cotizaciones":
         st.divider()
         col_p1, col_p2 = st.columns(2)
         
-        # Mostrar sugerencia de costo basado en inventario
         if material_sel != "--" and not inv_data.empty:
             costo_u = inv_data[inv_data['item'] == material_sel]['precio_usd'].values[0]
             total_costo_m = costo_u * cantidad_material
@@ -195,7 +196,6 @@ elif menu == "📝 Cotizaciones":
                           (datetime.now().strftime("%d/%m/%Y"), cliente_sel, trabajo, 
                            monto_final_usd, monto_final_usd * t_bcv, monto_final_usd * t_bin, estado_pago))
                 
-                # Descontar del inventario si se seleccionó material
                 if material_sel != "--" and cantidad_material > 0:
                     c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", 
                               (cantidad_material, material_sel))
@@ -211,3 +211,4 @@ elif menu == "📝 Cotizaciones":
         st.dataframe(df_cots.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
     else:
         st.info("No hay cotizaciones registradas.")
+
