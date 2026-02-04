@@ -295,29 +295,22 @@ elif menu == "👥 Clientes":
 elif menu == "🎨 Análisis CMYK":
     st.title("🎨 Analizador de Cobertura y Desgaste")
 
-    # --- CARGA DESDE BASE DE DATOS ---
+    # 1. Carga de datos desde la base de datos
     conn = conectar()
-    # Traemos los activos de la base de datos
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
     conn.close()
     
     lista_activos = df_act_db.to_dict('records')
-    # Filtramos solo impresoras (usando minúsculas como vienen de la DB)
     impresoras_disponibles = [e['equipo'] for e in lista_activos if e['categoria'] == "Impresora (Gasta Tinta)"]
 
     if not impresoras_disponibles:
         st.warning("⚠️ No has registrado ninguna Impresora en el módulo de '🏗️ Activos'.")
-        st.info("Ve a 'Activos' y registra tus máquinas para que aparezcan aquí.")
     else:
         c_printer, c_file = st.columns([1, 2])
         
         with c_printer:
             impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
-            
-            # Buscamos los datos de la impresora seleccionada
             datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
-            
-            # El desgaste ahora es directo porque lo guardamos así en la tabla 'activos'
             costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
         with c_file:
@@ -325,33 +318,31 @@ elif menu == "🎨 Análisis CMYK":
                                                  type=['png', 'jpg', 'jpeg'], 
                                                  accept_multiple_files=True)
 
+        # Si hay archivos y hay una impresora seleccionada
         if archivos_multiples and datos_imp:
             from PIL import Image
             import numpy as np
 
             resultados = []
-            with st.spinner('Analizando píxeles y calculando costos...'):
+            with st.spinner('Analizando píxeles...'):
                 for arc in archivos_multiples:
                     img = Image.open(arc).convert('CMYK')
                     datos = np.array(img)
                     
-                    # Porcentajes de cobertura
+                    # Cálculo de porcentajes
                     c = (np.mean(datos[:,:,0]) / 255) * 100
                     m = (np.mean(datos[:,:,1]) / 255) * 100
                     y = (np.mean(datos[:,:,2]) / 255) * 100
                     k = (np.mean(datos[:,:,3]) / 255) * 100
                     
-                    # Lógica de multiplicador
+                    # Multiplicador por tecnología
                     nombre_low = impresora_sel.lower()
                     multi = 2.5 if "j210" in nombre_low else (1.5 if "l1250" in nombre_low or "subli" in nombre_low else 1.0)
                     
-                    # Cálculo de Tinta (usando el valor de configuración que ya tienes)
+                    # Costo de tinta
                     costo_tinta_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
                     costo_tinta_final = ((c+m+y+k)/400) * 0.8 * costo_tinta_base * multi
                     
-                    # COSTO TOTAL = Tinta + Desgaste
-                    costo_total_obra = costo_tinta_final + costo_desgaste
-
                     resultados.append({
                         "Diseño": arc.name,
                         "Cian %": f"{c:.1f}%",
@@ -360,13 +351,16 @@ elif menu == "🎨 Análisis CMYK":
                         "Negro %": f"{k:.1f}%",
                         "Costo Tinta": f"$ {costo_tinta_final:.4f}",
                         "Desgaste Máq.": f"$ {costo_desgaste:.4f}",
-                        "TOTAL": round(costo_total_obra, 4)
+                        "TOTAL": round(costo_tinta_final + costo_desgaste, 4)
                     })
 
             st.subheader(f"📋 Reporte para {impresora_sel}")
-            df_res = pd.DataFrame(resultados)
-            st.table(df_res)
-            st.success(f"✅ Análisis completado. Costo base calculado.")
+            st.table(pd.DataFrame(resultados))
+            st.success("✅ Cálculo terminado.")
+
+        # Aquí estaba el error de sintaxis: aseguramos que esté alineado con el 'if archivos_multiples'
+        elif not archivos_multiples:
+            st.info("💡 Arrastra los archivos para ver cuánto te cuesta imprimirlos.")
     elif not archivos_multiples:
         st.info("💡 Arrastra los archivos para ver cuánto te cuesta imprimirlos en la máquina seleccionada.")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
@@ -476,6 +470,7 @@ elif menu == "🛠️ Otros Procesos":
                 c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
                 
                 st.success(f"💡 Para este proceso, tu costo base es **$ {costo_total:.2f}**. Sugerimos cobrar al menos el doble para tener ganancia.")
+
 
 
 
