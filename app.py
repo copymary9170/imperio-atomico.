@@ -188,8 +188,7 @@ if menu == "📦 Inventario":
                 c.commit(); c.close()
                 st.warning(f"Producto {prod_b} eliminado.")
                 st.rerun()
-
-# --- NUEVA SECCIÓN: HISTORIAL DE MOVIMIENTOS ---
+    # --- NUEVA SECCIÓN: HISTORIAL DE MOVIMIENTOS ---
         st.divider()
         with st.expander("📜 Ver Historial de Movimientos (Auditoría)"):
             conn = conectar()
@@ -621,6 +620,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
