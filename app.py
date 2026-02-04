@@ -291,63 +291,86 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
-# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (INTELIGENTE) ---
 elif menu == "🎨 Análisis CMYK":
-    st.title("🎨 Analizador de Cobertura Múltiple")
-    st.markdown("Arrastra todos los diseños aquí para obtener los porcentajes de tinta de cada uno.")
+    st.title("🎨 Analizador de Cobertura y Desgaste")
+    st.markdown("Analiza tus diseños y calcula el costo real (Tinta + Equipo).")
 
-    impresora = st.selectbox("🖨️ Configuración de Impresora", 
-                             ["HP Advantage J210a (Cartuchos)", 
-                              "HP Smart Tank 580w (Tinta Continua)", 
-                              "Epson L1250 (Sublimación)"])
+    # 1. Filtramos solo los equipos que son impresoras de la lista de activos
+    lista_activos = st.session_state.get('lista_equipos', [])
+    impresoras_disponibles = [e['Equipo'] for e in lista_activos if e['Categoría'] == "Impresora (Gasta Tinta)"]
+
+    if not impresoras_disponibles:
+        st.warning("⚠️ No has registrado ninguna Impresora en el módulo de '🏗️ Activos'.")
+        st.info("Ve a 'Activos' y registra tus máquinas para que aparezcan aquí.")
+        # Fallback por si acaso para que no dé error
+        impresoras_disponibles = ["Configura una impresora en Activos"]
+
+    c_printer, c_file = st.columns([1, 2])
     
-    # ACTIVAMOS LA CARGA MÚLTIPLE
-    archivos_multiples = st.file_uploader("Sube uno o varios archivos (JPG/PNG)", 
-                                          type=['png', 'jpg', 'jpeg'], 
-                                          accept_multiple_files=True)
+    with c_printer:
+        impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
+        
+        # Obtenemos el costo de desgaste de la impresora seleccionada
+        datos_imp = next((e for e in lista_activos if e['Equipo'] == impresora_sel), None)
+        # Buscamos la columna de desgaste (que tiene nombre dinámico)
+        costo_desgaste = 0.0
+        if datos_imp:
+            for clave in datos_imp:
+                if "Desgaste" in clave:
+                    costo_desgaste = datos_imp[clave]
 
-    if archivos_multiples:
+    with c_file:
+        archivos_multiples = st.file_uploader("Sube tus diseños (JPG/PNG)", 
+                                              type=['png', 'jpg', 'jpeg'], 
+                                              accept_multiple_files=True)
+
+    if archivos_multiples and datos_imp:
         from PIL import Image
         import numpy as np
-        import pandas as pd
 
         resultados = []
-        
-        with st.spinner('Analizando cobertura de todos los archivos...'):
+        with st.spinner('Analizando píxeles y calculando costos...'):
             for arc in archivos_multiples:
-                # Abrir y procesar internamente
                 img = Image.open(arc).convert('CMYK')
                 datos = np.array(img)
                 
-                # Calcular promedios de CMYK
+                # Porcentajes de cobertura
                 c = (np.mean(datos[:,:,0]) / 255) * 100
                 m = (np.mean(datos[:,:,1]) / 255) * 100
                 y = (np.mean(datos[:,:,2]) / 255) * 100
                 k = (np.mean(datos[:,:,3]) / 255) * 100
                 
-                # Cálculo de costo rápido
-                multiplicador = 2.5 if "J210a" in impresora else (1.5 if "L1250" in impresora else 1.0)
-                costo_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
-                costo_est = ((c+m+y+k)/400) * 0.8 * costo_base * multiplicador
+                # Lógica de multiplicador por tecnología (Automatizada)
+                # Si es cartucho (J210) cobramos más por gota, si es continua menos.
+                nombre_low = impresora_sel.lower()
+                multi = 2.5 if "j210" in nombre_low else (1.5 if "l1250" in nombre_low or "subli" in nombre_low else 1.0)
+                
+                # Cálculo de Tinta
+                costo_tinta_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
+                costo_tinta_final = ((c+m+y+k)/400) * 0.8 * costo_tinta_base * multi
+                
+                # COSTO TOTAL = Tinta + Desgaste de la máquina
+                costo_total_obra = costo_tinta_final + costo_desgaste
 
                 resultados.append({
-                    "Archivo": arc.name,
+                    "Diseño": arc.name,
                     "Cian %": f"{c:.1f}%",
                     "Magenta %": f"{m:.1f}%",
                     "Amarillo %": f"{y:.1f}%",
                     "Negro %": f"{k:.1f}%",
-                    "Costo Est. ($)": round(costo_est, 4)
+                    "Costo Tinta": f"$ {costo_tinta_final:.4f}",
+                    "Desgaste Máq.": f"$ {costo_desgaste:.4f}",
+                    "TOTAL": round(costo_total_obra, 4)
                 })
 
-        # Mostramos la tabla técnica final
-        st.subheader("📋 Resultados del Análisis")
+        st.subheader(f"📋 Reporte para {impresora_sel}")
         df_res = pd.DataFrame(resultados)
         st.table(df_res)
         
-        st.success("✅ Análisis completado. No se guardó ningún archivo en el sistema.")
-    else:
-        st.info("💡 Arrastra varios archivos para compararlos y ver cuál gasta más tinta.")
-
+        st.success(f"✅ El precio 'TOTAL' es lo que te cuesta a ti producir la hoja. ¡No olvides sumarle tu ganancia!")
+    elif not archivos_multiples:
+        st.info("💡 Arrastra los archivos para ver cuánto te cuesta imprimirlos en la máquina seleccionada.")
 # --- 12. LÓGICA DE ACTIVOS CLASIFICADOS ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
@@ -401,3 +424,4 @@ elif menu == "🏗️ Activos":
         df_act = pd.DataFrame(st.session_state.lista_equipos)
         st.subheader("📋 Inventario de Activos")
         st.dataframe(df_act, use_container_width=True, hide_index=True)
+
