@@ -304,65 +304,62 @@ elif menu == "🎨 Análisis CMYK":
     impresoras_disponibles = [e['equipo'] for e in lista_activos if e['categoria'] == "Impresora (Gasta Tinta)"]
 
     if not impresoras_disponibles:
-        st.warning("⚠️ No has registrado ninguna Impresora en el módulo de '🏗️ Activos'.")
+        st.warning("⚠️ No hay impresoras registradas en 'Activos'.")
+        st.stop() # Detiene la ejecución de este bloque para evitar errores
+
+    c_printer, c_file = st.columns([1, 2])
+    
+    with c_printer:
+        impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
+        datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
+        costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
+
+    with c_file:
+        archivos_multiples = st.file_uploader("Sube tus diseños (JPG/PNG)", 
+                                             type=['png', 'jpg', 'jpeg'], 
+                                             accept_multiple_files=True)
+
+    # Lógica de procesamiento
+    if archivos_multiples:
+        from PIL import Image
+        import numpy as np
+
+        resultados = []
+        with st.spinner('Analizando píxeles...'):
+            for arc in archivos_multiples:
+                img = Image.open(arc).convert('CMYK')
+                datos = np.array(img)
+                
+                # Cálculo de porcentajes
+                c = (np.mean(datos[:,:,0]) / 255) * 100
+                m = (np.mean(datos[:,:,1]) / 255) * 100
+                y = (np.mean(datos[:,:,2]) / 255) * 100
+                k = (np.mean(datos[:,:,3]) / 255) * 100
+                
+                # Multiplicador por tecnología
+                nombre_low = impresora_sel.lower()
+                multi = 2.5 if "j210" in nombre_low else (1.5 if "l1250" in nombre_low or "subli" in nombre_low else 1.0)
+                
+                # Costo de tinta
+                costo_tinta_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
+                costo_tinta_final = ((c+m+y+k)/400) * 0.8 * costo_tinta_base * multi
+                
+                resultados.append({
+                    "Diseño": arc.name,
+                    "Cian %": f"{c:.1f}%",
+                    "Magenta %": f"{m:.1f}%",
+                    "Amarillo %": f"{y:.1f}%",
+                    "Negro %": f"{k:.1f}%",
+                    "Costo Tinta": f"$ {costo_tinta_final:.4f}",
+                    "Desgaste Máq.": f"$ {costo_desgaste:.4f}",
+                    "TOTAL": round(costo_tinta_final + costo_desgaste, 4)
+                })
+
+        st.subheader(f"📋 Reporte para {impresora_sel}")
+        st.table(pd.DataFrame(resultados))
+        st.success("✅ Análisis completado con éxito.")
     else:
-        c_printer, c_file = st.columns([1, 2])
-        
-        with c_printer:
-            impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
-            datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
-            costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
-
-        with c_file:
-            archivos_multiples = st.file_uploader("Sube tus diseños (JPG/PNG)", 
-                                                 type=['png', 'jpg', 'jpeg'], 
-                                                 accept_multiple_files=True)
-
-        # Si hay archivos y hay una impresora seleccionada
-        if archivos_multiples and datos_imp:
-            from PIL import Image
-            import numpy as np
-
-            resultados = []
-            with st.spinner('Analizando píxeles...'):
-                for arc in archivos_multiples:
-                    img = Image.open(arc).convert('CMYK')
-                    datos = np.array(img)
-                    
-                    # Cálculo de porcentajes
-                    c = (np.mean(datos[:,:,0]) / 255) * 100
-                    m = (np.mean(datos[:,:,1]) / 255) * 100
-                    y = (np.mean(datos[:,:,2]) / 255) * 100
-                    k = (np.mean(datos[:,:,3]) / 255) * 100
-                    
-                    # Multiplicador por tecnología
-                    nombre_low = impresora_sel.lower()
-                    multi = 2.5 if "j210" in nombre_low else (1.5 if "l1250" in nombre_low or "subli" in nombre_low else 1.0)
-                    
-                    # Costo de tinta
-                    costo_tinta_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
-                    costo_tinta_final = ((c+m+y+k)/400) * 0.8 * costo_tinta_base * multi
-                    
-                    resultados.append({
-                        "Diseño": arc.name,
-                        "Cian %": f"{c:.1f}%",
-                        "Magenta %": f"{m:.1f}%",
-                        "Amarillo %": f"{y:.1f}%",
-                        "Negro %": f"{k:.1f}%",
-                        "Costo Tinta": f"$ {costo_tinta_final:.4f}",
-                        "Desgaste Máq.": f"$ {costo_desgaste:.4f}",
-                        "TOTAL": round(costo_tinta_final + costo_desgaste, 4)
-                    })
-
-            st.subheader(f"📋 Reporte para {impresora_sel}")
-            st.table(pd.DataFrame(resultados))
-            st.success("✅ Cálculo terminado.")
-
-        # Aquí estaba el error de sintaxis: aseguramos que esté alineado con el 'if archivos_multiples'
-        elif not archivos_multiples:
-            st.info("💡 Arrastra los archivos para ver cuánto te cuesta imprimirlos.")
-    elif not archivos_multiples:
-        st.info("💡 Arrastra los archivos para ver cuánto te cuesta imprimirlos en la máquina seleccionada.")
+        st.info("💡 Por favor, sube uno o varios archivos para iniciar el cálculo de costos.")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
@@ -470,6 +467,7 @@ elif menu == "🛠️ Otros Procesos":
                 c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
                 
                 st.success(f"💡 Para este proceso, tu costo base es **$ {costo_total:.2f}**. Sugerimos cobrar al menos el doble para tener ganancia.")
+
 
 
 
