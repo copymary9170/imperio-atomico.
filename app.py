@@ -92,40 +92,33 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
     menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
-# --- 4. LÓGICA DE INVENTARIO ---
+# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD ---
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
 
     # --- BUSCADOR DE INVENTARIO ---
     busqueda_inv = st.text_input("🔍 Buscar producto en inventario...", placeholder="Ej: Resma, Tinta...")
 
-    # --- BLOQUE DE ALERTAS DE STOCK BAJO (SOLO AGREGAR) ---
+    # --- BLOQUE DE ALERTAS DE STOCK BAJO ---
     st.divider()
-    
-    # Definimos el límite de alerta (puedes cambiar el 10 por el número que prefieras)
     limite_alerta = 10 
     
-    # Buscamos los productos que tienen 10 o menos unidades
     if not df_inv.empty:
         df_bajo_stock = df_inv[df_inv['cantidad'] <= limite_alerta]
-        
         if not df_bajo_stock.empty:
             st.subheader("⚠️ Materiales por Agotarse")
             for index, row in df_bajo_stock.iterrows():
-                # Mostramos un mensaje llamativo por cada producto bajo
                 st.warning(f"🚨 **¡Atención!** Quedan pocas unidades de: **{row['item']}** (Solo hay {int(row['cantidad'])} {row['unidad']})")
         else:
             st.success("✅ Tienes suficiente stock de todos tus materiales.")
 
-    # Modificamos la carga del DataFrame para que filtre
-    df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)] if not df_inv.empty else df_inv
-    
+    # --- REGISTRO DE NUEVA COMPRA (Aquí agregamos la trazabilidad) ---
     with st.expander("📥 Registrar Nueva Compra (Paquetes/Lotes)"):
         with st.form("form_inv"):
             c_info, c_tasa, c_imp = st.columns([2, 1, 1])
             with c_info:
                 it_nombre = st.text_input("Nombre del Producto")
-                it_cant = st.number_input("¿Unidades que trae el lote?", min_value=1, value=500, step=1)
+                it_cant = st.number_input("¿Unidades que trae el lote?", min_value=1.0, value=500.0, step=1.0)
                 it_unid = st.selectbox("Unidad", ["Hojas", "ml", "Unidad", "Resma"])
                 precio_lote = st.number_input("Precio TOTAL Lote (USD)", min_value=0.0, format="%.2f")
             with c_tasa:
@@ -140,53 +133,60 @@ if menu == "📦 Inventario":
 
             if st.form_submit_button("🚀 Cargar a Inventario"):
                 if it_nombre:
+                    # 1. Calculamos el costo unitario con impuestos
                     imp_t = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
                     costo_u = (precio_lote * (1 + imp_t)) / it_cant
+                    
                     c = conectar()
-                    c.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", (it_nombre, float(it_cant), it_unid, costo_u))
-                    c.commit(); c.close()
-                    st.success(f"✅ Guardado: {it_nombre}")
+                    # 2. Insertamos o Actualizamos el producto
+                    c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", 
+                              (it_nombre, float(it_cant), it_unid, costo_u))
+                    
+                    # 3. TRAZABILIDAD: Guardamos el movimiento en el historial
+                    # Primero obtenemos el ID (porque la tabla movs usa el id)
+                    res = c.execute("SELECT id FROM inventario WHERE item=?", (it_nombre,)).fetchone()
+                    if res:
+                        item_id = res[0]
+                        c.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo) VALUES (?, 'ENTRADA', ?, ?)", 
+                                  (item_id, it_cant, f"Compra Lote - Precio: ${precio_lote}"))
+                    
+                    c.commit()
+                    c.close()
+                    st.success(f"✅ Guardado y Registrado en Historial: {it_nombre}")
                     st.rerun()
 
+    # --- TABLA DE AUDITORÍA ---
     st.divider()
     if not df_inv.empty:
+        # Filtrado por búsqueda
+        df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)]
+        
         moneda = st.radio("Ver precios en:", ["USD", "BCV", "Binance"], horizontal=True)
-        df_audit = df_inv.copy()
-        df_audit.columns = ['Producto', 'Stock', 'Unidad', 'Costo Unitario']
+        df_audit = df_inv_filtrado.copy()
+        
+        # Ajustamos los nombres de columnas para que se vea profesional
+        # Nota: Asegúrate que df_inv traiga [id, item, cantidad, unidad, precio_usd]
         f = t_bcv if moneda == "BCV" else (t_bin if moneda == "Binance" else 1.0)
         sim = "Bs" if moneda != "USD" else "$"
         
-        df_audit['Costo Unit.'] = df_audit['Costo Unitario'] * f
-        df_audit['Inversión Stock'] = (df_audit['Stock'] * df_audit['Costo Unitario']) * f
+        df_audit['Costo Unit.'] = df_audit['precio_usd'] * f
+        df_audit['Inversión Stock'] = (df_audit['cantidad'] * df_audit['precio_usd']) * f
         
-        st.dataframe(df_audit[['Producto', 'Stock', 'Unidad', 'Costo Unit.', 'Inversión Stock']].style.format({
-            'Stock': '{:,.0f}', 'Costo Unit.': f"{sim} {{:.4f}}", 'Inversión Stock': f"{sim} {{:.2f}}"
+        st.dataframe(df_audit[['item', 'cantidad', 'unidad', 'Costo Unit.', 'Inversión Stock']].style.format({
+            'cantidad': '{:,.2f}', 'Costo Unit.': f"{sim} {{:.4f}}", 'Inversión Stock': f"{sim} {{:.2f}}"
         }), use_container_width=True, hide_index=True)
 
-
-        # --- BLOQUE DE ALERTAS DE STOCK BAJO (SOLO AGREGAR) ---
-        st.subheader("⚠️ Alertas de Reposición")
-        
-        # Definimos el límite de alerta (puedes cambiar el 10 por el número que prefieras)
-        limite_alerta = 10 
-        
-        # Filtramos los productos que tienen poco stock
-        df_bajo_stock = df_inv[df_inv['cantidad'] <= limite_alerta]
-        
-        if not df_bajo_stock.empty:
-            for index, row in df_bajo_stock.iterrows():
-                # Mostramos un mensaje llamativo por cada producto bajo
-                st.warning(f"🚨 **¡Atención!** Quedan pocas unidades de: **{row['item']}** (Solo hay {int(row['cantidad'])} {row['unidad']})")
-        else:
-            st.success("✅ Tienes suficiente stock de todos tus productos.")
-        
-        # --- SECCIÓN PARA CORREGIR ERRORES ---
-        st.divider()
-        with st.expander("🗑️ Borrar o Corregir Insumos"):
+    # --- SECCIÓN PARA CORREGIR ERRORES ---
+    st.divider()
+    with st.expander("🗑️ Borrar o Corregir Insumos"):
+        if not df_inv.empty:
             prod_b = st.selectbox("Selecciona producto a eliminar:", df_inv['item'].tolist())
             if st.button("❌ Eliminar Producto"):
-                c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (prod_b,))
-                c.commit(); c.close(); st.warning(f"Producto {prod_b} eliminado."); st.rerun()
+                c = conectar()
+                c.execute("DELETE FROM inventario WHERE item=?", (prod_b,))
+                c.commit(); c.close()
+                st.warning(f"Producto {prod_b} eliminado.")
+                st.rerun()
 
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
@@ -551,6 +551,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
