@@ -159,7 +159,7 @@ with st.form("f_config"):
        # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
-    
+
     c = conectar()
     # Cargamos los datos necesarios para el formulario
     clis = pd.read_sql_query("SELECT nombre FROM clientes", c)['nombre'].tolist()
@@ -203,4 +203,5 @@ elif menu == "📝 Cotizaciones":
     st.divider()
     if not df_cots_vista.empty:
         st.dataframe(df_cots_vista.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
+
 
