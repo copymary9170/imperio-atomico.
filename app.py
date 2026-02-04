@@ -52,26 +52,26 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
     menu = st.radio("Módulos", ["📦 Inventario", "📊 Dashboard", "⚙️ Configuración"])
 
-# --- 4. LÓGICA DE INVENTARIO (CON SELECTOR DE MONEDA Y UNIDADES) ---
+# --- 4. LÓGICA DE INVENTARIO (CON EDICIÓN Y CLARIDAD DE COSTOS) ---
 if menu == "📦 Inventario":
-    st.title("📦 Inventario Profesional")
+    st.title("📦 Inventario y Auditoría de Costos")
     
     with st.expander("📥 Registrar Nueva Compra (Paquetes/Lotes)"):
-        with st.form("form_inv_final"):
+        with st.form("form_inv_final_v2"):
             col_info, col_tasa, col_imp = st.columns([2, 1, 1])
             
             with col_info:
                 it_nombre = st.text_input("Nombre del Producto")
-                it_cant = st.number_input("Cantidad que trae el lote (Ej: 500)", min_value=0.01)
-                it_unid = st.selectbox("Unidad", ["Hojas", "ml", "Unidad", "Mts"])
-                precio_lote_usd = st.number_input("Precio del LOTE Completo (USD)", min_value=0.0, format="%.2f")
+                it_cant = st.number_input("¿Cuántas unidades trae el lote?", min_value=1.0, value=500.0)
+                it_unid = st.selectbox("Unidad de medida", ["Hojas", "ml", "Unidad", "Resma"])
+                precio_lote_usd = st.number_input("Precio TOTAL que pagaste por el lote (USD)", min_value=0.0, format="%.2f")
 
             with col_tasa:
-                st.markdown("### 💱 Tasa de Compra")
-                tipo_tasa = st.radio("Comprado a tasa:", ["Binance", "BCV", "Manual"])
+                st.markdown("### 💱 Tasa")
+                tipo_tasa = st.radio("Tasa de compra:", ["Binance", "BCV", "Manual"])
                 if tipo_tasa == "Binance": tasa_aplicada = t_bin
                 elif tipo_tasa == "BCV": tasa_aplicada = t_bcv
-                else: tasa_aplicada = st.number_input("Tasa Especial", value=t_bin)
+                else: tasa_aplicada = st.number_input("Tasa Manual", value=t_bin)
 
             with col_imp:
                 st.markdown("### 🧾 Impuestos")
@@ -80,59 +80,60 @@ if menu == "📦 Inventario":
                 pago_banco = st.checkbox(f"Banco ({banco*100}%)", value=False)
 
             if st.form_submit_button("🚀 Cargar a Inventario"):
-                if it_nombre and it_cant > 0:
-                    # Cálculo de impuestos
+                if it_nombre:
+                    # Calculamos impuestos sobre el total del lote
                     imp_total = (iva if pago_iva else 0) + (igtf if pago_gtf else 0) + (banco if pago_banco else 0)
-                    costo_lote_real = precio_lote_usd * (1 + imp_total)
-                    costo_unit_usd = costo_lote_real / it_cant
+                    costo_lote_con_impuestos = precio_lote_usd * (1 + imp_total)
+                    
+                    # El costo unitario es ese total dividido entre las unidades que trae
+                    costo_unit_usd = costo_lote_con_impuestos / it_cant
                     
                     c = conectar()
+                    # Guardamos el costo unitario para las cotizaciones
                     c.execute("INSERT OR REPLACE INTO inventario VALUES (?,?,?,?)", 
                               (it_nombre, it_cant, it_unid, costo_unit_usd))
                     c.commit(); c.close()
-                    st.success(f"✅ ¡Guardado! Costo unitario: ${costo_unit_usd:.4f}")
+                    st.success(f"✅ Guardado: {it_nombre}. Costo por {it_unid}: ${costo_unit_usd:.4f}")
                     st.rerun()
 
     st.divider()
 
-    # --- TABLA DINÁMICA CON SELECTOR ---
+    # --- TABLA DE VISUALIZACIÓN Y MODIFICACIÓN ---
     if not df_inv.empty:
-        st.subheader("📋 Visualización de Stock")
+        st.subheader("📋 Control de Existencias")
         
-        # El selector que tanto te gustaba (Actualizado a st.radio horizontal o segmented_control)
-        moneda = st.radio("Ver inventario en:", ["USD", "BCV", "Binance"], horizontal=True)
+        moneda = st.radio("Ver precios en:", ["USD", "BCV", "Binance"], horizontal=True)
         
-        df_display = df_inv.copy()
-        df_display.columns = ['Producto', 'Stock', 'Unidad', 'Costo Unit']
+        # Preparamos los datos para que sean fáciles de entender
+        df_audit = df_inv.copy()
+        df_audit.columns = ['Producto', 'Stock Actual', 'Unidad', 'Costo Unitario']
+        
+        factor = 1.0
+        simbolo = "$"
+        if moneda == "BCV": factor, simbolo = t_bcv, "Bs"
+        elif moneda == "Binance": factor, simbolo = t_bin, "Bs"
 
-        # Aplicar conversión según la moneda elegida
-        if moneda == "BCV":
-            df_display['Costo Unit'] = df_display['Costo Unit'] * t_bcv
-            df_display['Inversión Total'] = df_display['Stock'] * df_display['Costo Unit']
-            formato = "{:.2f} Bs"
-        elif moneda == "Binance":
-            df_display['Costo Unit'] = df_display['Costo Unit'] * t_bin
-            df_display['Inversión Total'] = df_display['Stock'] * df_display['Costo Unit']
-            formato = "{:.2f} Bs"
-        else:
-            df_display['Inversión Total'] = df_display['Stock'] * df_display['Costo Unit']
-            formato = "${:.4f}"
-
-        # Mostrar tabla formateada
-        st.dataframe(df_display.style.format({
-            'Costo Unit': formato,
-            'Inversión Total': "{:.2f}"
+        df_audit['Costo Unit.'] = df_audit['Costo Unitario'] * factor
+        df_audit['Inversión Stock'] = (df_audit['Stock Actual'] * df_audit['Costo Unitario']) * factor
+        
+        # Mostramos la tabla principal
+        st.dataframe(df_audit[['Producto', 'Stock Actual', 'Unidad', 'Costo Unit.', 'Inversión Stock']].style.format({
+            'Costo Unit.': f"{simbolo} {{:.4f}}",
+            'Inversión Stock': f"{simbolo} {{:.2f}}"
         }), use_container_width=True, hide_index=True)
-        
-        # Métricas de resumen rápidas
+
+        # --- SECCIÓN DE ELIMINACIÓN (Para corregir errores) ---
         st.divider()
-        total_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Valor Total (USD)", f"$ {total_usd:,.2f}")
-        c2.metric("Valor en BCV", f"{total_usd * t_bcv:,.2f} Bs")
-        c3.metric("Valor en Binance", f"{total_usd * t_bin:,.2f} Bs")
+        with st.expander("🗑️ Borrar o Corregir Insumos"):
+            prod_a_borrar = st.selectbox("Selecciona el producto con error:", df_inv['item'].tolist())
+            if st.button("❌ Eliminar Producto"):
+                c = conectar()
+                c.execute("DELETE FROM inventario WHERE item=?", (prod_a_borrar,))
+                c.commit(); c.close()
+                st.warning(f"Producto {prod_a_borrar} eliminado.")
+                st.rerun()
     else:
-        st.info("No hay nada en el inventario. ¡Empieza a cargar tus tesoros!")
+        st.info("Inventario vacío.")
 elif menu == "⚙️ Configuración":
     st.title("⚙️ Configuración de Tasas e Impuestos")
     with st.form("f_config"):
@@ -152,6 +153,7 @@ elif menu == "⚙️ Configuración":
 
 else:
     st.info("Módulo en construcción (Próxima parte).")
+
 
 
 
