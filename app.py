@@ -291,68 +291,74 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
-# --- 10. LÓGICA DE ANÁLISIS CMYK (EL ORIGINAL) ---
+# --- 10. LÓGICA DE ANÁLISIS CMYK (CON PROCESAMIENTO DE IMAGEN) ---
 elif menu == "🎨 Análisis CMYK":
-    st.title("🎨 Determinación de Costos CMYK")
-    st.markdown("Este análisis desglosa el costo real de cada color incluyendo la carga impositiva.")
+    st.title("🎨 Análisis de Cobertura Real CMYK")
+    st.markdown("Sube el diseño del cliente para determinar cuánta tinta consumirá cada color.")
 
-    # 1. Recuperamos los impuestos actuales
-    imp_total = iva + igtf + banco
+    # 1. Selector de Impresora
+    impresora = st.selectbox("🖨️ Selecciona la Impresora", ["Epson L805 (Foto)", "Epson L3110 (Estándar)", "Plotter / Otra"])
     
-    # 2. Buscamos las tintas en el inventario (deben ser unidad 'ml')
-    df_tintas = df_inv[df_inv['unidad'] == 'ml'].copy()
+    # 2. Cargador de Imagen para Análisis
+    archivo_diseno = st.file_uploader("🖼️ Sube el diseño (JPG/PNG) para analizar cobertura", type=['png', 'jpg', 'jpeg'])
 
-    if not df_tintas.empty:
-        st.subheader("📊 Desglose Técnico por Color")
+    if archivo_diseno:
+        from PIL import Image
+        import numpy as np
+
+        # Abrimos la imagen y la convertimos a CMYK
+        img = Image.open(archivo_diseno).convert('CMYK')
+        st.image(archivo_diseno, caption="Diseño a analizar", width=300)
         
-        # Calculamos el costo con impuestos
-        df_tintas['Costo Base (ml)'] = df_tintas['precio_usd']
-        df_tintas['Costo Real + Imp (ml)'] = df_tintas['precio_usd'] * (1 + imp_total)
-        
-        # Función para poner los colores de las tintas en la tabla
-        def color_tinta(val):
-            v = val.lower()
-            if 'cyan' in v or 'cian' in v: return 'background-color: #00ffff; color: black'
-            if 'magenta' in v: return 'background-color: #ff00ff; color: white'
-            if 'yellow' in v or 'amarillo' in v: return 'background-color: #ffff00; color: black'
-            if 'black' in v or 'negro' in v: return 'background-color: #000000; color: white'
-            return ''
+        # Convertimos a datos numéricos para calcular promedios
+        datos = np.array(img)
+        # CMYK son los canales 0, 1, 2, 3
+        c_prom = np.mean(datos[:,:,0]) / 255
+        m_prom = np.mean(datos[:,:,1]) / 255
+        y_prom = np.mean(datos[:,:,2]) / 255
+        k_prom = np.mean(datos[:,:,3]) / 255
 
-        st.dataframe(
-            df_tintas[['item', 'Costo Base (ml)', 'Costo Real + Imp (ml)']].style.format({
-                'Costo Base (ml)': '$ {:.4f}',
-                'Costo Real + Imp (ml)': '$ {:.4f}'
-            }).applymap(color_tinta, subset=['item']),
-            use_container_width=True, hide_index=True
-        )
+        st.subheader("📊 Resultado del Escaneo de Pixeles")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Cian", f"{c_prom*100:.1f}%")
+        col2.metric("Magenta", f"{m_prom*100:.1f}%")
+        col3.metric("Amarillo", f"{y_prom*100:.1f}%")
+        col4.metric("Negro", f"{k_prom*100:.1f}%")
 
-        # 3. Calculadora de Cobertura Avanzada
+        # 3. Cálculo de Costo basado en Inventario
         st.divider()
-        st.subheader("💎 Calculadora de Rentabilidad")
+        st.subheader("💰 Costo Estimado de Tinta")
         
-        c1, c2 = st.columns(2)
-        with c1:
-            st.info("💡 **Dato Pro:** Una página con mucha carga de color gasta más tinta. Ajusta el porcentaje según el diseño del cliente.")
-            pct_cobertura = st.slider("Porcentaje de cobertura del diseño", 5, 100, 25, step=5)
-        
-        with c2:
-            # Tomamos un promedio de las tintas para el cálculo rápido
-            costo_promedio_ml = df_tintas['Costo Real + Imp (ml)'].mean()
-            # Estimación técnica: 100% cobertura ≈ 0.8ml de tinta total
-            gasto_estimado = (pct_cobertura / 100) * 0.8 * costo_promedio_ml
+        imp_t = iva + igtf + banco
+        df_t = df_inv[df_inv['unidad'] == 'ml'].copy()
+
+        if not df_t.empty:
+            # Buscamos costos de cada color en el inventario
+            def obtener_costo(nombre_color):
+                filtro = df_t[df_t['item'].str.lower().contains(nombre_color.lower())]
+                if not filtro.empty:
+                    return filtro['precio_usd'].values[0] * (1 + imp_t)
+                return conf.loc['costo_tinta_ml', 'valor'] * (1 + imp_t)
+
+            costos = {
+                "C": obtener_costo("cian"),
+                "M": obtener_costo("magenta"),
+                "Y": obtener_costo("amarillo"),
+                "K": obtener_costo("negro")
+            }
+
+            # Estimación técnica: Una página A4 al 100% gasta aprox 0.8ml
+            # Multiplicamos la cobertura por el costo de cada ml
+            total_tinta = (c_prom * 0.2 * costos["C"]) + (m_prom * 0.2 * costos["M"]) + \
+                          (y_prom * 0.2 * costos["Y"]) + (k_prom * 0.2 * costos["K"])
             
-            st.metric("Costo de Tinta Estimado", f"$ {gasto_estimado:.4f}")
-            st.write(f"Basado en un promedio de **$ {costo_promedio_ml:.4f}** por ml.")
+            # Ajuste según impresora
+            if "L805" in impresora: total_tinta *= 1.2 # Gasta un poco más por calidad
+            
+            st.success(f"💵 El costo de tinta para este diseño es de: **$ {total_tinta:.4f}**")
+            st.caption(f"Cálculo basado en los precios de tu inventario + {imp_t*100:.0f}% de impuestos.")
+        else:
+            st.warning("⚠️ Registra las tintas en el Inventario (unidad 'ml') para calcular el precio exacto.")
 
     else:
-        st.warning("⚠️ No se detectan tintas con la unidad 'ml' en el Inventario.")
-        st.info("""
-        **Para que este análisis funcione:**
-        1. Ve a **📦 Inventario**.
-        2. Registra tus tintas (Ej: Tinta Cyan, Tinta Magenta...).
-        3. En 'Unidad', escribe **ml** exactamente.
-        4. Pon el precio que te costó el envase y la cantidad de ml que trae.
-        """)
-
-
-
+        st.info("💡 Sube una imagen para que el sistema detecte automáticamente cuánto Cian, Magenta, Amarillo y Negro tiene.")
