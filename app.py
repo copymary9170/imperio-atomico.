@@ -51,7 +51,7 @@ conn.close()
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
-    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🧪 Análisis", "⚙️ Configuración"])
+    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "⚙️ Configuración"])
     
 # --- 4. LÓGICA DE INVENTARIO ---
 if menu == "📦 Inventario":
@@ -236,52 +236,6 @@ elif menu == "📊 Dashboard":
     else:
         st.info("No hay datos registrados.")
 
-# --- 9. LÓGICA DE ANÁLISIS DE COSTOS (HOJA APARTE) ---
-elif menu == "🧪 Análisis":
-    st.title("🧪 Análisis de Costos y Rentabilidad")
-    st.markdown("En esta sección calculamos el costo real de tus insumos sumando todos los impuestos configurados.")
-
-    if not df_inv.empty:
-        # 1. Cálculos de base
-        df_analisis = df_inv.copy()
-        imp_totales = iva + igtf + banco
-        
-        df_analisis['Costo Base (USD)'] = df_analisis['precio_usd']
-        df_analisis['Costo con Impuestos'] = df_analisis['precio_usd'] * (1 + imp_totales)
-        df_analisis['Diferencia ($)'] = df_analisis['Costo con Impuestos'] - df_analisis['Costo Base (USD)']
-
-        # 2. Métricas rápidas arriba
-        c1, c2, c3 = st.columns(3)
-        insumo_caro = df_analisis.loc[df_analisis['Costo con Impuestos'].idxmax()]
-        c1.metric("Insumo más costoso", insumo_caro['item'])
-        c2.metric("Impuestos Totales", f"{imp_totales*100:.1f}%")
-        c3.metric("Total Insumos", len(df_analisis))
-
-        # 3. La Tabla Maestra con Colores
-        st.subheader("📋 Desglose de Costos Reales")
-        
-        def resaltar_costos(s):
-            # Si el impuesto añade más de 0.05$ al costo, lo resalta en naranja suave
-            return ['background-color: #fff3cd' if v > 0.05 else '' for v in s]
-
-        st.dataframe(
-            df_analisis[['item', 'Costo Base (USD)', 'Costo con Impuestos', 'Diferencia ($)']].style.format({
-                'Costo Base (USD)': '$ {:.4f}',
-                'Costo con Impuestos': '$ {:.4f}',
-                'Diferencia ($)': '$ {:.4f}'
-            }).apply(resaltar_costos, subset=['Diferencia ($)']),
-            use_container_width=True, hide_index=True
-        )
-
-        # 4. Explicación para que no haya dudas
-        st.info(f"""
-        **¿Cómo se calcula esto?**
-        - Se toma tu precio base y se le suma: **IVA ({iva*100}%)** + **IGTF ({igtf*100}%)** + **Comisión Bancaria ({banco*100}%)**.
-        - El resultado es lo que realmente te cuesta reponer ese material.
-        """)
-    else:
-        st.info("Registra productos en el Inventario para ver el análisis.")
-
 # --- 7. CONFIGURACIÓN ---
 elif menu == "⚙️ Configuración":
     st.title("⚙️ Tasas e Impuestos")
@@ -337,6 +291,53 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
+# --- 10. LÓGICA DE ANÁLISIS CMYK (NUEVO) ---
+elif menu == "🎨 Análisis CMYK":
+    st.title("🎨 Análisis de Costo por Tinta (CMYK)")
+    st.markdown("Calcula cuánto te cuesta cada gota de tinta basándote en el precio del envase y los impuestos.")
+
+    # Traemos el costo configurado de tinta por defecto (por si no hay en inventario)
+    costo_tinta_config = conf.loc['costo_tinta_ml', 'valor']
+
+    # Filtramos solo lo que sea 'ml' en el inventario
+    df_tintas = df_inv[df_inv['unidad'] == 'ml']
+
+    if not df_tintas.empty:
+        st.subheader("💧 Costo Real por Mililitro (ml)")
+        
+        # Calculamos el costo con impuestos para las tintas
+        imp_t = iva + igtf + banco
+        df_tintas = df_tintas.copy()
+        df_tintas['Costo ml (Base)'] = df_tintas['precio_usd']
+        df_tintas['Costo ml (Con Impuestos)'] = df_tintas['precio_usd'] * (1 + imp_t)
+        
+        st.dataframe(df_tintas[['item', 'Costo ml (Base)', 'Costo ml (Con Impuestos)']].style.format({
+            'Costo ml (Base)': '$ {:.4f}',
+            'Costo ml (Con Impuestos)': '$ {:.4f}'
+        }), use_container_width=True, hide_index=True)
+
+        # Calculadora de cobertura
+        st.divider()
+        st.subheader("🖼️ Calculadora de Gasto por Impresión")
+        col_c1, col_c2 = st.columns(2)
+        
+        tinta_sel = col_c1.selectbox("Selecciona la tinta:", df_tintas['item'].tolist())
+        cobertura = col_c2.slider("% de cobertura en la página", 1, 100, 25)
+        
+        precio_ml_real = df_tintas[df_tintas['item'] == tinta_sel]['Costo ml (Con Impuestos)'].values[0]
+        
+        # Estimación: Una página full color (100%) gasta aprox 0.5ml a 1ml dependiendo de la impresora
+        # Usaremos una base conservadora de 0.01ml por cada 1% de cobertura
+        gasto_estimado = (cobertura * 0.01) * precio_ml_real
+
+        st.info(f"""
+        **Resultado del Análisis:**
+        - Para una cobertura del **{cobertura}%**, el gasto de tinta es de aprox: **$ {gasto_estimado:.4f}**
+        - Esto es lo que debes sumar al costo del papel en tu cotización.
+        """)
+    else:
+        st.warning("No tienes tintas registradas en el inventario (deben estar en unidad 'ml').")
+        st.info(f"Costo genérico configurado actualmente: **$ {costo_tinta_config:.4f} por ml**")
 
 
 
