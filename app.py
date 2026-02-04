@@ -161,16 +161,28 @@ elif menu == "📝 Cotizaciones":
         c.close()
         
         if not tel.empty and tel['whatsapp'].iloc[0]:
-            numero = tel['whatsapp'].iloc[0].replace(" ", "").replace("+", "")
-            # Creamos el mensaje
+            # 1. Quitamos espacios o guiones que tenga el número
+            num_original = "".join(filter(str.isdigit, tel['whatsapp'].iloc[0]))
+            
+            # 2. Si el número empieza con '0', le quitamos el '0' y le ponemos '58'
+            if num_original.startswith('0'):
+                numero_final = "58" + num_original[1:]
+            # 3. Si ya tiene el 58, lo dejamos igual
+            elif num_original.startswith('4') or num_original.startswith('2'):
+                numero_final = "58" + num_original
+            else:
+                numero_final = num_original
+
+            # El mensaje con el precio en USD y Bs (BCV)
+            monto_bs = datos_c['monto_usd'] * t_bcv
             mensaje = f"¡Hola! *Imperio Atómico* te saluda. 👋%0A%0A" \
-                      f"Detalle de tu pedido: *{datos_c['trabajo']}*%0A" \
-                      f"Total a pagar: *{datos_c['monto_usd']:.2f} USD* (o al cambio del día).%0A%0A" \
-                      f"Estado: *{datos_c['estado']}*%0A" \
+                      f"Detalle: *{datos_c['trabajo']}*%0A" \
+                      f"Total: *{datos_c['monto_usd']:.2f} USD*%0A" \
+                      f"En Bolívares: *{monto_bs:.2f} Bs* (Tasa BCV)%0A%0A" \
                       f"¡Gracias por tu confianza! ⚛️"
             
-            link_ws = f"https://wa.me/{numero}?text={mensaje}"
-            st.link_button(f"🚀 Enviar a {datos_c['cliente']} vía WhatsApp", link_ws)
+            link_ws = f"https://wa.me/{numero_final}?text={mensaje}"
+            st.link_button(f"🚀 Enviar WhatsApp a {datos_c['cliente']}", link_ws)
         else:
             st.warning("Este cliente no tiene un número de WhatsApp registrado.")
 
@@ -243,6 +255,7 @@ elif menu == "👥 Clientes":
         st.dataframe(df_clis, use_container_width=True, hide_index=True)
     else:
         st.info("No se encontraron clientes con ese nombre.")
+
 
 
 
