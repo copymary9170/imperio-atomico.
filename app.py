@@ -90,7 +90,7 @@ conn.close()
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
-    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración"])
+    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
 # --- 4. LÓGICA DE INVENTARIO ---
 if menu == "📦 Inventario":
@@ -551,6 +551,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
