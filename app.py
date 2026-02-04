@@ -77,11 +77,19 @@ if not st.session_state.login:
             st.rerun()
     st.stop()
 
-# Carga de datos globales
+# --- CARGA DE DATOS GLOBALES (CON SEGURO DE DECIMALES) ---
 conn = conectar()
 conf = pd.read_sql_query("SELECT * FROM configuracion", conn).set_index('parametro')
-t_bcv = conf.loc['tasa_bcv', 'valor']
-t_bin = conf.loc['tasa_binance', 'valor']
+
+# Limpiamos las tasas para que nunca sean números absurdos (como 375 en vez de 37.5)
+t_bcv = float(conf.loc['tasa_bcv', 'valor'])
+t_bin = float(conf.loc['tasa_binance', 'valor'])
+
+# SEGURO ANTI-ERROR: Si la tasa es mayor a 200, la dividimos entre 10 
+# (Esto corrige automáticamente si escribiste 375.00 por error)
+if t_bcv > 200: t_bcv = t_bcv / 10
+if t_bin > 200: t_bin = t_bin / 10
+
 iva, igtf, banco = conf.loc['iva_perc', 'valor'], conf.loc['igtf_perc', 'valor'], conf.loc['banco_perc', 'valor']
 df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
 df_cots_global = pd.read_sql_query("SELECT * FROM cotizaciones", conn)
@@ -636,6 +644,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
