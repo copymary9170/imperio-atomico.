@@ -51,7 +51,7 @@ conn.close()
 with st.sidebar:
     st.header("⚛️ Imperio Atómico")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 BIN: {t_bin}")
-    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "⚙️ Configuración"])
+    menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🧪 Análisis", "⚙️ Configuración"])
     
 # --- 4. LÓGICA DE INVENTARIO ---
 if menu == "📦 Inventario":
@@ -236,6 +236,52 @@ elif menu == "📊 Dashboard":
     else:
         st.info("No hay datos registrados.")
 
+# --- 9. LÓGICA DE ANÁLISIS DE COSTOS (HOJA APARTE) ---
+elif menu == "🧪 Análisis":
+    st.title("🧪 Análisis de Costos y Rentabilidad")
+    st.markdown("En esta sección calculamos el costo real de tus insumos sumando todos los impuestos configurados.")
+
+    if not df_inv.empty:
+        # 1. Cálculos de base
+        df_analisis = df_inv.copy()
+        imp_totales = iva + igtf + banco
+        
+        df_analisis['Costo Base (USD)'] = df_analisis['precio_usd']
+        df_analisis['Costo con Impuestos'] = df_analisis['precio_usd'] * (1 + imp_totales)
+        df_analisis['Diferencia ($)'] = df_analisis['Costo con Impuestos'] - df_analisis['Costo Base (USD)']
+
+        # 2. Métricas rápidas arriba
+        c1, c2, c3 = st.columns(3)
+        insumo_caro = df_analisis.loc[df_analisis['Costo con Impuestos'].idxmax()]
+        c1.metric("Insumo más costoso", insumo_caro['item'])
+        c2.metric("Impuestos Totales", f"{imp_totales*100:.1f}%")
+        c3.metric("Total Insumos", len(df_analisis))
+
+        # 3. La Tabla Maestra con Colores
+        st.subheader("📋 Desglose de Costos Reales")
+        
+        def resaltar_costos(s):
+            # Si el impuesto añade más de 0.05$ al costo, lo resalta en naranja suave
+            return ['background-color: #fff3cd' if v > 0.05 else '' for v in s]
+
+        st.dataframe(
+            df_analisis[['item', 'Costo Base (USD)', 'Costo con Impuestos', 'Diferencia ($)']].style.format({
+                'Costo Base (USD)': '$ {:.4f}',
+                'Costo con Impuestos': '$ {:.4f}',
+                'Diferencia ($)': '$ {:.4f}'
+            }).apply(resaltar_costos, subset=['Diferencia ($)']),
+            use_container_width=True, hide_index=True
+        )
+
+        # 4. Explicación para que no haya dudas
+        st.info(f"""
+        **¿Cómo se calcula esto?**
+        - Se toma tu precio base y se le suma: **IVA ({iva*100}%)** + **IGTF ({igtf*100}%)** + **Comisión Bancaria ({banco*100}%)**.
+        - El resultado es lo que realmente te cuesta reponer ese material.
+        """)
+    else:
+        st.info("Registra productos en el Inventario para ver el análisis.")
+
 # --- 7. CONFIGURACIÓN ---
 elif menu == "⚙️ Configuración":
     st.title("⚙️ Tasas e Impuestos")
@@ -290,6 +336,7 @@ elif menu == "👥 Clientes":
         st.dataframe(df_clis, use_container_width=True, hide_index=True)
     else:
         st.info("No se encontraron clientes con ese nombre.")
+
 
 
 
