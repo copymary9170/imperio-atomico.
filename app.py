@@ -348,39 +348,53 @@ elif menu == "🎨 Análisis CMYK":
     else:
         st.info("💡 Arrastra varios archivos para compararlos y ver cuál gasta más tinta.")
 
-# --- 12. LÓGICA DE ACTIVOS CON TASA DE COMPRA ---
+# --- 12. LÓGICA DE ACTIVOS DINÁMICA (EQUIPOS INFINITOS) ---
 elif menu == "🏗️ Activos":
-    st.title("🏗️ Gestión de Equipos y Activos")
-    st.markdown("Registra cuánto te costaron tus equipos para recuperar la inversión con cada trabajo.")
+    st.title("🏗️ Inventario de Maquinaria y Equipos")
+    st.markdown("Registra aquí cada máquina de tu taller para calcular su desgaste.")
 
-    equipos = [
-        "HP Advantage J210a (Cartuchos)", 
-        "HP Smart Tank 580w (Continua)", 
-        "Epson L1250 (Sublimación)"
-    ]
+    # Inicializamos la lista de equipos en la sesión si no existe
+    if 'lista_equipos' not in st.session_state:
+        st.session_state.lista_equipos = []
 
-    for eq in equipos:
-        with st.expander(f"⚙️ Configurar {eq}"):
-            c1, c2, c3 = st.columns(3)
-            
-            with c1:
-                moneda = st.radio("¿Cómo lo pagaste?", ["Dólares ($)", "Bolívares (Bs)"], key=f"mon_{eq}")
-            
-            with c2:
-                monto_pagado = st.number_input(f"Monto Pagado", min_value=0.0, key=f"monto_{eq}")
-            
-            with c3:
-                if moneda == "Bolívares (Bs)":
-                    tasa_compra = st.number_input("Tasa de ese día (Bs/$)", min_value=0.01, value=36.0, key=f"tasa_{eq}")
-                    costo_dolares = monto_pagado / tasa_compra
-                else:
-                    costo_dolares = monto_pagado
-                
-                st.metric("Inversión en USD", f"$ {costo_dolares:.2f}")
+    # --- Formulario para agregar nuevo equipo ---
+    with st.expander("➕ Registrar Nuevo Equipo (Cameo, Plastificadora, etc.)"):
+        c1, c2 = st.columns(2)
+        nombre_eq = c1.text_input("Nombre del Equipo", placeholder="Ej: Cameo 5")
+        tipo_uso = c2.selectbox("Unidad de Desgaste", ["Hojas", "Cortes", "Metros", "Minutos", "Usos"])
+        
+        c3, c4, c5 = st.columns(3)
+        moneda = c3.radio("Pago en:", ["USD ($)", "BS (Bs)"])
+        monto = c4.number_input("Monto Pagado", min_value=0.0)
+        tasa = c5.number_input("Tasa de cambio (si fue en Bs)", min_value=1.0, value=tasa_dia)
+        
+        # Cálculo de costo base en USD
+        costo_usd = monto if moneda == "USD ($)" else (monto / tasa)
+        
+        vida_util = st.number_input(f"Vida Útil estimada (Total de {tipo_uso})", min_value=1)
+        
+        if st.button("💾 Guardar Equipo en el Sistema"):
+            nuevo_eq = {
+                "Equipo": nombre_eq,
+                "Inversión": costo_usd,
+                "Unidad": tipo_uso,
+                "Desgaste x Unidad": costo_usd / vida_util
+            }
+            st.session_state.lista_equipos.append(nuevo_eq)
+            st.success(f"✅ {nombre_eq} agregado con éxito.")
 
-            # Cálculo de Desgaste
-            v_util = st.number_input("Vida Útil estimada (Cant. Impresiones)", value=10000, key=f"vida_{eq}")
-            if v_util > 0:
-                desgaste = costo_dolares / v_util
-                st.write(f"🟢 Por cada hoja debes cobrar: **$ {desgaste:.4f}**")
-
+    # --- Tabla de Activos Registrados ---
+    if st.session_state.lista_equipos:
+        st.subheader("📋 Tus Equipos Registrados")
+        df_activos = pd.DataFrame(st.session_state.lista_equipos)
+        
+        st.table(df_activos.style.format({
+            "Inversión": "$ {:.2f}",
+            "Desgaste x Unidad": "$ {:.4f}"
+        }))
+        
+        if st.button("🗑️ Limpiar Lista de Equipos"):
+            st.session_state.lista_equipos = []
+            st.rerun()
+    else:
+        st.info("Aún no tienes equipos registrados. Usa el formulario de arriba para empezar con tu Cameo 5 o tu Plastificadora.")
