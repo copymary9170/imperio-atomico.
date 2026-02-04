@@ -153,7 +153,7 @@ elif menu == "⚙️ Configuración":
 
 else:
     st.info("Módulo en construcción (Próxima parte).")
-       # --- 5. LÓGICA DE COTIZACIONES (INTEGRADA CON INVENTARIO) ---
+# --- 5. LÓGICA DE COTIZACIONES (INTEGRADA CON INVENTARIO) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
@@ -222,6 +222,7 @@ elif menu == "📝 Cotizaciones":
         st.dataframe(df_hist.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
     else:
         st.info("Aún no hay cotizaciones registradas.")
+
 
 
 
