@@ -175,10 +175,13 @@ elif menu == "⚙️ Configuración":
             c.execute("UPDATE configuracion SET valor=? WHERE parametro='banco_perc'", (n_banco,))
             c.commit(); c.close(); st.success("✅ Configuración actualizada"); st.rerun()
 
-# --- 8. LÓGICA DE CLIENTES (NUEVO) ---
+# --- 8. LÓGICA DE CLIENTES ---
 elif menu == "👥 Clientes":
     st.title("👥 Registro de Clientes")
     
+    # --- BARRA DE BÚSQUEDA (ESTO ES LO NUEVO) ---
+    busqueda = st.text_input("🔍 Buscar cliente por nombre...", placeholder="Escribe aquí para filtrar...")
+
     with st.form("form_clientes"):
         col1, col2 = st.columns(2)
         nombre_cli = col1.text_input("Nombre del Cliente o Negocio")
@@ -203,4 +206,5 @@ elif menu == "👥 Clientes":
     if not df_clis.empty:
         st.subheader("📋 Directorio de Clientes")
         st.dataframe(df_clis, use_container_width=True, hide_index=True)
+
 
