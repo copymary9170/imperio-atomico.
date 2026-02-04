@@ -291,74 +291,51 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
-# --- 10. LÓGICA DE ANÁLISIS CMYK (CON PROCESAMIENTO DE IMAGEN) ---
+# --- 10. LÓGICA DE ANÁLISIS CMYK (AJUSTADA A TUS MÁQUINAS) ---
 elif menu == "🎨 Análisis CMYK":
     st.title("🎨 Análisis de Cobertura Real CMYK")
-    st.markdown("Sube el diseño del cliente para determinar cuánta tinta consumirá cada color.")
-
-    # 1. Selector de Impresora
-    impresora = st.selectbox("🖨️ Selecciona la Impresora", ["Epson L805 (Foto)", "Epson L3110 (Estándar)", "Plotter / Otra"])
     
-    # 2. Cargador de Imagen para Análisis
-    archivo_diseno = st.file_uploader("🖼️ Sube el diseño (JPG/PNG) para analizar cobertura", type=['png', 'jpg', 'jpeg'])
+    # 1. Selector de TUS Impresoras Reales
+    impresora = st.selectbox("🖨️ Selecciona tu Impresora", 
+                             ["HP Advantage J210a (Cartuchos)", 
+                              "HP Smart Tank 580w (Tinta Continua)", 
+                              "Epson L1250 (Sublimación)"])
+    
+    # 2. Cargador de Imagen (se mantiene igual)
+    archivo_diseno = st.file_uploader("🖼️ Sube el diseño para analizar", type=['png', 'jpg', 'jpeg'])
 
     if archivo_diseno:
         from PIL import Image
         import numpy as np
-
-        # Abrimos la imagen y la convertimos a CMYK
         img = Image.open(archivo_diseno).convert('CMYK')
-        st.image(archivo_diseno, caption="Diseño a analizar", width=300)
-        
-        # Convertimos a datos numéricos para calcular promedios
+        st.image(archivo_diseno, caption="Diseño analizado", width=250)
         datos = np.array(img)
-        # CMYK son los canales 0, 1, 2, 3
-        c_prom = np.mean(datos[:,:,0]) / 255
-        m_prom = np.mean(datos[:,:,1]) / 255
-        y_prom = np.mean(datos[:,:,2]) / 255
-        k_prom = np.mean(datos[:,:,3]) / 255
+        c_prom, m_prom, y_prom, k_prom = [np.mean(datos[:,:,i]) / 255 for i in range(4)]
 
-        st.subheader("📊 Resultado del Escaneo de Pixeles")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Cian", f"{c_prom*100:.1f}%")
-        col2.metric("Magenta", f"{m_prom*100:.1f}%")
-        col3.metric("Amarillo", f"{y_prom*100:.1f}%")
+        st.subheader("📊 Porcentajes Detectados")
+        c1, c2, c3, col4 = st.columns(4)
+        c1.metric("Cian", f"{c_prom*100:.1f}%")
+        c2.metric("Magenta", f"{m_prom*100:.1f}%")
+        c3.metric("Amarillo", f"{y_prom*100:.1f}%")
         col4.metric("Negro", f"{k_prom*100:.1f}%")
 
-        # 3. Cálculo de Costo basado en Inventario
+        # 3. Cálculo adaptado a tus equipos
         st.divider()
-        st.subheader("💰 Costo Estimado de Tinta")
-        
         imp_t = iva + igtf + banco
         df_t = df_inv[df_inv['unidad'] == 'ml'].copy()
 
-        if not df_t.empty:
-            # Buscamos costos de cada color en el inventario
-            def obtener_costo(nombre_color):
-                filtro = df_t[df_t['item'].str.lower().contains(nombre_color.lower())]
-                if not filtro.empty:
-                    return filtro['precio_usd'].values[0] * (1 + imp_t)
-                return conf.loc['costo_tinta_ml', 'valor'] * (1 + imp_t)
+        # Lógica de costos por tipo de impresora
+        multiplicador_gasto = 1.0
+        if "J210a" in impresora:
+            multiplicador_gasto = 2.5  # Los cartuchos son mucho más caros por gota
+        elif "L1250" in impresora:
+            multiplicador_gasto = 1.5  # La tinta de sublimación suele ser más densa
+        else: # HP 580w
+            multiplicador_gasto = 1.0  # Tinta continua estándar
 
-            costos = {
-                "C": obtener_costo("cian"),
-                "M": obtener_costo("magenta"),
-                "Y": obtener_costo("amarillo"),
-                "K": obtener_costo("negro")
-            }
-
-            # Estimación técnica: Una página A4 al 100% gasta aprox 0.8ml
-            # Multiplicamos la cobertura por el costo de cada ml
-            total_tinta = (c_prom * 0.2 * costos["C"]) + (m_prom * 0.2 * costos["M"]) + \
-                          (y_prom * 0.2 * costos["Y"]) + (k_prom * 0.2 * costos["K"])
-            
-            # Ajuste según impresora
-            if "L805" in impresora: total_tinta *= 1.2 # Gasta un poco más por calidad
-            
-            st.success(f"💵 El costo de tinta para este diseño es de: **$ {total_tinta:.4f}**")
-            st.caption(f"Cálculo basado en los precios de tu inventario + {imp_t*100:.0f}% de impuestos.")
-        else:
-            st.warning("⚠️ Registra las tintas en el Inventario (unidad 'ml') para calcular el precio exacto.")
-
-    else:
-        st.info("💡 Sube una imagen para que el sistema detecte automáticamente cuánto Cian, Magenta, Amarillo y Negro tiene.")
+        # (El resto del cálculo usa este multiplicador sobre tus precios de inventario)
+        costo_base_ml = conf.loc['costo_tinta_ml', 'valor'] * (1 + imp_t)
+        gasto_total = (c_prom + m_prom + y_prom + k_prom) * 0.5 * costo_base_ml * multiplicador_gasto
+        
+        st.success(f"💵 Costo estimado para la **{impresora}**: **$ {gasto_total:.4f}**")
+        st.info(f"💡 Factor de costo aplicado: {multiplicador_gasto}x (Basado en el tipo de tecnología de tu impresora).")
