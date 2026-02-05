@@ -98,9 +98,14 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
-# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN DEFINITIVA CORREGIDA) --- 
+# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN 100% ESTABLE) --- 
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
+
+    # 🔥 RECARGAR SIEMPRE EL INVENTARIO DESDE LA BASE DE DATOS
+    conn = conectar()
+    df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
+    conn.close()
 
     # --- BUSCADOR DE INVENTARIO ---
     busqueda_inv = st.text_input("🔍 Buscar producto en inventario...", placeholder="Ej: Resma, Tinta...")
@@ -158,7 +163,7 @@ if menu == "📦 Inventario":
                 if it_nombre:
                     imp_t = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
 
-                    # Guardamos el PRECIO DEL LOTE (NO el unitario)
+                    # Guardamos el precio total del lote ya con impuestos
                     precio_lote_final = precio_lote * (1 + imp_t)
 
                     c = conectar()
@@ -192,8 +197,13 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado correctamente: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA (CORRECCIÓN REAL DEL PROBLEMA) ---
+    # --- TABLA DE AUDITORÍA ---
     st.divider()
+
+    # 🔥 RECARGAR DE NUEVO PARA ASEGURAR DATOS FRESCOS
+    conn = conectar()
+    df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
+    conn.close()
 
     if not df_inv.empty:
 
@@ -204,29 +214,28 @@ if menu == "📦 Inventario":
             key="moneda_inv"
         )
 
-        # Definir tasa según selección
+        # Definir tasa y símbolo correctamente
         if moneda_ver == "BCV":
             tasa_v = float(t_bcv)
+            simbolo = "Bs"
         elif moneda_ver == "Binance":
             tasa_v = float(t_bin)
+            simbolo = "USDT"
         else:
             tasa_v = 1.0
-
-        simbolo = "Bs" if moneda_ver != "USD" else "$"
+            simbolo = "$"
 
         df_inv_filtrado = df_inv[
             df_inv['item'].str.contains(busqueda_inv, case=False)
         ].copy()
 
-        # --- AQUÍ ESTÁ LA CORRECCIÓN REAL ---
-        precio_lote_usd = df_inv_filtrado['precio_usd'].astype(float)
-        cantidad_stock = df_inv_filtrado['cantidad'].astype(float)
+        precio_lote_usd = df_inv_filtrado['precio_usd'].fillna(0).astype(float)
+        cantidad_stock = df_inv_filtrado['cantidad'].replace(0, 1).astype(float)
 
-        # Cálculo correcto:
+        # Cálculos reales y coherentes
         df_inv_filtrado['Costo Unitario'] = (precio_lote_usd / cantidad_stock) * tasa_v
         df_inv_filtrado['Valor Total'] = precio_lote_usd * tasa_v
 
-        # Redondeos para presentación clara
         df_inv_filtrado['Costo Unitario'] = df_inv_filtrado['Costo Unitario'].round(4)
         df_inv_filtrado['Valor Total'] = df_inv_filtrado['Valor Total'].round(2)
 
@@ -299,6 +308,7 @@ if menu == "📦 Inventario":
 
         if not df_movs_hist.empty:
             st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
+
 
 
 # --- 5. LÓGICA DE COTIZACIONES ---
@@ -711,6 +721,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
