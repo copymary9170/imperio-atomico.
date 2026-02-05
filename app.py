@@ -158,43 +158,43 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA REPARADA (BCV Y BINANCE) ---
-    st.divider()
-    if not df_inv.empty:
-        df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
-        
-        moneda = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True)
-        
-        # Tasa dinámica
-        if moneda == "BCV":
-            tasa_v = float(t_bcv)
-        elif moneda == "Binance":
-            tasa_v = float(t_bin)
-        else:
-            tasa_v = 1.0
-            
-        sim = "Bs" if moneda != "USD" else "$"
-        
-        # --- EL CAMBIO CLAVE AQUÍ ---
-        # Convertimos a float para asegurar matemáticas limpias
-        precio_usd_base = df_inv_filtrado['precio_usd'].astype(float)
-        stock_actual = df_inv_filtrado['cantidad'].astype(float)
+    # --- REPARACIÓN DEFINITIVA DE LÓGICA UNITARIO VS TOTAL ---
 
-        # Unitario: Precio de 1 sola unidad en la moneda elegida
-        df_inv_filtrado['Col_Unit'] = precio_usd_base * tasa_v
+if not df_inv.empty:
+    df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
+    
+    # 1. Determinamos la tasa según tu selección
+    if moneda == "BCV":
+        tasa_v = float(t_bcv)
+    elif moneda == "Binance":
+        tasa_v = float(t_bin)
+    else:
+        tasa_v = 1.0
         
-        # Total: Unitario x Cantidad
-        df_inv_filtrado['Col_Total'] = (precio_usd_base * tasa_v) * stock_actual
-        
-        # Formateo de la tabla
-        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
-        df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
+    sim = "Bs" if moneda != "USD" else "$"
 
-        st.dataframe(df_ver.style.format({
-            'Stock': '{:,.2f}', 
-            f'Unit. ({sim})': "{:.4f}", 
-            f'Total Stock ({sim})': "{:.2f}"
-        }), use_container_width=True, hide_index=True)
+    # 2. LIMPIEZA DE DATOS (Aseguramos que precio_usd sea el de UNA sola unidad)
+    # Convertimos a float para evitar errores de tipo
+    precio_hoja_usd = df_inv_filtrado['precio_usd'].astype(float)
+    cantidad_stock = df_inv_filtrado['cantidad'].astype(float)
+
+    # 3. CÁLCULO CORREGIDO
+    # El unitario SIEMPRE debe ser: (Precio de 1 unidad en $) * Tasa
+    df_inv_filtrado['Col_Unit'] = precio_hoja_usd * tasa_v
+    
+    # El total SIEMPRE debe ser: (Precio Unitario en moneda) * (Cantidad en Stock)
+    df_inv_filtrado['Col_Total'] = df_inv_filtrado['Col_Unit'] * cantidad_stock
+    
+    # 4. PREPARACIÓN DE TABLA
+    df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
+    df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
+
+    # 5. VISUALIZACIÓN CON REDONDEO (Para eliminar los decimales infinitos de tu captura fks.n.JPG)
+    st.dataframe(df_ver.style.format({
+        'Stock': '{:,.2f}', 
+        f'Unit. ({sim})': "{:.4f}",  # 4 decimales para precisión en hojas/ml
+        f'Total Stock ({sim})': "{:.2f}" # 2 decimales para dinero total
+    }), use_container_width=True, hide_index=True)
 
     # --- SECCIÓN PARA CORREGIR Y ELIMINAR ---
     st.divider()
@@ -635,6 +635,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
