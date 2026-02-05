@@ -580,6 +580,22 @@ elif menu == "🎨 Análisis CMYK":
         
         total_lote = df_res['TOTAL USD'].sum()
         st.success(f"💰 Costo total estimado: **${total_lote:.2f} USD** | **{total_lote * t_bcv:.2f} Bs**")
+
+    # ... (dentro de Análisis CMYK, después de mostrar la tabla de resultados)
+        total_lote = df_res['TOTAL USD'].sum()
+        total_ml_lote = df_res['Costo Tinta'].sum() / (precio_tinta_ml * (1 + iva + igtf)) # Cálculo inverso para ml
+        
+        st.success(f"💰 Costo total estimado: **${total_lote:.2f} USD**")
+
+        if st.button("📝 ENVIAR TODO A COTIZACIÓN"):
+            # Guardamos los datos en la "memoria" del sistema
+            st.session_state['datos_pre_cotizacion'] = {
+                'trabajo': f"Trabajo impreso: {len(archivos_multiples)} archivos",
+                'costo_base': total_lote,
+                'ml_estimados': total_ml_lote,
+                'unidades': len(archivos_multiples)
+            }
+            st.info("✅ Datos preparados. ¡Ve al módulo de Cotizaciones para finalizar!")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
@@ -689,6 +705,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
