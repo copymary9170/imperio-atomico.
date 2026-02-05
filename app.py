@@ -160,42 +160,41 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA (AQUÍ ESTÁ EL ARREGLO DE LOS MONTOS) ---
+    # --- TABLA DE AUDITORÍA TOTALMENTE BLINDADA (REPARACIÓN DEFINITIVA) ---
     st.divider()
     if not df_inv.empty:
         df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
-        
         moneda = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True)
         
+        # 1. Tasa
         try:
-            if moneda == "BCV":
-                tasa_v = float(t_bcv)
-            elif moneda == "Binance":
-                tasa_v = float(t_bin)
-            else:
-                tasa_v = 1.0
+            tasa_v = float(t_bcv) if moneda == "BCV" else (float(t_bin) if moneda == "Binance" else 1.0)
         except:
             tasa_v = 1.0
             
         sim = "Bs" if moneda != "USD" else "$"
         
-        # CÁLCULOS LÓGICOS CORREGIDOS
-        # Unitario: Precio de una sola pieza (Número pequeño)
-        df_inv_filtrado['Unit_Calculado'] = df_inv_filtrado['precio_usd'].astype(float) * tasa_v
-        
-        # Total Stock: Valor de toda la mercancía junta (Número grande)
-        df_inv_filtrado['Total_Calculado'] = (df_inv_filtrado['cantidad'].astype(float) * df_inv_filtrado['precio_usd'].astype(float)) * tasa_v
-        
-        # Formateo de columnas para mostrar
-        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Unit_Calculado', 'Total_Calculado']].copy()
-        df_ver.columns = ['Producto', 'Stock', 'Unidad', f'Unit. ({sim})', f'Total Stock ({sim})']
+        # 2. CÁLCULO SEGURO
+        # Precio base desde la DB (aseguramos que sea float)
+        precio_base = df_inv_filtrado['precio_usd'].astype(float)
+        cant_total = df_inv_filtrado['cantidad'].astype(float)
 
+        # EL UNITARIO: Es lo que cuesta 1 sola hojita
+        df_inv_filtrado['Col_Unit'] = precio_base * tasa_v
+        
+        # EL TOTAL: Es el Unitario multiplicado por cuántas tienes
+        df_inv_filtrado['Col_Total'] = (precio_base * tasa_v) * cant_total
+        
+        # 3. ORDEN DE COLUMNAS (Para que no se crucen)
+        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
+        df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
+
+        # 4. VISUALIZACIÓN
         st.dataframe(df_ver.style.format({
             'Stock': '{:,.2f}', 
-            f'Unit. ({sim})': "{:.4f}", 
-            f'Total Stock ({sim})': "{:.2f}"
+            f'Unit. ({sim})': "{:.4f}",  # 4 decimales para el chiquito
+            f'Total Stock ({sim})': "{:.2f}" # 2 decimales para el grande
         }), use_container_width=True, hide_index=True)
-
     # --- SECCIÓN PARA CORREGIR Y ELIMINAR ---
     st.divider()
     with st.expander("🗑️ Borrar o Corregir Insumos"):
@@ -638,6 +637,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
