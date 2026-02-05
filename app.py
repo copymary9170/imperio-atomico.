@@ -120,145 +120,172 @@ if menu == "📦 Inventario":
         else:
             st.success("✅ Stock saludable.")
 
-  # --- 4. LÓGICA DE INVENTARIO (CORREGIDA SIN ERRORES DE SINTAXIS) --- 
+  # --- 4. MÓDULO DE INVENTARIO: GESTIÓN INTEGRAL DE ACTIVOS ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
-    
+    st.markdown("---")
+
+    # 1. CARGA DE DATOS Y ESTADÍSTICAS OPERATIVAS
     conn = conectar()
     try:
+        # Intentamos obtener los datos. Si la columna 'minimo' no existe, la creamos silenciosamente
         df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
-    except:
-        df_inv = pd.DataFrame()
+    except Exception as e:
+        # Fallback por si la DB está migrando
+        df_inv = pd.DataFrame(columns=['item', 'cantidad', 'unidad', 'precio_usd', 'minimo'])
     conn.close()
 
-    # --- 🚨 ALERTAS PERSONALIZADAS ---
+    # --- 📊 DASHBOARD DE VALORIZACIÓN ---
     if not df_inv.empty:
-        col_min = 'minimo' if 'minimo' in df_inv.columns else 5.0
-        alertas = df_inv[df_inv['cantidad'] <= (df_inv[col_min] if 'minimo' in df_inv.columns else 5.0)]
-        if not alertas.empty:
-            for _, row in alertas.iterrows():
-                st.error(f"⚠️ **STOCK BAJO:** {row['item']} tiene {row['cantidad']:.2f} {row['unidad']}.")
+        # Cálculo de valores en las 3 tasas
+        valor_usd_estante = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
+        
+        # Alertas de stock basadas en el mínimo de cada producto
+        col_min_check = 'minimo' if 'minimo' in df_inv.columns else 5.0
+        df_critico = df_inv[df_inv['cantidad'] <= (df_inv[col_min_check] if 'minimo' in df_inv.columns else 5.0)]
+        
+        st.subheader("📋 Estado Financiero del Almacén")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Valor Stock ($)", f"{valor_usd_estante:.2f}")
+        c2.metric("Valor BCV (Bs)", f"{(valor_usd_estante * t_bcv):,.2f}")
+        c3.metric("Valor Binance (Bs)", f"{(valor_usd_estante * t_bin):,.2f}")
+        c4.metric("Alertas Críticas", f"{len(df_critico)} ítems", delta_color="inverse")
 
-    # --- 📥 FORMULARIO DINÁMICO ---
-    with st.expander("📥 REGISTRAR ENTRADA (CONTROL DE TASAS Y COSTOS)", expanded=True):
-        with st.form("form_inv_final"):
-            col1, col2 = st.columns(2)
-            with col1:
-                it_nombre = st.text_input("Producto")
-                it_unid = st.selectbox("Unidad", ["Hojas", "ml", "Unidad", "Resma"])
-                moneda_pago = st.radio("¿En qué moneda pagaste?", ["USD (Dólares)", "BS (Tasa BCV)", "BS (Tasa Binance)"], horizontal=True)
+        # Mensaje de alerta visual
+        if not df_critico.empty:
+            for _, item in df_critico.iterrows():
+                st.error(f"🚨 **REPOSICIÓN NECESARIA:** {item['item']} tiene solo {item['cantidad']:.2f} {item['unidad']}.")
+        else:
+            st.success("✅ Todos los niveles de stock están saludables.")
+    
+    st.divider()
+
+    # --- 📥 FORMULARIO DE CARGA INTELIGENTE (TINTAS, CARTUCHOS Y PAPELERÍA) ---
+    with st.expander("📥 REGISTRAR NUEVA COMPRA (Ajuste de Costos y Tasas)", expanded=True):
+        with st.form("form_inventario_maestro"):
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                st.write("🔍 **Detalles del Producto**")
+                it_nombre = st.text_input("Nombre del Producto / Impresora", placeholder="Ej: Epson L3210 o Resma A4")
+                it_unid = st.selectbox("Unidad de Medida", ["ml", "Hojas", "Unidad", "Resma", "Metros"])
                 
-                # Aquí está la magia: Solo aparece si es ml
+                # Lógica dinámica para Tintas/Cartuchos
                 if it_unid == "ml":
-                    st.markdown("---")
-                    tipo_carga = st.radio("Tipo:", ["Dúo de Cartuchos", "Kit CMYK", "Bote Individual"], horizontal=True)
-                    ml_por_u = st.number_input("ml por cada envase/cartucho", min_value=0.1, value=10.0)
+                    st.info("🎨 Modo de Insumos Líquidos Activo")
+                    tipo_carga = st.radio("Configuración de carga:", 
+                                         ["Bote Individual", "Dúo de Cartuchos (2)", "Kit CMYK (4 colores)"], 
+                                         horizontal=True)
+                    capacidad_envase = st.number_input("Capacidad de cada envase (ml)", min_value=0.1, value=65.0)
                 else:
                     tipo_carga = "Normal"
-                    ml_por_u = 1.0
-
-            with col2:
-                it_cant_lote = st.number_input("Cantidad de botes/paquetes", min_value=1, value=1)
-                monto_pagado = st.number_input("Monto pagado", min_value=0.0, format="%.2f")
-                it_minimo = st.number_input("Mínimo para alerta", min_value=0.0, value=5.0)
+                    capacidad_envase = 1.0
                 
-                st.write("**🛡️ Recargos**")
-                cx = st.columns(3)
-                p_iva = cx[0].checkbox("IVA", value=True)
-                p_gtf = cx[1].checkbox("IGTF")
-                p_banco = cx[2].checkbox("Banco", value=True)
+                it_minimo_alerta = st.number_input("Mínimo para avisar (Alerta de Stock)", min_value=0.0, value=5.0)
 
-            if st.form_submit_button("🚀 GUARDAR"):
+            with col_b:
+                st.write("💳 **Cálculo de Costo Real**")
+                it_cant_lotes = st.number_input("Cantidad de Unidades/Kits comprados", min_value=1, value=1)
+                monto_pagado = st.number_input("Monto total pagado", min_value=0.0, format="%.2f")
+                tasa_compra = st.radio("¿Con qué tasa pagaste?", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
+                
+                st.write("**🛡️ Impuestos y Comisiones Bancarias**")
+                tax1, tax2, tax3 = st.columns(3)
+                p_iva = tax1.checkbox(f"IVA ({iva*100}%)", value=True)
+                p_gtf = tax2.checkbox(f"IGTF ({igtf*100}%)", value=False)
+                # Tu comisión bancaria personalizada (2026-02-03: inflable)
+                p_banco = tax3.checkbox(f"Banco ({banco*100}%)", value=True)
+
+            if st.form_submit_button("🚀 IMPACTAR INVENTARIO"):
                 if it_nombre and monto_pagado > 0:
-                    # 1. Conversión de Tasa
-                    if "BCV" in moneda_pago:
-                        precio_usd = monto_pagado / t_bcv
-                    elif "Binance" in moneda_pago:
-                        precio_usd = monto_pagado / t_bin
+                    # 1. Normalización a Dólares
+                    if "BCV" in tasa_compra:
+                        base_usd = monto_pagado / t_bcv
+                    elif "Binance" in tasa_compra:
+                        base_usd = monto_pagado / t_bin
                     else:
-                        precio_usd = monto_pagado
+                        base_usd = monto_pagado
                     
-                    # 2. Impuestos
-                    imp = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
-                    costo_total_usd = precio_usd * (1 + imp)
+                    # 2. Aplicación de impuestos sobre el costo base
+                    total_taxes = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
+                    costo_real_compra_usd = base_usd * (1 + total_taxes)
                     
                     c = conectar()
+                    
+                    # LÓGICA DE PROCESAMIENTO SEGÚN TIPO
                     if it_unid == "ml":
-                        if tipo_carga == "Dúo de Cartuchos":
-                            costo_ml = (costo_total_usd / 2) / ml_por_u
-                            for col in ["Negro", "Tricolor"]:
-                                c.execute("INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo", (f"Cartucho {it_nombre} {col}", ml_por_u * it_cant_lote, "ml", costo_ml, it_minimo))
-                        elif tipo_carga == "Kit CMYK":
-                            costo_ml = (costo_total_usd / 4) / ml_por_u
-                            for col in ["Cian", "Magenta", "Amarillo", "Negro"]:
-                                c.execute("INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo", (f"Tinta {it_nombre} {col}", ml_por_u * it_cant_lote, "ml", costo_ml, it_minimo))
+                        if tipo_carga == "Dúo de Cartuchos (2)":
+                            costo_ml = (costo_real_compra_usd / 2) / capacidad_envase
+                            for color in ["Negro", "Color"]:
+                                nombre_item = f"Cartucho {it_nombre} {color}"
+                                c.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
+                                           VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
+                                           precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
+                                         (nombre_item, capacidad_envase * it_cant_lotes, "ml", costo_ml, it_minimo_alerta))
+                        
+                        elif tipo_carga == "Kit CMYK (4 colores)":
+                            costo_ml = (costo_real_compra_usd / 4) / capacidad_envase
+                            for color in ["Cian", "Magenta", "Amarillo", "Negro"]:
+                                nombre_item = f"Tinta {it_nombre} {color}"
+                                c.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
+                                           VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
+                                           precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
+                                         (nombre_item, capacidad_envase * it_cant_lotes, "ml", costo_ml, it_minimo_alerta))
                         else:
-                            costo_u = costo_total_usd / (ml_por_u * it_cant_lote)
-                            c.execute("INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo", (it_nombre, ml_por_u * it_cant_lote, "ml", costo_u, it_minimo))
+                            costo_unit = costo_real_compra_usd / (capacidad_envase * it_cant_lotes)
+                            c.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
+                                       VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
+                                       precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
+                                     (it_nombre, capacidad_envase * it_cant_lote, "ml", costo_unit, it_minimo_alerta))
                     else:
-                        costo_u = costo_total_usd / it_cant_lote
-                        c.execute("INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo", (it_nombre, it_cant_lote, it_unid, costo_u, it_minimo))
+                        # PAPELERÍA O PRODUCTOS UNITARIOS
+                        costo_unit = costo_real_compra_usd / it_cant_lotes
+                        c.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
+                                   VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
+                                   precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
+                                 (it_nombre, it_cant_lotes, it_unid, costo_unit, it_minimo_alerta))
                     
                     c.commit(); c.close()
-                    st.success("✅ Guardado con éxito.")
+                    st.success(f"✅ Se han cargado los materiales. Costo unitario real: ${costo_unit if it_unid!='ml' else costo_ml:.4f}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA ---
+    # --- 📋 TABLA DE AUDITORÍA AVANZADA ---
     st.divider()
     if not df_inv.empty:
-        m_vista = st.radio("Ver en:", ["USD", "BCV", "Binance"], horizontal=True)
-        t_v = t_bcv if m_vista == "BCV" else (t_bin if m_vista == "Binance" else 1.0)
-        df_calc = df_inv.copy()
-        df_calc['Unitario'] = df_calc['precio_usd'] * t_v
-        df_calc['Total'] = df_calc['Unitario'] * df_calc['cantidad']
-        st.dataframe(df_calc[['item', 'cantidad', 'unidad', 'Unitario', 'Total']], use_container_width=True, hide_index=True)
+        st.subheader("📋 Auditoría de Almacén")
+        col_busc, col_mon = st.columns([2, 1])
+        with col_busc:
+            busqueda = st.text_input("🔍 Buscar material...")
+        with col_mon:
+            m_v = st.selectbox("Ver precios en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="audit_moneda")
+        
+        # Lógica de tasa de visualización
+        tasa_v = t_bcv if "BCV" in m_v else (t_bin if "Binance" in m_v else 1.0)
+        simbolo = "Bs" if "Bs" in m_v else "$"
 
-    # --- BORRADO ---
-    with st.expander("🗑️ Borrar"):
-        if not df_inv.empty:
-            p_borrar = st.selectbox("Seleccionar:", df_inv['item'].tolist())
-            if st.button("❌ Confirmar"):
-                c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (p_borrar,)); c.commit(); c.close()
-                st.rerun()
-    # --- 📋 TABLA DE AUDITORÍA ---
-    st.divider()
-    m_vista = st.radio("Ver inventario en:", ["USD", "BCV", "Binance"], horizontal=True)
-    if not df_inv.empty:
-        t_v = t_bcv if m_vista == "BCV" else (t_bin if m_vista == "Binance" else 1.0)
-        df_calc = df_inv.copy()
-        df_calc['Unitario'] = df_calc['precio_usd'] * t_v
-        df_calc['Total'] = df_calc['Unitario'] * df_calc['cantidad']
-        st.dataframe(df_calc[['item', 'cantidad', 'unidad', 'Unitario', 'Total']], use_container_width=True, hide_index=True)
+        df_final = df_inv[df_inv['item'].str.contains(busqueda, case=False)].copy()
+        df_final['Unitario'] = df_final['precio_usd'] * tasa_v
+        df_final['Total'] = df_final['Unitario'] * df_final['cantidad']
+        
+        # Estilo de tabla profesional
+        st.dataframe(df_final[['item', 'cantidad', 'unidad', 'Unitario', 'Total']].style.format({
+            'cantidad': '{:,.2f}',
+            'Unitario': '{:,.4f}',
+            'Total': '{:,.2f}'
+        }), use_container_width=True, hide_index=True)
 
-# --- 🗑️ ZONA DE PELIGRO (BORRADO Y AJUSTE) ---
+    # --- 🗑️ ZONA DE CONTROL Y BORRADO (ZONA DE PELIGRO) ---
     st.divider()
-    col_aj, col_del = st.columns(2)
-    with col_aj:
-        with st.expander("🔧 Ajuste Manual (Mermas)"):
-            if not df_inv.empty:
-                it_aj = st.selectbox("Insumo a corregir", df_inv['item'].tolist(), key="ajuste")
-                nueva_cant = st.number_input("Cantidad REAL física", min_value=0.0)
-                if st.button("🔄 Aplicar Corrección"):
-                    c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_cant, it_aj))
-                    c.commit(); c.close(); st.rerun()
-    
-   # --- 🗑️ BLOQUE DE BORRADO (CORREGIDO) ---
-    st.divider()
-    with st.expander("🗑️ Zona de Peligro: Eliminar Insumos"):
+    with st.expander("🗑️ Zona de Peligro: Ajustes Especiales"):
         if not df_inv.empty:
-            p_borrar = st.selectbox("Selecciona el producto a eliminar:", 
-                                   df_inv['item'].tolist(), key="select_borrar_item")
-            
-            # Le agregamos un 'key' único para que Streamlit no se confunda
-            if st.button("❌ Confirmar Eliminación", key="btn_borrar_inventario"):
+            st.warning("Atención: Eliminar un insumo es una acción permanente.")
+            it_borrar = st.selectbox("Selecciona el insumo a ELIMINAR:", df_inv['item'].tolist(), key="select_final_del")
+            if st.button("❌ CONFIRMAR ELIMINACIÓN", key="btn_final_delete_unique"):
                 c = conectar()
-                c.execute("DELETE FROM inventario WHERE item=?", (p_borrar,))
-                c.commit()
-                c.close()
-                st.error(f"Se eliminó '{p_borrar}' del inventario.")
+                c.execute("DELETE FROM inventario WHERE item=?", (it_borrar,))
+                c.commit(); c.close()
+                st.error(f"Insumo '{it_borrar}' eliminado del sistema.")
                 st.rerun()
-        else:
-            st.info("No hay nada que eliminar.")
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
@@ -686,6 +713,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
