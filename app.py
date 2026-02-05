@@ -98,136 +98,135 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
-# --- 4. LÓGICA DE INVENTARIO (SISTEMA INTEGRAL DE GESTIÓN DE INSUMOS) --- 
+# --- 4. LÓGICA DE INVENTARIO (VERSIÓN SUPREMA) --- 
 if menu == "📦 Inventario":
-    st.title("📦 Centro de Gestión de Inventario")
-    st.markdown("Control total de materiales, tintas y costos operativos.")
-
-    # 1. Carga y Estadísticas Rápidas
+    st.title("📦 Centro de Control de Inventario")
+    
+    # Recarga de datos desde la DB
     conn = conectar()
     df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
     conn.close()
 
+    # --- MÉTRICAS DE VALOR TOTAL ---
     if not df_inv.empty:
-        c1, c2, c3 = st.columns(3)
-        total_items = len(df_inv)
-        valor_total = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
-        bajo_stock_count = len(df_inv[df_inv['cantidad'] <= 5])
-        
-        c1.metric("📦 Variedad de Insumos", f"{total_items} productos")
-        c2.metric("💰 Valor en Estante", f"$ {valor_total:.2f}")
-        c3.metric("🚨 Alertas de Stock", f"{bajo_stock_count} críticos", delta_color="inverse")
+        c1, c2, c3, c4 = st.columns(4)
+        v_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
+        c1.metric("💰 Total Stock ($)", f"{v_usd:.2f}")
+        c2.metric("🏦 Total BCV", f"{(v_usd * t_bcv):,.2f} Bs")
+        c3.metric("🔶 Total Binance", f"{(v_usd * t_bin):,.2f} Bs")
+        c4.metric("🚨 Alertas", len(df_inv[df_inv['cantidad'] <= 5]))
 
-    # --- 2. FORMULARIO DE CARGA INTELIGENTE (MULTI-TINTA Y LOTES) ---
+    # --- FORMULARIO EXTENDIDO DE CARGA ---
     st.divider()
-    with st.expander("📥 AGREGAR NUEVO MATERIAL O TINTA", expanded=False):
-        with st.form("form_inv_pro"):
+    with st.expander("📥 REGISTRAR ENTRADA DE MATERIAL (TINTAS / PAPEL / OTROS)", expanded=True):
+        with st.form("form_inv_supremo"):
             col1, col2 = st.columns(2)
             with col1:
-                it_nombre = st.text_input("Nombre / Referencia", placeholder="Ej: Epson L1250 o Resma Bond")
-                it_unid = st.selectbox("Unidad de medida", ["Hojas", "ml", "Unidad", "Resma", "Metros", "Láminas"])
+                it_nombre = st.text_input("Nombre del Producto o Impresora", placeholder="Ej: J210 o Resma A4")
+                it_unid = st.selectbox("Unidad de Medida", ["ml", "Hojas", "Unidad", "Metros", "Resma"])
                 
-                # Interfaz dinámica para tintas
+                # Inteligencia para Tintas
                 if it_unid == "ml":
-                    st.info("💡 Modo Tinta detectado: El sistema puede crear los 4 colores automáticamente.")
-                    tipo_carga = st.radio("¿Cómo vas a cargar?", ["Kit CMYK (4 colores)", "Bote Individual"])
+                    tipo_tinta = st.radio("¿Qué vas a cargar?", ["Kit CMYK (4 colores)", "Bote Individual"], horizontal=True)
                 else:
-                    tipo_carga = "Normal"
+                    tipo_tinta = "Normal"
 
             with col2:
-                it_cant = st.number_input("Cantidad que trae el paquete/bote", min_value=0.01, value=100.0)
-                precio_lote = st.number_input("Precio de Compra Total (USD)", min_value=0.0, format="%.2f")
-                st.caption("Los impuestos se calculan sobre el precio base.")
-                p_iva = st.checkbox(f"Sumar IVA ({iva*100}%)", value=True)
-                p_gtf = st.checkbox(f"Sumar IGTF ({igtf*100}%)", value=True)
+                it_cant = st.number_input("Cantidad (ml o Unidades)", min_value=0.01, value=100.0)
+                precio_base = st.number_input("Precio de Compra (Base USD)", min_value=0.0, format="%.2f")
+                
+                st.write("**🛡️ Impuestos y Comisiones**")
+                cx1, cx2, cx3 = st.columns(3)
+                p_iva = cx1.checkbox(f"IVA ({iva*100}%)", value=True)
+                p_gtf = cx2.checkbox(f"IGTF ({igtf*100}%)", value=False)
+                # Aquí está tu comisión bancaria (usando el valor de 'banco' de tu config)
+                p_banco = cx3.checkbox(f"Banco ({banco*100}%)", value=False)
 
-            if st.form_submit_button("🚀 GUARDAR EN BASE DE DATOS"):
-                if it_nombre and precio_lote > 0:
-                    tasa_imp = (iva if p_iva else 0) + (igtf if p_gtf else 0)
-                    precio_final = precio_lote * (1 + tasa_imp)
+            if st.form_submit_button("🚀 PROCESAR Y GUARDAR EN STOCK"):
+                if it_nombre and precio_base > 0:
+                    # Cálculo de recargo total
+                    impuestos_totales = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
+                    costo_real_usd = precio_base * (1 + impuestos_totales)
                     
                     c = conectar()
-                    # CASO 1: Kit de Tintas (Divide el precio entre 4 y crea los colores)
-                    if it_unid == "ml" and tipo_carga == "Kit CMYK (4 colores)":
+                    # CASO TINTAS CMYK: Creamos 4 registros
+                    if it_unid == "ml" and tipo_tinta == "Kit CMYK (4 colores)":
                         colores = ["Cian", "Magenta", "Amarillo", "Negro"]
-                        costo_por_ml = (precio_final / 4) / it_cant
+                        # Dividimos el costo real entre 4 botellas y luego por los ml de cada una
+                        costo_u_ml = (costo_real_usd / 4) / it_cant
                         for col in colores:
-                            nombre_full = f"Tinta {it_nombre} {col}"
+                            n_full = f"Tinta {it_nombre} {col}"
                             c.execute("""
                                 INSERT INTO inventario (item, cantidad, unidad, precio_usd) 
                                 VALUES (?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
-                                precio_usd = excluded.precio_usd, cantidad = cantidad + excluded.cantidad
-                            """, (nombre_full, it_cant, "ml", costo_por_ml))
-                        st.success(f"🎨 Kit CMYK de {it_nombre} cargado correctamente.")
+                                precio_usd = excluded.precio_usd,
+                                cantidad = cantidad + excluded.cantidad
+                            """, (n_full, it_cant, "ml", costo_u_ml))
                     
-                    # CASO 2: Producto normal o bote individual
+                    # CASO NORMAL
                     else:
-                        costo_u = precio_final / it_cant
+                        costo_u = costo_real_usd / it_cant
                         c.execute("""
                             INSERT INTO inventario (item, cantidad, unidad, precio_usd) 
                             VALUES (?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
-                            precio_usd = excluded.precio_usd, cantidad = cantidad + excluded.cantidad
+                            precio_usd = excluded.precio_usd,
+                            cantidad = cantidad + excluded.cantidad
                         """, (it_nombre, it_cant, it_unid, costo_u))
-                        st.success(f"✅ {it_nombre} actualizado en stock.")
                     
                     c.commit(); c.close()
+                    st.success("✅ Stock actualizado con éxito.")
                     st.rerun()
 
-    # --- 3. AUDITORÍA Y BÚSQUEDA ---
+    # --- TABLA DE AUDITORÍA CON TRIPLE TASA ---
     st.divider()
     st.subheader("📋 Auditoría de Almacén")
-    busqueda_inv = st.text_input("🔍 Filtrar por nombre...", placeholder="Escribe para buscar...")
+    busqueda = st.text_input("🔍 Buscar insumo...")
     
-    m_vista = st.radio("Ver costos en:", ["USD", "BCV"], horizontal=True)
-    t_v = t_bcv if m_vista == "BCV" else 1.0
-    simbolo = "Bs" if m_vista == "BCV" else "$"
-
+    # Selector de moneda con Binance
+    m_vista = st.radio("Ver precios en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
+    
     if not df_inv.empty:
-        df_f = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
-        
-        # Cálculos de vista
-        df_f['Unitario'] = df_f['precio_usd'] * t_v
-        df_f['Subtotal'] = df_f['Unitario'] * df_f['cantidad']
-        
-        # Estilo para la tabla
-        df_ver = df_f[['item', 'cantidad', 'unidad', 'Unitario', 'Subtotal']]
-        df_ver.columns = ['Insumo', 'Existencia', 'Und', f'Costo Unit ({simbolo})', f'Total ({simbolo})']
+        # Lógica de conversión dinámica
+        if "BCV" in m_vista:
+            t_aplicar = t_bcv; simb = "Bs"
+        elif "Binance" in m_vista:
+            t_aplicar = t_bin; simb = "Bs"
+        else:
+            t_aplicar = 1.0; simb = "$"
+
+        df_f = df_inv[df_inv['item'].str.contains(busqueda, case=False)].copy()
+        df_f['Unitario'] = df_f['precio_usd'] * t_aplicar
+        df_f['Total'] = df_f['Unitario'] * df_f['cantidad']
+
+        df_ver = df_f[['item', 'cantidad', 'unidad', 'Unitario', 'Total']]
+        df_ver.columns = ['Insumo', 'Stock', 'Und', f'Costo Unit ({simb})', f'Total Stock ({simb})']
 
         st.dataframe(df_ver.style.format({
-            'Existencia': '{:,.2f}',
-            f'Costo Unit ({simbolo})': '{:,.4f}',
-            f'Total ({simbolo})': '{:,.2f}'
-        }).highlight_max(axis=0, subset=[f'Total ({simbolo})'], color='#1e2a3a'), 
-        use_container_width=True, hide_index=True)
+            'Stock': '{:,.2f}',
+            f'Costo Unit ({simb})': '{:,.4f}',
+            f'Total Stock ({simb})': '{:,.2f}'
+        }), use_container_width=True, hide_index=True)
 
-    # --- 4. AJUSTES Y BORRADO (ZONA DE CONTROL) ---
+    # --- ZONA DE CONTROL (AJUSTE Y BORRADO) ---
     st.divider()
-    col_izq, col_der = st.columns(2)
-
-    with col_izq:
-        with st.expander("🔧 Ajuste Manual de Stock"):
-            st.caption("Usa esto para corregir mermas o pérdidas sin eliminar el producto.")
+    col_aj, col_del = st.columns(2)
+    
+    with col_aj:
+        with st.expander("🔧 Ajuste de Stock (Inventario Físico)"):
             if not df_inv.empty:
-                item_adj = st.selectbox("Insumo a ajustar", df_inv['item'].tolist(), key="adj_box")
-                nuevo_stock = st.number_input("Nuevo Stock Real", min_value=0.0, step=0.1)
-                if st.button("🔄 Aplicar Ajuste"):
-                    c = conectar()
-                    c.execute("UPDATE inventario SET cantidad = ? WHERE item = ?", (nuevo_stock, item_adj))
-                    c.commit(); c.close()
-                    st.rerun()
+                item_adj = st.selectbox("Selecciona para ajustar", df_inv['item'].tolist(), key="adj")
+                n_stock = st.number_input("Cantidad Real en Estante", min_value=0.0)
+                if st.button("🔄 Corregir Stock"):
+                    c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (n_stock, item_adj))
+                    c.commit(); c.close(); st.rerun()
 
-    with col_der:
-        with st.expander("🗑️ Eliminar Insumo"):
-            st.caption("Atención: Esta acción no se puede deshacer.")
+    with col_del:
+        with st.expander("🗑️ Zona de Peligro"):
             if not df_inv.empty:
-                p_borrar = st.selectbox("Eliminar:", df_inv['item'].tolist(), key="del_box")
-                if st.button("❌ Confirmar Borrado"):
-                    c = conectar()
-                    c.execute("DELETE FROM inventario WHERE item=?", (p_borrar,))
-                    c.commit(); c.close()
-                    st.error(f"Insumo '{p_borrar}' eliminado.")
+                p_borrar = st.selectbox("Producto a eliminar", df_inv['item'].tolist(), key="del")
+                if st.button("❌ ELIMINAR PERMANENTE"):
+                    c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (p_borrar,)); c.commit(); c.close()
                     st.rerun()
-
 
 
 # --- 5. LÓGICA DE COTIZACIONES ---
@@ -657,6 +656,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
