@@ -420,92 +420,47 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
-# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (MULTIGESTIÓN DE TINTAS) ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (VERSIÓN CORREGIDA) ---
 elif menu == "🎨 Análisis CMYK":
-    st.title("🎨 Analizador de Cobertura por Impresora")
+    st.title("🎨 Analizador de Cobertura y Costos por Impresora")
 
+    # 1. Carga de datos desde la base de datos
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
     df_inv_tintas = pd.read_sql_query("SELECT item, precio_usd FROM inventario WHERE item LIKE '%Tinta%'", conn)
     conn.close()
     
-    impresoras_disponibles = [e['equipo'] for e in df_act_db.to_dict('records') if e['categoria'] == "Impresora (Gasta Tinta)"]
+    # --- FIX DEL NameError: Creamos la lista de activos que faltaba ---
+    lista_activos = df_act_db.to_dict('records')
+    
+    impresoras_disponibles = [e['equipo'] for e in lista_activos if e['categoria'] == "Impresora (Gasta Tinta)"]
 
     if not impresoras_disponibles:
-        st.warning("⚠️ Registra tus impresoras en el módulo de 'Activos' primero.")
+        st.warning("⚠️ No hay impresoras registradas en 'Activos'.")
         st.stop()
 
     c_printer, c_file = st.columns([1, 2])
     
     with c_printer:
         impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
+        
+        # Ahora lista_activos ya existe, no dará error
         datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
-        # --- LÓGICA MULTI-TINTA ---
-        # El sistema busca TODO lo que coincida con el nombre de la impresora
-        # Ej: Si seleccionas "J210", buscará "Tinta J210 Negro", "Tinta J210 Cian", etc.
-        
-        # Filtramos el inventario para encontrar todos los insumos de esta máquina
+        # --- LÓGICA DE TINTAS POR GRUPO (Negro + Colores) ---
+        # Buscamos todo lo que tenga el nombre de la impresora (ej: "J210")
         tintas_maquina = df_inv_tintas[df_inv_tintas['item'].str.contains(impresora_sel, case=False, na=False)]
         
         if not tintas_maquina.empty:
-            # Calculamos el precio promedio por ml de ese grupo de tintas
-            # (Suma los precios de los 4 colores y divide entre 4)
+            # Promediamos el costo de los 4 colores (o los que tenga)
             precio_tinta_ml = tintas_maquina['precio_usd'].mean()
-            
-            with st.expander("🔍 Ver tintas vinculadas"):
+            with st.expander("💧 Ver Tintas Detectadas"):
                 st.write(tintas_maquina[['item', 'precio_usd']])
-            st.success(f"✅ Promedio detectado: ${precio_tinta_ml:.4f} / ml")
+            st.success(f"✅ Promedio: ${precio_tinta_ml:.4f} / ml")
         else:
             precio_tinta_ml = conf.loc['costo_tinta_ml', 'valor']
-            st.warning(f"⚠️ No hay tintas para '{impresora_sel}' en Inventario. Usando precio base.")
-        
-        st.caption(f"Costo por ml: ${precio_tinta_ml:.4f}")
-
-    with c_file:
-        archivos_multiples = st.file_uploader("Subir diseños", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
-
-    if archivos_multiples:
-        from PIL import Image
-        import numpy as np
-
-        resultados = []
-        for arc in archivos_multiples:
-            img = Image.open(arc).convert('CMYK')
-            datos = np.array(img)
-            
-            # Promedio de cobertura
-            c, m, y, k = [np.mean(datos[:,:,i]) / 255 * 100 for i in range(4)]
-            
-            # Multiplicadores de consumo por modelo
-            nombre_low = impresora_sel.lower()
-            if "j210" in nombre_low: multi = 2.5
-            elif "subli" in nombre_low or "l1250" in nombre_low: multi = 1.8
-            else: multi = 1.0
-            
-            # Cálculo de consumo (basado en cobertura total)
-            cobertura_total = (c + m + y + k)
-            consumo_ml = (cobertura_total / 400) * 0.15 * multi 
-            
-            costo_tinta = consumo_ml * precio_tinta_ml * (1 + iva + igtf)
-            total_hoja = costo_tinta + costo_desgaste
-            
-            resultados.append({
-                "Diseño": arc.name,
-                "Cobertura": f"{(c+m+y+k)/4:.1f}%",
-                "Tinta": f"$ {costo_tinta:.4f}",
-                "Máquina": f"$ {costo_desgaste:.4f}",
-                "Total ($)": round(total_hoja, 4),
-                "Total (Bs)": round(total_hoja * t_bcv, 2)
-            })
-
-        st.table(pd.DataFrame(resultados))
-        
-        # Botón para enviar a Cotización (Pre-paso)
-        if st.button("📝 Usar estos costos en una Cotización"):
-            st.session_state.costo_cmyk_temp = sum(res['Total ($)'] for res in resultados)
-            st.success("¡Costo guardado! Ve al módulo de Cotizaciones para aplicarlo.")
+            st.info(f"💡 Usando precio base: ${precio_tinta_ml}")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
@@ -615,6 +570,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
