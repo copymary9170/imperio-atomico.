@@ -98,7 +98,7 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
-# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD ---
+# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN CORREGIDA) ---
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
 
@@ -118,7 +118,7 @@ if menu == "📦 Inventario":
         else:
             st.success("✅ Tienes suficiente stock de todos tus materiales.")
 
-    # --- REGISTRO DE NUEVA COMPRA (Aquí agregamos la trazabilidad) ---
+    # --- REGISTRO DE NUEVA COMPRA ---
     with st.expander("📥 Registrar Nueva Compra (Paquetes/Lotes)"):
         with st.form("form_inv"):
             c_info, c_tasa, c_imp = st.columns([2, 1, 1])
@@ -139,17 +139,16 @@ if menu == "📦 Inventario":
 
             if st.form_submit_button("🚀 Cargar a Inventario"):
                 if it_nombre:
-                    # 1. Calculamos el costo unitario con impuestos
+                    # 1. Calculamos el costo unitario real con impuestos
                     imp_t = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
                     costo_u = (precio_lote * (1 + imp_t)) / it_cant
                     
                     c = conectar()
-                    # 2. Insertamos o Actualizamos el producto
+                    # 2. Insertamos o Actualizamos
                     c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", 
                               (it_nombre, float(it_cant), it_unid, costo_u))
                     
-                    # 3. TRAZABILIDAD: Guardamos el movimiento en el historial
-                    # Primero obtenemos el ID (porque la tabla movs usa el id)
+                    # 3. Guardamos movimiento
                     res = c.execute("SELECT id FROM inventario WHERE item=?", (it_nombre,)).fetchone()
                     if res:
                         item_id = res[0]
@@ -158,18 +157,16 @@ if menu == "📦 Inventario":
                     
                     c.commit()
                     c.close()
-                    st.success(f"✅ Guardado y Registrado en Historial: {it_nombre}")
+                    st.success(f"✅ Guardado: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA TOTALMENTE BLINDADA ---
+    # --- TABLA DE AUDITORÍA (AQUÍ ESTÁ EL ARREGLO DE LOS MONTOS) ---
     st.divider()
     if not df_inv.empty:
-        # 1. Filtramos y limpiamos
         df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
         
         moneda = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True)
         
-        # 2. Obtenemos la tasa exacta (aseguramos que sea un número)
         try:
             if moneda == "BCV":
                 tasa_v = float(t_bcv)
@@ -178,27 +175,28 @@ if menu == "📦 Inventario":
             else:
                 tasa_v = 1.0
         except:
-            tasa_v = 1.0 # Por si la base de datos devuelve algo raro
+            tasa_v = 1.0
             
         sim = "Bs" if moneda != "USD" else "$"
         
-        # 3. CÁLCULOS UNITARIOS Y TOTALES
-        # Convertimos el precio unitario guardado en USD a la moneda elegida
-        df_inv_filtrado['Unitario'] = df_inv_filtrado['precio_usd'].astype(float) * tasa_v
+        # CÁLCULOS LÓGICOS CORREGIDOS
+        # Unitario: Precio de una sola pieza (Número pequeño)
+        df_inv_filtrado['Unit_Calculado'] = df_inv_filtrado['precio_usd'].astype(float) * tasa_v
         
-        # Calculamos la inversión total: (Cantidad * Precio USD) * Tasa
-        df_inv_filtrado['Total_Stock'] = (df_inv_filtrado['cantidad'].astype(float) * df_inv_filtrado['precio_usd'].astype(float)) * tasa_v
+        # Total Stock: Valor de toda la mercancía junta (Número grande)
+        df_inv_filtrado['Total_Calculado'] = (df_inv_filtrado['cantidad'].astype(float) * df_inv_filtrado['precio_usd'].astype(float)) * tasa_v
         
-        # 4. FORMATEO FINAL
-        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Unitario', 'Total_Stock']].copy()
-        df_ver.columns = ['Producto', 'Stock (Unds)', 'Unidad', f'Unit. ({sim})', f'Total Stock ({sim})']
+        # Formateo de columnas para mostrar
+        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Unit_Calculado', 'Total_Calculado']].copy()
+        df_ver.columns = ['Producto', 'Stock', 'Unidad', f'Unit. ({sim})', f'Total Stock ({sim})']
 
         st.dataframe(df_ver.style.format({
-            'Stock (Unds)': '{:,.0f}', 
+            'Stock': '{:,.2f}', 
             f'Unit. ({sim})': "{:.4f}", 
             f'Total Stock ({sim})': "{:.2f}"
         }), use_container_width=True, hide_index=True)
-    # --- SECCIÓN PARA CORREGIR ERRORES ---
+
+    # --- SECCIÓN PARA CORREGIR Y ELIMINAR ---
     st.divider()
     with st.expander("🗑️ Borrar o Corregir Insumos"):
         if not df_inv.empty:
@@ -209,24 +207,24 @@ if menu == "📦 Inventario":
                 c.commit(); c.close()
                 st.warning(f"Producto {prod_b} eliminado.")
                 st.rerun()
-    # --- NUEVA SECCIÓN: HISTORIAL DE MOVIMIENTOS ---
-        st.divider()
-        with st.expander("📜 Ver Historial de Movimientos (Auditoría)"):
-            conn = conectar()
-            # Unimos la tabla de movimientos con la de inventario para ver los nombres
-            query_movs = '''
-                SELECT m.fecha, i.item, m.tipo, m.cantidad, m.motivo 
-                FROM inventario_movs m
-                JOIN inventario i ON m.item_id = i.id
-                ORDER BY m.fecha DESC LIMIT 50
-            '''
-            df_movs_hist = pd.read_sql_query(query_movs, conn)
-            conn.close()
 
-            if not df_movs_hist.empty:
-                st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
-            else:
-                st.info("No hay movimientos registrados todavía.")
+    # --- HISTORIAL DE MOVIMIENTOS ---
+    st.divider()
+    with st.expander("📜 Ver Historial de Movimientos (Auditoría)"):
+        conn = conectar()
+        query_movs = '''
+            SELECT m.fecha, i.item, m.tipo, m.cantidad, m.motivo 
+            FROM inventario_movs m
+            JOIN inventario i ON m.item_id = i.id
+            ORDER BY m.fecha DESC LIMIT 50
+        '''
+        df_movs_hist = pd.read_sql_query(query_movs, conn)
+        conn.close()
+
+        if not df_movs_hist.empty:
+            st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay movimientos registrados todavía.")
 
 
 
@@ -640,6 +638,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
