@@ -98,7 +98,7 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
-# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (REPARADO DEFINITIVO) ---
+# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN FINAL CORREGIDA) ---
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
 
@@ -139,7 +139,7 @@ if menu == "📦 Inventario":
 
             if st.form_submit_button("🚀 Cargar a Inventario"):
                 if it_nombre:
-                    # Cálculo correcto: Precio Lote con impuestos / cantidad de unidades
+                    # Cálculo: (Precio Lote + Impuestos) / Unidades
                     imp_t = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
                     costo_u = (precio_lote * (1 + imp_t)) / it_cant
                     
@@ -153,31 +153,41 @@ if menu == "📦 Inventario":
                         c.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo) VALUES (?, 'ENTRADA', ?, ?)", 
                                   (item_id, it_cant, f"Compra Lote - Precio: ${precio_lote}"))
                     
-                    c.commit(); c.close()
+                    c.commit()
+                    c.close()
                     st.success(f"✅ Guardado: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA (AQUÍ ESTÁ EL ARREGLO VISUAL) ---
+    # --- TABLA DE AUDITORÍA REPARADA (BCV Y BINANCE) ---
     st.divider()
     if not df_inv.empty:
-        # Filtro de búsqueda
         df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
         
         moneda = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True)
         
-        # Selección de tasa
-        tasa_v = t_bcv if moneda == "BCV" else (t_bin if moneda == "Binance" else 1.0)
+        # Tasa dinámica
+        if moneda == "BCV":
+            tasa_v = float(t_bcv)
+        elif moneda == "Binance":
+            tasa_v = float(t_bin)
+        else:
+            tasa_v = 1.0
+            
         sim = "Bs" if moneda != "USD" else "$"
         
-        # --- CÁLCULOS LÓGICOS REPARADOS ---
-        # 1. El Unitario es el precio de 1 sola unidad (Ej: 1.06 Bs)
-        df_inv_filtrado['Unit_Final'] = df_inv_filtrado['precio_usd'].astype(float) * tasa_v
+        # --- EL CAMBIO CLAVE AQUÍ ---
+        # Convertimos a float para asegurar matemáticas limpias
+        precio_usd_base = df_inv_filtrado['precio_usd'].astype(float)
+        stock_actual = df_inv_filtrado['cantidad'].astype(float)
+
+        # Unitario: Precio de 1 sola unidad en la moneda elegida
+        df_inv_filtrado['Col_Unit'] = precio_usd_base * tasa_v
         
-        # 2. El Total es la multiplicación de lo que tienes por el precio unitario (Ej: 531.11 Bs)
-        df_inv_filtrado['Total_Final'] = (df_inv_filtrado['cantidad'].astype(float) * df_inv_filtrado['precio_usd'].astype(float)) * tasa_v
+        # Total: Unitario x Cantidad
+        df_inv_filtrado['Col_Total'] = (precio_usd_base * tasa_v) * stock_actual
         
-        # Seleccionamos y renombramos para la tabla
-        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Unit_Final', 'Total_Final']].copy()
+        # Formateo de la tabla
+        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
         df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
 
         st.dataframe(df_ver.style.format({
@@ -192,12 +202,15 @@ if menu == "📦 Inventario":
         if not df_inv.empty:
             prod_b = st.selectbox("Selecciona producto a eliminar:", df_inv['item'].tolist())
             if st.button("❌ Eliminar Producto"):
-                c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (prod_b,)); c.commit(); c.close()
-                st.warning(f"Producto {prod_b} eliminado."); st.rerun()
+                c = conectar()
+                c.execute("DELETE FROM inventario WHERE item=?", (prod_b,))
+                c.commit(); c.close()
+                st.warning(f"Producto {prod_b} eliminado.")
+                st.rerun()
 
     # --- HISTORIAL DE MOVIMIENTOS ---
     st.divider()
-    with st.expander("📜 Ver Historial de Movimientos"):
+    with st.expander("📜 Ver Historial de Movimientos (Auditoría)"):
         conn = conectar()
         query_movs = '''
             SELECT m.fecha, i.item, m.tipo, m.cantidad, m.motivo 
@@ -207,8 +220,11 @@ if menu == "📦 Inventario":
         '''
         df_movs_hist = pd.read_sql_query(query_movs, conn)
         conn.close()
+
         if not df_movs_hist.empty:
             st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay movimientos registrados todavía.")
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
@@ -619,6 +635,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
