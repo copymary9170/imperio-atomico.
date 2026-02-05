@@ -420,35 +420,45 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
-# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (INTELIGENTE) ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (INTELIGENTE Y CONECTADO) ---
 elif menu == "🎨 Análisis CMYK":
-    st.title("🎨 Analizador de Cobertura y Desgaste")
+    st.title("🎨 Analizador de Cobertura y Costos Reales")
 
-    # 1. Carga de datos desde la base de datos
+    # 1. Carga de datos frescos
     conn = conectar()
+    # Traemos las impresoras de Activos
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
+    # Traemos los precios de las tintas del Inventario
+    df_tintas = pd.read_sql_query("SELECT item, precio_usd FROM inventario WHERE item LIKE '%Tinta%'", conn)
     conn.close()
     
-    lista_activos = df_act_db.to_dict('records')
-    impresoras_disponibles = [e['equipo'] for e in lista_activos if e['categoria'] == "Impresora (Gasta Tinta)"]
+    impresoras_disponibles = [e['equipo'] for e in df_act_db.to_dict('records') if e['categoria'] == "Impresora (Gasta Tinta)"]
 
     if not impresoras_disponibles:
-        st.warning("⚠️ No hay impresoras registradas en 'Activos'.")
-        st.stop() # Detiene la ejecución de este bloque para evitar errores
+        st.warning("⚠️ No hay impresoras en 'Activos'. Registra una para calcular el desgaste.")
+        st.stop()
 
     c_printer, c_file = st.columns([1, 2])
     
     with c_printer:
         impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
-        datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
+        datos_imp = next((e for e in df_act_db.to_dict('records') if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
+
+        # Buscamos el precio de la tinta en el inventario. 
+        # Si no hay "Tinta" en inventario, usamos el valor de configuración por defecto.
+        if not df_tintas.empty:
+            precio_tinta_ml = df_tintas['precio_usd'].mean() # Promediamos si hay varias, o tomamos la que haya
+        else:
+            precio_tinta_ml = conf.loc['costo_tinta_ml', 'valor']
+        
+        st.caption(f"Costo tinta base: ${precio_tinta_ml:.4f} / ml")
 
     with c_file:
         archivos_multiples = st.file_uploader("Sube tus diseños (JPG/PNG)", 
                                              type=['png', 'jpg', 'jpeg'], 
                                              accept_multiple_files=True)
 
-    # Lógica de procesamiento
     if archivos_multiples:
         from PIL import Image
         import numpy as np
@@ -459,36 +469,47 @@ elif menu == "🎨 Análisis CMYK":
                 img = Image.open(arc).convert('CMYK')
                 datos = np.array(img)
                 
-                # Cálculo de porcentajes
+                # Cálculo de porcentajes de cobertura por canal
                 c = (np.mean(datos[:,:,0]) / 255) * 100
                 m = (np.mean(datos[:,:,1]) / 255) * 100
                 y = (np.mean(datos[:,:,2]) / 255) * 100
                 k = (np.mean(datos[:,:,3]) / 255) * 100
                 
-                # Multiplicador por tecnología
+                # Multiplicador según tecnología (basado en tus modelos)
                 nombre_low = impresora_sel.lower()
                 multi = 2.5 if "j210" in nombre_low else (1.5 if "l1250" in nombre_low or "subli" in nombre_low else 1.0)
                 
-                # Costo de tinta
-                costo_tinta_base = conf.loc['costo_tinta_ml', 'valor'] * (1 + iva + igtf + banco)
-                costo_tinta_final = ((c+m+y+k)/400) * 0.8 * costo_tinta_base * multi
+                # --- LA FÓRMULA MAESTRA ---
+                # 1. Cobertura total sumada
+                cobertura_total = (c + m + y + k)
+                # 2. Estimación de consumo: Un área 100% CMYK gasta aprox 0.02ml por hoja A4
+                # Ajustamos según el promedio de cobertura
+                consumo_estimado_ml = (cobertura_total / 400) * 0.15 * multi 
+                
+                # 3. Costo final incluyendo impuestos de la configuración global
+                costo_tinta_final = consumo_estimado_ml * precio_tinta_ml * (1 + iva + igtf)
+                
+                total_por_hoja = costo_tinta_final + costo_desgaste
                 
                 resultados.append({
                     "Diseño": arc.name,
-                    "Cian %": f"{c:.1f}%",
-                    "Magenta %": f"{m:.1f}%",
-                    "Amarillo %": f"{y:.1f}%",
-                    "Negro %": f"{k:.1f}%",
+                    "C %": f"{c:.1f}%",
+                    "M %": f"{m:.1f}%",
+                    "Y %": f"{y:.1f}%",
+                    "K %": f"{k:.1f}%",
                     "Costo Tinta": f"$ {costo_tinta_final:.4f}",
                     "Desgaste Máq.": f"$ {costo_desgaste:.4f}",
-                    "TOTAL": round(costo_tinta_final + costo_desgaste, 4)
+                    "TOTAL USD": round(total_por_hoja, 4),
+                    "TOTAL BCV": round(total_por_hoja * t_bcv, 2)
                 })
 
-        st.subheader(f"📋 Reporte para {impresora_sel}")
-        st.table(pd.DataFrame(resultados))
-        st.success("✅ Análisis completado con éxito.")
-    else:
-        st.info("💡 Por favor, sube uno o varios archivos para iniciar el cálculo de costos.")
+        st.subheader(f"📋 Reporte de Costos: {impresora_sel}")
+        df_res = pd.DataFrame(resultados)
+        st.table(df_res)
+        
+        # Resumen rápido
+        total_encargo = df_res['TOTAL USD'].sum()
+        st.success(f"💰 Costo total de impresión para estos archivos: **$ {total_encargo:.2f}** | **{total_encargo * t_bcv:.2f} Bs**")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
@@ -598,6 +619,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
