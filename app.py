@@ -525,11 +525,11 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
-# --- 10. ANALIZADOR MASIVO CMYK (SOPORTA PDF, JPG, PNG) ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (SOPORTA PDF, JPG, PNG) ---
 elif menu == "🎨 Análisis CMYK":
     st.title("🎨 Analizador de Cobertura y Costos Reales")
 
-    # 1. Carga de datos base
+    # 1. Carga de datos base desde la base de datos
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
     df_inv_tintas = pd.read_sql_query("SELECT item, precio_usd FROM inventario WHERE item LIKE '%Tinta%'", conn)
@@ -539,7 +539,7 @@ elif menu == "🎨 Análisis CMYK":
     impresoras_disponibles = [e['equipo'] for e in lista_activos if e['categoria'] == "Impresora (Gasta Tinta)"]
 
     if not impresoras_disponibles:
-        st.warning("⚠️ No hay impresoras registradas en 'Activos'.")
+        st.warning("⚠️ No hay impresoras registradas en 'Activos'. Por favor, agrega una primero.")
         st.stop()
 
     c_printer, c_file = st.columns([1, 2])
@@ -549,19 +549,26 @@ elif menu == "🎨 Análisis CMYK":
         datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
+        # Buscamos precio de tinta específico para esa máquina
         tintas_maquina = df_inv_tintas[df_inv_tintas['item'].str.contains(impresora_sel, case=False, na=False)]
-        precio_tinta_ml = tintas_maquina['precio_usd'].mean() if not tintas_maquina.empty else conf.loc['costo_tinta_ml', 'valor']
-        st.info(f"💡 Precio Tinta: ${precio_tinta_ml:.4f}/ml")
+        if not tintas_maquina.empty:
+            precio_tinta_ml = tintas_maquina['precio_usd'].mean()
+            st.success(f"✅ Precio detectado: ${precio_tinta_ml:.4f}/ml")
+        else:
+            precio_tinta_ml = 0.10 # Precio de respaldo si no hay en inventario
+            st.info(f"💡 Usando precio base: ${precio_tinta_ml}/ml")
 
     with c_file:
-        archivos_multiples = st.file_uploader("Sube diseños (PDF, JPG, PNG)", 
+        archivos_multiples = st.file_uploader("Sube tus diseños (PDF, JPG, PNG)", 
                                              type=['pdf', 'png', 'jpg', 'jpeg'], 
-                                             accept_multiple_files=True)
+                                             accept_multiple_files=True,
+                                             key="uploader_cmyk_v3")
 
+    # --- MOTOR DE PROCESAMIENTO ---
     if archivos_multiples:
         from PIL import Image
         import numpy as np
-        import fitz  # PyMuPDF para manejar PDFs
+        import fitz  # PyMuPDF (Ya lo tienes en requirements.txt)
         import io
 
         resultados = []
@@ -571,64 +578,78 @@ elif menu == "🎨 Análisis CMYK":
             for arc in archivos_multiples:
                 imagenes_a_procesar = []
                 
-                # --- CASO 1: ES UN PDF ---
+                # SI ES PDF
                 if arc.type == "application/pdf":
-                    doc = fitz.open(stream=arc.read(), filetype="pdf")
-                    for page_num in range(len(doc)):
-                        page = doc.load_page(page_num)
-                        pix = page.get_pixmap(colorspace=fitz.csCMYK) # Lo extraemos directo en CMYK
-                        img_pil = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
-                        imagenes_a_procesar.append((f"{arc.name} (Pág {page_num+1})", img_pil))
+                    try:
+                        # Leemos el contenido del archivo
+                        file_content = arc.read()
+                        doc = fitz.open(stream=file_content, filetype="pdf")
+                        for page_num in range(len(doc)):
+                            page = doc.load_page(page_num)
+                            # Renderizamos la página a CMYK
+                            pix = page.get_pixmap(colorspace=fitz.csCMYK)
+                            img_pil = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
+                            imagenes_a_procesar.append((f"{arc.name} (Pág {page_num+1})", img_pil))
+                    except Exception as e:
+                        st.error(f"❌ Error leyendo PDF {arc.name}: {e}")
                 
-                # --- CASO 2: ES UNA IMAGEN ---
+                # SI ES IMAGEN
                 else:
-                    img_pil = Image.open(arc).convert('CMYK')
-                    imagenes_a_procesar.append((arc.name, img_pil))
+                    try:
+                        img_pil = Image.open(arc).convert('CMYK')
+                        imagenes_a_procesar.append((arc.name, img_pil))
+                    except Exception as e:
+                        st.error(f"❌ Error con imagen {arc.name}: {e}")
 
-                # --- PROCESAMIENTO DE PÍXELES ---
+                # ANALIZAR CADA PÁGINA/IMAGEN EXTRAÍDA
                 for nombre_item, img in imagenes_a_procesar:
                     total_paginas_lote += 1
                     datos = np.array(img)
                     
+                    # Promedio de canales
                     c = (np.mean(datos[:,:,0]) / 255) * 100
                     m = (np.mean(datos[:,:,1]) / 255) * 100
                     y = (np.mean(datos[:,:,2]) / 255) * 100
                     k = (np.mean(datos[:,:,3]) / 255) * 100
                     
+                    # Multiplicador por modelo (Ajusta los ml según la máquina)
                     nombre_low = impresora_sel.lower()
                     multi = 2.5 if "j210" in nombre_low else (1.8 if "subli" in nombre_low else 1.2)
                     
+                    # Cálculo de consumo y costo
                     consumo_ml = ((c + m + y + k) / 400) * 0.15 * multi 
-                    costo_tinta = consumo_ml * precio_tinta_ml * (1 + iva + igtf)
+                    costo_tinta = consumo_ml * precio_tinta_ml * (1 + 0.16 + 0.03) # IVA + IGTF
                     total_usd = costo_tinta + costo_desgaste
                     
                     resultados.append({
                         "Archivo": nombre_item,
                         "C%": f"{c:.1f}%", "M%": f"{m:.1f}%", "Y%": f"{y:.1f}%", "K%": f"{k:.1f}%",
                         "ml": round(consumo_ml, 4),
-                        "USD": round(total_usd, 4)
+                        "Costo USD": round(total_usd, 4),
+                        "Costo Bs": round(total_usd * t_bcv, 2)
                     })
 
-        # Mostrar Resultados
-        st.divider()
-        df_res = pd.DataFrame(resultados)
-        st.dataframe(df_res, use_container_width=True, hide_index=True)
-        
-        total_lote_usd = df_res['USD'].sum()
-        total_ml_lote = df_res['ml'].sum()
-        
-        st.success(f"💰 Costo Total: **${total_lote_usd:.2f} USD** | 🧪 Tinta Total: **{total_ml_lote:.2f} ml**")
+        # --- MOSTRAR RESULTADOS ---
+        if resultados:
+            st.divider()
+            df_res = pd.DataFrame(resultados)
+            st.table(df_res) # Mostramos la tabla de costos por archivo
+            
+            total_lote_usd = df_res['Costo USD'].sum()
+            total_ml_lote = df_res['ml'].sum()
+            
+            st.success(f"💰 Costo Total de Producción: **${total_lote_usd:.2f} USD** | **{(total_lote_usd * t_bcv):,.2f} Bs**")
+            st.info(f"🧪 Consumo Total de Tinta: **{total_ml_lote:.2f} ml**")
 
-        if st.button("📝 ENVIAR TODO A COTIZACIÓN"):
-            st.session_state['datos_pre_cotizacion'] = {
-                'trabajo': f"Impresión de {len(archivos_multiples)} archivos ({total_paginas_lote} págs/hojas)",
-                'costo_base': total_lote_usd,
-                'ml_estimados': total_ml_lote,
-                'unidades': total_paginas_lote
-            }
-            st.toast("✅ Datos listos en Cotizaciones")
-
-            st.info("✅ Datos preparados. ¡Ve al módulo de Cotizaciones para finalizar!")
+            # Botón para pasar a Cotizaciones
+            if st.button("📝 ENVIAR TODO A COTIZACIÓN"):
+                st.session_state['datos_pre_cotizacion'] = {
+                    'trabajo': f"Impresión: {len(archivos_multiples)} archivos ({total_paginas_lote} páginas)",
+                    'costo_base': total_lote_usd,
+                    'ml_estimados': total_ml_lote,
+                    'unidades': total_paginas_lote
+                }
+                st.toast("✅ Datos enviados. ¡Ve a la pestaña Cotizaciones!")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
@@ -738,6 +759,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
