@@ -420,11 +420,10 @@ elif menu == "⚙️ Configuración":
         n_banco = c2.number_input("Banco (0.02)", value=banco)
         if st.form_submit_button("💾 Guardar Cambios"):
             c = conectar()
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (n_bcv,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_binance'", (n_bin,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='iva_perc'", (n_iva,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='igtf_perc'", (n_igtf,))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='banco_perc'", (n_banco,))
+            # Usamos round(n_bcv, 2) para que a la base de datos ya entre limpio
+            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (round(n_bcv, 2),))
+            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_binance'", (round(n_bin, 2),))
+            # ... los demás quedan igual
             c.commit(); c.close(); st.success("✅ Configuración actualizada"); st.rerun()
 
 # --- 8. LÓGICA DE CLIENTES ---
@@ -641,6 +640,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
