@@ -291,16 +291,15 @@ if menu == "📦 Inventario":
                 if st.button("❌ ELIMINAR", key="btn_borrar_final"):
                     c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close()
                     st.rerun()
-# --- 5. LÓGICA DE COTIZACIONES (REVISADA Y COMPATIBLE) ---
+# --- 5. LÓGICA DE COTIZACIONES (REVISADA, COMPATIBLE Y CON DESCUENTO DE TINTA) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
     conn = conectar()
-    # 1. Cargamos clientes e inventario para los selectores
     df_clis = pd.read_sql_query("SELECT id, nombre, whatsapp FROM clientes", conn)
-    df_inv_items = pd.read_sql_query("SELECT item, precio_usd FROM inventario", conn)
+    # Cargamos inventario completo para separar Papel de Tinta
+    df_inv_full = pd.read_sql_query("SELECT item, precio_usd, unidad, cantidad FROM inventario", conn)
     
-    # 2. Cargamos historial uniendo tablas para ver el NOMBRE del cliente, no el ID
     query_historial = """
         SELECT c.id, c.fecha, cl.nombre as cliente, c.trabajo, c.monto_usd, c.estado 
         FROM cotizaciones c
@@ -310,89 +309,74 @@ elif menu == "📝 Cotizaciones":
     conn.close()
 
     if df_clis.empty:
-        st.warning("⚠️ No hay clientes registrados. Ve al módulo de 'Clientes' primero.")
+        st.warning("⚠️ No hay clientes registrados.")
     else:
-        with st.form("form_cot_imperio"):
+        with st.form("form_cot_imperio_total"):
             st.subheader("🛠️ Crear Nuevo Presupuesto")
             c1, c2 = st.columns(2)
             
-            # Diccionario auxiliar: { "Nombre": ID } para guardar el ID pero mostrar el Nombre
             dict_clientes = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
             cli_nombre = c1.selectbox("Selecciona el Cliente", ["--"] + list(dict_clientes.keys()))
+            trabajo = c1.text_input("¿Qué trabajo vas a realizar?")
             
-            trabajo = c1.text_input("¿Qué trabajo vas a realizar?", placeholder="Ej: 50 Invitaciones de Boda")
+            # --- SECCIÓN DE MATERIALES ---
+            papeles = df_inv_full[df_inv_full['unidad'] != 'ml']['item'].tolist()
+            material = c2.selectbox("Papel/Material", ["--"] + papeles)
+            cantidad_mat = c2.number_input("Cantidad de hojas/unidades", min_value=0, step=1)
             
-            material = c2.selectbox("Material a descontar del Inventario", ["--"] + df_inv_items['item'].tolist())
-            cantidad_mat = c2.number_input("Cantidad de hojas/unidades a usar", min_value=0, step=1)
-            
+            # --- SECCIÓN DE TINTA (Lo que faltaba) ---
+            tintas = df_inv_full[df_inv_full['unidad'] == 'ml']['item'].tolist()
+            tinta_sel = c2.selectbox("Tinta/Cartucho a descontar", ["--"] + tintas)
+            cobertura = c2.slider("Cobertura de tinta por hoja (%)", 5, 100, 15, help="5% es texto suave, 100% es foto full color.")
+
             monto_final = st.number_input("Precio Final a Cobrar (USD)", min_value=0.0, format="%.2f")
-            estado_pago = st.selectbox("Estado inicial", ["Pendiente", "Pagado"])
+            estado_pago = st.selectbox("Estado", ["Pendiente", "Pagado"])
             
-            if st.form_submit_button("📋 GUARDAR Y PROCESAR"):
+            if st.form_submit_button("📋 GUARDAR Y DESCONTAR TODO"):
                 if cli_nombre != "--" and monto_final > 0:
                     id_cliente_real = dict_clientes[cli_nombre]
                     
+                    # Cálculo de consumo de tinta: 
+                    # Promedio: 1ml rinde para 20 hojas al 5% de cobertura.
+                    # ml_usados = (cobertura / 5) * 0.05 * cantidad_hojas
+                    ml_usados = (cobertura / 5.0) * 0.05 * cantidad_mat
+                    
                     c = conectar()
-                    # A. Guardar en tabla cotizaciones (usando cliente_id numérico)
+                    # 1. Guardar Cotización
                     c.execute("""INSERT INTO cotizaciones (fecha, cliente_id, trabajo, monto_usd, estado) 
                                VALUES (?,?,?,?,?)""",
                               (datetime.now().strftime("%d/%m/%Y"), id_cliente_real, trabajo, monto_final, estado_pago))
                     
-                    # B. Descuento automático de inventario si se seleccionó material
+                    # 2. Descontar Papel
                     if material != "--" and cantidad_mat > 0:
                         c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cantidad_mat, material))
                     
-                    c.commit()
-                    c.close()
-                    st.success(f"✅ Cotización guardada y stock actualizado para {cli_nombre}")
+                    # 3. Descontar Tinta (ml reales)
+                    if tinta_sel != "--" and ml_usados > 0:
+                        c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (ml_usados, tinta_sel))
+                    
+                    c.commit(); c.close()
+                    st.success(f"✅ ¡Impacto total! Se descontó {cantidad_mat} hojas y {ml_usados:.2f}ml de tinta.")
                     st.rerun()
-                else:
-                    st.error("Por favor completa el cliente y el monto.")
 
-    # --- TABLA DE HISTORIAL CON COLORES ---
-    st.divider()
-    st.subheader("📑 Historial de Movimientos")
+    # --- HISTORIAL Y WHATSAPP (Se mantiene igual para que funcione) ---
     if not df_cots_global.empty:
-        def color_est(val):
-            color = '#ff4b4b' if val == 'Pendiente' else '#28a745'
-            return f'background-color: {color}; color: white; font-weight: bold; border-radius: 5px'
-        
-        st.dataframe(
-            df_cots_global.sort_values('id', ascending=False).style.applymap(color_est, subset=['estado']), 
-            use_container_width=True, 
-            hide_index=True
-        )
-
-        # --- BOTÓN DE WHATSAPP INTEGRADO ---
         st.divider()
-        st.subheader("📲 Enviar Cotización por WhatsApp")
+        st.subheader("📑 Historial de Movimientos")
+        st.dataframe(df_cots_global.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
         
-        # Seleccionamos por ID de la tabla cargada
-        c_envio = st.selectbox("Selecciona ID de cotización para enviar:", df_cots_global['id'].tolist())
+        st.subheader("📲 Enviar por WhatsApp")
+        c_envio = st.selectbox("Selecciona ID para enviar:", df_cots_global['id'].tolist())
         datos_c = df_cots_global[df_cots_global['id'] == c_envio].iloc[0]
-        
-        # Buscamos el WhatsApp de ese cliente específico
         whatsapp_cliente = df_clis[df_clis['nombre'] == datos_c['cliente']]['whatsapp'].iloc[0]
         
         if whatsapp_cliente:
-            # Limpieza de número para el link de WhatsApp
             num_final = "".join(filter(str.isdigit, whatsapp_cliente))
             if num_final.startswith('0'): num_final = "58" + num_final[1:]
             elif not num_final.startswith('58'): num_final = "58" + num_final
-
-            monto_bs = datos_c['monto_usd'] * t_bcv
-            mensaje = f"¡Hola! *Imperio Atómico* te saluda. 👋%0A%0A" \
-                      f"Detalle: *{datos_c['trabajo']}*%0A" \
-                      f"Total: *{datos_c['monto_usd']:.2f} USD*%0A" \
-                      f"En Bolívares: *{monto_bs:.2f} Bs* (Tasa BCV)%0A%0A" \
-                      f"¿Deseas confirmar el pedido? ⚛️"
             
-            st.link_button(f"🚀 Enviar WhatsApp a {datos_c['cliente']}", f"https://wa.me/{num_final}?text={mensaje}")
-        else:
-            st.warning("El cliente seleccionado no tiene número registrado.")
-    else:
-        st.info("Aún no hay cotizaciones registradas.")
-
+            msg = f"¡Hola! *Imperio Atómico* te saluda. 👋%0A%0ADetalle: *{datos_c['trabajo']}*%0ATotal: *{datos_c['monto_usd']:.2f} USD*%0AEn Bs: *{(datos_c['monto_usd']*t_bcv):,.2f} Bs*%0A%0A¿Confirmamos? ⚛️"
+            st.link_button(f"🚀 Enviar WhatsApp a {datos_c['cliente']}", f"https://wa.me/{num_final}?text={msg}")
 # --- 6. DASHBOARD FINANCIERO PROFESIONAL ---
 elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
@@ -705,6 +689,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
