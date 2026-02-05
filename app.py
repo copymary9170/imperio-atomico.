@@ -156,45 +156,37 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA (REPARACIÓN FORZADA DE PRECIO UNITARIO) ---
+    # --- TABLA DE AUDITORÍA (VERSIÓN FINAL DEFINITIVA) ---
     st.divider()
     if not df_inv.empty:
-        # 1. Definimos la moneda primero (evita NameError)
-        moneda_ver = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True, key="moneda_inv")
+        # 1. Definimos moneda y tasa primero para evitar el NameError
+        moneda_ver = st.radio("Selecciona Moneda:", ["USD", "BCV", "Binance"], horizontal=True, key="mon_inv")
         
-        # 2. Definimos la tasa
+        tasa_v = 1.0
         if moneda_ver == "BCV":
             tasa_v = float(t_bcv)
         elif moneda_ver == "Binance":
             tasa_v = float(t_bin)
-        else:
-            tasa_v = 1.0
             
         sim = "Bs" if moneda_ver != "USD" else "$"
 
+        # 2. Copiamos los datos para no dañar el original
         df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
-
-        # --- EL TRUCO PARA ARREGLAR TU ERROR ---
-        # Si el Unitario es mayor al Total, es porque 'precio_usd' es el precio del LOTE.
-        # Vamos a asegurar que 'Unit' sea siempre el precio de UNA unidad.
         
-        df_inv_filtrado['precio_usd'] = df_inv_filtrado['precio_usd'].astype(float)
-        df_inv_filtrado['cantidad'] = df_inv_filtrado['cantidad'].astype(float)
+        # 3. ASEGURAMOS QUE SEAN NÚMEROS
+        df_inv_filtrado['precio_usd'] = pd.to_numeric(df_inv_filtrado['precio_usd'], errors='coerce').fillna(0)
+        df_inv_filtrado['cantidad'] = pd.to_numeric(df_inv_filtrado['cantidad'], errors='coerce').fillna(1)
 
-        # Calculamos el precio REAL por hoja/ml en USD (Total / Cantidad)
-        # Solo lo hacemos si la cantidad es mayor a 0 para no romper el código
-        df_inv_filtrado['Unit_Real_USD'] = df_inv_filtrado.apply(
-            lambda x: x['precio_usd'] / x['cantidad'] if x['cantidad'] > 50 else x['precio_usd'], axis=1
-        )
-
-        # Ahora sí, multiplicamos por la tasa
-        df_inv_filtrado['Col_Unit'] = df_inv_filtrado['Unit_Real_USD'] * tasa_v
+        # 4. CÁLCULO ESTÁNDAR (Lógica: Total es lo que vale el stock, Unit es Total/Cantidad)
+        # Esto asegura que el Total siempre sea el número grande y el Unit el pequeño.
         df_inv_filtrado['Col_Total'] = df_inv_filtrado['precio_usd'] * tasa_v
+        df_inv_filtrado['Col_Unit'] = df_inv_filtrado['Col_Total'] / df_inv_filtrado['cantidad']
         
-        # 4. PREPARAR VISTA
+        # 5. ORDENAMOS LAS COLUMNAS PARA LA VISTA
         df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
         df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
 
+        # 6. FORMATEO (4 decimales para el chiquito, 2 para el grande)
         st.dataframe(df_ver.style.format({
             'Stock': '{:,.2f}', 
             f'Unit. ({sim})': "{:.4f}", 
@@ -635,6 +627,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
