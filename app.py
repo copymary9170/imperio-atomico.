@@ -202,6 +202,18 @@ if menu == "📦 Inventario":
         df_calc['Total'] = df_calc['Unitario'] * df_calc['cantidad']
         st.dataframe(df_calc[['item', 'cantidad', 'unidad', 'Unitario', 'Total']], use_container_width=True, hide_index=True)
 
+# --- 🗑️ ZONA DE PELIGRO (BORRADO Y AJUSTE) ---
+    st.divider()
+    col_aj, col_del = st.columns(2)
+    with col_aj:
+        with st.expander("🔧 Ajuste Manual (Mermas)"):
+            if not df_inv.empty:
+                it_aj = st.selectbox("Insumo a corregir", df_inv['item'].tolist(), key="ajuste")
+                nueva_cant = st.number_input("Cantidad REAL física", min_value=0.0)
+                if st.button("🔄 Aplicar Corrección"):
+                    c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_cant, it_aj))
+                    c.commit(); c.close(); st.rerun()
+    
     # --- 🗑️ BORRADO ---
     with st.expander("🗑️ Borrar Insumo"):
         if not df_inv.empty:
@@ -636,6 +648,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
