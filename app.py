@@ -98,7 +98,7 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
-# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN FINAL CORREGIDA) ---
+# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN FINAL SIN ERRORES) ---
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
 
@@ -139,7 +139,6 @@ if menu == "📦 Inventario":
 
             if st.form_submit_button("🚀 Cargar a Inventario"):
                 if it_nombre:
-                    # Cálculo: (Precio Lote + Impuestos) / Unidades
                     imp_t = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
                     costo_u = (precio_lote * (1 + imp_t)) / it_cant
                     
@@ -153,48 +152,43 @@ if menu == "📦 Inventario":
                         c.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo) VALUES (?, 'ENTRADA', ?, ?)", 
                                   (item_id, it_cant, f"Compra Lote - Precio: ${precio_lote}"))
                     
-                    c.commit()
-                    c.close()
+                    c.commit(); c.close()
                     st.success(f"✅ Guardado: {it_nombre}")
                     st.rerun()
 
-    # --- REPARACIÓN DEFINITIVA DE LÓGICA UNITARIO VS TOTAL ---
-
-if not df_inv.empty:
-    df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
-    
-    # 1. Determinamos la tasa según tu selección
-    if moneda == "BCV":
-        tasa_v = float(t_bcv)
-    elif moneda == "Binance":
-        tasa_v = float(t_bin)
-    else:
-        tasa_v = 1.0
+    # --- TABLA DE AUDITORÍA (CORRECCIÓN DE NAMEERROR Y BCV) ---
+    st.divider()
+    if not df_inv.empty:
+        # Primero definimos 'moneda' para que no dé NameError
+        moneda_ver = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True, key="moneda_inv")
         
-    sim = "Bs" if moneda != "USD" else "$"
+        # Ahora calculamos la tasa
+        if moneda_ver == "BCV":
+            tasa_v = float(t_bcv)
+        elif moneda_ver == "Binance":
+            tasa_v = float(t_bin)
+        else:
+            tasa_v = 1.0
+            
+        sim = "Bs" if moneda_ver != "USD" else "$"
 
-    # 2. LIMPIEZA DE DATOS (Aseguramos que precio_usd sea el de UNA sola unidad)
-    # Convertimos a float para evitar errores de tipo
-    precio_hoja_usd = df_inv_filtrado['precio_usd'].astype(float)
-    cantidad_stock = df_inv_filtrado['cantidad'].astype(float)
+        df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
 
-    # 3. CÁLCULO CORREGIDO
-    # El unitario SIEMPRE debe ser: (Precio de 1 unidad en $) * Tasa
-    df_inv_filtrado['Col_Unit'] = precio_hoja_usd * tasa_v
-    
-    # El total SIEMPRE debe ser: (Precio Unitario en moneda) * (Cantidad en Stock)
-    df_inv_filtrado['Col_Total'] = df_inv_filtrado['Col_Unit'] * cantidad_stock
-    
-    # 4. PREPARACIÓN DE TABLA
-    df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
-    df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
+        # MATEMÁTICA BLINDADA: Unitario pequeño, Total grande
+        precio_hoja_usd = df_inv_filtrado['precio_usd'].astype(float)
+        cantidad_stock = df_inv_filtrado['cantidad'].astype(float)
 
-    # 5. VISUALIZACIÓN CON REDONDEO (Para eliminar los decimales infinitos de tu captura fks.n.JPG)
-    st.dataframe(df_ver.style.format({
-        'Stock': '{:,.2f}', 
-        f'Unit. ({sim})': "{:.4f}",  # 4 decimales para precisión en hojas/ml
-        f'Total Stock ({sim})': "{:.2f}" # 2 decimales para dinero total
-    }), use_container_width=True, hide_index=True)
+        df_inv_filtrado['Col_Unit'] = precio_hoja_usd * tasa_v
+        df_inv_filtrado['Col_Total'] = (precio_hoja_usd * tasa_v) * cantidad_stock
+        
+        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
+        df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
+
+        st.dataframe(df_ver.style.format({
+            'Stock': '{:,.2f}', 
+            f'Unit. ({sim})': "{:.4f}", 
+            f'Total Stock ({sim})': "{:.2f}"
+        }), use_container_width=True, hide_index=True)
 
     # --- SECCIÓN PARA CORREGIR Y ELIMINAR ---
     st.divider()
@@ -202,15 +196,12 @@ if not df_inv.empty:
         if not df_inv.empty:
             prod_b = st.selectbox("Selecciona producto a eliminar:", df_inv['item'].tolist())
             if st.button("❌ Eliminar Producto"):
-                c = conectar()
-                c.execute("DELETE FROM inventario WHERE item=?", (prod_b,))
-                c.commit(); c.close()
-                st.warning(f"Producto {prod_b} eliminado.")
-                st.rerun()
+                c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (prod_b,)); c.commit(); c.close()
+                st.warning(f"Producto {prod_b} eliminado."); st.rerun()
 
     # --- HISTORIAL DE MOVIMIENTOS ---
     st.divider()
-    with st.expander("📜 Ver Historial de Movimientos (Auditoría)"):
+    with st.expander("📜 Ver Historial de Movimientos"):
         conn = conectar()
         query_movs = '''
             SELECT m.fecha, i.item, m.tipo, m.cantidad, m.motivo 
@@ -220,7 +211,6 @@ if not df_inv.empty:
         '''
         df_movs_hist = pd.read_sql_query(query_movs, conn)
         conn.close()
-
         if not df_movs_hist.empty:
             st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
         else:
@@ -635,6 +625,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
