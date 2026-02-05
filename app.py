@@ -242,13 +242,23 @@ if menu == "📦 Inventario":
                     c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_cant, it_aj))
                     c.commit(); c.close(); st.rerun()
     
-    # --- 🗑️ BORRADO ---
-    with st.expander("🗑️ Borrar Insumo"):
+   # --- 🗑️ BLOQUE DE BORRADO (CORREGIDO) ---
+    st.divider()
+    with st.expander("🗑️ Zona de Peligro: Eliminar Insumos"):
         if not df_inv.empty:
-            p_borrar = st.selectbox("Selecciona:", df_inv['item'].tolist())
-            if st.button("❌ Confirmar"):
-                c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (p_borrar,)); c.commit(); c.close()
+            p_borrar = st.selectbox("Selecciona el producto a eliminar:", 
+                                   df_inv['item'].tolist(), key="select_borrar_item")
+            
+            # Le agregamos un 'key' único para que Streamlit no se confunda
+            if st.button("❌ Confirmar Eliminación", key="btn_borrar_inventario"):
+                c = conectar()
+                c.execute("DELETE FROM inventario WHERE item=?", (p_borrar,))
+                c.commit()
+                c.close()
+                st.error(f"Se eliminó '{p_borrar}' del inventario.")
                 st.rerun()
+        else:
+            st.info("No hay nada que eliminar.")
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
@@ -676,6 +686,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
