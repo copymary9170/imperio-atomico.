@@ -156,42 +156,40 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA (VERSIÓN FINAL DEFINITIVA) ---
+    # --- TABLA DE AUDITORÍA (CORRECCIÓN DE NAMEERROR Y BCV) ---
     st.divider()
     if not df_inv.empty:
-        # 1. Definimos moneda y tasa primero para evitar el NameError
-        moneda_ver = st.radio("Selecciona Moneda:", ["USD", "BCV", "Binance"], horizontal=True, key="mon_inv")
+        # Primero definimos 'moneda' para que no dé NameError
+        moneda_ver = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True, key="moneda_inv")
         
-        tasa_v = 1.0
+        # Ahora calculamos la tasa
         if moneda_ver == "BCV":
             tasa_v = float(t_bcv)
         elif moneda_ver == "Binance":
             tasa_v = float(t_bin)
+        else:
+            tasa_v = 1.0
             
         sim = "Bs" if moneda_ver != "USD" else "$"
 
-        # 2. Copiamos los datos para no dañar el original
         df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
-        
-        # 3. ASEGURAMOS QUE SEAN NÚMEROS
-        df_inv_filtrado['precio_usd'] = pd.to_numeric(df_inv_filtrado['precio_usd'], errors='coerce').fillna(0)
-        df_inv_filtrado['cantidad'] = pd.to_numeric(df_inv_filtrado['cantidad'], errors='coerce').fillna(1)
 
-        # 4. CÁLCULO ESTÁNDAR (Lógica: Total es lo que vale el stock, Unit es Total/Cantidad)
-        # Esto asegura que el Total siempre sea el número grande y el Unit el pequeño.
-        df_inv_filtrado['Col_Total'] = df_inv_filtrado['precio_usd'] * tasa_v
-        df_inv_filtrado['Col_Unit'] = df_inv_filtrado['Col_Total'] / df_inv_filtrado['cantidad']
+        # MATEMÁTICA BLINDADA: Unitario pequeño, Total grande
+        precio_hoja_usd = df_inv_filtrado['precio_usd'].astype(float)
+        cantidad_stock = df_inv_filtrado['cantidad'].astype(float)
+
+        df_inv_filtrado['Col_Unit'] = precio_hoja_usd * tasa_v
+        df_inv_filtrado['Col_Total'] = (precio_hoja_usd * tasa_v) * cantidad_stock
         
-        # 5. ORDENAMOS LAS COLUMNAS PARA LA VISTA
         df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
         df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
 
-        # 6. FORMATEO (4 decimales para el chiquito, 2 para el grande)
         st.dataframe(df_ver.style.format({
             'Stock': '{:,.2f}', 
             f'Unit. ({sim})': "{:.4f}", 
             f'Total Stock ({sim})': "{:.2f}"
         }), use_container_width=True, hide_index=True)
+
     # --- SECCIÓN PARA CORREGIR Y ELIMINAR ---
     st.divider()
     with st.expander("🗑️ Borrar o Corregir Insumos"):
@@ -215,8 +213,6 @@ if menu == "📦 Inventario":
         conn.close()
         if not df_movs_hist.empty:
             st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
-        else:
-            st.info("No hay movimientos registrados todavía.")
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
@@ -627,6 +623,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
