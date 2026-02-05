@@ -98,7 +98,7 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
-# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN CORREGIDA) ---
+# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (REPARADO DEFINITIVO) ---
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
 
@@ -139,77 +139,65 @@ if menu == "📦 Inventario":
 
             if st.form_submit_button("🚀 Cargar a Inventario"):
                 if it_nombre:
-                    # 1. Calculamos el costo unitario real con impuestos
+                    # Cálculo correcto: Precio Lote con impuestos / cantidad de unidades
                     imp_t = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
                     costo_u = (precio_lote * (1 + imp_t)) / it_cant
                     
                     c = conectar()
-                    # 2. Insertamos o Actualizamos
                     c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", 
                               (it_nombre, float(it_cant), it_unid, costo_u))
                     
-                    # 3. Guardamos movimiento
                     res = c.execute("SELECT id FROM inventario WHERE item=?", (it_nombre,)).fetchone()
                     if res:
                         item_id = res[0]
                         c.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo) VALUES (?, 'ENTRADA', ?, ?)", 
                                   (item_id, it_cant, f"Compra Lote - Precio: ${precio_lote}"))
                     
-                    c.commit()
-                    c.close()
+                    c.commit(); c.close()
                     st.success(f"✅ Guardado: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA TOTALMENTE BLINDADA (REPARACIÓN DEFINITIVA) ---
+    # --- TABLA DE AUDITORÍA (AQUÍ ESTÁ EL ARREGLO VISUAL) ---
     st.divider()
     if not df_inv.empty:
+        # Filtro de búsqueda
         df_inv_filtrado = df_inv[df_inv['item'].str.contains(busqueda_inv, case=False)].copy()
+        
         moneda = st.radio("Selecciona Moneda de Visualización:", ["USD", "BCV", "Binance"], horizontal=True)
         
-        # 1. Tasa
-        try:
-            tasa_v = float(t_bcv) if moneda == "BCV" else (float(t_bin) if moneda == "Binance" else 1.0)
-        except:
-            tasa_v = 1.0
-            
+        # Selección de tasa
+        tasa_v = t_bcv if moneda == "BCV" else (t_bin if moneda == "Binance" else 1.0)
         sim = "Bs" if moneda != "USD" else "$"
         
-        # 2. CÁLCULO SEGURO
-        # Precio base desde la DB (aseguramos que sea float)
-        precio_base = df_inv_filtrado['precio_usd'].astype(float)
-        cant_total = df_inv_filtrado['cantidad'].astype(float)
-
-        # EL UNITARIO: Es lo que cuesta 1 sola hojita
-        df_inv_filtrado['Col_Unit'] = precio_base * tasa_v
+        # --- CÁLCULOS LÓGICOS REPARADOS ---
+        # 1. El Unitario es el precio de 1 sola unidad (Ej: 1.06 Bs)
+        df_inv_filtrado['Unit_Final'] = df_inv_filtrado['precio_usd'].astype(float) * tasa_v
         
-        # EL TOTAL: Es el Unitario multiplicado por cuántas tienes
-        df_inv_filtrado['Col_Total'] = (precio_base * tasa_v) * cant_total
+        # 2. El Total es la multiplicación de lo que tienes por el precio unitario (Ej: 531.11 Bs)
+        df_inv_filtrado['Total_Final'] = (df_inv_filtrado['cantidad'].astype(float) * df_inv_filtrado['precio_usd'].astype(float)) * tasa_v
         
-        # 3. ORDEN DE COLUMNAS (Para que no se crucen)
-        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Col_Unit', 'Col_Total']].copy()
+        # Seleccionamos y renombramos para la tabla
+        df_ver = df_inv_filtrado[['item', 'cantidad', 'unidad', 'Unit_Final', 'Total_Final']].copy()
         df_ver.columns = ['Producto', 'Stock', 'Und', f'Unit. ({sim})', f'Total Stock ({sim})']
 
-        # 4. VISUALIZACIÓN
         st.dataframe(df_ver.style.format({
             'Stock': '{:,.2f}', 
-            f'Unit. ({sim})': "{:.4f}",  # 4 decimales para el chiquito
-            f'Total Stock ({sim})': "{:.2f}" # 2 decimales para el grande
+            f'Unit. ({sim})': "{:.4f}", 
+            f'Total Stock ({sim})': "{:.2f}"
         }), use_container_width=True, hide_index=True)
+
     # --- SECCIÓN PARA CORREGIR Y ELIMINAR ---
     st.divider()
     with st.expander("🗑️ Borrar o Corregir Insumos"):
         if not df_inv.empty:
             prod_b = st.selectbox("Selecciona producto a eliminar:", df_inv['item'].tolist())
             if st.button("❌ Eliminar Producto"):
-                c = conectar()
-                c.execute("DELETE FROM inventario WHERE item=?", (prod_b,))
-                c.commit(); c.close()
-                st.warning(f"Producto {prod_b} eliminado.")
-                st.rerun()
+                c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (prod_b,)); c.commit(); c.close()
+                st.warning(f"Producto {prod_b} eliminado."); st.rerun()
 
     # --- HISTORIAL DE MOVIMIENTOS ---
     st.divider()
-    with st.expander("📜 Ver Historial de Movimientos (Auditoría)"):
+    with st.expander("📜 Ver Historial de Movimientos"):
         conn = conectar()
         query_movs = '''
             SELECT m.fecha, i.item, m.tipo, m.cantidad, m.motivo 
@@ -219,14 +207,8 @@ if menu == "📦 Inventario":
         '''
         df_movs_hist = pd.read_sql_query(query_movs, conn)
         conn.close()
-
         if not df_movs_hist.empty:
             st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
-        else:
-            st.info("No hay movimientos registrados todavía.")
-
-
-
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
@@ -637,6 +619,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
