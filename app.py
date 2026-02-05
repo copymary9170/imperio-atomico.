@@ -420,19 +420,17 @@ elif menu == "👥 Clientes":
     else:
         st.info("No se encontraron clientes con ese nombre.")
 
-# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (VERSIÓN CORREGIDA) ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (VERSIÓN FINAL INTEGRADA) ---
 elif menu == "🎨 Análisis CMYK":
-    st.title("🎨 Analizador de Cobertura y Costos por Impresora")
+    st.title("🎨 Analizador de Cobertura y Costos Reales")
 
-    # 1. Carga de datos desde la base de datos
+    # 1. Carga de datos base
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
     df_inv_tintas = pd.read_sql_query("SELECT item, precio_usd FROM inventario WHERE item LIKE '%Tinta%'", conn)
     conn.close()
     
-    # --- FIX DEL NameError: Creamos la lista de activos que faltaba ---
     lista_activos = df_act_db.to_dict('records')
-    
     impresoras_disponibles = [e['equipo'] for e in lista_activos if e['categoria'] == "Impresora (Gasta Tinta)"]
 
     if not impresoras_disponibles:
@@ -443,24 +441,71 @@ elif menu == "🎨 Análisis CMYK":
     
     with c_printer:
         impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
-        
-        # Ahora lista_activos ya existe, no dará error
         datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
-        # --- LÓGICA DE TINTAS POR GRUPO (Negro + Colores) ---
-        # Buscamos todo lo que tenga el nombre de la impresora (ej: "J210")
+        # Buscamos las tintas de esa máquina específica
         tintas_maquina = df_inv_tintas[df_inv_tintas['item'].str.contains(impresora_sel, case=False, na=False)]
         
         if not tintas_maquina.empty:
-            # Promediamos el costo de los 4 colores (o los que tenga)
             precio_tinta_ml = tintas_maquina['precio_usd'].mean()
-            with st.expander("💧 Ver Tintas Detectadas"):
-                st.write(tintas_maquina[['item', 'precio_usd']])
-            st.success(f"✅ Promedio: ${precio_tinta_ml:.4f} / ml")
+            st.success(f"✅ Promedio detectado: ${precio_tinta_ml:.4f}/ml")
         else:
             precio_tinta_ml = conf.loc['costo_tinta_ml', 'valor']
             st.info(f"💡 Usando precio base: ${precio_tinta_ml}")
+
+    with c_file:
+        # El cargador de archivos debe estar aquí
+        archivos_multiples = st.file_uploader("Sube tus diseños (JPG/PNG)", 
+                                             type=['png', 'jpg', 'jpeg'], 
+                                             accept_multiple_files=True,
+                                             key="uploader_cmyk")
+
+    # --- MOTOR DE PROCESAMIENTO (Asegúrate de que este bloque esté presente) ---
+    if archivos_multiples:
+        from PIL import Image
+        import numpy as np
+
+        resultados = []
+        with st.spinner('🚀 Analizando archivos...'):
+            for arc in archivos_multiples:
+                # Abrimos y convertimos a CMYK
+                img = Image.open(arc).convert('CMYK')
+                datos = np.array(img)
+                
+                # Promedio de cada canal (0=C, 1=M, 2=Y, 3=K)
+                c = (np.mean(datos[:,:,0]) / 255) * 100
+                m = (np.mean(datos[:,:,1]) / 255) * 100
+                y = (np.mean(datos[:,:,2]) / 255) * 100
+                k = (np.mean(datos[:,:,3]) / 255) * 100
+                
+                # Multiplicador según modelo
+                nombre_low = impresora_sel.lower()
+                multi = 2.5 if "j210" in nombre_low else (1.8 if "subli" in nombre_low else 1.2)
+                
+                # Consumo estimado (cobertura total / 400 * factor de ml * multiplicador)
+                consumo_ml = ((c + m + y + k) / 400) * 0.15 * multi 
+                
+                # Costos
+                costo_tinta = consumo_ml * precio_tinta_ml * (1 + iva + igtf)
+                total_usd = costo_tinta + costo_desgaste
+                
+                resultados.append({
+                    "Archivo": arc.name,
+                    "C%": f"{c:.1f}%", "M%": f"{m:.1f}%", "Y%": f"{y:.1f}%", "K%": f"{k:.1f}%",
+                    "Costo Tinta": round(costo_tinta, 4),
+                    "Desgaste": round(costo_desgaste, 4),
+                    "TOTAL USD": round(total_usd, 4),
+                    "TOTAL Bs": round(total_usd * t_bcv, 2)
+                })
+
+        # Mostrar Resultados
+        st.divider()
+        df_res = pd.DataFrame(resultados)
+        st.table(df_res)
+        
+        total_lote = df_res['TOTAL USD'].sum()
+        st.success(f"💰 Costo total estimado: **${total_lote:.2f} USD** | **{total_lote * t_bcv:.2f} Bs**")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 elif menu == "🏗️ Activos":
     st.title("🏗️ Gestión de Equipos y Activos")
@@ -570,6 +615,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
