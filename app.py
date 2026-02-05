@@ -439,19 +439,27 @@ elif menu == "🎨 Análisis CMYK":
     
     with c_printer:
         impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
-        datos_imp = next((e for e in df_act_db.to_dict('records') if e['equipo'] == impresora_sel), None)
+        datos_imp = next((e for e in lista_activos if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
-        # --- LÓGICA DE BÚSQUEDA DE TINTA ESPECÍFICA ---
-        # Buscamos en el inventario una tinta que coincida con el nombre de la impresora
-        tinta_match = df_inv_tintas[df_inv_tintas['item'].str.contains(impresora_sel, case=False, na=False)]
+        # --- LÓGICA MULTI-TINTA ---
+        # El sistema busca TODO lo que coincida con el nombre de la impresora
+        # Ej: Si seleccionas "J210", buscará "Tinta J210 Negro", "Tinta J210 Cian", etc.
         
-        if not tinta_match.empty:
-            precio_tinta_ml = tinta_match['precio_usd'].iloc[0]
-            st.success(f"✅ Usando costo de: {tinta_match['item'].iloc[0]}")
+        # Filtramos el inventario para encontrar todos los insumos de esta máquina
+        tintas_maquina = df_inv_tintas[df_inv_tintas['item'].str.contains(impresora_sel, case=False, na=False)]
+        
+        if not tintas_maquina.empty:
+            # Calculamos el precio promedio por ml de ese grupo de tintas
+            # (Suma los precios de los 4 colores y divide entre 4)
+            precio_tinta_ml = tintas_maquina['precio_usd'].mean()
+            
+            with st.expander("🔍 Ver tintas vinculadas"):
+                st.write(tintas_maquina[['item', 'precio_usd']])
+            st.success(f"✅ Promedio detectado: ${precio_tinta_ml:.4f} / ml")
         else:
             precio_tinta_ml = conf.loc['costo_tinta_ml', 'valor']
-            st.info(f"💡 Tinta específica no encontrada. Usando precio base: ${precio_tinta_ml}")
+            st.warning(f"⚠️ No hay tintas para '{impresora_sel}' en Inventario. Usando precio base.")
         
         st.caption(f"Costo por ml: ${precio_tinta_ml:.4f}")
 
@@ -607,6 +615,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
