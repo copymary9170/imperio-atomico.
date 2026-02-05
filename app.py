@@ -98,7 +98,7 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     menu = st.radio("Módulos", ["📦 Inventario", "📝 Cotizaciones", "📊 Dashboard", "👥 Clientes", "🎨 Análisis CMYK", "🛠️ Otros Procesos", "🏗️ Activos", "⚙️ Configuración", "💰 Caja y Gastos"])
     
-# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN CORREGIDA Y CLARA) --- 
+# --- 4. LÓGICA DE INVENTARIO CON TRAZABILIDAD (VERSIÓN DEFINITIVA CORREGIDA) --- 
 if menu == "📦 Inventario":
     st.title("📦 Inventario y Auditoría")
 
@@ -158,17 +158,16 @@ if menu == "📦 Inventario":
                 if it_nombre:
                     imp_t = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
 
-                    # Costo por unidad individual en USD
-                    costo_unitario_usd = (precio_lote * (1 + imp_t)) / it_cant
+                    # Guardamos el PRECIO DEL LOTE (NO el unitario)
+                    precio_lote_final = precio_lote * (1 + imp_t)
 
                     c = conectar()
 
-                    # Guardamos SIEMPRE el costo unitario en USD
                     c.execute("""
                         INSERT OR REPLACE INTO inventario 
                         (item, cantidad, unidad, precio_usd) 
                         VALUES (?,?,?,?)
-                    """, (it_nombre, float(it_cant), it_unid, costo_unitario_usd))
+                    """, (it_nombre, float(it_cant), it_unid, precio_lote_final))
 
                     res = c.execute(
                         "SELECT id FROM inventario WHERE item=?",
@@ -193,7 +192,7 @@ if menu == "📦 Inventario":
                     st.success(f"✅ Guardado correctamente: {it_nombre}")
                     st.rerun()
 
-    # --- TABLA DE AUDITORÍA (CÁLCULOS CORRECTOS) ---
+    # --- TABLA DE AUDITORÍA (CORRECCIÓN REAL DEL PROBLEMA) ---
     st.divider()
 
     if not df_inv.empty:
@@ -219,19 +218,18 @@ if menu == "📦 Inventario":
             df_inv['item'].str.contains(busqueda_inv, case=False)
         ].copy()
 
-        # --- CÁLCULO CLARO Y SEGURO ---
-        precio_unitario_usd = df_inv_filtrado['precio_usd'].astype(float)
+        # --- AQUÍ ESTÁ LA CORRECCIÓN REAL ---
+        precio_lote_usd = df_inv_filtrado['precio_usd'].astype(float)
         cantidad_stock = df_inv_filtrado['cantidad'].astype(float)
 
-        # Conversión correcta
-        df_inv_filtrado['Costo Unitario'] = precio_unitario_usd * tasa_v
-        df_inv_filtrado['Valor Total'] = df_inv_filtrado['Costo Unitario'] * cantidad_stock
+        # Cálculo correcto:
+        df_inv_filtrado['Costo Unitario'] = (precio_lote_usd / cantidad_stock) * tasa_v
+        df_inv_filtrado['Valor Total'] = precio_lote_usd * tasa_v
 
-        # Redondeos para presentación profesional
+        # Redondeos para presentación clara
         df_inv_filtrado['Costo Unitario'] = df_inv_filtrado['Costo Unitario'].round(4)
         df_inv_filtrado['Valor Total'] = df_inv_filtrado['Valor Total'].round(2)
 
-        # Tabla final a mostrar
         df_ver = df_inv_filtrado[[
             'item',
             'cantidad',
@@ -244,15 +242,15 @@ if menu == "📦 Inventario":
             'Producto',
             'Stock (Unds)',
             'Unidad',
-            f'Costo Unitario ({simbolo})',
-            f'Valor Total Inventario ({simbolo})'
+            f'Unit. ({simbolo})',
+            f'Total Stock ({simbolo})'
         ]
 
         st.dataframe(
             df_ver.style.format({
                 'Stock (Unds)': '{:,.2f}',
-                f'Costo Unitario ({simbolo})': "{:.4f}",
-                f'Valor Total Inventario ({simbolo})': "{:.2f}"
+                f'Unit. ({simbolo})': "{:.4f}",
+                f'Total Stock ({simbolo})': "{:.2f}"
             }),
             use_container_width=True,
             hide_index=True
@@ -301,6 +299,7 @@ if menu == "📦 Inventario":
 
         if not df_movs_hist.empty:
             st.dataframe(df_movs_hist, use_container_width=True, hide_index=True)
+
 
 # --- 5. LÓGICA DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
@@ -712,6 +711,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
