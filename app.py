@@ -291,120 +291,107 @@ if menu == "📦 Inventario":
                 if st.button("❌ ELIMINAR", key="btn_borrar_final"):
                     c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close()
                     st.rerun()
-# --- 5. LÓGICA DE COTIZACIONES ---
+# --- 5. LÓGICA DE COTIZACIONES (REVISADA Y COMPATIBLE) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
-    c = conectar()
-    clis = pd.read_sql_query("SELECT nombre FROM clientes", c)['nombre'].tolist()
-    inv_l = pd.read_sql_query("SELECT item, precio_usd FROM inventario", c)
-    c.close()
+    
+    conn = conectar()
+    # 1. Cargamos clientes e inventario para los selectores
+    df_clis = pd.read_sql_query("SELECT id, nombre, whatsapp FROM clientes", conn)
+    df_inv_items = pd.read_sql_query("SELECT item, precio_usd FROM inventario", conn)
+    
+    # 2. Cargamos historial uniendo tablas para ver el NOMBRE del cliente, no el ID
+    query_historial = """
+        SELECT c.id, c.fecha, cl.nombre as cliente, c.trabajo, c.monto_usd, c.estado 
+        FROM cotizaciones c
+        LEFT JOIN clientes cl ON c.cliente_id = cl.id
+    """
+    df_cots_global = pd.read_sql_query(query_historial, conn)
+    conn.close()
 
-    with st.form("form_cot"):
-        c1, c2 = st.columns(2)
-        cli = c1.selectbox("Cliente", ["--"] + clis)
-        trab = c1.text_input("Trabajo")
-        mat = c2.selectbox("Material a usar", ["--"] + inv_l['item'].tolist())
-        cant_m = c2.number_input("Cantidad (unidades completas)", min_value=0, step=1)
-        monto_f = st.number_input("Precio Final a Cobrar (USD)", min_value=0.0)
-        est = st.selectbox("Estado", ["Pendiente", "Pagado"])
-        
-        if st.form_submit_button("📋 Guardar Cotización"):
-            if cli != "--" and monto_f > 0:
-                c = conectar()
-                c.execute("INSERT INTO cotizaciones (fecha, cliente, trabajo, monto_usd, monto_bcv, monto_binance, estado) VALUES (?,?,?,?,?,?,?)",
-                          (datetime.now().strftime("%d/%m/%Y"), cli, trab, monto_f, monto_f*t_bcv, monto_f*t_bin, est))
-                if mat != "--":
-                    c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_m, mat))
-                c.commit(); c.close(); st.success("✅ Guardado"); st.rerun()
+    if df_clis.empty:
+        st.warning("⚠️ No hay clientes registrados. Ve al módulo de 'Clientes' primero.")
+    else:
+        with st.form("form_cot_imperio"):
+            st.subheader("🛠️ Crear Nuevo Presupuesto")
+            c1, c2 = st.columns(2)
+            
+            # Diccionario auxiliar: { "Nombre": ID } para guardar el ID pero mostrar el Nombre
+            dict_clientes = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
+            cli_nombre = c1.selectbox("Selecciona el Cliente", ["--"] + list(dict_clientes.keys()))
+            
+            trabajo = c1.text_input("¿Qué trabajo vas a realizar?", placeholder="Ej: 50 Invitaciones de Boda")
+            
+            material = c2.selectbox("Material a descontar del Inventario", ["--"] + df_inv_items['item'].tolist())
+            cantidad_mat = c2.number_input("Cantidad de hojas/unidades a usar", min_value=0, step=1)
+            
+            monto_final = st.number_input("Precio Final a Cobrar (USD)", min_value=0.0, format="%.2f")
+            estado_pago = st.selectbox("Estado inicial", ["Pendiente", "Pagado"])
+            
+            if st.form_submit_button("📋 GUARDAR Y PROCESAR"):
+                if cli_nombre != "--" and monto_final > 0:
+                    id_cliente_real = dict_clientes[cli_nombre]
+                    
+                    c = conectar()
+                    # A. Guardar en tabla cotizaciones (usando cliente_id numérico)
+                    c.execute("""INSERT INTO cotizaciones (fecha, cliente_id, trabajo, monto_usd, estado) 
+                               VALUES (?,?,?,?,?)""",
+                              (datetime.now().strftime("%d/%m/%Y"), id_cliente_real, trabajo, monto_final, estado_pago))
+                    
+                    # B. Descuento automático de inventario si se seleccionó material
+                    if material != "--" and cantidad_mat > 0:
+                        c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cantidad_mat, material))
+                    
+                    c.commit()
+                    c.close()
+                    st.success(f"✅ Cotización guardada y stock actualizado para {cli_nombre}")
+                    st.rerun()
+                else:
+                    st.error("Por favor completa el cliente y el monto.")
 
+    # --- TABLA DE HISTORIAL CON COLORES ---
+    st.divider()
     st.subheader("📑 Historial de Movimientos")
     if not df_cots_global.empty:
         def color_est(val):
             color = '#ff4b4b' if val == 'Pendiente' else '#28a745'
-            return f'background-color: {color}; color: white; font-weight: bold'
-        st.dataframe(df_cots_global.sort_values('id', ascending=False).style.applymap(color_est, subset=['estado']), use_container_width=True)
+            return f'background-color: {color}; color: white; font-weight: bold; border-radius: 5px'
+        
+        st.dataframe(
+            df_cots_global.sort_values('id', ascending=False).style.applymap(color_est, subset=['estado']), 
+            use_container_width=True, 
+            hide_index=True
+        )
 
-    st.divider()
-    st.subheader("📲 Enviar Cotización por WhatsApp")
-    
-    if not df_cots_global.empty:
-        # Seleccionamos la última cotización para enviar
-        c_envio = st.selectbox("Selecciona la cotización a enviar:", df_cots_global['id'].tolist())
+        # --- BOTÓN DE WHATSAPP INTEGRADO ---
+        st.divider()
+        st.subheader("📲 Enviar Cotización por WhatsApp")
+        
+        # Seleccionamos por ID de la tabla cargada
+        c_envio = st.selectbox("Selecciona ID de cotización para enviar:", df_cots_global['id'].tolist())
         datos_c = df_cots_global[df_cots_global['id'] == c_envio].iloc[0]
         
-        # Buscamos el teléfono del cliente
-        c = conectar()
-        tel = pd.read_sql_query(f"SELECT whatsapp FROM clientes WHERE nombre = '{datos_c['cliente']}'", c)
-        c.close()
+        # Buscamos el WhatsApp de ese cliente específico
+        whatsapp_cliente = df_clis[df_clis['nombre'] == datos_c['cliente']]['whatsapp'].iloc[0]
         
-        if not tel.empty and tel['whatsapp'].iloc[0]:
-            # 1. Quitamos espacios o guiones que tenga el número
-            num_original = "".join(filter(str.isdigit, tel['whatsapp'].iloc[0]))
-            
-            # 2. Si el número empieza con '0', le quitamos el '0' y le ponemos '58'
-            if num_original.startswith('0'):
-                numero_final = "58" + num_original[1:]
-            # 3. Si ya tiene el 58, lo dejamos igual
-            elif num_original.startswith('4') or num_original.startswith('2'):
-                numero_final = "58" + num_original
-            else:
-                numero_final = num_original
+        if whatsapp_cliente:
+            # Limpieza de número para el link de WhatsApp
+            num_final = "".join(filter(str.isdigit, whatsapp_cliente))
+            if num_final.startswith('0'): num_final = "58" + num_final[1:]
+            elif not num_final.startswith('58'): num_final = "58" + num_final
 
-            # El mensaje con el precio en USD y Bs (BCV)
             monto_bs = datos_c['monto_usd'] * t_bcv
             mensaje = f"¡Hola! *Imperio Atómico* te saluda. 👋%0A%0A" \
                       f"Detalle: *{datos_c['trabajo']}*%0A" \
                       f"Total: *{datos_c['monto_usd']:.2f} USD*%0A" \
                       f"En Bolívares: *{monto_bs:.2f} Bs* (Tasa BCV)%0A%0A" \
-                      f"¡Gracias por tu confianza! ⚛️"
+                      f"¿Deseas confirmar el pedido? ⚛️"
             
-            link_ws = f"https://wa.me/{numero_final}?text={mensaje}"
-            st.link_button(f"🚀 Enviar WhatsApp a {datos_c['cliente']}", link_ws)
+            st.link_button(f"🚀 Enviar WhatsApp a {datos_c['cliente']}", f"https://wa.me/{num_final}?text={mensaje}")
         else:
-            st.warning("Este cliente no tiene un número de WhatsApp registrado.")
-
-
-# --- NUEVO MÓDULO: CAJA Y VENTAS ---
-elif menu == "💰 Caja y Gastos":
-    st.title("💰 Gestión de Flujo de Caja")
-    
-    tab1, tab2 = st.tabs(["💵 Registrar Venta", "📉 Registrar Gasto"])
-    
-    with tab1:
-        st.subheader("Convertir Cotización en Cobro")
-        # Solo mostramos cotizaciones pendientes
-        c = conectar()
-        df_pendientes = pd.read_sql_query("SELECT id, cliente_id, trabajo, monto_usd FROM cotizaciones WHERE estado='Pendiente'", c)
-        
-        if not df_pendientes.empty:
-            sel_cot = st.selectbox("Selecciona Cotización para cobrar", df_pendientes['id'].tolist())
-            m_pago = st.selectbox("Método de Pago", ["Efectivo", "Zelle", "Pago Móvil", "Binance"])
-            
-            if st.button("Confirmar Cobro"):
-                datos = df_pendientes[df_pendientes['id'] == sel_cot].iloc[0]
-                # 1. Crear la venta
-                c.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)", 
-                          (int(datos['cliente_id']), datos['monto_usd'], m_pago))
-                # 2. Marcar cotización como Pagada
-                c.execute("UPDATE cotizaciones SET estado='Pagado' WHERE id=?", (sel_cot,))
-                c.commit()
-                st.success("✅ Venta registrada en caja.")
-                st.rerun()
-        else:
-            st.info("No hay cotizaciones pendientes de cobro.")
-        c.close()
-
-    with tab2:
-        st.subheader("Registro de Gastos Operativos")
-        with st.form("form_gastos"):
-            desc_g = st.text_input("Descripción del gasto (Ej: Pago de luz, Alquiler, Comida)")
-            monto_g = st.number_input("Monto (USD)", min_value=0.0)
-            cat_g = st.selectbox("Categoría", ["Servicios", "Materiales", "Mantenimiento", "Otros"])
-            if st.form_submit_button("Registrar Gasto"):
-                c = conectar()
-                c.execute("INSERT INTO gastos (descripcion, monto, categoria) VALUES (?,?,?)", (desc_g, monto_g, cat_g))
-                c.commit(); c.close()
-                st.warning("📉 Gasto registrado.")
+            st.warning("El cliente seleccionado no tiene número registrado.")
+    else:
+        st.info("Aún no hay cotizaciones registradas.")
 
 # --- 6. DASHBOARD FINANCIERO PROFESIONAL ---
 elif menu == "📊 Dashboard":
@@ -718,6 +705,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
