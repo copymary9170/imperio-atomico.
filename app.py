@@ -269,64 +269,125 @@ if menu == "📦 Inventario":
                 it_aj = st.selectbox("Material a corregir:", df_inv['item'].tolist(), key="sel_ajuste_real")
                 nueva_c = st.number_input("Cantidad Real en Estante:", min_value=0.0, key="num_ajuste")
                 if st.button("🔄 Actualizar Cantidad", key="btn_update_stock"):
-                    c = conectar()
-                    c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj))
-                    c.commit()
-                    c.close()
-                    st.success(f"Stock de {it_aj} actualizado.")
-                    st.rerun()
-                    
-        with col_del:
-            # Solo el Admin puede borrar productos del todo
-            if ROL == "Admin":
-                with st.expander("🗑️ Eliminar Producto"):
-                    it_del = st.selectbox("Eliminar permanentemente:", df_inv['item'].tolist(), key="sel_borrar_real")
-                    if st.button("❌ ELIMINAR", key="btn_delete_item"):
-                        c = conectar()
-                        c.execute("DELETE FROM inventario WHERE item=?", (it_del,))
-                        c.commit()
-                        c.close()
-                        st.warning(f"Producto {it_del} eliminado.")
-                        st.rerun()
-            else:
-                st.info("ℹ️ Solo el Administrador puede eliminar registros.")
+               # --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL (CON PASAJE/DELIVERY) --- 
+if menu == "📦 Inventario":
+    st.title("📦 Centro de Control de Inventario")
+    
+    # --- CONEXIÓN Y DATOS ---
+    conn = conectar()
+    try:
+        df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
+        if 'minimo' not in df_inv.columns:
+            c = conn.cursor()
+            c.execute("ALTER TABLE inventario ADD COLUMN minimo REAL DEFAULT 5.0")
+            conn.commit()
+            df_inv['minimo'] = 5.0
+    except:
+        df_inv = pd.DataFrame()
+    conn.close()
 
-    # --- ⚙️ SECCIÓN 5: AJUSTES Y BORRADO (SOLO PARA JEFA/ADMIN) ---
-    if ROL == "Admin":
-        st.divider()
-        col_aj, col_del = st.columns(2)
-        with col_aj:
-            with st.expander("🔧 Corregir Stock (Mermas)"):
-                if not df_inv.empty:
-                    it_aj = st.selectbox("Material a corregir:", df_inv['item'].tolist(), key="sel_ajuste")
-                    nueva_c = st.number_input("Cantidad Real en Estante:", min_value=0.0)
-                    if st.button("🔄 Actualizar Cantidad"):
-                        c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj)); c.commit(); c.close(); st.rerun()
-        with col_del:
-            with st.expander("🗑️ Eliminar Producto"):
-                if not df_inv.empty:
-                    it_del = st.selectbox("Eliminar permanentemente:", df_inv['item'].tolist(), key="sel_borrar")
-                    if st.button("❌ ELIMINAR"):
-                        c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close(); st.rerun()
+    # --- 📊 MÉTRICAS FINANCIERAS ---
+    if not df_inv.empty:
+        st.subheader("💰 Inversión Activa en Almacén")
+        valor_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Dólares", f"$ {valor_usd:,.2f}")
+        c2.metric("Total BCV", f"Bs {(valor_usd * t_bcv):,.2f}")
+        c3.metric("Tasa Actual", f"{t_bcv} Bs")
+        
+        # Alertas de Reposición
+        alertas = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
+        if not alertas.empty:
+            st.error(f"⚠️ ¡ATENCIÓN! Tienes {len(alertas)} insumos bajo el mínimo.")
+        else:
+            st.success("✅ Stock saludable.")
+    else:
+        st.info("Inventario vacío. Registra tu primera compra.")
 
-    # --- ⚙️ SECCIÓN 5: AJUSTES Y BORRADO ---
     st.divider()
-    col_aj, col_del = st.columns(2)
-    with col_aj:
-        with st.expander("🔧 Corregir Stock (Mermas)"):
-            if not df_inv.empty:
-                it_aj = st.selectbox("Material a corregir:", df_inv['item'].tolist(), key="sel_ajuste")
-                nueva_c = st.number_input("Cantidad Real en Estante:", min_value=0.0)
-                if st.button("🔄 Actualizar Cantidad", key="btn_ajuste"):
-                    c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj)); c.commit(); c.close()
-                    st.rerun()
-    with col_del:
-        with st.expander("🗑️ Eliminar Producto"):
-            if not df_inv.empty:
-                it_del = st.selectbox("Eliminar permanentemente:", df_inv['item'].tolist(), key="sel_borrar")
-                if st.button("❌ ELIMINAR", key="btn_borrar_final"):
-                    c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close()
-                    st.rerun()
+
+    # --- 📥 FORMULARIO DE ENTRADA CON LOGÍSTICA ---
+    st.subheader("📥 Registrar Entrada (Incluir Pasaje/Delivery)")
+    it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"], key="u_medida_root")
+
+    with st.form("form_inventario_logistica_v1"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📦 Detalles del Producto**")
+            it_nombre = st.text_input("Nombre del Insumo", placeholder="Ej: Tinta Sublimación")
+            if it_unid == "ml":
+                tipo_carga = st.radio("Presentación:", ["Bote Individual", "Dúo (2)", "Kit CMYK (4)"], horizontal=True)
+                capacidad = st.number_input("ml por cada bote", min_value=0.1, value=100.0)
+            else:
+                tipo_carga, capacidad = "Normal", 1.0
+            it_minimo = st.number_input("Punto de Alerta (Mínimo)", min_value=0.0, value=5.0)
+
+        with col2:
+            st.markdown("**💵 Costos y Pasajes**")
+            it_cant_packs = st.number_input("Cantidad comprada", min_value=1, value=1)
+            monto_compra = st.number_input("Precio pagado ($ o Bs)", min_value=0.0, format="%.2f")
+            moneda_pago = st.radio("Moneda de Pago:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
+            # AQUÍ ESTÁ TU AJUSTE DE PASAJE
+            gastos_bs = st.number_input("Pasaje o Delivery en Bs", min_value=0.0, help="Se convertirá a $ y se sumará al costo")
+            
+            st.write("---")
+            st.write("**🛡️ Impuestos**")
+            tx1, tx2 = st.columns(2)
+            p_iva = tx1.checkbox(f"IVA ({iva*100}%)", value=True)
+            p_igtf = tx2.checkbox(f"IGTF ({igtf*100}%)", value=False)
+
+        if st.form_submit_button("🚀 IMPACTAR INVENTARIO ATÓMICO"):
+            if it_nombre and (monto_compra > 0 or gastos_bs > 0):
+                # Conversión de moneda base
+                if "BCV" in moneda_pago: base_u = monto_compra / t_bcv
+                elif "Binance" in moneda_pago: base_u = monto_compra / t_bin
+                else: base_u = monto_compra
+                
+                # Sumar logística y aplicar impuestos
+                total_con_log = base_u + (gastos_bs / t_bcv)
+                costo_final = total_con_log * (1 + (iva if p_iva else 0) + (igtf if p_igtf else 0))
+                
+                c = conectar(); cur = c.cursor()
+                if it_unid == "ml":
+                    div = 4 if "Kit" in tipo_carga else (2 if "Dúo" in tipo_carga else 1)
+                    costo_ml = (costo_final / (div * it_cant_packs)) / capacidad
+                    colores = ["Cian", "Magenta", "Amarillo", "Negro"] if div==4 else (["Negro", "Color"] if div==2 else [""])
+                    for col in colores:
+                        n_item = f"{it_nombre} {col}".strip()
+                        cur.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
+                                   VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
+                                   precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
+                                 (n_item, capacidad * it_cant_packs, "ml", costo_ml, it_minimo))
+                else:
+                    costo_u = costo_final / it_cant_packs
+                    cur.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
+                               VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
+                               precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
+                             (it_nombre, it_cant_packs, it_unid, costo_u, it_minimo))
+                c.commit(); c.close(); st.success("✅ Inventario actualizado con éxito."); st.rerun()
+
+    # --- 📋 AUDITORÍA Y AJUSTES ---
+    if not df_inv.empty:
+        st.divider()
+        st.subheader("📋 Auditoría de Almacén")
+        busc = st.text_input("🔍 Buscar material...")
+        df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
+        st.dataframe(df_f[['item', 'cantidad', 'unidad', 'precio_usd']], use_container_width=True, hide_index=True)
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            with st.expander("🔧 Corregir Stock"):
+                it_aj = st.selectbox("Insumo:", df_f['item'].tolist(), key="sel_ajuste_real")
+                nueva_c = st.number_input("Cantidad Real:", min_value=0.0, key="num_ajuste")
+                if st.button("🔄 Actualizar", key="btn_ajuste_final"):
+                    c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj)); c.commit(); c.close(); st.rerun()
+        with col_b:
+            with st.expander("🗑️ Eliminar"):
+                it_del = st.selectbox("Borrar de la base:", df_f['item'].tolist(), key="sel_del_real")
+                if st.button("❌ Eliminar", key="btn_del_final"):
+                    c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close(); st.rerun()
+
 # --- 6. LÓGICA DE COTIZACIONES (VERSIÓN MAESTRA FINAL BLINDADA) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
@@ -802,6 +863,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
