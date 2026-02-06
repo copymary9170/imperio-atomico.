@@ -60,59 +60,83 @@ def migrar_base_datos():
 inicializar_sistema()
 migrar_base_datos()
 
-# --- 2. CONFIGURACIÓN INICIAL ---
+# --- 2. CONFIGURACIÓN INICIAL Y SEGURIDAD ---
 st.set_page_config(page_title="Imperio Atómico - Sistema Pro", layout="wide")
 inicializar_sistema()
+migrar_base_datos()
 
-# --- SISTEMA DE AUTENTICACIÓN POR ROLES ---
+# Inicializamos el estado de la sesión si no existe
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
+    st.session_state.usuario_nombre = None
+    st.session_state.rol = None
 
+# --- PANTALLA DE LOGIN POR ROLES ---
 if not st.session_state.autenticado:
-    st.title("⚛️ Acceso al Imperio Atómico")
-    with st.form("login_atómico"):
+    st.title("🔐 Acceso al Imperio Atómico")
+    with st.form("login_atomico"):
         u = st.text_input("Usuario")
-        p = st.text_input("Contraseña", type="password")
+        p = st.text_input("Clave", type="password")
+        
         if st.form_submit_button("Entrar al Sistema"):
-            conn = conectar()
-            # Buscamos en la base de datos si el usuario existe
-            res = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", conn, params=(u, p))
-            conn.close()
-            
-            if not res.empty:
+            # 1. ACCESO DE EMERGENCIA (Bypass para asegurar que entres)
+            if u == "jefa" and p == "atomica2026":
                 st.session_state.autenticado = True
-                st.session_state.usuario_nombre = res.iloc[0]['nombre']
-                st.session_state.rol = res.iloc[0]['rol']
+                st.session_state.usuario_nombre = "Dueña del Imperio"
+                st.session_state.rol = "Admin"
                 st.rerun()
-            else:
-                st.error("❌ Credenciales incorrectas")
-    st.stop() # Detiene el código aquí si no se han logueado
+            
+            # 2. ACCESO POR BASE DE DATOS (Para mamá y tu hermana)
+            conn = conectar()
+            try:
+                res = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", conn, params=(u, p))
+                if not res.empty:
+                    st.session_state.autenticado = True
+                    st.session_state.usuario_nombre = res.iloc[0]['nombre']
+                    st.session_state.rol = res.iloc[0]['rol']
+                    conn.close()
+                    st.rerun()
+                else:
+                    st.error("❌ Usuario o clave incorrectos")
+            except:
+                st.error("⚠️ Error de base de datos. Usa el acceso de emergencia.")
+            finally:
+                conn.close()
+    st.stop()
 
-# Si llegamos aquí, es que ya entraron. Definimos el rol para usarlo luego.
+# Definimos el ROL para usarlo en el menú
 ROL = st.session_state.rol
 
-# --- 3. MENÚ LATERAL DINÁMICO ---
+# --- CARGA DE DATOS GLOBALES (Solo si ya pasó el login) ---
+conn = conectar()
+conf = pd.read_sql_query("SELECT * FROM configuracion", conn).set_index('parametro')
+t_bcv = round(float(conf.loc['tasa_bcv', 'valor']), 2)
+t_bin = round(float(conf.loc['tasa_binance', 'valor']), 2)
+iva, igtf, banco = conf.loc['iva_perc', 'valor'], conf.loc['igtf_perc', 'valor'], conf.loc['banco_perc', 'valor']
+df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
+conn.close()
+
+# --- 3. MENÚ LATERAL FILTRADO ---
 with st.sidebar:
     st.header(f"👋 Hola, {st.session_state.usuario_nombre}")
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     
-    # Definimos qué puede ver cada una
+    # Filtro de opciones según ROL
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"] # Todas ven esto
     
-    if ROL == "Admin": # TÚ ves todo
-        opciones += ["📦 Inventario", "📊 Dashboard", "💰 Caja y Gastos", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración"]
-    
-    elif ROL == "Administracion": # TU MAMÁ ve finanzas
-        opciones += ["📊 Dashboard", "💰 Caja y Gastos", "⚙️ Configuración"]
-        
-    elif ROL == "Produccion": # TU HERMANA ve procesos
-        opciones += ["🛠️ Otros Procesos", "🏗️ Activos", "📦 Inventario"]
+    if ROL == "Admin":
+        opciones += ["📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración"]
+    elif ROL == "Administracion":
+        opciones += ["📊 Dashboard", "⚙️ Configuración"]
+    elif ROL == "Produccion":
+        opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
-    menu = st.radio("Módulos Disponibles", opciones)
+    menu = st.radio("Módulos", opciones)
     
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
+
 
 # --- 4. LÓGICA DE INVENTARIO (VERSIÓN "TASAS DE COMPRA" COMPLETA) --- 
 if menu == "📦 Inventario":
@@ -775,6 +799,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
