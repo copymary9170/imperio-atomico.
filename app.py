@@ -1,4 +1,4 @@
-import streamlit as st
+u7import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
@@ -239,7 +239,7 @@ if menu == "📦 Inventario":
                 c.commit(); c.close()
                 st.success(f"✅ Inventario impactado. Costo real con pasaje: $ {costo_final_usd:.2f}")
                 st.rerun()
-    # --- 📋 SECCIÓN 4: AUDITORÍA DE ALMACÉN (CON BUSCADOR Y PRECIOS DINÁMICOS) ---
+    # --- 📋 SECCIÓN 4: AUDITORÍA DE ALMACÉN ---
     if not df_inv.empty:
         st.divider()
         st.subheader("📋 Auditoría de Almacén")
@@ -257,6 +257,39 @@ if menu == "📦 Inventario":
         st.dataframe(df_f[['item', 'cantidad', 'unidad', 'Unitario', 'Total']].style.format({
             'cantidad': '{:,.2f}', 'Unitario': f'{simb} {{:,.4f}}', 'Total': f'{simb} {{:,.2f}}'
         }), use_container_width=True, hide_index=True)
+
+        # --- ⚙️ SECCIÓN 5: AJUSTES Y BORRADO (ÚNICA Y PROTEGIDA) ---
+        st.divider()
+        st.subheader("⚙️ Gestión de Inventario")
+        col_aj, col_del = st.columns(2)
+        
+        with col_aj:
+            with st.expander("🔧 Corregir Stock (Mermas)"):
+                # Usamos una clave única 'sel_ajuste_real' para evitar el error
+                it_aj = st.selectbox("Material a corregir:", df_inv['item'].tolist(), key="sel_ajuste_real")
+                nueva_c = st.number_input("Cantidad Real en Estante:", min_value=0.0, key="num_ajuste")
+                if st.button("🔄 Actualizar Cantidad", key="btn_update_stock"):
+                    c = conectar()
+                    c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj))
+                    c.commit()
+                    c.close()
+                    st.success(f"Stock de {it_aj} actualizado.")
+                    st.rerun()
+                    
+        with col_del:
+            # Solo el Admin puede borrar productos del todo
+            if ROL == "Admin":
+                with st.expander("🗑️ Eliminar Producto"):
+                    it_del = st.selectbox("Eliminar permanentemente:", df_inv['item'].tolist(), key="sel_borrar_real")
+                    if st.button("❌ ELIMINAR", key="btn_delete_item"):
+                        c = conectar()
+                        c.execute("DELETE FROM inventario WHERE item=?", (it_del,))
+                        c.commit()
+                        c.close()
+                        st.warning(f"Producto {it_del} eliminado.")
+                        st.rerun()
+            else:
+                st.info("ℹ️ Solo el Administrador puede eliminar registros.")
 
     # --- ⚙️ SECCIÓN 5: AJUSTES Y BORRADO (SOLO PARA JEFA/ADMIN) ---
     if ROL == "Admin":
@@ -769,6 +802,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
