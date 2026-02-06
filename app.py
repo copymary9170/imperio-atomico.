@@ -235,21 +235,45 @@ if menu == "📦 Inventario":
     if not df_inv.empty:
         st.divider()
         st.subheader("📋 Auditoría de Almacén")
-        busc = st.text_input("🔍 Buscar material...")
+        
+        # 1. Filtro de búsqueda
+        busc = st.text_input("🔍 Buscar material (Nombre)...", placeholder="Ej: Tinta")
+        
+        # 2. Preparar los datos para la tabla (Cálculos de moneda)
         df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
-        st.dataframe(df_f[['item', 'cantidad', 'unidad', 'precio_usd']], use_container_width=True, hide_index=True)
+        
+        # Creamos las columnas de bolívares para la vista
+        df_f['Precio Bs (BCV)'] = df_f['precio_usd'] * t_bcv
+        df_f['Inversión Total ($)'] = df_f['cantidad'] * df_f['precio_usd']
+        df_f['Inversión Total (Bs)'] = df_f['Inversión Total ($)'] * t_bcv
 
+        # 3. Mostrar la tabla profesional
+        st.dataframe(
+            df_f[['item', 'cantidad', 'unidad', 'precio_usd', 'Precio Bs (BCV)', 'Inversión Total ($)']], 
+            column_config={
+                "item": "Insumo",
+                "precio_usd": st.column_config.NumberColumn("Precio Unit. $", format="$ %.4f"),
+                "Precio Bs (BCV)": st.column_config.NumberColumn("Precio Unit. Bs", format="Bs %.2f"),
+                "Inversión Total ($)": st.column_config.NumberColumn("Valor Inventario $", format="$ %.2f")
+            },
+            use_container_width=True, 
+            hide_index=True
+        )
+
+        # --- AJUSTES RÁPIDOS ---
         col_a, col_b = st.columns(2)
         with col_a:
             with st.expander("🔧 Corregir Stock"):
                 it_aj = st.selectbox("Insumo:", df_f['item'].tolist(), key="sel_ajuste_real")
-                nueva_c = st.number_input("Cantidad Real:", min_value=0.0, key="num_ajuste")
-                if st.button("🔄 Actualizar", key="btn_ajuste_final"):
+                nueva_c = st.number_input("Cantidad Real en Almacén:", min_value=0.0, key="num_ajuste")
+                if st.button("🔄 Actualizar Cantidad", key="btn_ajuste_final"):
                     c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj)); c.commit(); c.close(); st.rerun()
+        
         with col_b:
-            with st.expander("🗑️ Eliminar"):
-                it_del = st.selectbox("Borrar de la base:", df_f['item'].tolist(), key="sel_del_real")
-                if st.button("❌ Eliminar", key="btn_del_final"):
+            with st.expander("🗑️ Eliminar Insumo"):
+                it_del = st.selectbox("Selecciona para borrar:", df_f['item'].tolist(), key="sel_del_real")
+                st.warning("Esta acción no se puede deshacer.")
+                if st.button("❌ Confirmar Eliminación", key="btn_del_final"):
                     c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close(); st.rerun()
 # --- 6. LÓGICA DE COTIZACIONES (VERSIÓN MAESTRA FINAL BLINDADA) ---
 elif menu == "📝 Cotizaciones":
@@ -726,6 +750,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
