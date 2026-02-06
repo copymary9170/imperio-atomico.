@@ -2,118 +2,103 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
+from PIL import Image
+import numpy as np
+import io
 
 # --- 1. MOTOR DE BASE DE DATOS PROFESIONAL ---
 def conectar():
-    # Cambiamos 'imperio_data.db' por 'imperio_v2.db'
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
-def inicializar_sistema():
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     
-    # ... (Todas tus tablas actuales que ya tienes en el código) ...
+    # Crear tablas principales
+    c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
+    c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
+    c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
+    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente_id INTEGER, trabajo TEXT, monto_usd REAL, estado TEXT, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
+    c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo_pago TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
     c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     
-    # --- NUEVA TABLA DE USUARIOS ---
-    c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
-                 (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)''')
+    # Tabla de Usuarios
+    c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
     
-    # Insertamos los usuarios iniciales si la tabla está vacía
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         usuarios_iniciales = [
-            ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),  # TÚ
-            ('mama', 'admin2026', 'Administracion', 'Mamá'),       # TU MAMÁ
-            ('pro', 'diseno2026', 'Produccion', 'Hermana')         # TU HERMANA
+            ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
+            ('mama', 'admin2026', 'Administracion', 'Mamá'),
+            ('pro', 'diseno2026', 'Produccion', 'Hermana')
         ]
         c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", usuarios_iniciales)
+
+    # Configuración inicial
+    config_init = [
+        ('tasa_bcv', 36.50), ('tasa_binance', 38.00),
+        ('iva_perc', 0.16), ('igtf_perc', 0.03),
+        ('banco_perc', 0.02), ('costo_tinta_ml', 0.10)
+    ]
+    for param, valor in config_init:
+        c.execute("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", (param, valor))
     
-    # ... (El resto de tus configuraciones_iniciales de tasas BCV, etc.) ...
     conn.commit()
     conn.close()
 
 def migrar_base_datos():
     conn = conectar()
-    cursor = conn.cursor()
+    c = conn.cursor()
     try:
-        # Intentamos agregar la columna cliente_id a cotizaciones
-        cursor.execute("ALTER TABLE cotizaciones ADD COLUMN cliente_id INTEGER")
-        # Intentamos agregar la tabla de movimientos si no existe
-        cursor.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    item_id INTEGER,
-                    tipo TEXT,
-                    cantidad REAL,
-                    motivo TEXT,
-                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-        conn.commit()
-    except:
-        # Si ya existe, no hará nada y no dará error
-        pass
-    finally:
-        conn.close()
+        c.execute("ALTER TABLE cotizaciones ADD COLUMN cliente_id INTEGER")
+    except: pass
+    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    conn.commit()
+    conn.close()
 
-# Llama a la migración después de inicializar
+# --- EJECUCIÓN INICIAL ---
 inicializar_sistema()
 migrar_base_datos()
 
-# --- 2. CONFIGURACIÓN INICIAL Y SEGURIDAD ---
+# --- 2. CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="Imperio Atómico - Sistema Pro", layout="wide")
-inicializar_sistema()
-migrar_base_datos()
 
-# Inicializamos el estado de la sesión si no existe
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
-    st.session_state.usuario_nombre = None
-    st.session_state.rol = None
 
-# --- PANTALLA DE LOGIN POR ROLES ---
 if not st.session_state.autenticado:
     st.title("🔐 Acceso al Imperio Atómico")
-    with st.form("login_atomico"):
+    with st.form("login_form"):
         u = st.text_input("Usuario")
         p = st.text_input("Clave", type="password")
-        
-        if st.form_submit_button("Entrar al Sistema"):
-            # 1. ACCESO DE EMERGENCIA (Bypass para asegurar que entres)
-            if u == "jefa" and p == "atomica2026":
+        if st.form_submit_button("Entrar"):
+            if u == "jefa" and p == "atomica2026": # Bypass de emergencia
                 st.session_state.autenticado = True
-                st.session_state.usuario_nombre = "Dueña del Imperio"
                 st.session_state.rol = "Admin"
+                st.session_state.usuario_nombre = "Dueña del Imperio"
                 st.rerun()
             
-            # 2. ACCESO POR BASE DE DATOS (Para mamá y tu hermana)
             conn = conectar()
-            try:
-                res = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", conn, params=(u, p))
-                if not res.empty:
-                    st.session_state.autenticado = True
-                    st.session_state.usuario_nombre = res.iloc[0]['nombre']
-                    st.session_state.rol = res.iloc[0]['rol']
-                    conn.close()
-                    st.rerun()
-                else:
-                    st.error("❌ Usuario o clave incorrectos")
-            except:
-                st.error("⚠️ Error de base de datos. Usa el acceso de emergencia.")
-            finally:
-                conn.close()
+            res = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", conn, params=(u, p))
+            conn.close()
+            if not res.empty:
+                st.session_state.autenticado = True
+                st.session_state.rol = res.iloc[0]['rol']
+                st.session_state.usuario_nombre = res.iloc[0]['nombre']
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas")
     st.stop()
 
-# Definimos el ROL para usarlo en el menú
+# --- 3. CARGA DE DATOS Y VARIABLES ---
 ROL = st.session_state.rol
-
-# --- CARGA DE DATOS GLOBALES (Solo si ya pasó el login) ---
 conn = conectar()
 conf = pd.read_sql_query("SELECT * FROM configuracion", conn).set_index('parametro')
 t_bcv = round(float(conf.loc['tasa_bcv', 'valor']), 2)
 t_bin = round(float(conf.loc['tasa_binance', 'valor']), 2)
 iva, igtf, banco = conf.loc['iva_perc', 'valor'], conf.loc['igtf_perc', 'valor'], conf.loc['banco_perc', 'valor']
-df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
 conn.close()
 
 # --- 3. MENÚ LATERAL FILTRADO ---
@@ -799,6 +784,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
