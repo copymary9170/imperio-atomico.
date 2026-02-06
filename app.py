@@ -164,7 +164,7 @@ if menu == "📦 Inventario":
 
     st.divider()
 
-    # --- 📥 SECCIÓN 3: FORMULARIO DE ENTRADA PRO (DINÁMICO) ---
+  # --- 📥 SECCIÓN 3: FORMULARIO DE ENTRADA PRO (CON LOGÍSTICA) ---
     st.subheader("📥 Registrar Entrada de Materiales")
     it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"], key="selector_u_final")
 
@@ -185,10 +185,13 @@ if menu == "📦 Inventario":
             it_minimo = st.number_input("Punto de Alerta (Mínimo)", min_value=0.0, value=5.0)
 
         with col_der:
-            st.markdown("**💵 Costos e Impuestos**")
+            st.markdown("**💵 Costos y Logística**")
             it_cant_packs = st.number_input("Cantidad comprada (Packs/Kits)", min_value=1, value=1)
-            monto_pagado = st.number_input("Monto total pagado", min_value=0.0, format="%.2f")
+            monto_pagado = st.number_input("Monto total pagado ($/Bs)", min_value=0.0, format="%.2f")
             moneda_pago = st.radio("Moneda de Pago:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
+            
+            # --- EL AJUSTE DEL PASAJE ---
+            gastos_bs = st.number_input("Pasaje o Delivery en Bs (Ida y Vuelta)", min_value=0.0, help="Se convertirá a $ y se sumará al costo total")
             
             st.write("---")
             st.write("**🛡️ Impuestos Aplicados**")
@@ -198,19 +201,26 @@ if menu == "📦 Inventario":
             p_banco = tx3.checkbox(f"Banco ({banco*100}%)", value=True)
 
         if st.form_submit_button("🚀 IMPACTAR INVENTARIO"):
-            if it_nombre and monto_pagado > 0:
-                # Conversión de tasas
+            if it_nombre and (monto_pagado > 0 or gastos_bs > 0):
+                # 1. Conversión de moneda base
                 if "BCV" in moneda_pago: base_usd = monto_pagado / t_bcv
                 elif "Binance" in moneda_pago: base_usd = monto_pagado / t_bin
                 else: base_usd = monto_pagado
                 
+                # 2. Sumar pasaje convertido a USD
+                pasaje_usd = gastos_bs / t_bcv
+                base_con_pasaje = base_usd + pasaje_usd
+                
+                # 3. Aplicar impuestos sobre el total
                 recargo_total = (iva if p_iva else 0) + (igtf if p_gtf else 0) + (banco if p_banco else 0)
-                costo_final_usd = base_usd * (1 + recargo_total)
+                costo_final_usd = base_con_pasaje * (1 + recargo_total)
                 
                 c = conectar(); cur = c.cursor()
                 if it_unid == "ml":
                     div = 4 if "Kit" in tipo_carga else (2 if "Dúo" in tipo_carga else 1)
-                    costo_por_ml = (costo_final_usd / div) / capacidad
+                    # El costo total real se divide entre la cantidad de botes y luego entre los ml
+                    costo_por_ml = (costo_final_usd / (div * it_cant_packs)) / capacidad
+                    
                     colores = ["Cian", "Magenta", "Amarillo", "Negro"] if div==4 else (["Negro", "Color"] if div==2 else [""])
                     for col in colores:
                         item_f = f"{it_nombre} {col}".strip()
@@ -219,13 +229,16 @@ if menu == "📦 Inventario":
                                    precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
                                  (item_f, capacidad * it_cant_packs, "ml", costo_por_ml, it_minimo))
                 else:
+                    # Para papeles o resmas
                     costo_u = costo_final_usd / it_cant_packs
                     cur.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
                                VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
                                precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
                              (it_nombre, it_cant_packs, it_unid, costo_u, it_minimo))
-                c.commit(); c.close(); st.success("✅ Inventario impactado."); st.rerun()
-
+                
+                c.commit(); c.close()
+                st.success(f"✅ Inventario impactado. Costo real con pasaje: $ {costo_final_usd:.2f}")
+                st.rerun()
     # --- 📋 SECCIÓN 4: AUDITORÍA DE ALMACÉN (CON BUSCADOR Y PRECIOS DINÁMICOS) ---
     if not df_inv.empty:
         st.divider()
@@ -756,6 +769,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
