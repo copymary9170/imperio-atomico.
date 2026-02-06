@@ -281,7 +281,7 @@ if menu == "📦 Inventario":
                 if st.button("❌ ELIMINAR", key="btn_borrar_final"):
                     c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close()
                     st.rerun()
-# --- 5. LÓGICA DE COTIZACIONES (VERSIÓN MAESTRA FINAL) ---
+# --- 6. LÓGICA DE COTIZACIONES (VERSIÓN MAESTRA FINAL INTEGRADA) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
@@ -323,15 +323,18 @@ elif menu == "📝 Cotizaciones":
             tintas = df_inv_full[df_inv_full['unidad'] == 'ml']['item'].tolist()
             tinta_sel = cx1.selectbox("Tinta a descontar", ["--"] + tintas)
             
-            # Si viene de CMYK usamos los ml exactos, si no, slider manual
+            # --- LÓGICA DE PRECISIÓN DE TINTA ---
             if pre_datos:
                 ml_final = cx2.number_input("ML de tinta (Precisión CMYK)", value=float(pre_datos.get('ml_estimados', 0.0)), format="%.4f")
             else:
                 cobertura = cx2.slider("Cobertura manual (%)", 5, 100, 15)
+                # Cálculo estimado: (cobertura/5) * base de 0.05ml por hoja
                 ml_final = (cobertura / 5.0) * 0.05 * cant_hojas
+                st.caption(f"Estimado manual: {ml_final:.4f} ml")
 
             # Pago y Margen
             st.divider()
+            # Sugerencia de precio (Costo base del CMYK * margen de ganancia)
             sug_precio = pre_datos.get('costo_base', 0.0) * 2.5
             monto_f = st.number_input("Precio Total a Cobrar ($)", min_value=0.0, value=float(sug_precio), format="%.2f")
             metodo = st.selectbox("Método de Pago", ["Efectivo", "Pago Móvil", "Zelle", "Binance"])
@@ -340,25 +343,26 @@ elif menu == "📝 Cotizaciones":
             if st.form_submit_button("🚀 GUARDAR Y PROCESAR TODO"):
                 if cli_nombre != "--" and monto_f > 0:
                     id_cli = dict_clientes[cli_nombre]
-                    c = conectar()
+                    c = conectar(); cur = c.cursor()
+                    
                     # 1. Guardar Cotización
-                    c.execute("INSERT INTO cotizaciones (fecha, cliente_id, trabajo, monto_usd, estado) VALUES (?,?,?,?,?)",
+                    cur.execute("INSERT INTO cotizaciones (fecha, cliente_id, trabajo, monto_usd, estado) VALUES (?,?,?,?,?)",
                               (datetime.now().strftime("%d/%m/%Y"), id_cli, trabajo, monto_f, est_pago))
                     
                     # 2. Si se paga ahora, va directo a Ventas (Caja)
                     if est_pago == "Pagado":
-                        c.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)",
-                                  (id_cli, monto_f, metodo))
+                        cur.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)", (id_cli, monto_f, metodo))
                     
                     # 3. Descuento de Papel
                     if material != "--" and cant_hojas > 0:
-                        c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_hojas, material))
+                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_hojas, material))
                     
                     # 4. Descuento de Tinta
                     if tinta_sel != "--" and ml_final > 0:
-                        c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (ml_final, tinta_sel))
+                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (ml_final, tinta_sel))
                     
                     c.commit(); c.close()
+                    # Limpiar memoria de CMYK tras usarla
                     if 'datos_pre_cotizacion' in st.session_state: del st.session_state['datos_pre_cotizacion']
                     st.success("✅ ¡Operación Atómica exitosa!"); st.rerun()
 
@@ -367,36 +371,38 @@ elif menu == "📝 Cotizaciones":
         st.divider()
         st.subheader("📑 Gestión de Facturación")
         
-        # Sistema de cobro para lo que quedó pendiente
+        # Sistema de cobro para lo que quedó pendiente (Solo Admin/Administracion)
         pendientes = df_cots_global[df_cots_global['estado'] == "Pendiente"]
-        if not pendientes.empty:
+        if not pendientes.empty and ROL in ["Admin", "Administracion"]:
             with st.expander("💰 COBRAR PENDIENTES"):
                 col_sel, col_met, col_btn = st.columns([1, 1, 1])
                 id_c = col_sel.selectbox("ID Cotización:", pendientes['id'].tolist())
-                met_at = col_met.selectbox("Recibido por:", ["Efectivo", "Pago Móvil", "Zelle", "Binance"])
+                met_at = col_met.selectbox("Recibido por:", ["Efectivo", "Pago Móvil", "Zelle", "Binance"], key="met_pend")
                 if col_btn.button("Marcar como Cobrado"):
                     fila = pendientes[pendientes['id'] == id_c].iloc[0]
-                    c = conectar()
-                    c.execute("UPDATE cotizaciones SET estado = 'Pagado' WHERE id = ?", (id_c,))
-                    c.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)",
+                    c = conectar(); cur = c.cursor()
+                    cur.execute("UPDATE cotizaciones SET estado = 'Pagado' WHERE id = ?", (id_c,))
+                    cur.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)",
                               (int(fila['cliente_id']), float(fila['monto_usd']), met_at))
-                    c.commit(); c.close(); st.rerun()
+                    c.commit(); c.close(); st.success("¡Cobro registrado!"); st.rerun()
 
-        # Tabla visual
+        # Tabla visual de historial
         st.dataframe(df_cots_global.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
         
-        # WhatsApp rápido
+        # --- WHATSAPP RÁPIDO ---
         st.subheader("📲 Enviar a WhatsApp")
-        c_env = st.selectbox("Selecciona ID para enviar:", df_cots_global['id'].tolist())
+        c_env = st.selectbox("Selecciona ID para enviar:", df_cots_global['id'].tolist()[::-1])
         d_c = df_cots_global[df_cots_global['id'] == c_env].iloc[0]
-        # Buscar el tlf del cliente de esa cotización
-        tlf = df_clis[df_clis['id'] == d_c['cliente_id']]['whatsapp'].iloc[0]
-        if tlf:
-            num = "".join(filter(str.isdigit, tlf))
+        
+        # Buscar tlf del cliente
+        tlf_val = df_clis[df_clis['id'] == d_c['cliente_id']]['whatsapp'].iloc[0]
+        if tlf_val:
+            num = "".join(filter(str.isdigit, tlf_val))
             if num.startswith('0'): num = "58" + num[1:]
             elif not num.startswith('58'): num = "58" + num
+            
             msg = f"¡Hola! *Imperio Atómico* ⚛️%0A*Trabajo:* {d_c['trabajo']}%0A*Total:* {d_c['monto_usd']:.2f} USD%0A*Tasa BCV:* {(d_c['monto_usd']*t_bcv):,.2f} Bs"
-            st.link_button(f"🚀 Enviar WhatsApp a {d_c['cliente']}", f"https://wa.me/{num}?text={msg}")
+            st.link_button(f"🚀 WhatsApp a {d_c['cliente']}", f"https://wa.me/{num}?text={msg}")
             
 # --- 6. DASHBOARD FINANCIERO PROFESIONAL ---
 elif menu == "📊 Dashboard":
@@ -749,6 +755,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
