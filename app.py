@@ -187,9 +187,10 @@ if menu == "📦 Inventario":
             
             st.write("---")
             st.write("**🛡️ Impuestos**")
-            tx1, tx2 = st.columns(2)
+            tx1, tx2, tx3 = st.columns(3) # Añadimos una tercera columna
             p_iva = tx1.checkbox(f"IVA ({iva*100}%)", value=True)
             p_igtf = tx2.checkbox(f"IGTF ({igtf*100}%)", value=False)
+            p_banco = tx3.checkbox(f"Banco ({banco*100}%)", value=True, help="Comisión por uso de plataforma/banco")
 
         if st.form_submit_button("🚀 IMPACTAR INVENTARIO ATÓMICO"):
             if it_nombre and (monto_compra > 0 or gastos_bs > 0):
@@ -202,9 +203,11 @@ if menu == "📦 Inventario":
                 total_con_log = base_u + (gastos_bs / t_bcv)
                 
                 # 3. APLICAR TODOS LOS IMPUESTOS (IVA + IGTF + BANCO)
-                # Sumamos todos los porcentajes que tengas activos
+                # Aquí la lógica ya suma el banco si el checkbox está marcado
                 recargo_total = (iva if p_iva else 0) + (igtf if p_igtf else 0) + (banco if p_banco else 0)
                 costo_final = total_con_log * (1 + recargo_total)
+                
+                # ... sigue el resto de tu código igual
                 
                 c = conectar(); cur = c.cursor()
                 # ... (el resto del código de inserción sigue igual)
@@ -723,6 +726,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
