@@ -123,7 +123,7 @@ with st.sidebar:
         st.rerun()
 
 
-# --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL (CON PASAJE/DELIVERY) --- 
+# --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL --- 
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
     
@@ -149,22 +149,19 @@ if menu == "📦 Inventario":
         c2.metric("Total BCV", f"Bs {(valor_usd * t_bcv):,.2f}")
         c3.metric("Tasa Actual", f"{t_bcv} Bs")
         
-        # Alertas de Reposición
         alertas = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
         if not alertas.empty:
             st.error(f"⚠️ ¡ATENCIÓN! Tienes {len(alertas)} insumos bajo el mínimo.")
-        else:
-            st.success("✅ Stock saludable.")
     else:
         st.info("Inventario vacío. Registra tu primera compra.")
 
     st.divider()
 
-    # --- 📥 FORMULARIO DE ENTRADA CON LOGÍSTICA ---
-    st.subheader("📥 Registrar Entrada (Incluir Pasaje/Delivery)")
+    # --- 📥 FORMULARIO DE ENTRADA AUTOMATIZADO ---
+    st.subheader("📥 Registrar Entrada de Mercancía")
     it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"], key="u_medida_root")
 
-    with st.form("form_inventario_logistica_v1"):
+    with st.form("form_inventario_automatico"):
         col1, col2 = st.columns(2)
         
         with col1:
@@ -178,19 +175,14 @@ if menu == "📦 Inventario":
             it_minimo = st.number_input("Punto de Alerta (Mínimo)", min_value=0.0, value=5.0)
 
         with col2:
-            st.markdown("**💵 Costos y Pasajes**")
+            st.markdown("**💵 Costos y Logística**")
             it_cant_packs = st.number_input("Cantidad comprada", min_value=1, value=1)
             monto_compra = st.number_input("Precio pagado ($ o Bs)", min_value=0.0, format="%.2f")
             moneda_pago = st.radio("Moneda de Pago:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
-            # AQUÍ ESTÁ TU AJUSTE DE PASAJE
-            gastos_bs = st.number_input("Pasaje o Delivery en Bs", min_value=0.0, help="Se convertirá a $ y se sumará al costo")
+            gastos_bs = st.number_input("Pasaje o Delivery en Bs", min_value=0.0)
             
-            st.write("---")
-            st.write("**🛡️ Impuestos**")
-            tx1, tx2, tx3 = st.columns(3) # Añadimos una tercera columna
-            p_iva = tx1.checkbox(f"IVA ({iva*100}%)", value=True)
-            p_igtf = tx2.checkbox(f"IGTF ({igtf*100}%)", value=False)
-            p_banco = tx3.checkbox(f"Banco ({banco*100}%)", value=True, help="Comisión por uso de plataforma/banco")
+            # INFO DE IMPUESTOS (Para que sepas qué se está sumando)
+            st.caption(f"🛡️ **Impuestos Auto:** IVA ({iva*100}%) + IGTF ({igtf*100}%) + Banco ({banco*100}%)")
 
         if st.form_submit_button("🚀 IMPACTAR INVENTARIO ATÓMICO"):
             if it_nombre and (monto_compra > 0 or gastos_bs > 0):
@@ -199,18 +191,12 @@ if menu == "📦 Inventario":
                 elif "Binance" in moneda_pago: base_u = monto_compra / t_bin
                 else: base_u = monto_compra
                 
-                # 2. Sumar logística (pasaje) convertido a USD
+                # 2. Sumar logística (pasaje)
                 total_con_log = base_u + (gastos_bs / t_bcv)
                 
-                # 3. APLICAR TODOS LOS IMPUESTOS (IVA + IGTF + BANCO)
-                # Aquí la lógica ya suma el banco si el checkbox está marcado
-                recargo_total = (iva if p_iva else 0) + (igtf if p_igtf else 0) + (banco if p_banco else 0)
+                # 3. APLICACIÓN AUTOMÁTICA DE TODOS LOS IMPUESTOS
+                recargo_total = iva + igtf + banco
                 costo_final = total_con_log * (1 + recargo_total)
-                
-                # ... sigue el resto de tu código igual
-                
-                c = conectar(); cur = c.cursor()
-                # ... (el resto del código de inserción sigue igual)
                 
                 c = conectar(); cur = c.cursor()
                 if it_unid == "ml":
@@ -229,51 +215,43 @@ if menu == "📦 Inventario":
                                VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
                                precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
                              (it_nombre, it_cant_packs, it_unid, costo_u, it_minimo))
-                c.commit(); c.close(); st.success("✅ Inventario actualizado con éxito."); st.rerun()
+                
+                c.commit(); c.close(); st.success("✅ Inventario actualizado (Impuestos aplicados)."); st.rerun()
 
-    # --- 📋 AUDITORÍA Y AJUSTES ---
+    # --- 📋 AUDITORÍA DE ALMACÉN ---
     if not df_inv.empty:
         st.divider()
         st.subheader("📋 Auditoría de Almacén")
+        busc = st.text_input("🔍 Buscar material...", placeholder="Ej: Tinta")
         
-        # 1. Filtro de búsqueda
-        busc = st.text_input("🔍 Buscar material (Nombre)...", placeholder="Ej: Tinta")
-        
-        # 2. Preparar los datos para la tabla (Cálculos de moneda)
         df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
         
-        # Creamos las columnas de bolívares para la vista
+        # Cálculos de moneda para la vista
         df_f['Precio Bs (BCV)'] = df_f['precio_usd'] * t_bcv
         df_f['Inversión Total ($)'] = df_f['cantidad'] * df_f['precio_usd']
-        df_f['Inversión Total (Bs)'] = df_f['Inversión Total ($)'] * t_bcv
 
-        # 3. Mostrar la tabla profesional
         st.dataframe(
             df_f[['item', 'cantidad', 'unidad', 'precio_usd', 'Precio Bs (BCV)', 'Inversión Total ($)']], 
             column_config={
-                "item": "Insumo",
                 "precio_usd": st.column_config.NumberColumn("Precio Unit. $", format="$ %.4f"),
                 "Precio Bs (BCV)": st.column_config.NumberColumn("Precio Unit. Bs", format="Bs %.2f"),
                 "Inversión Total ($)": st.column_config.NumberColumn("Valor Inventario $", format="$ %.2f")
             },
-            use_container_width=True, 
-            hide_index=True
+            use_container_width=True, hide_index=True
         )
-
-        # --- AJUSTES RÁPIDOS ---
+        
+        # Ajustes y Eliminación (Igual que antes)
         col_a, col_b = st.columns(2)
         with col_a:
             with st.expander("🔧 Corregir Stock"):
                 it_aj = st.selectbox("Insumo:", df_f['item'].tolist(), key="sel_ajuste_real")
-                nueva_c = st.number_input("Cantidad Real en Almacén:", min_value=0.0, key="num_ajuste")
-                if st.button("🔄 Actualizar Cantidad", key="btn_ajuste_final"):
+                nueva_c = st.number_input("Cantidad Real:", min_value=0.0, key="num_ajuste")
+                if st.button("🔄 Actualizar", key="btn_ajuste_final"):
                     c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj)); c.commit(); c.close(); st.rerun()
-        
         with col_b:
-            with st.expander("🗑️ Eliminar Insumo"):
-                it_del = st.selectbox("Selecciona para borrar:", df_f['item'].tolist(), key="sel_del_real")
-                st.warning("Esta acción no se puede deshacer.")
-                if st.button("❌ Confirmar Eliminación", key="btn_del_final"):
+            with st.expander("🗑️ Eliminar"):
+                it_del = st.selectbox("Borrar de la base:", df_f['item'].tolist(), key="sel_del_real")
+                if st.button("❌ Eliminar", key="btn_del_final"):
                     c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close(); st.rerun()
 # --- 6. LÓGICA DE COTIZACIONES (VERSIÓN MAESTRA FINAL BLINDADA) ---
 elif menu == "📝 Cotizaciones":
@@ -750,6 +728,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
