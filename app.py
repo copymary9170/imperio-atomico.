@@ -193,14 +193,21 @@ if menu == "📦 Inventario":
 
         if st.form_submit_button("🚀 IMPACTAR INVENTARIO ATÓMICO"):
             if it_nombre and (monto_compra > 0 or gastos_bs > 0):
-                # Conversión de moneda base
+                # 1. Conversión de moneda base a USD
                 if "BCV" in moneda_pago: base_u = monto_compra / t_bcv
                 elif "Binance" in moneda_pago: base_u = monto_compra / t_bin
                 else: base_u = monto_compra
                 
-                # Sumar logística y aplicar impuestos
+                # 2. Sumar logística (pasaje) convertido a USD
                 total_con_log = base_u + (gastos_bs / t_bcv)
-                costo_final = total_con_log * (1 + (iva if p_iva else 0) + (igtf if p_igtf else 0))
+                
+                # 3. APLICAR TODOS LOS IMPUESTOS (IVA + IGTF + BANCO)
+                # Sumamos todos los porcentajes que tengas activos
+                recargo_total = (iva if p_iva else 0) + (igtf if p_igtf else 0) + (banco if p_banco else 0)
+                costo_final = total_con_log * (1 + recargo_total)
+                
+                c = conectar(); cur = c.cursor()
+                # ... (el resto del código de inserción sigue igual)
                 
                 c = conectar(); cur = c.cursor()
                 if it_unid == "ml":
@@ -716,6 +723,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
