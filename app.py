@@ -866,7 +866,7 @@ if menu == "💰 Ventas":
     if df_inv.empty:
         st.warning("⚠️ No puedes vender si no tienes nada en el Inventario. Registra insumos primero.")
     else:
-        with st.form("form_ventas_atomicas"):
+        with st.form("form_ventas_atomicas_unica", clear_on_submit=True):
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**📦 Detalles del Pedido**")
@@ -929,85 +929,6 @@ if menu == "💰 Ventas":
     except:
         st.info("El historial se creará con tu primera venta.")
     conn.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
