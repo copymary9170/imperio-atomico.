@@ -320,98 +320,7 @@ if menu == "📦 Inventario":
                     st.table(log)
                     
 
-# --- 5. MÓDULO DE VENTAS (CONTROL TOTAL DE SALIDAS Y GANANCIAS) ---
-elif menu == "💰 Ventas":
-    st.title("💰 Punto de Venta e Ingresos")
-    
-    # Refrescamos datos para asegurar que vemos el stock real
-    df_inv = st.session_state.df_inv
-    df_cli = st.session_state.df_cli
 
-    if df_cli.empty:
-        st.error("❌ No hay clientes registrados. Ve al módulo de Clientes primero.")
-        st.stop()
-
-    tab_v1, tab_v2 = st.tabs(["🛒 Nueva Venta Directa", "📈 Reporte de Ingresos"])
-
-    with tab_v1:
-        with st.form("registro_venta_total"):
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("### 👤 Cliente y Trabajo")
-                cliente_n = st.selectbox("Cliente:", df_cli['nombre'].tolist())
-                desc_trabajo = st.text_input("¿Qué estás vendiendo?", placeholder="Ej: 10 Agendas de Cuero")
-                pago_tipo = st.selectbox("Forma de Pago:", ["Efectivo $", "Pago Móvil", "Zelle", "Binance", "Transferencia Bs"])
-            
-            with c2:
-                st.markdown("### 💵 Montos")
-                precio_venta = st.number_input("Precio Final Cobrado ($)", min_value=0.0, format="%.2f")
-                items_usados = st.multiselect("Materiales consumidos en este trabajo:", df_inv['item'].tolist())
-
-            # --- DESGLOSE DE CONSUMO ---
-            dict_consumo = {}
-            costo_materiales_total = 0.0
-            
-            if items_usados:
-                st.divider()
-                st.caption("Indica la cantidad exacta usada para calcular tu ganancia real:")
-                cols_m = st.columns(len(items_usados))
-                for i, nombre_it in enumerate(items_usados):
-                    # Buscamos datos del item para el cálculo
-                    info_it = df_inv[df_inv['item'] == nombre_it].iloc[0]
-                    
-                    # Input de cantidad
-                    cant = cols_m[i].number_input(f"{nombre_it} ({info_it['unidad']})", min_value=0.0, step=0.1, key=f"v_{nombre_it}")
-                    dict_consumo[nombre_it] = {"id": info_it['id'], "cant": cant, "costo_u": info_it['precio_usd']}
-                    costo_materiales_total += (cant * info_it['precio_usd'])
-
-            st.divider()
-            # Cálculo de Ganancia en vivo
-            ganancia_estimada = precio_venta - costo_materiales_total
-            col_g1, col_g2 = st.columns(2)
-            col_g1.metric("Costo Materiales", f"$ {costo_materiales_total:,.2f}")
-            col_g2.metric("Ganancia Neta", f"$ {ganancia_estimada:,.2f}", delta_color="normal")
-
-            if st.form_submit_button("✅ COMPLETAR VENTA Y ACTUALIZAR STOCK"):
-                if desc_trabajo and precio_venta > 0:
-                    try:
-                        conn = conectar(); cur = conn.cursor()
-                        id_cliente = int(df_cli[df_cli['nombre'] == cliente_n]['id'].values[0])
-                        
-                        # 1. Registrar la Venta
-                        cur.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)", 
-                                    (id_cliente, precio_venta, pago_tipo))
-                        id_v = cur.lastrowid
-                        conn.commit()
-
-                        # 2. Descontar Inventario con el MOTOR (Seguridad Total)
-                        for n, datos in dict_consumo.items():
-                            if datos['cant'] > 0:
-                                ejecutar_movimiento_stock(
-                                    datos['id'], 
-                                    -datos['cant'], 
-                                    "SALIDA", 
-                                    motivo=f"Venta ID:{id_v} - {desc_trabajo}"
-                                )
-                        
-                        st.success(f"🎉 ¡Venta Exitosa! Ganancia neta: ${ganancia_estimada:,.2f}")
-                        cargar_datos_seguros()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error al procesar: {e}")
-                else:
-                    st.warning("Escribe una descripción y el precio de venta.")
-
-    with tab_v2:
-        st.subheader("📋 Registro Histórico")
-        conn = conectar()
-        df_h = pd.read_sql("""
-            SELECT v.id, v.fecha, c.nombre as Cliente, v.monto_total as 'Total $', v.metodo_pago
-            FROM ventas v JOIN clientes c ON v.cliente_id = c.id
-            ORDER BY v.id DESC LIMIT 50
-        """, conn)
-        conn.close()
-        st.dataframe(df_h, use_container_width=True, hide_index=True)
             
 # --- 6. DASHBOARD FINANCIERO PROFESIONAL ---
 elif menu == "📊 Dashboard":
@@ -899,4 +808,5 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
