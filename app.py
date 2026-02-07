@@ -217,54 +217,85 @@ if menu == "📦 Inventario":
                              (it_nombre, it_cant_packs, it_unid, costo_u, it_minimo))
                 c.commit(); c.close(); st.success("✅ Guardado."); st.rerun()
 
-    # --- 📋 AUDITORÍA CON SELECTOR DE MONEDA ---
+    # --- 📋 AUDITORÍA CON SELECTOR DE MONEDA DINÁMICO ---
     if not df_inv.empty:
         st.divider()
         st.subheader("📋 Auditoría de Almacén")
         
-        # SELECTOR DE VISTA
-        modo_ver = st.radio("Visualizar precios en:", ["Dólares ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
-        busc = st.text_input("🔍 Buscar material...")
+        # Selector de Moneda para el reporte
+        modo_ver = st.radio(
+            "Visualizar costos y totales en:", 
+            ["Dólares ($)", "BCV (Bs)", "Binance (Bs)"], 
+            horizontal=True,
+            help="Cambia la tasa de visualización para auditar según el mercado oficial o paralelo."
+        )
         
+        busc = st.text_input("🔍 Buscar material en existencia...", placeholder="Ej: Resma, Cian, etc.")
+        
+        # Filtro de búsqueda
         df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
         
-        # Lógica de conversión según el selector
+        # Lógica de conversión dinámica para la tabla
         if "BCV" in modo_ver:
             tasa_v = t_bcv
             simbolo = "Bs"
+            formato_p = "Bs %.4f"
+            formato_t = "Bs %.2f"
         elif "Binance" in modo_ver:
             tasa_v = t_bin
             simbolo = "Bs (Bin)"
+            formato_p = "Bs %.4f"
+            formato_t = "Bs %.2f"
         else:
             tasa_v = 1.0
             simbolo = "$"
+            formato_p = "$ %.4f"
+            formato_t = "$ %.2f"
 
+        # Aplicamos la conversión a las columnas de vista
         df_f['Precio Unit.'] = df_f['precio_usd'] * tasa_v
-        df_f['Total Inversión'] = (df_f['cantidad'] * df_f['precio_usd']) * tasa_v
+        df_f['Inversión Total'] = (df_f['cantidad'] * df_f['precio_usd']) * tasa_v
 
+        # Renderizado de la Tabla Profesional
         st.dataframe(
-            df_f[['item', 'cantidad', 'unidad', 'Precio Unit.', 'Total Inversión']], 
+            df_f[['item', 'cantidad', 'unidad', 'Precio Unit.', 'Inversión Total']], 
             column_config={
                 "item": "Insumo",
-                "Precio Unit.": st.column_config.NumberColumn(f"Costo {simbolo}", format=f"{simbolo} %.4f"),
-                "Total Inversión": st.column_config.NumberColumn(f"Total {simbolo}", format=f"{simbolo} %.2f")
+                "cantidad": "Existencia",
+                "unidad": "Medida",
+                "Precio Unit.": st.column_config.NumberColumn(f"Costo Unit. ({simbolo})", format=formato_p),
+                "Inversión Total": st.column_config.NumberColumn(f"Valor en Almacén ({simbolo})", format=formato_t)
             },
-            use_container_width=True, hide_index=True
+            use_container_width=True, 
+            hide_index=True
         )
 
-        # Controles de edición (Igual que antes)
+        # --- PANEL DE AJUSTES RÁPIDOS ---
+        st.write("🔧 **Operaciones de Inventario**")
         col_a, col_b = st.columns(2)
+        
         with col_a:
-            with st.expander("🔧 Corregir Stock"):
-                it_aj = st.selectbox("Insumo:", df_f['item'].tolist(), key="sel_aj")
-                nueva_c = st.number_input("Cantidad Real:", min_value=0.0)
-                if st.button("🔄 Actualizar"):
-                    c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj)); c.commit(); c.close(); st.rerun()
+            with st.expander("📝 Corregir Stock (Ajuste Manual)"):
+                it_aj = st.selectbox("Insumo a corregir:", df_f['item'].tolist(), key="sel_aj")
+                nueva_c = st.number_input("Cantidad física real en estante:", min_value=0.0, key="num_aj")
+                if st.button("🔄 Confirmar Ajuste", use_container_width=True):
+                    c = conectar()
+                    c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj))
+                    c.commit()
+                    c.close()
+                    st.success(f"Stock de {it_aj} actualizado.")
+                    st.rerun()
+                    
         with col_b:
-            with st.expander("🗑️ Eliminar"):
-                it_del = st.selectbox("Borrar:", df_f['item'].tolist(), key="sel_del")
-                if st.button("❌ Eliminar"):
-                    c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close(); st.rerun()
+            with st.expander("🗑️ Eliminar Insumo Definitivamente"):
+                it_del = st.selectbox("Insumo a borrar:", df_f['item'].tolist(), key="sel_del")
+                st.warning("Esto borrará el registro y su historial de precios.")
+                if st.button("❌ Eliminar Registro", use_container_width=True):
+                    c = conectar()
+                    c.execute("DELETE FROM inventario WHERE item=?", (it_del,))
+                    c.commit()
+                    c.close()
+                    st.rerun()
                     
 
 # --- 6. LÓGICA DE COTIZACIONES (VERSIÓN MAESTRA FINAL BLINDADA) ---
@@ -742,6 +773,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
