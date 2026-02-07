@@ -151,17 +151,17 @@ if menu == "📦 Inventario":
         
         alertas = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
         if not alertas.empty:
-            st.error(f"⚠️ ¡ATENCIÓN! Tienes {len(alertas)} insumos bajo el mínimo.")
+            st.error(f"⚠️ Tienes {len(alertas)} insumos bajo el mínimo.")
     else:
-        st.info("Inventario vacío. Registra tu primera compra.")
+        st.info("Inventario vacío.")
 
     st.divider()
 
-    # --- 📥 FORMULARIO DE ENTRADA AUTOMATIZADO ---
+    # --- 📥 FORMULARIO DE ENTRADA (TOTALMENTE MANUAL) ---
     st.subheader("📥 Registrar Entrada de Mercancía")
     it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"], key="u_medida_root")
 
-    with st.form("form_inventario_automatico"):
+    with st.form("form_inventario_manual_final"):
         col1, col2 = st.columns(2)
         
         with col1:
@@ -177,14 +177,19 @@ if menu == "📦 Inventario":
         with col2:
             st.markdown("**💵 Costos y Logística**")
             it_cant_packs = st.number_input("Cantidad comprada", min_value=1, value=1)
-            monto_compra = st.number_input("Precio pagado ($ o Bs)", min_value=0.0, format="%.2f")
+            monto_compra = st.number_input("Precio pagado (Total compra)", min_value=0.0, format="%.2f")
             moneda_pago = st.radio("Moneda de Pago:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
             gastos_bs = st.number_input("Pasaje o Delivery en Bs", min_value=0.0)
             
-            # INFO DE IMPUESTOS (Para que sepas qué se está sumando)
-            st.caption(f"🛡️ **Impuestos Auto:** IVA ({iva*100}%) + IGTF ({igtf*100}%) + Banco ({banco*100}%)")
+            st.write("---")
+            st.markdown("**🛡️ ¿Qué impuestos aplicar a esta compra?**")
+            tx1, tx2, tx3 = st.columns(3)
+            # Aquí tú decides manualmente qué marcar
+            p_iva = tx1.checkbox(f"IVA ({iva*100}%)", value=False)
+            p_igtf = tx2.checkbox(f"IGTF ({igtf*100}%)", value=False)
+            p_banco = tx3.checkbox(f"Banco ({banco*100}%)", value=False)
 
-        if st.form_submit_button("🚀 IMPACTAR INVENTARIO ATÓMICO"):
+        if st.form_submit_button("🚀 IMPACTAR INVENTARIO"):
             if it_nombre and (monto_compra > 0 or gastos_bs > 0):
                 # 1. Conversión de moneda base a USD
                 if "BCV" in moneda_pago: base_u = monto_compra / t_bcv
@@ -194,9 +199,9 @@ if menu == "📦 Inventario":
                 # 2. Sumar logística (pasaje)
                 total_con_log = base_u + (gastos_bs / t_bcv)
                 
-                # 3. APLICACIÓN AUTOMÁTICA DE TODOS LOS IMPUESTOS
-                recargo_total = iva + igtf + banco
-                costo_final = total_con_log * (1 + recargo_total)
+                # 3. LÓGICA MANUAL: Solo suma lo que TÚ marcaste
+                recargo_manual = (iva if p_iva else 0) + (igtf if p_igtf else 0) + (banco if p_banco else 0)
+                costo_final = total_con_log * (1 + recargo_manual)
                 
                 c = conectar(); cur = c.cursor()
                 if it_unid == "ml":
@@ -216,31 +221,32 @@ if menu == "📦 Inventario":
                                precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
                              (it_nombre, it_cant_packs, it_unid, costo_u, it_minimo))
                 
-                c.commit(); c.close(); st.success("✅ Inventario actualizado (Impuestos aplicados)."); st.rerun()
+                c.commit(); c.close(); st.success("✅ Guardado con tus ajustes manuales."); st.rerun()
 
-    # --- 📋 AUDITORÍA DE ALMACÉN ---
+    # --- 📋 AUDITORÍA CON PRECIOS EN DOS MONEDAS ---
     if not df_inv.empty:
         st.divider()
         st.subheader("📋 Auditoría de Almacén")
-        busc = st.text_input("🔍 Buscar material...", placeholder="Ej: Tinta")
+        busc = st.text_input("🔍 Buscar material...")
         
         df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
         
-        # Cálculos de moneda para la vista
-        df_f['Precio Bs (BCV)'] = df_f['precio_usd'] * t_bcv
-        df_f['Inversión Total ($)'] = df_f['cantidad'] * df_f['precio_usd']
+        # Cálculos para la visualización (No afectan la DB, solo para que tú los veas)
+        df_f['Precio Unit. Bs'] = df_f['precio_usd'] * t_bcv
+        df_f['Valor Total $'] = df_f['cantidad'] * df_f['precio_usd']
 
         st.dataframe(
-            df_f[['item', 'cantidad', 'unidad', 'precio_usd', 'Precio Bs (BCV)', 'Inversión Total ($)']], 
+            df_f[['item', 'cantidad', 'unidad', 'precio_usd', 'Precio Unit. Bs', 'Valor Total $']], 
             column_config={
-                "precio_usd": st.column_config.NumberColumn("Precio Unit. $", format="$ %.4f"),
-                "Precio Bs (BCV)": st.column_config.NumberColumn("Precio Unit. Bs", format="Bs %.2f"),
-                "Inversión Total ($)": st.column_config.NumberColumn("Valor Inventario $", format="$ %.2f")
+                "item": "Nombre del Insumo",
+                "cantidad": "Stock Actual",
+                "precio_usd": st.column_config.NumberColumn("Costo $", format="$ %.4f"),
+                "Precio Unit. Bs": st.column_config.NumberColumn("Costo Bs", format="Bs %.2f"),
+                "Valor Total $": st.column_config.NumberColumn("Inversión $", format="$ %.2f")
             },
             use_container_width=True, hide_index=True
         )
         
-        # Ajustes y Eliminación (Igual que antes)
         col_a, col_b = st.columns(2)
         with col_a:
             with st.expander("🔧 Corregir Stock"):
@@ -253,6 +259,8 @@ if menu == "📦 Inventario":
                 it_del = st.selectbox("Borrar de la base:", df_f['item'].tolist(), key="sel_del_real")
                 if st.button("❌ Eliminar", key="btn_del_final"):
                     c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close(); st.rerun()
+                    
+
 # --- 6. LÓGICA DE COTIZACIONES (VERSIÓN MAESTRA FINAL BLINDADA) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
@@ -728,6 +736,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
