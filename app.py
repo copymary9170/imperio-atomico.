@@ -6,7 +6,7 @@ from PIL import Image
 import numpy as np
 import io
 
-# --- 1. MOTOR DE BASE DE DATOS PROFESIONAL ---
+# --- 1. MOTOR DE BASE DE DATOS Y ARQUITECTURA ---
 def conectar():
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
@@ -15,7 +15,7 @@ def inicializar_sistema():
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     
-    # Crear tablas principales
+    # Tablas Principales
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
@@ -23,10 +23,20 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente_id INTEGER, trabajo TEXT, monto_usd REAL, estado TEXT, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
     c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo_pago TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
     c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-    
-    # Tabla de Usuarios
     c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
     
+    # TABLA DE AUDITORÍA (Crucial para el control real)
+    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    item_id INTEGER, 
+                    tipo TEXT, 
+                    cantidad REAL, 
+                    motivo TEXT, 
+                    usuario TEXT,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(item_id) REFERENCES inventario(id))''')
+
+    # Usuarios iniciales
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         usuarios_iniciales = [
@@ -48,38 +58,65 @@ def inicializar_sistema():
     conn.commit()
     conn.close()
 
-def migrar_base_datos():
+# --- MOTOR DE INVENTARIO (EL CEREBRO QUE EVITA ERRORES) ---
+def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo="Ajuste Manual"):
+    """
+    Controla que no haya stock negativo y anota el movimiento.
+    cantidad_cambio: Positivo para sumar, Negativo para restar.
+    """
     conn = conectar()
-    c = conn.cursor()
     try:
-        c.execute("ALTER TABLE cotizaciones ADD COLUMN cliente_id INTEGER")
-    except: pass
-    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    conn.commit()
+        cur = conn.cursor()
+        cur.execute("BEGIN TRANSACTION")
+        
+        # Validar existencia
+        cur.execute("SELECT cantidad, item FROM inventario WHERE id = ?", (item_id,))
+        res = cur.fetchone()
+        if not res: raise ValueError("El producto no existe.")
+        
+        stock_actual, nombre = res
+        nuevo_stock = stock_actual + cantidad_cambio
+        
+        # Bloqueo de seguridad: No permite negativos
+        if nuevo_stock < 0:
+            raise ValueError(f"No hay suficiente {nombre}. Tienes {stock_actual} y pides {abs(cantidad_cambio)}.")
+
+        # Actualizar Inventario
+        cur.execute("UPDATE inventario SET cantidad = ? WHERE id = ?", (nuevo_stock, item_id))
+
+        # Registrar Auditoría
+        user = st.session_state.get('usuario_nombre', 'Sistema')
+        cur.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES (?,?,?,?,?)",
+                    (item_id, tipo_mov, cantidad_cambio, motivo, user))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+def cargar_datos_seguros():
+    """Mantiene los datos frescos en todo el sistema"""
+    conn = conectar()
+    st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
+    st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
     conn.close()
 
-# --- EJECUCIÓN INICIAL ---
+# --- INICIO DEL SISTEMA ---
 inicializar_sistema()
-migrar_base_datos()
-
-# --- 2. CONFIGURACIÓN DE STREAMLIT ---
-st.set_page_config(page_title="Imperio Atómico - Sistema Pro", layout="wide")
-
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
 
+# --- LOGIN (Simplificado y Funcional) ---
 if not st.session_state.autenticado:
+    st.set_page_config(page_title="Acceso - Imperio", layout="centered")
     st.title("🔐 Acceso al Imperio Atómico")
-    with st.form("login_form"):
+    with st.form("login"):
         u = st.text_input("Usuario")
         p = st.text_input("Clave", type="password")
         if st.form_submit_button("Entrar"):
-            if u == "jefa" and p == "atomica2026": # Bypass de emergencia
-                st.session_state.autenticado = True
-                st.session_state.rol = "Admin"
-                st.session_state.usuario_nombre = "Dueña del Imperio"
-                st.rerun()
-            
             conn = conectar()
             res = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", conn, params=(u, p))
             conn.close()
@@ -87,20 +124,24 @@ if not st.session_state.autenticado:
                 st.session_state.autenticado = True
                 st.session_state.rol = res.iloc[0]['rol']
                 st.session_state.usuario_nombre = res.iloc[0]['nombre']
+                cargar_datos_seguros()
                 st.rerun()
             else:
-                st.error("Credenciales incorrectas")
+                st.error("Usuario o clave incorrecta")
     st.stop()
 
-# --- 3. CARGA DE DATOS Y VARIABLES ---
+# --- SI ESTÁ AUTENTICADO, CARGAMOS EL RESTO ---
+st.set_page_config(page_title="Imperio Atómico - ERP", layout="wide")
+cargar_datos_seguros() # Datos frescos en cada recarga
 ROL = st.session_state.rol
+
+# Carga de tasas para el sidebar
 conn = conectar()
 conf = pd.read_sql_query("SELECT * FROM configuracion", conn).set_index('parametro')
 t_bcv = round(float(conf.loc['tasa_bcv', 'valor']), 2)
 t_bin = round(float(conf.loc['tasa_binance', 'valor']), 2)
 iva, igtf, banco = conf.loc['iva_perc', 'valor'], conf.loc['igtf_perc', 'valor'], conf.loc['banco_perc', 'valor']
 conn.close()
-
 # --- 3. MENÚ LATERAL FILTRADO ---
 with st.sidebar:
     st.header(f"👋 Hola, {st.session_state.usuario_nombre}")
@@ -914,4 +955,5 @@ if menu == "💰 Ventas":
     df_h = pd.read_sql_query(query_historial, conn)
     st.dataframe(df_h, use_container_width=True, hide_index=True)
     conn.close()
+
 
