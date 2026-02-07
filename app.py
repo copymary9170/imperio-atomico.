@@ -107,12 +107,16 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     
     # Filtro de opciones según ROL
-    opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"] # Todas ven esto
+    opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"] # Todos ven esto
     
     if ROL == "Admin":
-        opciones += ["📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración"]
+        # Añadimos Ventas al Admin
+        opciones += ["💰 Ventas", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración"]
+    
     elif ROL == "Administracion":
-        opciones += ["📊 Dashboard", "⚙️ Configuración"]
+        # Añadimos Ventas a Administración
+        opciones += ["💰 Ventas", "📊 Dashboard", "⚙️ Configuración"]
+    
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
@@ -121,7 +125,6 @@ with st.sidebar:
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
-
 
 # --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL --- 
 if menu == "📦 Inventario":
@@ -926,6 +929,7 @@ if menu == "💰 Ventas":
     except:
         st.info("El historial se creará con tu primera venta.")
     conn.close()
+
 
 
 
