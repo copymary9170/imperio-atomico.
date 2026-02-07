@@ -854,12 +854,11 @@ if menu == "💰 Ventas":
         st.info("El historial se creará con tu primera venta.")
     conn.close() 
 
-# --- 5. MÓDULO DE VENTAS: IMPACTO MULTI-MATERIAL ---
+# --- 5. MÓDULO DE VENTAS: ENFOQUE MULTI-TINTA ---
 if menu == "💰 Ventas":
-    st.title("💰 Registro de Ventas e Insumos")
+    st.title("💰 Registro de Ventas")
     
     conn = conectar()
-    # Cargamos el inventario actual
     df_inv = pd.read_sql_query("SELECT item, cantidad, unidad FROM inventario WHERE cantidad > 0", conn)
     conn.close()
 
@@ -867,75 +866,67 @@ if menu == "💰 Ventas":
         st.session_state.carrito_insumos = []
 
     # --- 1. DATOS DEL PEDIDO ---
-    with st.expander("👤 Información del Cliente y Pago", expanded=True):
+    with st.expander("👤 Cliente y Pago", expanded=True):
         c1, c2 = st.columns(2)
         cliente = c1.text_input("Cliente")
-        pedido_desc = c1.text_area("Descripción (Ej: Impresión full color)")
+        pedido_desc = c1.text_area("Descripción del trabajo")
         monto_v = c2.number_input("Monto Cobrado", min_value=0.0, format="%.2f")
         moneda_v = c2.radio("Moneda:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
 
     st.divider()
 
-    # --- 2. CARGA RÁPIDA DE INSUMOS ---
-    st.subheader("📦 Carga de Materiales Gastados")
+    # --- 2. ACCIÓN RÁPIDA: LAS 4 TINTAS DE UN SOLO GOLPE ---
+    st.subheader("🎨 Descontar Kit de Tintas 580w")
+    st.markdown("Escribe cuánto gastaste y presiona el botón para cargar las 4 automáticamente.")
     
-    # SECCIÓN MÁGICA PARA TUS TINTAS 580W
-    st.info("💡 Usa este botón para descontar los 4 colores (CMYK) al mismo tiempo.")
-    col_cmyk, col_v_cmyk = st.columns([2, 1])
+    col_ml, col_btn_cmyk = st.columns([2, 2])
+    ml_gasto = col_ml.number_input("ml gastados de CADA color:", min_value=0.0, step=0.1, format="%.1f")
     
-    cant_cmyk = col_cmyk.number_input("ml a descontar de CADA tinta (Negro, Magenta, Cian, Yellow):", min_value=0.0, step=0.1, key="cmyk_val")
-    
-    if col_v_cmyk.button("🎨 AGREGAR LAS 4 TINTAS", use_container_width=True):
-        # Nombres exactos que tienes en tu inventario según tus fotos
-        colores_580w = ["negro", "magenta", "cian", "yellow"]
-        encontrados = 0
+    if col_btn_cmyk.button("🚀 CARGAR LAS 4 TINTAS (CMYK)", use_container_width=True):
+        # Buscamos tus tintas específicas 580w
+        colores = ["negro", "magenta", "cian", "yellow"]
+        items_encontrados = []
         
-        for col in colores_580w:
-            # Buscamos la tinta que contenga "580w" y el color
-            for item_inv in df_inv['item'].tolist():
-                if "580w" in item_inv.lower() and col in item_inv.lower():
-                    st.session_state.carrito_insumos.append({
-                        "item": item_inv,
-                        "cantidad": cant_cmyk,
-                        "unidad": "ml"
-                    })
-                    encontrados += 1
+        for col in colores:
+            for item in df_inv['item'].tolist():
+                if "580w" in item.lower() and col in item.lower():
+                    items_encontrados.append({"item": item, "cantidad": ml_gasto, "unidad": "ml"})
                     break
         
-        if encontrados == 4:
-            st.success("✅ Se añadieron los 4 colores a la lista.")
+        if len(items_encontrados) >= 1:
+            st.session_state.carrito_insumos.extend(items_encontrados)
+            st.success(f"✅ Se añadieron {len(items_encontrados)} tintas a la lista.")
+            st.rerun()
         else:
-            st.warning(f"Se encontraron {encontrados} de 4 tintas. Verifica los nombres en Inventario.")
+            st.error("No encontré las tintas '580w' en el inventario. Revisa los nombres.")
 
-    st.write("---")
-    
-    # AGREGADOR MANUAL (Para papel u otros materiales)
-    st.write("¿Gastaste algo más? (Papel, Vinil, etc.)")
-    col_ins, col_cant, col_btn = st.columns([3, 2, 1])
-    insumo_sel = col_ins.selectbox("Seleccionar otro material:", df_inv['item'].tolist(), key="sel_manual")
-    unidad_m = df_inv[df_inv['item'] == insumo_sel]['unidad'].values[0]
-    cant_v = col_cant.number_input(f"Cantidad ({unidad_m})", min_value=0.0, step=0.01, key="cant_indiv")
-    
-    if col_btn.button("➕ Añadir", use_container_width=True):
-        if cant_v > 0:
-            st.session_state.carrito_insumos.append({"item": insumo_sel, "cantidad": cant_v, "unidad": unidad_m})
+    st.divider()
+
+    # --- 3. OTROS MATERIALES (Solo si necesitas algo más que tinta) ---
+    with st.expander("➕ Añadir otro material (Papel, Vinil, etc.)"):
+        col_it, col_ca, col_ad = st.columns([3, 1, 1])
+        insumo_otro = col_it.selectbox("Selecciona material extra:", df_inv['item'].tolist())
+        unidad_otro = df_inv[df_inv['item'] == insumo_otro]['unidad'].values[0]
+        cant_otro = col_ca.number_input(f"Cant. ({unidad_otro})", min_value=0.0)
+        if col_ad.button("Añadir Extra"):
+            st.session_state.carrito_insumos.append({"item": insumo_otro, "cantidad": cant_otro, "unidad": unidad_otro})
             st.rerun()
 
-    # --- 3. RESUMEN Y PROCESAMIENTO ---
+    # --- 4. LISTA DE VERIFICACIÓN Y ENVÍO ---
     if st.session_state.carrito_insumos:
-        st.subheader("📝 Lista de materiales a descontar:")
-        # Mostramos la lista para que estés segura antes de guardar
+        st.subheader("📋 Resumen de materiales a descontar")
+        # Mostramos lo que se va a restar
         for i, it in enumerate(st.session_state.carrito_insumos):
-            st.text(f"• {it['item']}: {it['cantidad']} {it['unidad']}")
+            st.markdown(f"**- {it['item']}:** {it['cantidad']} {it['unidad']}")
         
-        c_del, c_proc = st.columns(2)
-        if c_del.button("🗑️ Borrar lista y empezar de nuevo", use_container_width=True):
+        c_borrar, c_enviar = st.columns(2)
+        if c_borrar.button("🗑️ Limpiar Todo"):
             st.session_state.carrito_insumos = []
             st.rerun()
 
-        if c_proc.button("🚀 CONFIRMAR VENTA Y RESTAR STOCK", type="primary", use_container_width=True):
+        if c_enviar.button("✅ PROCESAR VENTA FINAL", type="primary", use_container_width=True):
             if cliente and monto_v > 0:
-                # Conversión a USD
+                # Conversión USD
                 if "BCV" in moneda_v: m_usd = monto_v / t_bcv
                 elif "Binance" in moneda_v: m_usd = monto_v / t_bin
                 else: m_usd = monto_v
@@ -945,22 +936,24 @@ if menu == "💰 Ventas":
                     from datetime import datetime
                     fecha_h = datetime.now().strftime("%d/%m/%Y %H:%M")
                     
-                    for mat in st.session_state.carrito_insumos:
-                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (mat['cantidad'], mat['item']))
-                        
+                    for m in st.session_state.carrito_insumos:
+                        # 1. Restar del stock
+                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (m['cantidad'], m['item']))
+                        # 2. Guardar registro
                         cur.execute("""CREATE TABLE IF NOT EXISTS ventas 
                                       (id INTEGER PRIMARY KEY, fecha TEXT, cliente TEXT, pedido TEXT, monto_usd REAL, material TEXT, gasto REAL)""")
                         cur.execute("INSERT INTO ventas (fecha, cliente, pedido, monto_usd, material, gasto) VALUES (?,?,?,?,?,?)",
-                                   (fecha_h, cliente, pedido_desc, m_usd, mat['item'], mat['cantidad']))
+                                   (fecha_h, cliente, pedido_desc, m_usd, m['item'], m['cantidad']))
                     
                     c.commit()
                     st.session_state.carrito_insumos = []
-                    st.success("✅ ¡Venta registrada y las 4 tintas descontadas!")
+                    st.success("🎉 ¡Listo! Se descontó todo el material de un solo golpe.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
                 finally:
                     c.close()
+
 
 
 
