@@ -157,11 +157,11 @@ if menu == "📦 Inventario":
 
     st.divider()
 
-    # --- 📥 FORMULARIO DE ENTRADA (TOTALMENTE MANUAL) ---
+    # --- 📥 FORMULARIO DE ENTRADA (MANUAL) ---
     st.subheader("📥 Registrar Entrada de Mercancía")
     it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"], key="u_medida_root")
 
-    with st.form("form_inventario_manual_final"):
+    with st.form("form_inventario_manual"):
         col1, col2 = st.columns(2)
         
         with col1:
@@ -177,31 +177,26 @@ if menu == "📦 Inventario":
         with col2:
             st.markdown("**💵 Costos y Logística**")
             it_cant_packs = st.number_input("Cantidad comprada", min_value=1, value=1)
-            monto_compra = st.number_input("Precio pagado (Total compra)", min_value=0.0, format="%.2f")
+            monto_compra = st.number_input("Precio pagado (Total)", min_value=0.0, format="%.2f")
             moneda_pago = st.radio("Moneda de Pago:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
             gastos_bs = st.number_input("Pasaje o Delivery en Bs", min_value=0.0)
             
             st.write("---")
-            st.markdown("**🛡️ ¿Qué impuestos aplicar a esta compra?**")
+            st.markdown("**🛡️ Impuestos Manuales**")
             tx1, tx2, tx3 = st.columns(3)
-            # Aquí tú decides manualmente qué marcar
-            p_iva = tx1.checkbox(f"IVA ({iva*100}%)", value=False)
-            p_igtf = tx2.checkbox(f"IGTF ({igtf*100}%)", value=False)
-            p_banco = tx3.checkbox(f"Banco ({banco*100}%)", value=False)
+            p_iva = tx1.checkbox(f"IVA", value=False)
+            p_igtf = tx2.checkbox(f"IGTF", value=False)
+            p_banco = tx3.checkbox(f"Banco", value=False)
 
         if st.form_submit_button("🚀 IMPACTAR INVENTARIO"):
             if it_nombre and (monto_compra > 0 or gastos_bs > 0):
-                # 1. Conversión de moneda base a USD
                 if "BCV" in moneda_pago: base_u = monto_compra / t_bcv
                 elif "Binance" in moneda_pago: base_u = monto_compra / t_bin
                 else: base_u = monto_compra
                 
-                # 2. Sumar logística (pasaje)
                 total_con_log = base_u + (gastos_bs / t_bcv)
-                
-                # 3. LÓGICA MANUAL: Solo suma lo que TÚ marcaste
-                recargo_manual = (iva if p_iva else 0) + (igtf if p_igtf else 0) + (banco if p_banco else 0)
-                costo_final = total_con_log * (1 + recargo_manual)
+                recargo = (iva if p_iva else 0) + (igtf if p_igtf else 0) + (banco if p_banco else 0)
+                costo_final = total_con_log * (1 + recargo)
                 
                 c = conectar(); cur = c.cursor()
                 if it_unid == "ml":
@@ -220,44 +215,55 @@ if menu == "📦 Inventario":
                                VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
                                precio_usd=excluded.precio_usd, cantidad=cantidad+excluded.cantidad, minimo=excluded.minimo""", 
                              (it_nombre, it_cant_packs, it_unid, costo_u, it_minimo))
-                
-                c.commit(); c.close(); st.success("✅ Guardado con tus ajustes manuales."); st.rerun()
+                c.commit(); c.close(); st.success("✅ Guardado."); st.rerun()
 
-    # --- 📋 AUDITORÍA CON PRECIOS EN DOS MONEDAS ---
+    # --- 📋 AUDITORÍA CON SELECTOR DE MONEDA ---
     if not df_inv.empty:
         st.divider()
         st.subheader("📋 Auditoría de Almacén")
+        
+        # SELECTOR DE VISTA
+        modo_ver = st.radio("Visualizar precios en:", ["Dólares ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
         busc = st.text_input("🔍 Buscar material...")
         
         df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
         
-        # Cálculos para la visualización (No afectan la DB, solo para que tú los veas)
-        df_f['Precio Unit. Bs'] = df_f['precio_usd'] * t_bcv
-        df_f['Valor Total $'] = df_f['cantidad'] * df_f['precio_usd']
+        # Lógica de conversión según el selector
+        if "BCV" in modo_ver:
+            tasa_v = t_bcv
+            simbolo = "Bs"
+        elif "Binance" in modo_ver:
+            tasa_v = t_bin
+            simbolo = "Bs (Bin)"
+        else:
+            tasa_v = 1.0
+            simbolo = "$"
+
+        df_f['Precio Unit.'] = df_f['precio_usd'] * tasa_v
+        df_f['Total Inversión'] = (df_f['cantidad'] * df_f['precio_usd']) * tasa_v
 
         st.dataframe(
-            df_f[['item', 'cantidad', 'unidad', 'precio_usd', 'Precio Unit. Bs', 'Valor Total $']], 
+            df_f[['item', 'cantidad', 'unidad', 'Precio Unit.', 'Total Inversión']], 
             column_config={
-                "item": "Nombre del Insumo",
-                "cantidad": "Stock Actual",
-                "precio_usd": st.column_config.NumberColumn("Costo $", format="$ %.4f"),
-                "Precio Unit. Bs": st.column_config.NumberColumn("Costo Bs", format="Bs %.2f"),
-                "Valor Total $": st.column_config.NumberColumn("Inversión $", format="$ %.2f")
+                "item": "Insumo",
+                "Precio Unit.": st.column_config.NumberColumn(f"Costo {simbolo}", format=f"{simbolo} %.4f"),
+                "Total Inversión": st.column_config.NumberColumn(f"Total {simbolo}", format=f"{simbolo} %.2f")
             },
             use_container_width=True, hide_index=True
         )
-        
+
+        # Controles de edición (Igual que antes)
         col_a, col_b = st.columns(2)
         with col_a:
             with st.expander("🔧 Corregir Stock"):
-                it_aj = st.selectbox("Insumo:", df_f['item'].tolist(), key="sel_ajuste_real")
-                nueva_c = st.number_input("Cantidad Real:", min_value=0.0, key="num_ajuste")
-                if st.button("🔄 Actualizar", key="btn_ajuste_final"):
+                it_aj = st.selectbox("Insumo:", df_f['item'].tolist(), key="sel_aj")
+                nueva_c = st.number_input("Cantidad Real:", min_value=0.0)
+                if st.button("🔄 Actualizar"):
                     c = conectar(); c.execute("UPDATE inventario SET cantidad=? WHERE item=?", (nueva_c, it_aj)); c.commit(); c.close(); st.rerun()
         with col_b:
             with st.expander("🗑️ Eliminar"):
-                it_del = st.selectbox("Borrar de la base:", df_f['item'].tolist(), key="sel_del_real")
-                if st.button("❌ Eliminar", key="btn_del_final"):
+                it_del = st.selectbox("Borrar:", df_f['item'].tolist(), key="sel_del")
+                if st.button("❌ Eliminar"):
                     c = conectar(); c.execute("DELETE FROM inventario WHERE item=?", (it_del,)); c.commit(); c.close(); st.rerun()
                     
 
@@ -736,6 +742,7 @@ elif menu == "🛠️ Otros Procesos":
             c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
             
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+
 
 
 
