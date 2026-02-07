@@ -775,8 +775,157 @@ elif menu == "🛠️ Otros Procesos":
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
 
 
+# --- 5. MÓDULO DE VENTAS: REGISTRO Y DESCUENTO DE STOCK ---
+if menu == "💰 Ventas":
+    st.title("💰 Registro de Ventas")
+    st.markdown("Registra tus pedidos aquí para descontar materiales y llevar tu control de ingresos.")
 
+    conn = conectar()
+    df_inv = pd.read_sql_query("SELECT * FROM inventario WHERE cantidad > 0", conn)
+    conn.close()
 
+    if df_inv.empty:
+        st.warning("⚠️ No puedes vender si no tienes nada en el Inventario. Registra insumos primero.")
+    else:
+        with st.form("form_ventas_atomicas"):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**📦 Detalles del Pedido**")
+                cliente = st.text_input("Nombre del Cliente")
+                pedido = st.text_area("¿Qué estás vendiendo?", placeholder="Ej: 20 Libretas personalizadas", height=100)
+            
+            with c2:
+                st.markdown("**💵 Cobro Realizado**")
+                monto_v = st.number_input("Monto Total", min_value=0.0, format="%.2f")
+                moneda_v = st.radio("Moneda:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
+                st.write("---")
+                # Selección de material a descontar
+                insumo = st.selectbox("Material gastado en este trabajo:", df_inv['item'].tolist())
+                unid_medida = df_inv[df_inv['item'] == insumo]['unidad'].values[0]
+                cant_gasto = st.number_input(f"Cantidad a restar del stock ({unid_medida})", min_value=0.01)
+
+            if st.form_submit_button("🚀 FINALIZAR VENTA Y DESCONTAR"):
+                if cliente and monto_v > 0:
+                    # Cálculo de valor en USD para tu historial
+                    if "BCV" in moneda_v: m_usd = monto_v / t_bcv
+                    elif "Binance" in moneda_v: m_usd = monto_v / t_bin
+                    else: m_usd = monto_v
+
+                    c = conectar(); cur = c.cursor()
+                    # 1. Verificar si hay suficiente antes de restar
+                    cur.execute("SELECT cantidad FROM inventario WHERE item=?", (insumo,))
+                    actual = cur.fetchone()[0]
+
+                    if actual >= cant_gasto:
+                        # 2. Restar del inventario
+                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_gasto, insumo))
+                        
+                        # 3. Guardar en Historial de Ventas
+                        cur.execute("""CREATE TABLE IF NOT EXISTS ventas 
+                                      (id INTEGER PRIMARY KEY, fecha TEXT, cliente TEXT, pedido TEXT, monto_usd REAL, material TEXT, gasto REAL)""")
+                        
+                        from datetime import datetime
+                        cur.execute("INSERT INTO ventas (fecha, cliente, pedido, monto_usd, material, gasto) VALUES (?,?,?,?,?,?)",
+                                   (datetime.now().strftime("%d/%m/%Y %H:%M"), cliente, pedido, m_usd, insumo, cant_gasto))
+                        
+                        c.commit(); c.close()
+                        st.success(f"✅ Venta registrada. Se restaron {cant_gasto} {unid_medida} de {insumo}.")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ No tienes suficiente {insumo}. Tienes {actual} y quieres gastar {cant_gasto}.")
+                        c.close()
+                else:
+                    st.error("Por favor rellena el nombre del cliente y el monto.")
+
+    # --- 📈 VISTA RÁPIDA DE INGRESOS ---
+    st.divider()
+    st.subheader("📋 Últimos Pedidos Entregados")
+    conn = conectar()
+    try:
+        df_v = pd.read_sql_query("SELECT fecha, cliente, pedido, monto_usd as 'Total $', material as 'Insumo' FROM ventas ORDER BY id DESC LIMIT 5", conn)
+        if not df_v.empty:
+            st.table(df_v)
+        else:
+            st.info("No hay ventas registradas hoy.")
+    except:
+        st.info("El historial se creará con tu primera venta.")
+    conn.close() 
+
+# --- 5. MÓDULO DE VENTAS: REGISTRO Y DESCUENTO DE STOCK ---
+if menu == "💰 Ventas":
+    st.title("💰 Registro de Ventas")
+    st.markdown("Registra tus pedidos aquí para descontar materiales y llevar tu control de ingresos.")
+
+    conn = conectar()
+    df_inv = pd.read_sql_query("SELECT * FROM inventario WHERE cantidad > 0", conn)
+    conn.close()
+
+    if df_inv.empty:
+        st.warning("⚠️ No puedes vender si no tienes nada en el Inventario. Registra insumos primero.")
+    else:
+        with st.form("form_ventas_atomicas"):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**📦 Detalles del Pedido**")
+                cliente = st.text_input("Nombre del Cliente")
+                pedido = st.text_area("¿Qué estás vendiendo?", placeholder="Ej: 20 Libretas personalizadas", height=100)
+            
+            with c2:
+                st.markdown("**💵 Cobro Realizado**")
+                monto_v = st.number_input("Monto Total", min_value=0.0, format="%.2f")
+                moneda_v = st.radio("Moneda:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
+                st.write("---")
+                # Selección de material a descontar
+                insumo = st.selectbox("Material gastado en este trabajo:", df_inv['item'].tolist())
+                unid_medida = df_inv[df_inv['item'] == insumo]['unidad'].values[0]
+                cant_gasto = st.number_input(f"Cantidad a restar del stock ({unid_medida})", min_value=0.01)
+
+            if st.form_submit_button("🚀 FINALIZAR VENTA Y DESCONTAR"):
+                if cliente and monto_v > 0:
+                    # Cálculo de valor en USD para tu historial
+                    if "BCV" in moneda_v: m_usd = monto_v / t_bcv
+                    elif "Binance" in moneda_v: m_usd = monto_v / t_bin
+                    else: m_usd = monto_v
+
+                    c = conectar(); cur = c.cursor()
+                    # 1. Verificar si hay suficiente antes de restar
+                    cur.execute("SELECT cantidad FROM inventario WHERE item=?", (insumo,))
+                    actual = cur.fetchone()[0]
+
+                    if actual >= cant_gasto:
+                        # 2. Restar del inventario
+                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_gasto, insumo))
+                        
+                        # 3. Guardar en Historial de Ventas
+                        cur.execute("""CREATE TABLE IF NOT EXISTS ventas 
+                                      (id INTEGER PRIMARY KEY, fecha TEXT, cliente TEXT, pedido TEXT, monto_usd REAL, material TEXT, gasto REAL)""")
+                        
+                        from datetime import datetime
+                        cur.execute("INSERT INTO ventas (fecha, cliente, pedido, monto_usd, material, gasto) VALUES (?,?,?,?,?,?)",
+                                   (datetime.now().strftime("%d/%m/%Y %H:%M"), cliente, pedido, m_usd, insumo, cant_gasto))
+                        
+                        c.commit(); c.close()
+                        st.success(f"✅ Venta registrada. Se restaron {cant_gasto} {unid_medida} de {insumo}.")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ No tienes suficiente {insumo}. Tienes {actual} y quieres gastar {cant_gasto}.")
+                        c.close()
+                else:
+                    st.error("Por favor rellena el nombre del cliente y el monto.")
+
+    # --- 📈 VISTA RÁPIDA DE INGRESOS ---
+    st.divider()
+    st.subheader("📋 Últimos Pedidos Entregados")
+    conn = conectar()
+    try:
+        df_v = pd.read_sql_query("SELECT fecha, cliente, pedido, monto_usd as 'Total $', material as 'Insumo' FROM ventas ORDER BY id DESC LIMIT 5", conn)
+        if not df_v.empty:
+            st.table(df_v)
+        else:
+            st.info("No hay ventas registradas hoy.")
+    except:
+        st.info("El historial se creará con tu primera venta.")
+    conn.close()
 
 
 
