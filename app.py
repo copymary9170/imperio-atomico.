@@ -778,99 +778,140 @@ elif menu == "🛠️ Otros Procesos":
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
 
 
-# --- 5. MÓDULO DE VENTAS: INTELIGENCIA MULTI-MÁQUINA ---
+# --- 5. MÓDULO DE VENTAS PROFESIONAL (REDISEÑADO) ---
 if menu == "💰 Ventas":
     st.title("💰 Registro de Ventas e Insumos")
     
+    # 1. Asegurar estructura de tablas correcta
+    conn = conectar(); cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS detalle_insumos_ventas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    venta_id INTEGER,
+                    item_nombre TEXT,
+                    cantidad_gastada REAL,
+                    FOREIGN KEY(venta_id) REFERENCES ventas(id))""")
+    conn.commit(); conn.close()
+
+    # 2. Carga de Datos iniciales
     conn = conectar()
-    df_inv = pd.read_sql_query("SELECT item, cantidad, unidad FROM inventario WHERE cantidad > 0", conn)
+    df_inv = pd.read_sql_query("SELECT item, cantidad, unidad FROM inventario", conn)
+    df_cli = pd.read_sql_query("SELECT id, nombre FROM clientes", conn)
     conn.close()
 
-    if 'carrito_insumos' not in st.session_state:
-        st.session_state.carrito_insumos = []
+    if df_cli.empty:
+        st.warning("⚠️ Debes registrar al menos un cliente antes de vender.")
+        st.stop()
 
-    # --- 1. DATOS DEL PEDIDO ---
-    with st.expander("👤 Información del Cliente y Pago", expanded=True):
-        c1, c2 = st.columns(2)
-        cliente = c1.text_input("Cliente")
-        pedido_desc = c1.text_area("Descripción (Ej: 20 Tazas Sublimadas)")
-        monto_v = c2.number_input("Monto Cobrado", min_value=0.0, format="%.2f")
-        moneda_v = c2.radio("Moneda:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
-
-    st.divider()
-
-    # --- 2. EL CEREBRO DE TINTAS (DINÁMICO) ---
-    st.subheader("🎨 Descuento Automático de Tintas (CMYK)")
-    st.info("Escribe los ml y selecciona qué grupo de tintas usaste. El sistema buscará los 4 colores por ti.")
-
-    col_ml, col_grupo, col_btn_kit = st.columns([1, 2, 1])
-    ml_gasto = col_ml.number_input("ml por color:", min_value=0.0, step=0.1, format="%.1f")
-    
-    # Identificamos "Familias" de tintas (Ej: "Sublimación", "580w", "J210a")
-    # Buscamos palabras comunes que no sean el color
-    lista_items = df_inv['item'].tolist()
-    familias = sorted(list(set([i.split()[0] for i in lista_items if "ml" in df_inv[df_inv['item']==i]['unidad'].values])))
-
-    grupo_sel = col_grupo.selectbox("¿Qué tintas usaste?", familias if familias else ["Sin tintas en inventario"])
-
-    if col_btn_kit.button("🚀 CARGAR KIT", use_container_width=True):
-        colores_cmyk = ["negro", "magenta", "cian", "yellow", "amarillo", "cyan"]
-        encontrados = []
+    # --- FORMULARIO DE VENTA ---
+    with st.form("form_venta_profesional"):
+        st.subheader("📋 Información General")
+        c1, c2, c3 = st.columns([2, 1, 1])
         
-        for item in lista_items:
-            # Si el item pertenece a la familia elegida y tiene un nombre de color
-            if grupo_sel.lower() in item.lower() and any(c in item.lower() for c in colores_cmyk):
-                encontrados.append({"item": item, "cantidad": ml_gasto, "unidad": "ml"})
+        with c1:
+            # Selector de cliente vinculado por ID
+            dict_clientes = dict(zip(df_cli['nombre'], df_cli['id']))
+            cliente_sel = st.selectbox("Cliente", options=list(dict_clientes.keys()))
+            cliente_id = dict_clientes[cliente_sel]
+            
+        with c2:
+            monto_total = st.number_input("Monto Total", min_value=0.0, format="%.2f")
         
-        if encontrados:
-            st.session_state.carrito_insumos.extend(encontrados)
-            st.success(f"✅ Se cargaron {len(encontrados)} colores de {grupo_sel}.")
-            st.rerun()
+        with c3:
+            metodo_p = st.selectbox("Método de Pago", ["Efectivo $", "Pago Móvil", "Zelle", "Binance", "Transferencia"])
+
+        st.divider()
+
+        # --- SECCIÓN DE IMPRESORAS Y TINTAS ---
+        st.subheader("🖨️ Consumo de Tintas por Impresora")
+        impresora = st.selectbox("Selecciona la Impresora usada:", 
+                                ["Ninguna / Solo Materiales", "Epson 580", "Sublimación", "J210A"])
+        
+        dict_gastos = {} # Aquí guardaremos los ML manuales de cada color
+
+        if impresora != "Ninguna / Solo Materiales":
+            # Definimos los kits según tu realidad operativa
+            kits = {
+                "Epson 580": ["580 Negro", "580 Cyan", "580 Magenta", "580 Amarillo"],
+                "Sublimación": ["Sublimación Negro", "Sublimación Cyan", "Sublimación Magenta", "Sublimación Amarillo"],
+                "J210A": ["J210A Negro", "J210A Color"]
+            }
+            
+            col_tintas = st.columns(len(kits[impresora]))
+            for i, color_buscado in enumerate(kits[impresora]):
+                with col_tintas[i]:
+                    # Buscamos en inventario el item que coincida
+                    match = df_inv[df_inv['item'].str.contains(color_buscado, case=False, na=False)]
+                    if not match.empty:
+                        item_real = match.iloc[0]['item']
+                        stock_actual = match.iloc[0]['cantidad']
+                        gasto = st.number_input(f"ML {color_buscado}", min_value=0.0, max_value=stock_actual, step=0.1, help=f"Stock: {stock_actual}ml")
+                        if gasto > 0:
+                            dict_gastos[item_real] = gasto
+                    else:
+                        st.caption(f"⚠️ {color_buscado} no encontrado en inventario")
+
+        st.divider()
+
+        # --- OTROS MATERIALES ---
+        st.subheader("📦 Otros Insumos (Papel, Vinil, etc.)")
+        otros_materiales = st.multiselect("Selecciona materiales adicionales:", 
+                                         df_inv[~df_inv['unidad'].isin(['ml'])]['item'].tolist())
+        
+        for mat in otros_materiales:
+            match_mat = df_inv[df_inv['item'] == mat].iloc[0]
+            cant_mat = st.number_input(f"Cantidad de {mat} ({match_mat['unidad']})", 
+                                      min_value=0.0, max_value=float(match_mat['cantidad']), step=1.0)
+            if cant_mat > 0:
+                dict_gastos[mat] = cant_mat
+
+        st.write("---")
+        btn_procesar = st.form_submit_button("🚀 REGISTRAR VENTA Y DESCONTAR INVENTARIO")
+
+    # --- LÓGICA DE PROCESAMIENTO ---
+    if btn_procesar:
+        if monto_total <= 0:
+            st.error("El monto de la venta debe ser mayor a cero.")
+        elif not dict_gastos:
+            st.warning("No has registrado ningún insumo gastado para esta venta.")
         else:
-            st.error(f"No encontré el kit completo para {grupo_sel}.")
+            try:
+                conn = conectar(); cur = conn.cursor()
+                
+                # 1. Insertar en tabla VENTAS (Estructura original)
+                cur.execute("""INSERT INTO ventas (cliente_id, monto_total, metodo_pago) 
+                               VALUES (?, ?, ?)""", (cliente_id, monto_total, metodo_pago))
+                venta_id = cur.lastrowid
 
-    st.divider()
+                # 2. Procesar cada insumo (Descuento y Detalle)
+                for item, cant in dict_gastos.items():
+                    # Descontar de Inventario
+                    cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant, item))
+                    
+                    # Registrar en Detalle de Insumos
+                    cur.execute("""INSERT INTO detalle_insumos_ventas (venta_id, item_nombre, cantidad_gastada) 
+                                   VALUES (?, ?, ?)""", (venta_id, item, cant))
 
-    # --- 3. OTROS MATERIALES (Papel, Vinil, etc.) ---
-    st.subheader("📦 Otros Materiales")
-    # Multiselect para no ir uno por uno
-    seleccionados = st.multiselect("Selecciona todo lo extra que gastaste:", [i for i in lista_items if i not in [x['item'] for x in st.session_state.carrito_insumos]])
-
-    if seleccionados:
-        for s in seleccionados:
-            u = df_inv[df_inv['item']==s]['unidad'].values[0]
-            c_extra = st.number_input(f"Cantidad de {s} ({u})", min_value=0.0, key=f"v_{s}")
-            if st.button(f"Añadir {s}", key=f"btn_{s}"):
-                st.session_state.carrito_insumos.append({"item": s, "cantidad": c_extra, "unidad": u})
+                conn.commit()
+                st.success(f"✅ Venta #{venta_id} registrada con éxito. Inventario actualizado.")
+                st.balloons()
                 st.rerun()
 
-    # --- 4. LISTA DE RESUMEN Y PROCESAR ---
-    if st.session_state.carrito_insumos:
-        st.subheader("📋 Resumen de Descuento")
-        for i, it in enumerate(st.session_state.carrito_insumos):
-            st.write(f"🔹 **{it['item']}**: {it['cantidad']} {it['unidad']}")
-        
-        c_l, c_p = st.columns(2)
-        if c_l.button("🗑️ Limpiar Todo"):
-            st.session_state.carrito_insumos = []
-            st.rerun()
+            except Exception as e:
+                st.error(f"Error técnico: {e}")
+            finally:
+                conn.close()
 
-        if c_p.button("✅ FINALIZAR Y RESTAR STOCK", type="primary", use_container_width=True):
-            if cliente and monto_v > 0:
-                tasa = t_bcv if "BCV" in moneda_v else (t_bin if "Binance" in moneda_v else 1.0)
-                m_usd = monto_v / tasa
+    # --- HISTORIAL DE VENTAS RECIENTES ---
+    st.divider()
+    st.subheader("📋 Últimas Ventas")
+    conn = conectar()
+    query_historial = """
+        SELECT v.id, v.fecha, c.nombre as cliente, v.monto_total, v.metodo_pago 
+        FROM ventas v 
+        JOIN clientes c ON v.cliente_id = c.id 
+        ORDER BY v.id DESC LIMIT 10
+    """
+    df_h = pd.read_sql_query(query_historial, conn)
+    st.dataframe(df_h, use_container_width=True, hide_index=True)
+    conn.close()
 
-                c = conectar(); cur = c.cursor()
-                try:
-                    from datetime import datetime
-                    f = datetime.now().strftime("%d/%m/%Y %H:%M")
-                    for m in st.session_state.carrito_insumos:
-                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (m['cantidad'], m['item']))
-                        cur.execute("CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY, fecha TEXT, cliente TEXT, pedido TEXT, monto_usd REAL, material TEXT, gasto REAL)")
-                        cur.execute("INSERT INTO ventas (fecha, cliente, pedido, monto_usd, material, gasto) VALUES (?,?,?,?,?,?)", (f, cliente, pedido_desc, m_usd, m['item'], m['cantidad']))
-                    c.commit()
-                    st.session_state.carrito_insumos = []
-                    st.success("¡Venta procesada con éxito!")
-                    st.rerun()
-                except Exception as e: st.error(f"Error: {e}")
-                finally: c.close()
