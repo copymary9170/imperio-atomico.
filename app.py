@@ -320,129 +320,98 @@ if menu == "📦 Inventario":
                     st.table(log)
                     
 
-# --- 6. LÓGICA DE COTIZACIONES (VERSIÓN MAESTRA FINAL BLINDADA) ---
-elif menu == "📝 Cotizaciones":
-    st.title("📝 Generador de Cotizaciones")
+# --- 5. MÓDULO DE VENTAS (CONTROL TOTAL DE SALIDAS Y GANANCIAS) ---
+elif menu == "💰 Ventas":
+    st.title("💰 Punto de Venta e Ingresos")
     
-    # Recuperar datos de memoria (Analizador CMYK)
-    pre_datos = st.session_state.get('datos_pre_cotizacion', {})
-    conn = conectar()
-    df_clis = pd.read_sql_query("SELECT id, nombre, whatsapp FROM clientes", conn)
-    df_inv_full = pd.read_sql_query("SELECT item, precio_usd, unidad, cantidad FROM inventario", conn)
-    
-    # Cargamos historial uniendo clientes para ver nombres
-    query_hist = """
-        SELECT c.id, c.fecha, cl.nombre as cliente, c.trabajo, c.monto_usd, c.estado, c.cliente_id 
-        FROM cotizaciones c
-        LEFT JOIN clientes cl ON c.cliente_id = cl.id
-    """
-    df_cots_global = pd.read_sql_query(query_hist, conn)
-    conn.close()
+    # Refrescamos datos para asegurar que vemos el stock real
+    df_inv = st.session_state.df_inv
+    df_cli = st.session_state.df_cli
 
-    # --- 🛡️ BLINDAJE DE DATOS (NORMALIZACIÓN) ---
-    if not df_inv_full.empty:
-        # Limpiamos la columna unidad para que no falle por espacios o mayúsculas
-        df_inv_full['unidad_limpia'] = (
-            df_inv_full['unidad']
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .str.lower()
-        )
-        
-        # Filtramos tintas usando la unidad normalizada
-        tintas = df_inv_full[df_inv_full['unidad_limpia'] == 'ml']['item'].unique().tolist()
-        # Filtramos papeles (lo que NO sea ml)
-        papeles = df_inv_full[df_inv_full['unidad_limpia'] != 'ml']['item'].unique().tolist()
-    else:
-        tintas, papeles = [], []
+    if df_cli.empty:
+        st.error("❌ No hay clientes registrados. Ve al módulo de Clientes primero.")
+        st.stop()
 
-    if df_clis.empty:
-        st.warning("⚠️ No hay clientes. Registra uno en el módulo 'Clientes'.")
-    elif not tintas:
-        st.error("⚠️ No hay tintas detectadas en el inventario. Regístralas con unidad 'ml'.")
-    else:
-        with st.form("form_cot_final_boss"):
-            st.subheader("🛠️ Crear Nuevo Presupuesto")
+    tab_v1, tab_v2 = st.tabs(["🛒 Nueva Venta Directa", "📈 Reporte de Ingresos"])
+
+    with tab_v1:
+        with st.form("registro_venta_total"):
             c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("### 👤 Cliente y Trabajo")
+                cliente_n = st.selectbox("Cliente:", df_cli['nombre'].tolist())
+                desc_trabajo = st.text_input("¿Qué estás vendiendo?", placeholder="Ej: 10 Agendas de Cuero")
+                pago_tipo = st.selectbox("Forma de Pago:", ["Efectivo $", "Pago Móvil", "Zelle", "Binance", "Transferencia Bs"])
             
-            dict_clientes = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
-            cli_nombre = c1.selectbox("Cliente", ["--"] + list(dict_clientes.keys()))
-            trabajo = c1.text_input("¿Qué trabajo es?", value=pre_datos.get('trabajo', ""))
+            with c2:
+                st.markdown("### 💵 Montos")
+                precio_venta = st.number_input("Precio Final Cobrado ($)", min_value=0.0, format="%.2f")
+                items_usados = st.multiselect("Materiales consumidos en este trabajo:", df_inv['item'].tolist())
+
+            # --- DESGLOSE DE CONSUMO ---
+            dict_consumo = {}
+            costo_materiales_total = 0.0
             
-            material = c2.selectbox("Papel/Material", ["--"] + papeles)
-            cant_hojas = c2.number_input("Cantidad de hojas", min_value=0, value=int(pre_datos.get('unidades', 0)))
-            
-            st.divider()
-            cx1, cx2 = st.columns(2)
-            tinta_sel = cx1.selectbox("Tinta a descontar", ["--"] + tintas)
-            
-            if pre_datos:
-                ml_final = cx2.number_input("ML de tinta (Precisión CMYK)", value=float(pre_datos.get('ml_estimados', 0.0)), format="%.4f")
-            else:
-                cobertura = cx2.slider("Cobertura manual (%)", 5, 100, 15)
-                ml_final = (cobertura / 5.0) * 0.05 * cant_hojas
-                st.caption(f"Estimado manual: {ml_final:.4f} ml")
+            if items_usados:
+                st.divider()
+                st.caption("Indica la cantidad exacta usada para calcular tu ganancia real:")
+                cols_m = st.columns(len(items_usados))
+                for i, nombre_it in enumerate(items_usados):
+                    # Buscamos datos del item para el cálculo
+                    info_it = df_inv[df_inv['item'] == nombre_it].iloc[0]
+                    
+                    # Input de cantidad
+                    cant = cols_m[i].number_input(f"{nombre_it} ({info_it['unidad']})", min_value=0.0, step=0.1, key=f"v_{nombre_it}")
+                    dict_consumo[nombre_it] = {"id": info_it['id'], "cant": cant, "costo_u": info_it['precio_usd']}
+                    costo_materiales_total += (cant * info_it['precio_usd'])
 
             st.divider()
-            sug_precio = pre_datos.get('costo_base', 0.0) * 2.5
-            monto_f = st.number_input("Precio Total a Cobrar ($)", min_value=0.0, value=float(sug_precio), format="%.2f")
-            metodo = st.selectbox("Método de Pago", ["Efectivo", "Pago Móvil", "Zelle", "Binance"])
-            est_pago = st.selectbox("Estado", ["Pendiente", "Pagado"])
+            # Cálculo de Ganancia en vivo
+            ganancia_estimada = precio_venta - costo_materiales_total
+            col_g1, col_g2 = st.columns(2)
+            col_g1.metric("Costo Materiales", f"$ {costo_materiales_total:,.2f}")
+            col_g2.metric("Ganancia Neta", f"$ {ganancia_estimada:,.2f}", delta_color="normal")
 
-            if st.form_submit_button("🚀 GUARDAR Y PROCESAR TODO"):
-                if cli_nombre != "--" and monto_f > 0:
-                    id_cli = dict_clientes[cli_nombre]
-                    c = conectar(); cur = c.cursor()
-                    cur.execute("INSERT INTO cotizaciones (fecha, cliente_id, trabajo, monto_usd, estado) VALUES (?,?,?,?,?)",
-                              (datetime.now().strftime("%d/%m/%Y"), id_cli, trabajo, monto_f, est_pago))
-                    
-                    if est_pago == "Pagado":
-                        cur.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)", (id_cli, monto_f, metodo))
-                    
-                    if material != "--" and cant_hojas > 0:
-                        cur.execute("UPDATE inventario SET cantidad = max(0, cantidad - ?) WHERE item = ?", (cant_hojas, material))
-                    
-                    if tinta_sel != "--" and ml_final > 0:
-                        cur.execute("UPDATE inventario SET cantidad = max(0, cantidad - ?) WHERE item = ?", (ml_final, tinta_sel))
-                    
-                    c.commit(); c.close()
-                    if 'datos_pre_cotizacion' in st.session_state: del st.session_state['datos_pre_cotizacion']
-                    st.success("✅ ¡Operación Atómica exitosa!"); st.rerun()
+            if st.form_submit_button("✅ COMPLETAR VENTA Y ACTUALIZAR STOCK"):
+                if desc_trabajo and precio_venta > 0:
+                    try:
+                        conn = conectar(); cur = conn.cursor()
+                        id_cliente = int(df_cli[df_cli['nombre'] == cliente_n]['id'].values[0])
+                        
+                        # 1. Registrar la Venta
+                        cur.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)", 
+                                    (id_cliente, precio_venta, pago_tipo))
+                        id_v = cur.lastrowid
+                        conn.commit()
 
-    # --- HISTORIAL Y GESTIÓN DE COBROS ---
-    if not df_cots_global.empty:
-        st.divider()
-        st.subheader("📑 Gestión de Facturación")
-        
-        pendientes = df_cots_global[df_cots_global['estado'] == "Pendiente"]
-        if not pendientes.empty and ROL in ["Admin", "Administracion"]:
-            with st.expander("💰 COBRAR PENDIENTES"):
-                col_sel, col_met, col_btn = st.columns([1, 1, 1])
-                id_c = col_sel.selectbox("ID Cotización:", pendientes['id'].tolist())
-                met_at = col_met.selectbox("Recibido por:", ["Efectivo", "Pago Móvil", "Zelle", "Binance"], key="met_pend")
-                if col_btn.button("Marcar como Cobrado"):
-                    fila = pendientes[pendientes['id'] == id_c].iloc[0]
-                    c = conectar(); cur = c.cursor()
-                    cur.execute("UPDATE cotizaciones SET estado = 'Pagado' WHERE id = ?", (id_c,))
-                    cur.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)",
-                              (int(fila['cliente_id']), float(fila['monto_usd']), met_at))
-                    c.commit(); c.close(); st.success("¡Cobro registrado!"); st.rerun()
+                        # 2. Descontar Inventario con el MOTOR (Seguridad Total)
+                        for n, datos in dict_consumo.items():
+                            if datos['cant'] > 0:
+                                ejecutar_movimiento_stock(
+                                    datos['id'], 
+                                    -datos['cant'], 
+                                    "SALIDA", 
+                                    motivo=f"Venta ID:{id_v} - {desc_trabajo}"
+                                )
+                        
+                        st.success(f"🎉 ¡Venta Exitosa! Ganancia neta: ${ganancia_estimada:,.2f}")
+                        cargar_datos_seguros()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al procesar: {e}")
+                else:
+                    st.warning("Escribe una descripción y el precio de venta.")
 
-        st.dataframe(df_cots_global.sort_values('id', ascending=False), use_container_width=True, hide_index=True)
-        
-        st.subheader("📲 Enviar a WhatsApp")
-        c_env = st.selectbox("Selecciona ID para enviar:", df_cots_global['id'].tolist()[::-1])
-        d_c = df_cots_global[df_cots_global['id'] == c_env].iloc[0]
-        
-        tlf_val = df_clis[df_clis['id'] == d_c['cliente_id']]['whatsapp'].iloc[0]
-        if tlf_val:
-            num = "".join(filter(str.isdigit, tlf_val))
-            if num.startswith('0'): num = "58" + num[1:]
-            elif not num.startswith('58'): num = "58" + num
-            
-            msg = f"¡Hola! *Imperio Atómico* ⚛️%0A*Trabajo:* {d_c['trabajo']}%0A*Total:* {d_c['monto_usd']:.2f} USD%0A*Tasa BCV:* {(d_c['monto_usd']*t_bcv):,.2f} Bs"
-            st.link_button(f"🚀 WhatsApp a {d_c['cliente']}", f"https://wa.me/{num}?text={msg}")
+    with tab_v2:
+        st.subheader("📋 Registro Histórico")
+        conn = conectar()
+        df_h = pd.read_sql("""
+            SELECT v.id, v.fecha, c.nombre as Cliente, v.monto_total as 'Total $', v.metodo_pago
+            FROM ventas v JOIN clientes c ON v.cliente_id = c.id
+            ORDER BY v.id DESC LIMIT 50
+        """, conn)
+        conn.close()
+        st.dataframe(df_h, use_container_width=True, hide_index=True)
             
 # --- 6. DASHBOARD FINANCIERO PROFESIONAL ---
 elif menu == "📊 Dashboard":
@@ -797,142 +766,95 @@ elif menu == "🛠️ Otros Procesos":
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
 
 
-# --- 5. MÓDULO DE VENTAS PROFESIONAL (REDISEÑADO) ---
-if menu == "💰 Ventas":
-    st.title("💰 Registro de Ventas e Insumos")
+# --- 5. MÓDULO DE VENTAS (CONTROL TOTAL DE SALIDAS Y GANANCIAS) ---
+elif menu == "💰 Ventas":
+    st.title("💰 Punto de Venta e Ingresos")
     
-    # 1. Asegurar estructura de tablas correcta
-    conn = conectar(); cur = conn.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS detalle_insumos_ventas (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    venta_id INTEGER,
-                    item_nombre TEXT,
-                    cantidad_gastada REAL,
-                    FOREIGN KEY(venta_id) REFERENCES ventas(id))""")
-    conn.commit(); conn.close()
-
-    # 2. Carga de Datos iniciales
-    conn = conectar()
-    df_inv = pd.read_sql_query("SELECT item, cantidad, unidad FROM inventario", conn)
-    df_cli = pd.read_sql_query("SELECT id, nombre FROM clientes", conn)
-    conn.close()
+    # Refrescamos datos para asegurar que vemos el stock real
+    df_inv = st.session_state.df_inv
+    df_cli = st.session_state.df_cli
 
     if df_cli.empty:
-        st.warning("⚠️ Debes registrar al menos un cliente antes de vender.")
+        st.error("❌ No hay clientes registrados. Ve al módulo de Clientes primero.")
         st.stop()
 
-    # --- FORMULARIO DE VENTA ---
-    with st.form("form_venta_profesional"):
-        st.subheader("📋 Información General")
-        c1, c2, c3 = st.columns([2, 1, 1])
-        
-        with c1:
-            # Selector de cliente vinculado por ID
-            dict_clientes = dict(zip(df_cli['nombre'], df_cli['id']))
-            cliente_sel = st.selectbox("Cliente", options=list(dict_clientes.keys()))
-            cliente_id = dict_clientes[cliente_sel]
+    tab_v1, tab_v2 = st.tabs(["🛒 Nueva Venta Directa", "📈 Reporte de Ingresos"])
+
+    with tab_v1:
+        with st.form("registro_venta_total"):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("### 👤 Cliente y Trabajo")
+                cliente_n = st.selectbox("Cliente:", df_cli['nombre'].tolist())
+                desc_trabajo = st.text_input("¿Qué estás vendiendo?", placeholder="Ej: 10 Agendas de Cuero")
+                pago_tipo = st.selectbox("Forma de Pago:", ["Efectivo $", "Pago Móvil", "Zelle", "Binance", "Transferencia Bs"])
             
-        with c2:
-            monto_total = st.number_input("Monto Total", min_value=0.0, format="%.2f")
-        
-        with c3:
-            metodo_p = st.selectbox("Método de Pago", ["Efectivo $", "Pago Móvil", "Zelle", "Binance", "Transferencia"])
+            with c2:
+                st.markdown("### 💵 Montos")
+                precio_venta = st.number_input("Precio Final Cobrado ($)", min_value=0.0, format="%.2f")
+                items_usados = st.multiselect("Materiales consumidos en este trabajo:", df_inv['item'].tolist())
 
-        st.divider()
-
-        # --- SECCIÓN DE IMPRESORAS Y TINTAS ---
-        st.subheader("🖨️ Consumo de Tintas por Impresora")
-        impresora = st.selectbox("Selecciona la Impresora usada:", 
-                                ["Ninguna / Solo Materiales", "Epson 580", "Sublimación", "J210A"])
-        
-        dict_gastos = {} # Aquí guardaremos los ML manuales de cada color
-
-        if impresora != "Ninguna / Solo Materiales":
-            # Definimos los kits según tu realidad operativa
-            kits = {
-                "Epson 580": ["580 Negro", "580 Cyan", "580 Magenta", "580 Amarillo"],
-                "Sublimación": ["Sublimación Negro", "Sublimación Cyan", "Sublimación Magenta", "Sublimación Amarillo"],
-                "J210A": ["J210A Negro", "J210A Color"]
-            }
+            # --- DESGLOSE DE CONSUMO ---
+            dict_consumo = {}
+            costo_materiales_total = 0.0
             
-            col_tintas = st.columns(len(kits[impresora]))
-            for i, color_buscado in enumerate(kits[impresora]):
-                with col_tintas[i]:
-                    # Buscamos en inventario el item que coincida
-                    match = df_inv[df_inv['item'].str.contains(color_buscado, case=False, na=False)]
-                    if not match.empty:
-                        item_real = match.iloc[0]['item']
-                        stock_actual = match.iloc[0]['cantidad']
-                        gasto = st.number_input(f"ML {color_buscado}", min_value=0.0, max_value=stock_actual, step=0.1, help=f"Stock: {stock_actual}ml")
-                        if gasto > 0:
-                            dict_gastos[item_real] = gasto
-                    else:
-                        st.caption(f"⚠️ {color_buscado} no encontrado en inventario")
-
-        st.divider()
-
-        # --- OTROS MATERIALES ---
-        st.subheader("📦 Otros Insumos (Papel, Vinil, etc.)")
-        otros_materiales = st.multiselect("Selecciona materiales adicionales:", 
-                                         df_inv[~df_inv['unidad'].isin(['ml'])]['item'].tolist())
-        
-        for mat in otros_materiales:
-            match_mat = df_inv[df_inv['item'] == mat].iloc[0]
-            cant_mat = st.number_input(f"Cantidad de {mat} ({match_mat['unidad']})", 
-                                      min_value=0.0, max_value=float(match_mat['cantidad']), step=1.0)
-            if cant_mat > 0:
-                dict_gastos[mat] = cant_mat
-
-        st.write("---")
-        btn_procesar = st.form_submit_button("🚀 REGISTRAR VENTA Y DESCONTAR INVENTARIO")
-
-    # --- LÓGICA DE PROCESAMIENTO ---
-    if btn_procesar:
-        if monto_total <= 0:
-            st.error("El monto de la venta debe ser mayor a cero.")
-        elif not dict_gastos:
-            st.warning("No has registrado ningún insumo gastado para esta venta.")
-        else:
-            try:
-                conn = conectar(); cur = conn.cursor()
-                
-                # 1. Insertar en tabla VENTAS (Estructura original)
-                cur.execute("""INSERT INTO ventas (cliente_id, monto_total, metodo_pago) 
-                               VALUES (?, ?, ?)""", (cliente_id, monto_total, metodo_pago))
-                venta_id = cur.lastrowid
-
-                # 2. Procesar cada insumo (Descuento y Detalle)
-                for item, cant in dict_gastos.items():
-                    # Descontar de Inventario
-                    cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant, item))
+            if items_usados:
+                st.divider()
+                st.caption("Indica la cantidad exacta usada para calcular tu ganancia real:")
+                cols_m = st.columns(len(items_usados))
+                for i, nombre_it in enumerate(items_usados):
+                    # Buscamos datos del item para el cálculo
+                    info_it = df_inv[df_inv['item'] == nombre_it].iloc[0]
                     
-                    # Registrar en Detalle de Insumos
-                    cur.execute("""INSERT INTO detalle_insumos_ventas (venta_id, item_nombre, cantidad_gastada) 
-                                   VALUES (?, ?, ?)""", (venta_id, item, cant))
+                    # Input de cantidad
+                    cant = cols_m[i].number_input(f"{nombre_it} ({info_it['unidad']})", min_value=0.0, step=0.1, key=f"v_{nombre_it}")
+                    dict_consumo[nombre_it] = {"id": info_it['id'], "cant": cant, "costo_u": info_it['precio_usd']}
+                    costo_materiales_total += (cant * info_it['precio_usd'])
 
-                conn.commit()
-                st.success(f"✅ Venta #{venta_id} registrada con éxito. Inventario actualizado.")
-                st.balloons()
-                st.rerun()
+            st.divider()
+            # Cálculo de Ganancia en vivo
+            ganancia_estimada = precio_venta - costo_materiales_total
+            col_g1, col_g2 = st.columns(2)
+            col_g1.metric("Costo Materiales", f"$ {costo_materiales_total:,.2f}")
+            col_g2.metric("Ganancia Neta", f"$ {ganancia_estimada:,.2f}", delta_color="normal")
 
-            except Exception as e:
-                st.error(f"Error técnico: {e}")
-            finally:
-                conn.close()
+            if st.form_submit_button("✅ COMPLETAR VENTA Y ACTUALIZAR STOCK"):
+                if desc_trabajo and precio_venta > 0:
+                    try:
+                        conn = conectar(); cur = conn.cursor()
+                        id_cliente = int(df_cli[df_cli['nombre'] == cliente_n]['id'].values[0])
+                        
+                        # 1. Registrar la Venta
+                        cur.execute("INSERT INTO ventas (cliente_id, monto_total, metodo_pago) VALUES (?,?,?)", 
+                                    (id_cliente, precio_venta, pago_tipo))
+                        id_v = cur.lastrowid
+                        conn.commit()
 
-    # --- HISTORIAL DE VENTAS RECIENTES ---
-    st.divider()
-    st.subheader("📋 Últimas Ventas")
-    conn = conectar()
-    query_historial = """
-        SELECT v.id, v.fecha, c.nombre as cliente, v.monto_total, v.metodo_pago 
-        FROM ventas v 
-        JOIN clientes c ON v.cliente_id = c.id 
-        ORDER BY v.id DESC LIMIT 10
-    """
-    df_h = pd.read_sql_query(query_historial, conn)
-    st.dataframe(df_h, use_container_width=True, hide_index=True)
-    conn.close()
+                        # 2. Descontar Inventario con el MOTOR (Seguridad Total)
+                        for n, datos in dict_consumo.items():
+                            if datos['cant'] > 0:
+                                ejecutar_movimiento_stock(
+                                    datos['id'], 
+                                    -datos['cant'], 
+                                    "SALIDA", 
+                                    motivo=f"Venta ID:{id_v} - {desc_trabajo}"
+                                )
+                        
+                        st.success(f"🎉 ¡Venta Exitosa! Ganancia neta: ${ganancia_estimada:,.2f}")
+                        cargar_datos_seguros()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al procesar: {e}")
+                else:
+                    st.warning("Escribe una descripción y el precio de venta.")
 
-
-
+    with tab_v2:
+        st.subheader("📋 Registro Histórico")
+        conn = conectar()
+        df_h = pd.read_sql("""
+            SELECT v.id, v.fecha, c.nombre as Cliente, v.monto_total as 'Total $', v.metodo_pago
+            FROM ventas v JOIN clientes c ON v.cliente_id = c.id
+            ORDER BY v.id DESC LIMIT 50
+        """, conn)
+        conn.close()
+        st.dataframe(df_h, use_container_width=True, hide_index=True)
