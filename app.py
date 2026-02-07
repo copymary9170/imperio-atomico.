@@ -387,6 +387,10 @@ elif menu == "📊 Dashboard":
 
 # --- 7. MÓDULO DE CONFIGURACIÓN (EL PANEL DE CONTROL) ---
 elif menu == "⚙️ Configuración":
+    # --- AGREGA ESTAS 3 LÍNEAS JUSTO DEBAJO ---
+    if ROL not in ["Admin", "Administracion"]:
+        st.error("🚫 Acceso Denegado. Solo la Jefa o Administración pueden cambiar tasas y costos.")
+        st.stop()
     st.title("⚙️ Configuración del Sistema")
     st.info("Desde aquí controlas los precios base y las tasas para combatir la inflación.")
 
@@ -607,6 +611,10 @@ elif menu == "🎨 Análisis CMYK":
                 st.toast("✅ Datos enviados. ¡Ve a la pestaña Cotizaciones!")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 elif menu == "🏗️ Activos":
+    # --- AGREGA ESTAS 3 LÍNEAS ---
+    if ROL != "Admin":
+        st.error("🚫 Acceso Denegado. Solo el Administrador puede gestionar activos fijos.")
+        st.stop()
     st.title("🏗️ Gestión de Equipos y Activos")
     st.markdown("Los equipos registrados aquí se guardan permanentemente en la base de datos.")
 
@@ -806,3 +814,4 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
