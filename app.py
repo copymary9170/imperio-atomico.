@@ -859,6 +859,7 @@ if menu == "💰 Ventas":
     st.title("💰 Registro de Ventas e Insumos")
     
     conn = conectar()
+    # Cargamos el inventario actual
     df_inv = pd.read_sql_query("SELECT item, cantidad, unidad FROM inventario WHERE cantidad > 0", conn)
     conn.close()
 
@@ -869,7 +870,7 @@ if menu == "💰 Ventas":
     with st.expander("👤 Información del Cliente y Pago", expanded=True):
         c1, c2 = st.columns(2)
         cliente = c1.text_input("Cliente")
-        pedido_desc = c1.text_area("Descripción (Ej: 100 tazas, 20 camisas...)")
+        pedido_desc = c1.text_area("Descripción (Ej: Impresión full color)")
         monto_v = c2.number_input("Monto Cobrado", min_value=0.0, format="%.2f")
         moneda_v = c2.radio("Moneda:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
 
@@ -878,48 +879,61 @@ if menu == "💰 Ventas":
     # --- 2. CARGA RÁPIDA DE INSUMOS ---
     st.subheader("📦 Carga de Materiales Gastados")
     
-    # BOTÓN MÁGICO CMYK
-    st.markdown("⚡ **Acciones Rápidas**")
-    col_cmyk, col_vacio = st.columns([1, 2])
+    # SECCIÓN MÁGICA PARA TUS TINTAS 580W
+    st.info("💡 Usa este botón para descontar los 4 colores (CMYK) al mismo tiempo.")
+    col_cmyk, col_v_cmyk = st.columns([2, 1])
     
-    cant_cmyk = col_cmyk.number_input("ml a descontar de CADA color (CMYK):", min_value=0.0, step=0.1)
-    if col_cmyk.button("🎨 Añadir Kit CMYK Completo"):
-        colores = ["Cian", "Magenta", "Amarillo", "Negro"]
-        for c in colores:
-            # Buscamos si existe el item que contenga el nombre del color
-            match = [item for item in df_inv['item'].tolist() if c in item]
-            if match:
-                st.session_state.carrito_insumos.append({
-                    "item": match[0],
-                    "cantidad": cant_cmyk,
-                    "unidad": "ml"
-                })
-        st.toast("Kit CMYK añadido a la lista")
+    cant_cmyk = col_cmyk.number_input("ml a descontar de CADA tinta (Negro, Magenta, Cian, Yellow):", min_value=0.0, step=0.1, key="cmyk_val")
+    
+    if col_v_cmyk.button("🎨 AGREGAR LAS 4 TINTAS", use_container_width=True):
+        # Nombres exactos que tienes en tu inventario según tus fotos
+        colores_580w = ["negro", "magenta", "cian", "yellow"]
+        encontrados = 0
+        
+        for col in colores_580w:
+            # Buscamos la tinta que contenga "580w" y el color
+            for item_inv in df_inv['item'].tolist():
+                if "580w" in item_inv.lower() and col in item_inv.lower():
+                    st.session_state.carrito_insumos.append({
+                        "item": item_inv,
+                        "cantidad": cant_cmyk,
+                        "unidad": "ml"
+                    })
+                    encontrados += 1
+                    break
+        
+        if encontrados == 4:
+            st.success("✅ Se añadieron los 4 colores a la lista.")
+        else:
+            st.warning(f"Se encontraron {encontrados} de 4 tintas. Verifica los nombres en Inventario.")
 
     st.write("---")
     
-    # AGREGADOR MANUAL (Para papel, vinil, etc.)
+    # AGREGADOR MANUAL (Para papel u otros materiales)
+    st.write("¿Gastaste algo más? (Papel, Vinil, etc.)")
     col_ins, col_cant, col_btn = st.columns([3, 2, 1])
-    insumo_sel = col_ins.selectbox("Otro material:", df_inv['item'].tolist())
+    insumo_sel = col_ins.selectbox("Seleccionar otro material:", df_inv['item'].tolist(), key="sel_manual")
     unidad_m = df_inv[df_inv['item'] == insumo_sel]['unidad'].values[0]
-    cant_v = col_cant.number_input(f"Cantidad ({unidad_m})", min_value=0.0, step=0.01, key="cant_manual")
+    cant_v = col_cant.number_input(f"Cantidad ({unidad_m})", min_value=0.0, step=0.01, key="cant_indiv")
     
-    if col_btn.button("➕ Añadir Individual"):
+    if col_btn.button("➕ Añadir", use_container_width=True):
         if cant_v > 0:
             st.session_state.carrito_insumos.append({"item": insumo_sel, "cantidad": cant_v, "unidad": unidad_m})
             st.rerun()
 
     # --- 3. RESUMEN Y PROCESAMIENTO ---
     if st.session_state.carrito_insumos:
-        st.subheader("📝 Resumen de Gasto para esta venta")
-        df_resumen = pd.DataFrame(st.session_state.carrito_insumos)
-        st.table(df_resumen)
+        st.subheader("📝 Lista de materiales a descontar:")
+        # Mostramos la lista para que estés segura antes de guardar
+        for i, it in enumerate(st.session_state.carrito_insumos):
+            st.text(f"• {it['item']}: {it['cantidad']} {it['unidad']}")
         
-        if st.button("🗑️ Vaciar Lista"):
+        c_del, c_proc = st.columns(2)
+        if c_del.button("🗑️ Borrar lista y empezar de nuevo", use_container_width=True):
             st.session_state.carrito_insumos = []
             st.rerun()
 
-        if st.button("🚀 FINALIZAR VENTA Y DESCONTAR TODO", type="primary", use_container_width=True):
+        if c_proc.button("🚀 CONFIRMAR VENTA Y RESTAR STOCK", type="primary", use_container_width=True):
             if cliente and monto_v > 0:
                 # Conversión a USD
                 if "BCV" in moneda_v: m_usd = monto_v / t_bcv
@@ -928,11 +942,12 @@ if menu == "💰 Ventas":
 
                 c = conectar(); cur = c.cursor()
                 try:
+                    from datetime import datetime
                     fecha_h = datetime.now().strftime("%d/%m/%Y %H:%M")
+                    
                     for mat in st.session_state.carrito_insumos:
-                        # Restar Stock
                         cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (mat['cantidad'], mat['item']))
-                        # Registrar Historial
+                        
                         cur.execute("""CREATE TABLE IF NOT EXISTS ventas 
                                       (id INTEGER PRIMARY KEY, fecha TEXT, cliente TEXT, pedido TEXT, monto_usd REAL, material TEXT, gasto REAL)""")
                         cur.execute("INSERT INTO ventas (fecha, cliente, pedido, monto_usd, material, gasto) VALUES (?,?,?,?,?,?)",
@@ -940,7 +955,7 @@ if menu == "💰 Ventas":
                     
                     c.commit()
                     st.session_state.carrito_insumos = []
-                    st.success("✅ Venta procesada. Inventario actualizado.")
+                    st.success("✅ ¡Venta registrada y las 4 tintas descontadas!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
