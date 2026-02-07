@@ -854,81 +854,106 @@ if menu == "💰 Ventas":
         st.info("El historial se creará con tu primera venta.")
     conn.close() 
 
-# --- 5. MÓDULO DE VENTAS: REGISTRO Y DESCUENTO DE STOCK ---
+# --- 5. MÓDULO DE VENTAS: REGISTRO MULTI-INSUMO ---
 if menu == "💰 Ventas":
-    st.title("💰 Registro de Ventas")
-    st.markdown("Registra tus pedidos aquí para descontar materiales y llevar tu control de ingresos.")
+    st.title("💰 Registro de Ventas Multi-Insumo")
+    
+    # Inicializamos una "bolsa de materiales" en la sesión si no existe
+    if 'carrito_insumos' not in st.session_state:
+        st.session_state.carrito_insumos = []
 
     conn = conectar()
-    df_inv = pd.read_sql_query("SELECT * FROM inventario WHERE cantidad > 0", conn)
+    df_inv = pd.read_sql_query("SELECT item, cantidad, unidad FROM inventario WHERE cantidad > 0", conn)
     conn.close()
 
-    if df_inv.empty:
-        st.warning("⚠️ No puedes vender si no tienes nada en el Inventario. Registra insumos primero.")
-    else:
-        with st.form("form_ventas_atomicas_unica", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**📦 Detalles del Pedido**")
-                cliente = st.text_input("Nombre del Cliente")
-                pedido = st.text_area("¿Qué estás vendiendo?", placeholder="Ej: 20 Libretas personalizadas", height=100)
-            
-            with c2:
-                st.markdown("**💵 Cobro Realizado**")
-                monto_v = st.number_input("Monto Total", min_value=0.0, format="%.2f")
-                moneda_v = st.radio("Moneda:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
-                st.write("---")
-                # Selección de material a descontar
-                insumo = st.selectbox("Material gastado en este trabajo:", df_inv['item'].tolist())
-                unid_medida = df_inv[df_inv['item'] == insumo]['unidad'].values[0]
-                cant_gasto = st.number_input(f"Cantidad a restar del stock ({unid_medida})", min_value=0.01)
+    # --- 1. DATOS DEL PEDIDO ---
+    with st.expander("👤 Datos del Cliente y Pago", expanded=True):
+        c1, c2 = st.columns(2)
+        cliente = c1.text_input("Nombre del Cliente", key="v_cliente")
+        pedido_desc = c1.text_area("Descripción del Pedido", placeholder="Ej: 50 Agendas con fotos")
+        
+        monto_v = c2.number_input("Monto Total Cobrado", min_value=0.0, format="%.2f")
+        moneda_v = c2.radio("Moneda:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
 
-            if st.form_submit_button("🚀 FINALIZAR VENTA Y DESCONTAR"):
-                if cliente and monto_v > 0:
-                    # Cálculo de valor en USD para tu historial
-                    if "BCV" in moneda_v: m_usd = monto_v / t_bcv
-                    elif "Binance" in moneda_v: m_usd = monto_v / t_bin
-                    else: m_usd = monto_v
+    st.divider()
 
-                    c = conectar(); cur = c.cursor()
-                    # 1. Verificar si hay suficiente antes de restar
-                    cur.execute("SELECT cantidad FROM inventario WHERE item=?", (insumo,))
-                    actual = cur.fetchone()[0]
+    # --- 2. AGREGADOR DE MATERIALES (Aquí puedes meter todas las tintas) ---
+    st.subheader("📦 Materiales Utilizados")
+    col_ins, col_cant, col_btn = st.columns([3, 2, 1])
+    
+    insumo_sel = col_ins.selectbox("Selecciona Insumo:", df_inv['item'].tolist())
+    unidad_m = df_inv[df_inv['item'] == insumo_sel]['unidad'].values[0]
+    cant_v = col_cant.number_input(f"Cantidad ({unidad_m})", min_value=0.0, step=0.01)
+    
+    if col_btn.button("➕ Añadir"):
+        if cant_v > 0:
+            st.session_state.carrito_insumos.append({
+                "item": insumo_sel,
+                "cantidad": cant_v,
+                "unidad": unidad_m
+            })
+        else:
+            st.warning("La cantidad debe ser mayor a 0")
 
-                    if actual >= cant_gasto:
-                        # 2. Restar del inventario
-                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_gasto, insumo))
+    # Mostrar la lista de lo que se va a descontar
+    if st.session_state.carrito_insumos:
+        st.write("### 📝 Resumen de Gasto:")
+        for i, item in enumerate(st.session_state.carrito_insumos):
+            st.write(f"- **{item['item']}**: {item['cantidad']} {item['unidad']}")
+        
+        if st.button("🗑️ Limpiar Lista"):
+            st.session_state.carrito_insumos = []
+            st.rerun()
+
+    st.divider()
+
+    # --- 3. BOTÓN FINAL PARA IMPACTAR TODO ---
+    if st.button("🚀 PROCESAR VENTA TOTAL", type="primary", use_container_width=True):
+        if not cliente or monto_v <= 0 or not st.session_state.carrito_insumos:
+            st.error("Faltan datos (Cliente, Monto o Materiales)")
+        else:
+            # Cálculo de USD
+            if "BCV" in moneda_v: m_usd = monto_v / t_bcv
+            elif "Binance" in moneda_v: m_usd = monto_v / t_bin
+            else: m_usd = monto_v
+
+            c = conectar(); cur = c.cursor()
+            try:
+                error_stock = False
+                for mat in st.session_state.carrito_insumos:
+                    # Verificar stock
+                    cur.execute("SELECT cantidad FROM inventario WHERE item=?", (mat['item'],))
+                    stock_actual = cur.fetchone()[0]
+                    
+                    if stock_actual < mat['cantidad']:
+                        st.error(f"❌ Stock insuficiente para {mat['item']}. Tienes {stock_actual}")
+                        error_stock = True
+                        break
+                
+                if not error_stock:
+                    from datetime import datetime
+                    fecha_h = datetime.now().strftime("%d/%m/%Y %H:%M")
+                    
+                    for mat in st.session_state.carrito_insumos:
+                        # 1. Descontar Inventario
+                        cur.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", 
+                                   (mat['cantidad'], mat['item']))
                         
-                        # 3. Guardar en Historial de Ventas
+                        # 2. Guardar en Ventas (un registro por cada material para trazabilidad)
                         cur.execute("""CREATE TABLE IF NOT EXISTS ventas 
                                       (id INTEGER PRIMARY KEY, fecha TEXT, cliente TEXT, pedido TEXT, monto_usd REAL, material TEXT, gasto REAL)""")
-                        
-                        from datetime import datetime
                         cur.execute("INSERT INTO ventas (fecha, cliente, pedido, monto_usd, material, gasto) VALUES (?,?,?,?,?,?)",
-                                   (datetime.now().strftime("%d/%m/%Y %H:%M"), cliente, pedido, m_usd, insumo, cant_gasto))
-                        
-                        c.commit(); c.close()
-                        st.success(f"✅ Venta registrada. Se restaron {cant_gasto} {unid_medida} de {insumo}.")
-                        st.rerun()
-                    else:
-                        st.error(f"❌ No tienes suficiente {insumo}. Tienes {actual} y quieres gastar {cant_gasto}.")
-                        c.close()
-                else:
-                    st.error("Por favor rellena el nombre del cliente y el monto.")
+                                   (fecha_h, cliente, pedido_desc, m_usd, mat['item'], mat['cantidad']))
+                    
+                    c.commit()
+                    st.session_state.carrito_insumos = [] # Limpiar carrito
+                    st.success("✅ Venta procesada y todos los materiales descontados.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+            finally:
+                c.close()
 
-    # --- 📈 VISTA RÁPIDA DE INGRESOS ---
-    st.divider()
-    st.subheader("📋 Últimos Pedidos Entregados")
-    conn = conectar()
-    try:
-        df_v = pd.read_sql_query("SELECT fecha, cliente, pedido, monto_usd as 'Total $', material as 'Insumo' FROM ventas ORDER BY id DESC LIMIT 5", conn)
-        if not df_v.empty:
-            st.table(df_v)
-        else:
-            st.info("No hay ventas registradas hoy.")
-    except:
-        st.info("El historial se creará con tu primera venta.")
-    conn.close()
 
 
 
