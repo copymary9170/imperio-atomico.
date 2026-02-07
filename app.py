@@ -476,23 +476,64 @@ elif menu == "📊 Dashboard":
             st.write("**Últimos Gastos**")
             st.dataframe(df_gastos.tail(10), use_container_width=True, hide_index=True)
 
-# --- 7. CONFIGURACIÓN ---
+# --- 7. MÓDULO DE CONFIGURACIÓN (EL PANEL DE CONTROL) ---
 elif menu == "⚙️ Configuración":
-    st.title("⚙️ Tasas e Impuestos")
-    with st.form("f_conf"):
+    st.title("⚙️ Configuración del Sistema")
+    st.info("Desde aquí controlas los precios base y las tasas para combatir la inflación.")
+
+    conn = conectar()
+    # Cargamos los valores actuales de la base de datos
+    conf_df = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
+    
+    with st.form("config_general"):
+        st.subheader("💵 Tasas de Cambio")
         c1, c2 = st.columns(2)
-        n_bcv = c1.number_input("Tasa BCV", value=t_bcv)
-        n_bin = c1.number_input("Tasa Binance", value=t_bin)
-        n_iva = c2.number_input("IVA (0.16)", value=iva)
-        n_igtf = c2.number_input("IGTF (0.03)", value=igtf)
-        n_banco = c2.number_input("Banco (0.02)", value=banco)
-        if st.form_submit_button("💾 Guardar Cambios"):
-            c = conectar()
-            # Usamos round(n_bcv, 2) para que a la base de datos ya entre limpio
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (round(n_bcv, 2),))
-            c.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_binance'", (round(n_bin, 2),))
-            # ... los demás quedan igual
-            c.commit(); c.close(); st.success("✅ Configuración actualizada"); st.rerun()
+        nueva_bcv = c1.number_input("Tasa BCV (Bs/$)", value=float(conf_df.loc['tasa_bcv', 'valor']), format="%.2f")
+        nueva_bin = c2.number_input("Tasa Binance (Bs/$)", value=float(conf_df.loc['tasa_binance', 'valor']), format="%.2f")
+
+        st.divider()
+        st.subheader("💉 Costos de Insumos Críticos")
+        # Aquí es donde manejas la inflación de la tinta
+        costo_tinta = st.number_input("Costo de Tinta por ml ($)", 
+                                      value=float(conf_df.loc['costo_tinta_ml', 'valor']), 
+                                      format="%.4f", 
+                                      help="Este valor afecta los cálculos automáticos de las cotizaciones CMYK.")
+
+        st.divider()
+        st.subheader("🛡️ Impuestos y Comisiones")
+        c3, c4, c5 = st.columns(3)
+        n_iva = c3.number_input("IVA (0.16 = 16%)", value=float(conf_df.loc['iva_perc', 'valor']), format="%.2f")
+        n_igtf = c4.number_input("IGTF (0.03 = 3%)", value=float(conf_df.loc['igtf_perc', 'valor']), format="%.2f")
+        n_banco = c5.number_input("Comisión Bancaria", value=float(conf_df.loc['banco_perc', 'valor']), format="%.2f")
+
+        if st.form_submit_button("💾 GUARDAR CAMBIOS ATÓMICOS"):
+            cur = conn.cursor()
+            actualizaciones = [
+                ('tasa_bcv', nueva_bcv),
+                ('tasa_binance', nueva_bin),
+                ('costo_tinta_ml', costo_tinta),
+                ('iva_perc', n_iva),
+                ('igtf_perc', n_igtf),
+                ('banco_perc', n_banco)
+            ]
+            for param, val in actualizaciones:
+                cur.execute("UPDATE configuracion SET valor = ? WHERE parametro = ?", (val, param))
+            
+            conn.commit()
+            st.success("✅ ¡Configuración actualizada! Los cambios se aplicarán en todo el sistema de inmediato.")
+            st.rerun()
+    
+    conn.close()
+
+    # --- GESTIÓN DE USUARIOS (Solo para la Jefa) ---
+    if st.session_state.rol == "Admin":
+        st.divider()
+        with st.expander("👤 Gestión de Usuarios y Claves"):
+            st.write("Aquí puedes ver quién tiene acceso al sistema.")
+            conn = conectar()
+            users = pd.read_sql("SELECT username, rol, nombre FROM usuarios", conn)
+            conn.close()
+            st.table(users)
 
 # --- 8. LÓGICA DE CLIENTES ---
 elif menu == "👥 Clientes":
@@ -858,3 +899,4 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
