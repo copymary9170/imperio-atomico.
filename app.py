@@ -688,20 +688,22 @@ elif menu == "🛠️ Otros Procesos":
 
 # --- 14. FUNCIONES DE CÁLCULO GENERALES (FUERA DE LOS IF) ---
 
-def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
+ddef calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
     """Calcula el precio final aplicando margen e impuestos"""
     precio_con_ganancia = costo_base * (1 + (margen_ganancia / 100))
     
     if not incluir_impuestos:
         return precio_con_ganancia
     
-    # Valores por defecto si no existen en session_state
     iva = st.session_state.get('iva', 0.16)
     igtf = st.session_state.get('igtf', 0.03)
     banco = st.session_state.get('banco', 0.02)
     
     return precio_con_ganancia * (1 + iva + igtf + banco)
 
+
+def cargar_datos_seguros():
+    cargar_datos()
 if st.form_submit_button("🧮 Calcular Proceso"):
                 costo_u = datos_eq['desgaste']
                 costo_t = costo_u * unidades
@@ -958,6 +960,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
