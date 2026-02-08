@@ -76,25 +76,23 @@ if not st.session_state.autenticado:
                 st.session_state.rol = res.iloc[0]['rol']
                 st.session_state.usuario_nombre = res.iloc[0]['nombre']
                 st.rerun()
-            # Si falla, el bypass de emergencia (Solo para ti)
+            # Bypass de emergencia alineado correctamente
             elif u == "jefa" and p == "atomica2026":
                 st.session_state.autenticado = True
                 st.session_state.rol = "Admin"
                 st.session_state.usuario_nombre = "Dueña del Imperio"
                 st.rerun()
-           else:
+            else:
                 st.error("❌ Usuario o clave incorrecta")
-    st.stop() # <--- Aquí terminaba tu error de la línea 87
+    st.stop()
 
-# --- 2.5 FUNCIONES TRANSACCIONALES (Alineadas al borde izquierdo) ---
+# --- 2.5 FUNCIONES DE APOYO (Alineadas al borde izquierdo) ---
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
-    """Actualiza el stock y registra la auditoría"""
+    """Registra movimientos y actualiza el stock real contra la inflación"""
     try:
         conn = conectar()
         cur = conn.cursor()
-        # Actualización real de la tabla
         cur.execute("UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?", (cantidad_cambio, item_id))
-        # Registro del historial
         cur.execute("""INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) 
                        VALUES (?, ?, ?, ?, ?)""", 
                     (item_id, tipo_mov, cantidad_cambio, motivo, st.session_state.get('usuario_nombre', 'Sistema')))
@@ -102,21 +100,19 @@ def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
         conn.close()
         return True
     except Exception as e:
-        st.error(f"Error en base de datos: {e}")
+        st.error(f"Error en movimiento: {e}")
         return False
 
 def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
-    """Calcula el costo final considerando la inflación y tasas"""
-    costo_con_envio = base_usd + logistica_usd
+    """Calcula el costo real sumando logística e impuestos (IVA/IGTF/Banco)"""
+    costo_con_logistica = base_usd + logistica_usd
     if not aplicar_impuestos:
-        return costo_con_envio
+        return costo_con_logistica
     
-    # Valores de la sesión para ajustes rápidos por inflación
     iva = st.session_state.get('iva', 0.16)
     igtf = st.session_state.get('igtf', 0.03)
     banco = st.session_state.get('banco', 0.02)
-    
-    return costo_con_envio * (1 + iva + igtf + banco)
+    return costo_con_logistica * (1 + iva + igtf + banco)
 
 # --- 2. INICIALIZAR SISTEMA ---
 def inicializar_sistema():
@@ -984,6 +980,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
