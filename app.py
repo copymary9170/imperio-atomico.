@@ -893,49 +893,73 @@ elif menu == "📝 Cotizaciones":
 elif menu == "📊 Auditoría y Métricas":
     st.title("📊 Auditoría de Producción e Insumos")
     
-    # 1. Carga de datos desde la tabla de movimientos (La que llena la función ACID)
     conn = conectar()
+    cursor = conn.cursor()
+    
+    # --- 🛡️ BLINDAJE: CREACIÓN AUTOMÁTICA DE TABLA SI NO EXISTE ---
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS inventario_movs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            item TEXT,
+            cantidad REAL,
+            unidad TEXT,
+            tipo_mov TEXT, -- 'ENTRADA' o 'SALIDA'
+            referencia TEXT -- ID de Venta o Compra
+        )
+    """)
+    conn.commit()
+
+    # Ahora ejecutamos la consulta de forma segura
     query_movs = """
         SELECT fecha, item, cantidad, unidad, tipo_mov 
         FROM inventario_movs 
         WHERE unidad = 'ml' 
         ORDER BY fecha DESC
     """
-    df_movs = pd.read_sql_query(query_movs, conn)
-    conn.close()
+    
+    try:
+        df_movs = pd.read_sql_query(query_movs, conn)
+    except Exception as e:
+        st.error(f"Error al leer auditoría: {e}")
+        df_movs = pd.DataFrame()
+    finally:
+        conn.close()
 
-    tab1, tab2 = st.tabs(["🧪 Consumo de Tinta", "📈 Flujo de Inventario"])
+    tab1, tab2 = st.tabs(["🧪 Consumo de Tinta", "📈 Flujo General"])
 
     with tab1:
         st.subheader("Análisis de Consumo por Color")
         if not df_movs.empty:
-            # Filtramos solo salidas (ventas) para ver el gasto
+            # Filtramos solo salidas (ventas)
             df_salidas = df_movs[df_movs['tipo_mov'] == 'SALIDA'].copy()
-            df_salidas['fecha'] = pd.to_datetime(df_salidas['fecha']).dt.date
             
-            # Gráfica de consumo acumulado por ítem (Color)
-            consumo_total = df_salidas.groupby('item')['cantidad'].sum().reset_index()
-            
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.bar_chart(data=consumo_total, x='item', y='cantidad')
-            with c2:
-                st.write("📋 **ML Totales Consumidos**")
-                st.dataframe(consumo_total, hide_index=True)
+            if not df_salidas.empty:
+                df_salidas['fecha'] = pd.to_datetime(df_salidas['fecha']).dt.date
+                consumo_total = df_salidas.groupby('item')['cantidad'].sum().reset_index()
                 
-            st.divider()
-            st.write("🔍 **Últimos descuentos realizados (Auditoría Forense)**")
-            st.dataframe(df_salidas.head(20), use_container_width=True, hide_index=True)
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    # Gráfica interactiva de barras
+                    st.bar_chart(data=consumo_total, x='item', y='cantidad')
+                with c2:
+                    st.write("📋 **Resumen de Gastos**")
+                    st.table(consumo_total)
+                
+                st.divider()
+                st.write("🔍 **Log de Salidas CMYK**")
+                st.dataframe(df_salidas, use_container_width=True, hide_index=True)
+            else:
+                st.info("💡 No hay registros de 'SALIDA' aún. Procesa una venta para ver datos.")
         else:
-            st.info("No hay datos de consumo registrados aún.")
+            st.info("🔍 No hay movimientos de tinta registrados en la base de datos.")
 
     with tab2:
-        st.subheader("Movimientos Generales del Almacén")
-        # Aquí puedes ver Entradas (compras) y Salidas (ventas)
+        st.subheader("Historial Completo de Movimientos")
         if not df_movs.empty:
             st.dataframe(df_movs, use_container_width=True)
         else:
-            st.info("El historial de movimientos está vacío.")
+            st.warning("El historial está vacío. Realiza operaciones en Inventario o Ventas.")
 
 
 
