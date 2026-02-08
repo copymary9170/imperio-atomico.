@@ -676,6 +676,40 @@ elif menu == "🛠️ Otros Procesos":
             st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
 
 
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Generador de Presupuestos")
+    
+    # Si venimos del Analizador CMYK, precargamos los datos
+    datos_cmyk = st.session_state.get('datos_pre_cotizacion', {})
+    
+    with st.expander("💎 Datos del Trabajo", expanded=True):
+        col1, col2 = st.columns(2)
+        desc = col1.text_input("Trabajo:", value=datos_cmyk.get('trabajo', ""))
+        cliente = col2.selectbox("Cliente:", st.session_state.df_cli['nombre'].tolist())
+        
+        c1, c2, c3 = st.columns(3)
+        costo_base = c1.number_input("Costo Materiales ($):", value=float(datos_cmyk.get('costo_base', 0.0)), format="%.4f")
+        margen = c2.slider("Margen de Ganancia %:", 30, 300, 100)
+        cantidad = c3.number_input("Unidades:", value=int(datos_cmyk.get('unidades', 1)), min_value=1)
+
+    # Cálculo dinámico
+    precio_unitario = costo_base * (1 + (margen/100))
+    total_neto = precio_unitario * cantidad
+    total_con_impuestos = calcular_precio_con_impuestos(total_neto)
+
+    st.subheader(f"Total a Cobrar: ${total_con_impuestos:.2f}")
+    
+    col_a, col_b = st.columns(2)
+    if col_a.button("📤 Generar PDF (Simulado)"):
+        st.write(f"Generando presupuesto para {cliente}...")
+    
+    if col_b.button("💰 Convertir en Venta Real"):
+        st.session_state['transaccion_pendiente'] = {
+            'cliente': cliente,
+            'monto': total_con_impuestos,
+            'detalle': desc
+        }
+        st.success("¡Datos enviados a Ventas!")
 
 
 
