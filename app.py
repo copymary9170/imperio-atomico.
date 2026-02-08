@@ -831,7 +831,7 @@ elif menu == "🛠️ Otros Procesos":
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Presupuestos")
     
-    # Si venimos del Analizador CMYK, precargamos los datos
+    # Datos que vienen del Analizador CMYK (si se usó)
     datos_cmyk = st.session_state.get('datos_pre_cotizacion', {})
     
     with st.expander("💎 Datos del Trabajo", expanded=True):
@@ -839,37 +839,36 @@ elif menu == "📝 Cotizaciones":
         desc = col1.text_input("Trabajo:", value=datos_cmyk.get('trabajo', ""))
         
         # Validación de seguridad para la lista de clientes
-        lista_clientes = st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Cliente Genérico"]
+        df_cli = st.session_state.get('df_cli', pd.DataFrame())
+        lista_clientes = df_cli['nombre'].tolist() if not df_cli.empty else ["Cliente Genérico"]
         cliente = col2.selectbox("Cliente:", lista_clientes)
         
         st.divider()
         
-        # --- ENTRADA DE DATOS PARA EL MOTOR ---
         c1, c2, c3 = st.columns(3)
-        # 1. Recuperamos el costo base (ya sea del Analizador CMYK o manual)
         costo_base = c1.number_input("Costo Base de Producción ($)", 
                                     value=float(datos_cmyk.get('costo_base', 0.0)), 
                                     format="%.4f")
         
-        # 2. Definimos el margen (Aquí es donde evitamos duplicar)
         margen_ganancia = c2.number_input("Margen de Ganancia (%)", min_value=0, value=100)
-        
-        # 3. Opción de impuestos
         incluir_impuestos = c3.checkbox("¿Aplicar Impuestos? (IVA/IGTF/Banc)", value=True)
 
-        # --- LLAMADA ÚNICA AL MOTOR (Cero duplicidad) ---
-        # El motor recibe Costo -> Suma Margen -> Suma Impuestos (si aplica)
+        # Aquí es donde ocurre la magia del motor que pegamos arriba
         precio_final_usd = calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos)
 
-        # --- RESULTADOS VISUALES ---
         st.divider()
         res1, res2, res3 = st.columns(3)
         res1.metric("Costo Real", f"$ {costo_base:.2f}")
-        res2.metric("PRECIO VENTA (USD)", f"$ {precio_final_usd:.2f}", delta=f"Ganancia: ${(precio_final_usd/(1.21 if incluir_impuestos else 1) - costo_base):.2f}")
+        
+        # Cálculo de ganancia neta restando impuestos si se aplicaron
+        divisor = (1 + st.session_state.get('iva', 0.16) + st.session_state.get('igtf', 0.03) + st.session_state.get('banco', 0.02)) if incluir_impuestos else 1
+        ganancia_neta = (precio_final_usd / divisor) - costo_base
+        
+        res2.metric("PRECIO VENTA (USD)", f"$ {precio_final_usd:.2f}", delta=f"Ganancia: ${ganancia_neta:.2f}")
         res3.metric("PRECIO VENTA (BS)", f"Bs {(precio_final_usd * t_bcv):,.2f}")
+        
         if st.button("💾 Guardar Cotización"):
-            st.success("Cotización guardada exitosamente (Simulado)")
-
+            st.success("✅ Cotización lista para procesar.")
 if menu == "💰 Ventas":
     st.title("💰 Registro de Ventas")
     
@@ -1011,6 +1010,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
