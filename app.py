@@ -247,7 +247,8 @@ elif menu == "📝 Cotizaciones":
                 value=int(datos_pre.get('unidades', 1))
             )
 
-    # --- 4. GESTIÓN DE INSUMOS ---
+  if menu == "📦 Inventario":
+    st.title("📦 Centro de Control de Inventario")
     st.subheader("📦 Consumo de Insumos")
     consumos_reales = {}
 
@@ -1105,6 +1106,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
