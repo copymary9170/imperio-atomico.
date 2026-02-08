@@ -663,29 +663,30 @@ elif menu == "🛠️ Otros Procesos":
     if not otros_equipos:
         st.warning("⚠️ No hay maquinaria registrada (Cameo, Plastificadora, etc.) en '🏗️ Activos'.")
     else:
-        # TODO el formulario debe estar dentro de este 'with'
         with st.form("form_procesos_fijo"):
             col1, col2, col3 = st.columns(3)
             
-            # Nombres de equipos usando minúsculas 'equipo'
             nombres_eq = [e['equipo'] for e in otros_equipos]
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
             
             # Buscamos los datos de esa máquina
-           unidades = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1)
+            datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
+            
+            # Aquí estaba el error de alineación (Checklist #Indentation)
+            unidades = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1)
             margen_p = col3.number_input("Margen Ganancia %", value=50)
 
             if st.form_submit_button("🧮 Calcular Proceso"):
                 costo_u = datos_eq['desgaste']
                 costo_t = costo_u * unidades
                 
-                # Usamos la función de cálculo (la defino abajo para que no falle)
+                # Función de precio final
                 precio_v = calcular_precio_con_impuestos(costo_t, margen_p)
                 
                 st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
                 st.success(f"Precio Sugerido: $ {precio_v:.2f}")
 
-# --- FUNCIONES DE CÁLCULO QUE TE FALTABAN (PONLAS AL FINAL O ARRIBA) ---
+# --- 14. FUNCIONES DE CÁLCULO (FUERA DE LOS IF DE MENÚ) ---
 
 def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
     """Calcula el precio final aplicando ganancia e impuestos del session_state"""
@@ -694,7 +695,6 @@ def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos
     if not incluir_impuestos:
         return precio_con_ganancia
     
-    # Jalamos los impuestos que guardaste en la configuración
     iva = st.session_state.get('iva', 0.16)
     igtf = st.session_state.get('igtf', 0.03)
     banco = st.session_state.get('banco', 0.02)
@@ -920,6 +920,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
