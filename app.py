@@ -1,48 +1,90 @@
-import streamlit as st
 import pandas as pd
 import sqlite3
+import streamlit as st
 from datetime import datetime
 from PIL import Image
 import numpy as np
 import io
 
-# --- 1. FUNCIÓN DE CONEXIÓN ---
+# --- 1. MOTOR DE BASE DE DATOS PROFESIONAL ---
 def conectar():
-    # Usamos v2 para que la base de datos nazca limpia y sin errores de columnas
-    return sqlite3.connect("imperio_v2.db", check_same_thread=False)
+    # Asegúrate de que este nombre sea el mismo que usabas antes si quieres tus datos viejos
+    return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
-def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=False):
-    """Calcula el costo real de entrada (Inversión)"""
-    total_base = base_usd + logistica_usd
-    if aplicar_impuestos:
-        # Usamos los valores que ya tienes en session_state
-        iva = st.session_state.get('iva', 0.16)
-        igtf = st.session_state.get('igtf', 0.03)
-        banco = st.session_state.get('banco', 0.02)
-        return total_base * (1 + iva + igtf + banco)
-    return total_base
-
-def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
-    """Registra auditoría y actualiza stock protegiendo contra inventario negativo"""
+def inicializar_sistema():
     conn = conectar()
-    cur = conn.cursor()
-    try:
-        # 1. VALIDACIÓN DE SEGURIDAD (Solo si es una salida/descuento)
-        if cantidad_cambio < 0:
-            cur.execute("SELECT cantidad, item FROM inventario WHERE id = ?", (item_id,))
-            resultado = cur.fetchone()
-            if resultado:
-                stock_actual, nombre_item = resultado
-                if stock_actual + cantidad_cambio < 0:
-                    return False, f"Stock insuficiente de {nombre_item} (Disponible: {stock_actual})"
+    c = conn.cursor()
+    c.execute("PRAGMA foreign_keys = ON")
+    
+    # Tablas principales
+    c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
+    c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
+    c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
+    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente_id INTEGER, trabajo TEXT, monto_usd REAL, estado TEXT, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
+    c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo_pago TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
+    c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
+    c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
 
-        # 2. REGISTRO DE AUDITORÍA
-        usuario = st.session_state.get('usuario_nombre', 'Sistema')
-        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cur.execute("""INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario, fecha)
-                       VALUES (?, ?, ?, ?, ?, ?)""", 
-                    (item_id, tipo_mov, cantidad_cambio, motivo, usuario, fecha))
-        
+    # --- REPARACIÓN DE USUARIOS ---
+    c.execute("SELECT COUNT(*) FROM usuarios")
+    if c.fetchone()[0] == 0:
+        usuarios_iniciales = [
+            ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
+            ('mama', 'admin2026', 'Administracion', 'Mamá'),
+            ('pro', 'diseno2026', 'Produccion', 'Hermana')
+        ]
+        c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", usuarios_iniciales)
+
+    # --- CONFIGURACIÓN DE INFLACIÓN (TINTA Y TASAS) ---
+    config_init = [
+        ('tasa_bcv', 36.50),
+        ('tasa_binance', 38.00),
+        ('iva_perc', 0.16),
+        ('igtf_perc', 0.03),
+        ('banco_perc', 0.02),
+        ('costo_tinta_ml', 0.10) # <--- ¡Aquí puedes cambiar el precio base!
+    ]
+    for param, valor in config_init:
+        c.execute("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", (param, valor))
+    
+    conn.commit()
+    conn.close()
+
+# Ejecución inicial
+inicializar_sistema()
+
+# --- 2. LOGIN REFORZADO ---
+st.set_page_config(page_title="Imperio Atómico - Sistema Pro", layout="wide")
+
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    st.title("🔐 Acceso al Imperio Atómico")
+    with st.form("login_form"):
+        u = st.text_input("Usuario").lower().strip() # Limpiamos espacios y mayúsculas
+        p = st.text_input("Clave", type="password")
+        if st.form_submit_button("Entrar"):
+            # Primero intentamos con la base de datos
+            conn = conectar()
+            res = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", conn, params=(u, p))
+            conn.close()
+            
+            if not res.empty:
+                st.session_state.autenticado = True
+                st.session_state.rol = res.iloc[0]['rol']
+                st.session_state.usuario_nombre = res.iloc[0]['nombre']
+                st.rerun()
+            # Si falla, el bypass de emergencia (Solo para ti)
+            elif u == "jefa" and p == "atomica2026":
+                st.session_state.autenticado = True
+                st.session_state.rol = "Admin"
+                st.session_state.usuario_nombre = "Dueña del Imperio"
+                st.rerun()
+            else:
+                st.error("❌ Usuario o clave incorrecta")
+    st.stop()
         # 3. ACTUALIZACIÓN REAL
         cur.execute("UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?", (cantidad_cambio, item_id))
         
@@ -930,6 +972,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
