@@ -6,54 +6,40 @@ from PIL import Image
 import numpy as np
 import io
 
-# --- 1. FUNCIÓN DE CONEXIÓN (FUNDAMENTAL) ---
+# --- 1. FUNCIÓN DE CONEXIÓN (Blindada) ---
 def conectar():
     """Establece la conexión con SQLite"""
     return sqlite3.connect("imperio_data.db", check_same_thread=False)
 
-# --- 2. MOTOR ÚNICO DE COSTOS ---
-def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
-    total = base_usd + logistica_usd
-    if aplicar_impuestos:
-        # Estas variables se cargan después desde la base de datos
-        recargo = iva + igtf + banco
-        total *= (1 + recargo)
-    return round(total, 6)
-
-# --- 3. INICIALIZAR SISTEMA (EL QUE REPARAMOS RECIÉN) ---
+# --- 2. INICIALIZAR SISTEMA (La base de todo) ---
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     
-    # 1. Crear tablas con todas las columnas necesarias desde el inicio
+    # CREAR TABLA DE USUARIOS (Con todas las columnas exactas)
+    c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+                    username TEXT PRIMARY KEY, 
+                    password TEXT, 
+                    rol TEXT, 
+                    nombre TEXT)''')
+    
+    # CREAR TABLA DE INVENTARIO
+    c.execute('''CREATE TABLE IF NOT EXISTS inventario (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    item TEXT UNIQUE, 
+                    cantidad REAL, 
+                    unidad TEXT, 
+                    precio_usd REAL, 
+                    minimo REAL DEFAULT 5.0)''')
+    
+    # OTRAS TABLAS NECESARIAS
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente_id INTEGER, trabajo TEXT, monto_usd REAL, estado TEXT, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
-    c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo_pago TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
-    c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-    
-    # TABLA DE USUARIOS (Asegurando que tenga 'nombre')
-    c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
-    
-    # TABLA DE AUDITORÍA
-    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                    item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT,
-                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(item_id) REFERENCES inventario(id))''')
+    c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
 
-    # 2. 🛡️ PARCHES DE REPARACIÓN (Por si la base de datos ya existe)
-    try:
-        c.execute("ALTER TABLE inventario ADD COLUMN minimo REAL DEFAULT 5.0")
-    except: pass
-    try:
-        c.execute("ALTER TABLE usuarios ADD COLUMN nombre TEXT")
-    except: pass
-
-    # 3. Usuarios iniciales
+    # INSERTAR USUARIOS INICIALES (Para que puedas entrar)
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         usuarios_iniciales = [
@@ -61,9 +47,9 @@ def inicializar_sistema():
             ('mama', 'admin2026', 'Administracion', 'Mamá'),
             ('pro', 'diseno2026', 'Produccion', 'Hermana')
         ]
-        c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", usuarios_iniciales)
+        c.executemany("INSERT INTO usuarios (username, password, rol, nombre) VALUES (?,?,?,?)", usuarios_iniciales)
 
-    # 4. Configuración inicial (Tasas e Impuestos)
+    # CONFIGURACIÓN INICIAL
     config_init = [
         ('tasa_bcv', 36.50), ('tasa_binance', 38.00),
         ('iva_perc', 0.16), ('igtf_perc', 0.03),
@@ -837,6 +823,7 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
 
