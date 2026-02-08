@@ -1388,5 +1388,99 @@ elif menu == "🏁 Cierre de Caja":
     if st.button("🖨️ Generar Reporte PDF (Simulado)"):
         st.info("Función de reporte lista para conectar a impresora térmica.")
 
+# --- 11. MÓDULO DE COTIZACIONES (EL PUENTE ENTRE DISEÑO Y VENTA) ---
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Generador de Cotizaciones Atómicas")
+    
+    # 1. Recuperar datos del Analizador CMYK si existen
+    datos_pre = st.session_state.get('datos_pre_cotizacion', {
+        'trabajo': "Trabajo General",
+        'costo_base': 0.0,
+        'ml_estimados': 0.0,
+        'unidades': 1
+    })
+
+    with st.container(border=True):
+        st.subheader("🛠️ Detalles del Trabajo")
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            descr = st.text_input("Descripción del trabajo:", value=datos_pre['trabajo'])
+            # Selector de cliente desde la BD
+            conn = conectar()
+            df_clis = pd.read_sql("SELECT id, nombre FROM clientes", conn)
+            conn.close()
+            
+            if not df_clis.empty:
+                opciones_cli = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
+                cliente_sel = st.selectbox("👤 Asignar a Cliente:", opciones_cli.keys())
+                id_cliente = opciones_cli[cliente_sel]
+            else:
+                st.warning("⚠️ No hay clientes. Ve al módulo 'Clientes' primero.")
+                st.stop()
+
+        with col2:
+            unidades = st.number_input("Cantidad de piezas:", min_value=1, value=int(datos_pre['unidades']))
+
+    # --- CÁLCULO DE PRECIOS ---
+    st.subheader("💰 Estructura de Costos y Ganancia")
+    c1, c2, c3 = st.columns(3)
+    
+    costo_unitario_base = c1.number_input("Costo Unit. Base ($)", value=float(datos_pre['costo_base'] / datos_pre['unidades'] if datos_pre['unidades'] > 0 else 0.0), format="%.4f")
+    margen = c2.slider("Margen de Ganancia %", min_value=10, max_value=500, value=100, step=10)
+    
+    # Cálculos dinámicos
+    costo_total_prod = costo_unitario_base * unidades
+    precio_venta_total = costo_total_prod * (1 + (margen / 100))
+    ganancia_neta = precio_venta_total - costo_total_prod
+
+    # --- VISUALIZACIÓN DE RESULTADOS ---
+    st.divider()
+    v1, v2, v3 = st.columns(3)
+    v1.metric("Costo Producción", f"$ {costo_total_prod:.2f}")
+    v2.metric("Precio Sugerido", f"$ {precio_venta_total:.2f}", delta=f"Ganancia: ${ganancia_neta:.2f}")
+    v3.metric("Precio en Bs (BCV)", f"Bs {(precio_venta_total * t_bcv):,.2f}")
+
+    # --- ACCIÓN FINAL: REGISTRAR VENTA ---
+    st.divider()
+    metodo_pago = st.selectbox("💳 Método de Pago:", ["Efectivo $", "Zelle", "Pago Móvil", "Transferencia Bs", "Binance"])
+    
+    if st.button("🚀 CONVERTIR EN VENTA Y REGISTRAR", use_container_width=True, type="primary"):
+        try:
+            conn = conectar()
+            cur = conn.cursor()
+            
+            # 1. Insertar en tabla Ventas
+            cur.execute("""
+                INSERT INTO ventas (cliente_id, monto_total, metodo, fecha) 
+                VALUES (?, ?, ?, ?)
+            """, (id_cliente, precio_venta_total, metodo_pago, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            
+            # 2. (Opcional) Registrar salida de tinta en inventario si viene de CMYK
+            if datos_pre['ml_estimados'] > 0:
+                # Aquí podrías buscar la tinta específica y descontarla
+                # Por ahora, limpia el estado de la pre-cotización
+                st.session_state.datos_pre_cotizacion = None
+            
+            conn.commit()
+            conn.close()
+            
+            st.balloons()
+            st.success(f"✅ ¡Venta de {cliente_sel} registrada por ${precio_venta_total:.2f}!")
+            
+            # Borrar datos temporales para evitar duplicados
+            if 'datos_pre_cotizacion' in st.session_state:
+                del st.session_state['datos_pre_cotizacion']
+                
+            st.info("🔄 Actualizando Dashboard...")
+            cargar_datos()
+        except Exception as e:
+            st.error(f"Error al registrar venta: {e}")
+
+    # Botón para limpiar si se quiere empezar de cero
+    if st.button("🗑️ Limpiar Cotización"):
+        if 'datos_pre_cotizacion' in st.session_state:
+            del st.session_state['datos_pre_cotizacion']
+        st.rerun()
 
 
