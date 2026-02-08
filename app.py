@@ -166,22 +166,19 @@ with st.sidebar:
     st.header(f"👋 Hola, {st.session_state.usuario_nombre}")
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     
-    # Filtro de opciones según ROL
-    opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"] # Todos ven esto
+    # 1. Definimos la lista de opciones (Lógica de Roles)
+    opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
     
     if ROL == "Admin":
-        # Agregamos "📉 Gastos" a la lista del Admin
         opciones += ["💰 Ventas", "📉 Gastos", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", "🏁 Cierre de Caja"]
-    
     elif ROL == "Administracion":
-        # Agregamos "📉 Gastos" a Administracion
         opciones += ["💰 Ventas", "📉 Gastos", "📊 Dashboard", "⚙️ Configuración", "🏁 Cierre de Caja"]
-    
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
-    # Renderizar el menú
-    menu = st.radio("Seleccione una opción:", opciones)
+    # 2. UNA SOLA LLAMADA al radio button
+    # Si tienes otra línea que diga 'menu = st.radio' en otra parte, BÓRRALA.
+    menu = st.radio("Seleccione una opción:", opciones, key="menu_principal")
 
     menu = st.radio("Módulos", opciones)
     
@@ -930,6 +927,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
