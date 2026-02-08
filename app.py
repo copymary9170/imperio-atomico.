@@ -6,9 +6,21 @@ from PIL import Image
 import numpy as np
 import io
 
-# --- 1. MOTOR DE BASE DE DATOS Y ARQUITECTURA ---
-def conectar():
-    return sqlite3.connect('imperio_v2.db', check_same_thread=False)
+# --- MOTOR ÚNICO DE COSTOS (Protección anti-error) ---
+def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
+    """
+    Calcula el costo real de un insumo sumando logística e impuestos.
+    Usa los valores globales de iva, igtf y banco.
+    """
+    # Sumamos la base más el envío/delivery
+    total = base_usd + logistica_usd
+    
+    if aplicar_impuestos:
+        # Aquí sumamos todos los porcentajes configurados
+        recargo = iva + igtf + banco
+        total *= (1 + recargo)
+        
+    return round(total, 6) # Usamos 6 decimales para precisión en tintas
 
 def inicializar_sistema():
     conn = conectar()
@@ -223,18 +235,19 @@ if menu == "📦 Inventario":
         if st.form_submit_button("🚀 IMPACTAR INVENTARIO"):
             if it_nombre and (monto_compra > 0 or gastos_bs > 0):
                 try:
-                    # Cálculo de tasa y costo base
+                    # 1. Cálculo de tasa y base
                     tasa_u = t_bcv if "BCV" in moneda_pago else (t_bin if "Binance" in moneda_pago else 1.0)
                     base_usd = monto_compra / tasa_u
                     logistica_usd = gastos_bs / t_bcv
                     
-                    # Motor de costos (Punto 7 de la auditoría)
-                    recargo = (iva if p_iva else 0) + (igtf if p_igtf else 0) + (banco if p_banco else 0)
-                    costo_final_usd = (base_usd + logistica_usd) * (1 + recargo)
+                    # 2. Uso del Motor Único de Costos (LO NUEVO)
+                    # Aplicamos impuestos solo si alguno está marcado
+                    tiene_impuestos = p_iva or p_igtf or p_banco
+                    costo_final_usd = calcular_costo_total(base_usd, logistica_usd, aplicar_impuestos=tiene_impuestos)
                     
                     conn = conectar(); cur = conn.cursor()
                     
-                    # Lógica de distribución para Kits CMYK o individuales
+                    # 3. Lógica de distribución para Kits CMYK o individuales
                     div = 4 if it_unid == "ml" and "Kit" in tipo_carga else (2 if it_unid == "ml" and "Dúo" in tipo_carga else 1)
                     costo_por_ml_o_unidad = (costo_final_usd / (div * it_cant_packs)) / (capacidad if it_unid == "ml" else 1)
                     
@@ -244,22 +257,22 @@ if menu == "📦 Inventario":
                         n_item = f"{it_nombre} {col}".strip()
                         cant_a_sumar = capacidad * it_cant_packs
                         
-                        # Aseguramos que el producto existe en la tabla Maestra
+                        # Guardar/Actualizar en Inventario
                         cur.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
                                        VALUES (?, 0, ?, ?, ?) 
                                        ON CONFLICT(item) DO UPDATE SET 
                                        precio_usd=excluded.precio_usd, minimo=excluded.minimo""", 
                                     (n_item, it_unid, costo_por_ml_o_unidad, it_minimo))
                         
-                        conn.commit() # Guardamos para obtener ID
+                        conn.commit() 
                         cur.execute("SELECT id FROM inventario WHERE item=?", (n_item,))
                         prod_id = cur.fetchone()[0]
                         
-                        # LLAMADA AL MOTOR TRANSACCIONAL (Auditoría real)
+                        # Auditoría
                         ejecutar_movimiento_stock(prod_id, cant_a_sumar, "ENTRADA", motivo=f"Compra en {moneda_pago}")
                     
                     st.success("✅ Insumos registrados y auditados correctamente.")
-                    cargar_datos_seguros() # Actualizamos memoria global
+                    cargar_datos_seguros()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -814,4 +827,5 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
