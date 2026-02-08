@@ -717,72 +717,81 @@ def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos
     banco = st.session_state.get('banco', 0.02)
     return precio_con_ganancia * (1 + iva + igtf + banco)
 
-# AHORA SÍ, EL ELIF DE COTIZACIONES (También pegado al margen izquierdo)
+# --- 11. MÓDULO DE COTIZACIONES (VERSIÓN IMPERIO) ---
 elif menu == "📝 Cotizaciones":
-    st.title("📝 Cotizaciones Pro")    
-    # Recuperar datos del Analizador CMYK si existen
+    st.title("📝 Generador de Presupuestos")
+
+    # Función interna para no romper la indentación del menú
+    def calcular_p_final(costo, marg, imp=True):
+        p_ganancia = costo * (1 + (marg / 100))
+        if not imp: return p_ganancia
+        iva = st.session_state.get('iva', 0.16)
+        igtf = st.session_state.get('igtf', 0.03)
+        banco = st.session_state.get('banco', 0.02)
+        return p_ganancia * (1 + iva + igtf + banco)
+
+    # 1. Recuperar datos del Analizador CMYK (si existen)
     pre_datos = st.session_state.get('datos_pre_cotizacion', {})
     
-    with st.expander("🛠️ Configuración de la Cotización", expanded=True):
-        with st.form("form_cotizacion_completa"):
-            c1, c2 = st.columns(2)
-            with c1:
-                trabajo = st.text_input("Nombre del Proyecto", value=pre_datos.get('trabajo', "Impresión Personalizada"))
-                cliente = st.selectbox("Seleccionar Cliente", st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Cliente Particular"])
-                unidades = st.number_input("Cantidad de Unidades", value=pre_datos.get('unidades', 1), min_value=1)
+    # 2. Interfaz de Usuario
+    with st.container(border=True):
+        with st.form("form_cotiza_completo"):
+            col1, col2 = st.columns(2)
+            with col1:
+                trabajo = st.text_input("💎 Producto/Servicio", value=pre_datos.get('trabajo', ""), placeholder="Ej: 100 Stickers Brillantes")
+                cliente_sel = st.selectbox("👤 Cliente", st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Particular"])
             
-            with c2:
-                # Insumos adicionales
-                costo_tinta = st.number_input("Costo Tinta Estimado ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f")
-                costo_papel = st.number_input("Costo de Papel/Material ($)", min_value=0.0, format="%.4f")
-                horas_diseno = st.number_input("Horas de Diseño/Mano de Obra", min_value=0.0, step=0.5)
-                precio_hora = st.number_input("Precio por Hora ($)", value=5.0)
+            with col2:
+                unidades = st.number_input("📦 Cantidad", value=pre_datos.get('unidades', 1), min_value=1)
+                tasa_usada = st.radio("💹 Tasa de referencia", ["BCV", "Binance"], horizontal=True)
 
             st.divider()
-            c3, c4 = st.columns(2)
-            margen = c3.slider("Margen de Ganancia %", 10, 500, 100)
-            incluir_imp = c4.checkbox("Aplicar Impuestos de Ley (IVA/IGTF/Banco)", value=True)
+            
+            c3, c4, c5 = st.columns(3)
+            costo_mat = c3.number_input("💰 Costo Material ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f", help="Costo de tinta + papel + desgaste")
+            margen = c4.number_input("📈 Margen %", value=100, help="Tu ganancia sobre el costo")
+            incluir_imp = c5.checkbox("🛡️ Cobrar Impuestos", value=True)
 
-            btn_calcular = st.form_submit_button("💰 GENERAR PRESUPUESTO")
+            enviar = st.form_submit_button("🚀 GENERAR PRESUPUESTO PROFESIONAL")
 
-    if btn_calcular:
-        # Lógica de cálculo
-        costo_base_total = costo_tinta + costo_papel + (horas_diseno * precio_hora)
+    # 3. Lógica de Salida
+    if enviar:
+        tasa_v = t_bcv if tasa_usada == "BCV" else t_bin
+        precio_u = calcular_p_final(costo_mat, margen, incluir_imp)
+        total_usd = precio_u * unidades
+        total_bs = total_usd * tasa_v
+
+        # --- RECIBO VISUAL ---
+        st.balloons()
+        st.subheader("📋 Resumen de Cotización")
         
-        # Precio unitario con ganancia e impuestos
-        precio_unidad = calcular_precio_con_impuestos(costo_base_total, margen, incluir_imp)
-        total_proyecto = precio_unidad * unidades
-        
-        # --- RESULTADOS ---
-        st.success("### 📊 Resultado del Análisis")
-        res1, res2, res3 = st.columns(3)
-        res1.metric("Costo Producción (Total)", f"$ {costo_base_total:.2f}")
-        res2.metric("Precio Unit. Venta", f"$ {precio_unidad:.2f}")
-        res3.metric("TOTAL A COBRAR", f"$ {total_proyecto:.2f}")
+        fil1, fil2, fil3 = st.columns(3)
+        fil1.metric("Precio Unitario", f"$ {precio_u:.2f}")
+        fil2.metric("Total en Dólares", f"$ {total_usd:.2f}")
+        fil3.metric("Total en Bolívares", f"Bs {total_bs:,.2f}")
 
-        st.info(f"💵 **Total en Bolívares (BCV):** {(total_proyecto * t_bcv):,.2f} Bs")
-
-        # --- GENERADOR DE TEXTO PARA WHATSAPP ---
+        # --- GENERADOR DE WHATSAPP ---
         st.divider()
-        st.subheader("📱 Formato para enviar a Cliente")
+        st.markdown("### 📱 Mensaje para enviar al Cliente")
         
         texto_ws = f"""*COTIZACIÓN: {trabajo}* 🚀
 ---
-👤 *Cliente:* {cliente}
+👤 *Cliente:* {cliente_sel}
 📦 *Cantidad:* {unidades} unidades
-💵 *Precio Unitario:* ${precio_unidad:.2f}
-💰 *TOTAL:* ${total_proyecto:.2f}
+💵 *Precio Unitario:* ${precio_u:.2f}
+💰 *TOTAL:* ${total_usd:.2f}
 
-📌 *Tasa BCV:* {t_bcv} Bs.
-Total en Bs: {(total_proyecto * t_bcv):,.2f}
+📌 *Tasa {tasa_usada}:* {tasa_v:.2f} Bs.
+*Total en Bs: {total_bs:,.2f}*
 
-_Precios sujetos a cambios según la tasa del día._
-¡Gracias por confiar en el Imperio Atómico! 👑"""
+_Válido por 24 horas. ¡Gracias por elegirnos!_ 👑"""
         
-        st.text_area("Copia este texto:", value=texto_ws, height=250)
-        st.caption("Copia el texto de arriba y pégalo directamente en el chat de tu cliente.")        
-        if st.button("💾 Guardar Cotización"):
-            st.success("✅ Cotización lista para procesar.")
+        st.text_area("Copia este texto y pégalo en WhatsApp:", value=texto_ws, height=220)
+        
+        # Guardar en el historial de la sesión para no perderlo
+        st.session_state['ultima_venta_calc'] = total_usd
+        st.success("✅ Cotización lista. Si el cliente paga, puedes registrarla en el módulo de Ventas.")
+        
 if menu == "💰 Ventas":
     st.title("💰 Registro de Ventas")
     
@@ -924,6 +933,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
