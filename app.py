@@ -86,7 +86,7 @@ if not st.session_state.autenticado:
                 st.error("❌ Usuario o clave incorrecta")
     st.stop()
         # 3. ACTUALIZACIÓN REAL
-        cur.execute("UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?", (cantidad_cambio, item_id))
+    cur.execute("UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?", (cantidad_cambio, item_id))
         
         conn.commit()
         return True, "Operación exitosa"
@@ -972,6 +972,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
