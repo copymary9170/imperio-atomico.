@@ -701,41 +701,7 @@ def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos
     
     return precio_con_ganancia * (1 + iva + igtf + banco)
 
-def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
-    """Calcula el costo real de un insumo al entrar al inventario"""
-    total = base_usd + logistica_usd
-    if not aplicar_impuestos:
-        return total
-    
-    iva = st.session_state.get('iva', 0.16)
-    igtf = st.session_state.get('igtf', 0.03)
-    banco = st.session_state.get('banco', 0.02)
-    
-    return total * (1 + iva + igtf + banco)
-            # EL BOTÓN DEBE ESTAR DENTRO DEL FORMULARIO
-            boton_calcular = st.form_submit_button("💎 Calcular Costo de Proceso")
-
-        # Lógica después de presionar el botón
-        if boton_calcular:
-            # Cálculo de desgaste
-            total_desgaste = costo_u * cantidad_uso
-            
-            # Cálculo de insumo
-            total_insumo = 0.0
-            if insumo_sel != "-- Ninguno --":
-                # Buscamos el precio en el inventario
-                precio_u_insumo = df_inv[df_inv['item'] == insumo_sel]['precio_usd'].values[0]
-                total_insumo = precio_u_insumo * cant_insumo
-            
-            costo_total = total_desgaste + total_insumo
-            
-            st.divider()
-            c1, c2, c3 = st.columns(3)
-            c1.metric(f"Desgaste {eq_sel}", f"$ {total_desgaste:.4f}")
-            c2.metric("Costo Insumos", f"$ {total_insumo:.4f}")
-            c3.metric("COSTO TOTAL", f"$ {costo_total:.2f}")
-            
-            st.success(f"💡 Tu costo base es **$ {costo_total:.2f}**. ¡Añade tu margen de ganancia!")
+}
 
 
 elif menu == "📝 Cotizaciones":
@@ -920,6 +886,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
