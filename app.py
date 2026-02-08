@@ -732,39 +732,54 @@ datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
                     st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
                     st.success(f"Precio Sugerido: $ {precio_v:.2f}")
 
-# --- 13. LÓGICA DE OTROS PROCESOS (LIMPIO) ---
+# --- 13. MÓDULO DE OTROS PROCESOS (VERSIÓN DEFINITIVA Y LIMPIA) ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
-    
+    st.markdown("Calcula el costo de acabados usando los activos guardados.")
+
+    # Cargar activos desde la base de datos
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
     conn.close()
     
     lista_activos = df_act_db.to_dict('records')
+
+    # Filtramos activos que NO son impresoras
     otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
 
     if not otros_equipos:
-        st.warning("⚠️ No hay maquinaria registrada en '🏗️ Activos'.")
+        st.warning("⚠️ No hay maquinaria registrada (Cameo, Plastificadora, etc.) en '🏗️ Activos'.")
     else:
         with st.form("form_procesos_fijo"):
             col1, col2, col3 = st.columns(3)
+
             nombres_eq = [e['equipo'] for e in otros_equipos]
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
-            
-            # Buscamos los datos del equipo seleccionado
+
+            # Obtener datos del equipo seleccionado
             datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
-            
-            # ESTA ES LA LÍNEA QUE DABA ERROR: Ahora está perfectamente alineada
+
             if datos_eq:
-                unidades_p = col2.number_input(f"Cantidad ({datos_eq['unidad']})", min_value=1)
-                margen_p = col3.number_input("Margen %", value=50)
+                unidades = col2.number_input(
+                    f"Cantidad de {datos_eq['unidad']}",
+                    min_value=1,
+                    value=1
+                )
+
+                margen_p = col3.number_input(
+                    "Margen Ganancia %",
+                    value=50
+                )
 
                 if st.form_submit_button("🧮 Calcular Proceso"):
-                    costo_t = datos_eq['desgaste'] * unidades_p
-                    precio_sugerido = costo_t * (1 + (margen_p / 100))
-                    
+                    costo_u = datos_eq['desgaste']
+                    costo_t = costo_u * unidades
+
+                    precio_v = calcular_precio_con_impuestos(costo_t, margen_p)
+
                     st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
-                    st.success(f"Precio Sugerido: $ {precio_sugerido:.2f}")
+                    st.success(f"Precio Sugerido (Con Impuestos): $ {precio_v:.2f}")
+
 
 # --- 11. MÓDULO DE COTIZACIONES ---
 elif menu == "📝 Cotizaciones":
@@ -943,6 +958,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
