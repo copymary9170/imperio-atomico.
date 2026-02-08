@@ -1,7 +1,30 @@
+import streamlit as st
+import pandas as pd
+import sqlite3
+from datetime import datetime
+from PIL import Image
+import numpy as np
+import io
+
+# --- 1. FUNCIÓN DE CONEXIÓN (FUNDAMENTAL) ---
+def conectar():
+    """Establece la conexión con SQLite"""
+    return sqlite3.connect("imperio_data.db", check_same_thread=False)
+
+# --- 2. MOTOR ÚNICO DE COSTOS ---
+def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
+    total = base_usd + logistica_usd
+    if aplicar_impuestos:
+        # Estas variables se cargan después desde la base de datos
+        recargo = iva + igtf + banco
+        total *= (1 + recargo)
+    return round(total, 6)
+
+# --- 3. INICIALIZAR SISTEMA (EL QUE REPARAMOS RECIÉN) ---
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
-    c.execute("PRAGMA foreign_keys = ON")
+    # ... (aquí va el resto del código que te pasé antes con el parche)
     
     # Tablas Principales
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
@@ -810,6 +833,7 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
 
