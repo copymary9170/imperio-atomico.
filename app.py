@@ -896,21 +896,34 @@ elif menu == "📊 Auditoría y Métricas":
     conn = conectar()
     cursor = conn.cursor()
     
-    # --- 🛡️ BLINDAJE: CREACIÓN AUTOMÁTICA DE TABLA SI NO EXISTE ---
+    # --- 🛡️ BLINDAJE: CREACIÓN Y ACTUALIZACIÓN AUTOMÁTICA ---
+    # 1. Asegurar que la tabla base exista
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventario_movs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            item TEXT,
-            cantidad REAL,
-            unidad TEXT,
-            tipo_mov TEXT, -- 'ENTRADA' o 'SALIDA'
-            referencia TEXT -- ID de Venta o Compra
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # 2. CIRUJANO DE DB: Inyectar columnas si la tabla existía pero estaba incompleta
+    columnas_necesarias = [
+        ("item", "TEXT"),
+        ("cantidad", "REAL"),
+        ("unidad", "TEXT"),
+        ("tipo_mov", "TEXT"),
+        ("referencia", "TEXT")
+    ]
+    
+    for col_nombre, col_tipo in columnas_necesarias:
+        try:
+            cursor.execute(f"ALTER TABLE inventario_movs ADD COLUMN {col_nombre} {col_tipo}")
+        except:
+            # Si da error es que la columna ya existe, ignoramos y seguimos
+            pass
+            
     conn.commit()
 
-    # Ahora ejecutamos la consulta de forma segura
+    # 3. Consulta segura
     query_movs = """
         SELECT fecha, item, cantidad, unidad, tipo_mov 
         FROM inventario_movs 
@@ -940,7 +953,6 @@ elif menu == "📊 Auditoría y Métricas":
                 
                 c1, c2 = st.columns([2, 1])
                 with c1:
-                    # Gráfica interactiva de barras
                     st.bar_chart(data=consumo_total, x='item', y='cantidad')
                 with c2:
                     st.write("📋 **Resumen de Gastos**")
@@ -960,6 +972,7 @@ elif menu == "📊 Auditoría y Métricas":
             st.dataframe(df_movs, use_container_width=True)
         else:
             st.warning("El historial está vacío. Realiza operaciones en Inventario o Ventas.")
+
 
 
 
