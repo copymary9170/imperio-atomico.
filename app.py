@@ -991,3 +991,4 @@ elif menu == "📉 Gastos":
 
 
 
+
