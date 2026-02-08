@@ -716,7 +716,7 @@ elif menu == "📝 Cotizaciones":
 def cargar_datos_seguros():
     cargar_datos()
 # --- 13. LÓGICA DE OTROS PROCESOS ---
-elif menu == "🛠️ Otros Procesos":
+    elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
     
     conn = conectar()
@@ -942,6 +942,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
