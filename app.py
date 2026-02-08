@@ -843,22 +843,16 @@ elif menu == "🏁 Cierre de Caja":
         df_ventas_dia = pd.DataFrame(columns=['monto_total', 'metodo'])
         df_movs_dia = pd.DataFrame(columns=['item', 'tipo', 'cantidad', 'usuario'])
 
-   # --- MÉTRICAS ---
-    # Cambiamos a 3 columnas para que c3 tenga donde vivir
+    # --- MÉTRICAS ---
     c1, c2, c3 = st.columns(3) 
     
     total_usd = df_ventas_dia['monto_total'].sum() if not df_ventas_dia.empty else 0.0
     
     c1.metric("💰 Ventas Totales", f"$ {total_usd:.2f}")
     c2.metric("📦 Movimientos de Stock", len(df_movs_dia))
-    c3.metric("🧾 Facturas Emitidas", len(df_ventas_dia)) # Ahora c3 ya existe
-
-    if not df_ventas_dia.empty:
-        st.subheader("💵 Desglose por Método")
-        st.table(df_ventas_dia.groupby('metodo')['monto_total'].sum())
     c3.metric("🧾 Facturas Emitidas", len(df_ventas_dia))
 
-    # 3. Desglose por Método de Pago (Crucial para el arqueo)
+    # 3. Arqueo por Método de Pago
     st.subheader("💵 Arqueo por Método de Pago")
     if not df_ventas_dia.empty:
         arqueo = df_ventas_dia.groupby('metodo')['monto_total'].sum().reset_index()
@@ -866,18 +860,26 @@ elif menu == "🏁 Cierre de Caja":
     else:
         st.info("No hay ventas registradas hoy.")
 
-    # 4. Auditoría de Insumos (Lo que salió vs lo que se vendió)
+    # 4. Auditoría de Insumos
     st.subheader("📋 Consumo de Almacén hoy")
     if not df_movs_dia.empty:
         st.dataframe(df_movs_dia, use_container_width=True, hide_index=True)
-    n reporte por WhatsApp/Email 
-        # o guardar un log de "Cierre Finalizad
-  # 5. Botón de Cierre Oficial
-    if st.button("🔒 Ejecutar Cierre y Exportar Registro"):
-        # Se asegura que todas las líneas de texto explicativo tengan el '#' al inicio
-        # Lógica futura: enviar reporte por WhatsApp/Email
-        # Lógica futura: guardar log de 'Cierre Finalizado' en auditoría.
+    else:
+        st.info("No hubo movimientos de inventario hoy.")
+
+    # 5. Botón de Cierre Oficial y Exportación
+    st.divider()
+    if st.button("🔒 Ejecutar Cierre y Generar Reporte"):
         st.success(f"✅ Cierre de caja del {fecha_hoy} completado con éxito.")
+        
+        # Generación de CSV para respaldo físico
+        csv = df_ventas_dia.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Descargar Reporte de Ventas (CSV)",
+            data=csv,
+            file_name=f"cierre_{fecha_hoy}.csv",
+            mime="text/csv",
+        )
 
 
 
