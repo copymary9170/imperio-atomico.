@@ -108,25 +108,44 @@ if not st.session_state.autenticado:
 
 # --- 4. CARGA DE DATOS MAESTROS (LOGUEADO) ---
 def cargar_datos():
-    conn = conectar()
-    st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
-    st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-    conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
-    st.session_state.tasa_bcv = float(conf.loc['tasa_bcv', 'valor'])
-    st.session_state.iva = float(conf.loc['iva_perc', 'valor'])
-    st.session_state.igtf = float(conf.loc['igtf_perc', 'valor'])
-    st.session_state.banco = float(conf.loc['banco_perc', 'valor'])
-    conn.close()
+    """Carga configuraciones y tablas maestras en la sesión para evitar lentitud"""
+    try:
+        conn = conectar()
+        # Cargar tablas para uso general
+        st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
+        st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+        
+        # Cargar configuración de tasas e impuestos
+        conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
+        
+        # Guardamos en session_state para que estén disponibles en todo el app
+        st.session_state.tasa_bcv = float(conf.loc['tasa_bcv', 'valor'])
+        st.session_state.tasa_binance = float(conf.loc['tasa_binance', 'valor'])
+        st.session_state.iva = float(conf.loc['iva_perc', 'valor'])
+        st.session_state.igtf = float(conf.loc['igtf_perc', 'valor'])
+        st.session_state.banco = float(conf.loc['banco_perc', 'valor'])
+        st.session_state.costo_tinta = float(conf.loc['costo_tinta_ml', 'valor'])
+        
+        conn.close()
+    except Exception as e:
+        st.error(f"Error cargando configuración: {e}")
 
+# Ejecutamos la carga
 cargar_datos()
+
+# Definimos variables locales rápidas para el menú y cálculos
 t_bcv = st.session_state.tasa_bcv
+t_bin = st.session_state.tasa_binance # <--- Esto arregla el NameError
 ROL = st.session_state.rol
-# --- 3. MENÚ LATERAL FILTRADO ---
+
+# --- 5. MENÚ LATERAL FILTRADO ---
 with st.sidebar:
     st.header(f"👋 Hola, {st.session_state.usuario_nombre}")
+    
+    # Barra de estado financiero rápida
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     
-    # 1. Definimos la lista de opciones (Lógica de Roles)
+    # Definimos la lista de opciones según el Rol
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
     
     if ROL == "Admin":
@@ -136,13 +155,13 @@ with st.sidebar:
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
-    # 2. ÚNICA LLAMADA AL MENÚ (Eliminamos la duplicidad)
     menu = st.radio("Seleccione una opción:", opciones, key="menu_unico_final")
     
-    st.divider() # Una línea visual para separar el botón de salir
+    st.divider()
     
     if st.button("🚪 Cerrar Sesión"):
-        st.session_state.autenticado = False
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
 
 # --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL --- 
@@ -889,6 +908,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
