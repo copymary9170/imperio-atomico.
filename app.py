@@ -873,9 +873,10 @@ elif menu == "🏁 Cierre de Caja":
     if st.button("🖨️ Generar Reporte PDF (Simulado)"):
         st.info("Función de reporte lista para conectar a impresora térmica.")
 
-# --- 11. MÓDULO DE COTIZACIONES (SISTEMA MULTI-TINTA PROFESIONAL) ---
+# --- 7. COTIZACIONES (OJO: Aquí es donde daba el error, revisa la indentación) ---
 elif menu == "📝 Cotizaciones":
-    st.title("📝 Generador de Cotizaciones Atómicas")
+    st.title("📝 Cotizador de Trabajos")
+    # ... Resto de tu código de cotizaciones
     
     # 1. Recuperar datos del Analizador CMYK
     datos_pre = st.session_state.get('datos_pre_cotizacion', {
@@ -1085,6 +1086,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
