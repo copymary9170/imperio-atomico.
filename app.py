@@ -202,11 +202,15 @@ with st.sidebar:
 
         st.rerun()
 
-elif menu == "📦 Inventario":
+# --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL --- 
+
+if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
     
+    # 1. Usar datos frescos de la memoria global
     df_inv = st.session_state.df_inv
 
+    # --- 📊 MÉTRICAS FINANCIERAS ---
     if not df_inv.empty:
         st.subheader("💰 Inversión Activa en Almacén")
         valor_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
@@ -223,6 +227,7 @@ elif menu == "📦 Inventario":
 
     st.divider()
 
+    # --- 📥 FORMULARIO DE ENTRADA ---
     st.subheader("📥 Registrar Entrada de Mercancía")
     it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"], key="u_medida_root")
 
@@ -280,7 +285,7 @@ elif menu == "📦 Inventario":
                         prod_id = cur.fetchone()[0]
                         ejecutar_movimiento_stock(prod_id, cant_a_sumar, "ENTRADA", motivo=f"Compra en {moneda_pago}")
                     
-                    st.success("✅ Inventario actualizado.")
+                    st.success("✅ Insumos registrados correctamente.")
                     cargar_datos_seguros()
                     st.rerun()
                 except Exception as e:
@@ -288,6 +293,27 @@ elif menu == "📦 Inventario":
                 finally:
                     conn.close()
 
+    st.divider()
+
+    # --- 📋 TABLA DE AUDITORÍA ---
+    if not df_inv.empty:
+        st.subheader("📋 Auditoría de Almacén")
+        modo_ver = st.radio("Visualizar en:", ["Dólares ($)", "BCV (Bs)"], horizontal=True)
+        busc = st.text_input("🔍 Filtrar material...", placeholder="Ej: Tinta, Papel...")
+        
+        df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
+        tasa_vista = t_bcv if "BCV" in modo_ver else 1.0
+        df_f['Costo Unit.'] = df_f['precio_usd'] * tasa_vista
+        df_f['Valor Total'] = (df_f['cantidad'] * df_f['precio_usd']) * tasa_vista
+
+        st.dataframe(
+            df_f[['item', 'cantidad', 'unidad', 'Costo Unit.', 'Valor Total']], 
+            column_config={
+                "Costo Unit.": st.column_config.NumberColumn(format="%.4f"),
+                "Valor Total": st.column_config.NumberColumn(format="%.2f")
+            },
+            use_container_width=True, hide_index=True
+        )
     # --- 📋 TABLA DE AUDITORÍA PROFESIONAL ---
 
     if not df_inv.empty:
@@ -1271,6 +1297,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
