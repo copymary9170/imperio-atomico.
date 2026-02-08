@@ -203,15 +203,15 @@ with st.sidebar:
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
-# --- 6. MÓDULOS DE INTERFAZ: INVENTARIO (CON TASA DE ORIGEN) ---
+# --- 6. MÓDULOS DE INTERFAZ: INVENTARIO (VERSIÓN FINAL "BELLA") ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
     df_inv = st.session_state.df_inv
     
-    # Selector de visualización general (Para ver tu almacén hoy)
+    # --- PANEL DE VISUALIZACIÓN ---
     col_v1, col_v2 = st.columns([2, 1])
     with col_v1:
-        moneda_ver = st.radio("Visualizar inventario en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
+        moneda_ver = st.radio("Ver Inventario en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
     
     tasa_ver = 1.0 if "USD" in moneda_ver else (t_bcv if "BCV" in moneda_ver else t_bin)
     simbolo = "$" if "USD" in moneda_ver else "Bs"
@@ -220,57 +220,62 @@ if menu == "📦 Inventario":
         valor_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
         c1, c2, c3 = st.columns(3)
         c1.metric(f"Valor Almacén ({simbolo})", f"{simbolo} {(valor_usd * tasa_ver):,.2f}")
-        c2.metric("Tasa Actual (BCV)", f"{t_bcv} Bs")
-        c3.metric("Tasa Actual (Binance)", f"{t_bin} Bs")
+        c2.metric("Tasa BCV", f"{t_bcv} Bs")
+        c3.metric("Tasa Binance", f"{t_bin} Bs")
     
     st.divider()
     
     tab_lista, tab_registro, tab_edicion = st.tabs(["📋 Inventario Actual", "🆕 Registro / Carga", "🛠️ Modificar / Borrar"])
     
     with tab_registro:
-        with st.form("form_inventario_exacto"):
+        with st.form("form_inventario_limpio"):
             st.subheader("📥 Registro de Compra")
             
             c_u, c_n = st.columns([1, 2])
-            u_medida = c_u.selectbox("Unidad:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
+            u_medida = c_u.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
             it_nombre = c_n.text_input("Nombre del Material").strip()
             
-            # --- LÓGICA DE CANTIDADES ---
+            # --- LÓGICA CONDICIONAL: SOLO APARECE SI ES ML ---
             if u_medida == "ml":
+                st.info("🎨 Configuración de Tintas")
                 c1, c2 = st.columns(2)
-                ml_bote = c1.number_input("ml por bote:", min_value=0.0, value=100.0)
+                ml_bote = c1.number_input("ml por cada bote:", min_value=0.0, value=100.0)
                 cant_botes = c2.number_input("Cantidad de botes:", min_value=1, value=1)
                 total_unidades = ml_bote * cant_botes
             else:
-                total_unidades = st.number_input(f"Cantidad total ({u_medida}):", min_value=0.0, value=1.0)
+                # Si es Resma, Unidad, etc., solo pide la cantidad plana
+                total_unidades = st.number_input(f"Cantidad de {u_medida} a ingresar:", min_value=0.0, value=1.0)
 
             st.markdown("---")
-            # --- EL CORAZÓN DE TU SOLICITUD: ORIGEN DEL PAGO ---
-            st.write("💰 **¿Cómo pagaste este producto?**")
+            st.write("💰 **Costo y Tasas de Pago**")
             cc1, cc2, cc3 = st.columns(3)
             
             monto_pago = cc1.number_input("Monto pagado:", min_value=0.0, format="%.2f")
-            moneda_pago = cc2.selectbox("Moneda de pago:", ["USD $", "Bs (Tasa BCV)", "Bs (Tasa Binance)"])
-            impuesto = cc3.selectbox("¿Pagaste Impuesto?", ["No", "16% IVA", "3% IGTF"])
+            moneda_pago = cc2.selectbox("Tasa aplicada al pagar:", ["USD $", "Bs (Tasa BCV)", "Bs (Tasa Binance)"])
+            
+            # --- IMPUESTOS (INCLUYENDO BANCO) ---
+            imp_gob = cc3.selectbox("Impuesto Ley:", ["Ninguno", "16% IVA", "3% IGTF"])
+            comision_banco = st.slider("Comisión Bancaria / Otros (%)", 0.0, 5.0, 0.5, step=0.1)
 
-            # Cálculo de la tasa según el origen
+            # 1. Determinar tasa de conversión a USD
             tasa_compra = 1.0
             if "BCV" in moneda_pago: tasa_compra = t_bcv
             if "Binance" in moneda_pago: tasa_compra = t_bin
             
-            # Convertimos el pago a Dólares "limpios"
+            # 2. Convertir monto base a USD
             monto_en_usd = monto_pago / tasa_compra if "Bs" in moneda_pago else monto_pago
             
-            # Aplicamos impuesto si aplica
-            pct = 0.16 if "16%" in impuesto else (0.03 if "3%" in impuesto else 0.0)
-            costo_final_usd = (monto_en_usd * (1 + pct)) / total_unidades if total_unidades > 0 else 0
+            # 3. Sumar todos los impuestos (Gobierno + Banco)
+            pct_gob = 0.16 if "16%" in imp_gob else (0.03 if "3%" in imp_gob else 0.0)
+            pct_banco = comision_banco / 100
+            
+            costo_final_usd = (monto_en_usd * (1 + pct_gob + pct_banco)) / total_unidades if total_unidades > 0 else 0
 
-            st.info(f"💡 El sistema registrará este material con un costo base de **$ {costo_final_usd:.4f}**")
+            st.warning(f"💡 Costo real calculado (con {comision_banco}% banco): **$ {costo_final_usd:.4f}** por {u_medida}")
 
             if st.form_submit_button("🚀 GUARDAR EN INVENTARIO"):
                 if it_nombre:
                     conn = conectar(); c = conn.cursor()
-                    # (Lógica de Insert/Update igual a la anterior...)
                     c.execute("SELECT id FROM inventario WHERE item = ?", (it_nombre,))
                     res = c.fetchone()
                     if res:
@@ -281,13 +286,13 @@ if menu == "📦 Inventario":
                     cargar_datos_seguros(); st.rerun()
 
     with tab_lista:
-        # Mostramos la tabla convirtiendo el precio_usd a la moneda de visualización elegida arriba
-        df_ver = df_inv.copy()
-        df_ver['precio_usd'] = df_ver['precio_usd'] * tasa_ver
-        st.dataframe(df_ver, use_container_width=True, hide_index=True)
+        if not df_inv.empty:
+            df_ver = df_inv.copy()
+            df_ver['precio_usd'] = df_ver['precio_usd'] * tasa_ver
+            st.dataframe(df_ver.rename(columns={'precio_usd': f'Costo ({simbolo})'}), use_container_width=True, hide_index=True)
 
     with tab_edicion:
-        # (Aquí va el código de modificar/borrar que ya tienes)
+        # Aquí sigue tu código de editar y borrar...
         pass
 elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
@@ -1038,6 +1043,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
