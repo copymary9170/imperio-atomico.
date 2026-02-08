@@ -422,12 +422,12 @@ elif menu == "👥 Clientes":
 
 
 
-# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (SOPORTA PDF, JPG, PNG) ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK ---
 elif menu == "🎨 Análisis CMYK":
     st.title("🎨 Analizador de Cobertura y Costos Reales")
 
-    # 1. Carga de datos profesional (Filtro por unidad 'ml', no por nombre)
-    df_tintas_db = obtener_tintas_disponibles() # Usa la función que ya definimos
+    # 1. Carga de datos profesional con validación de seguridad
+    df_tintas_db = obtener_tintas_disponibles()
     
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
@@ -446,95 +446,20 @@ elif menu == "🎨 Análisis CMYK":
         datos_imp = next((e for e in df_act_db.to_dict('records') if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
-        # Buscamos las tintas que pertenecen a esta máquina por nombre de ítem, 
-        # pero VALIDADAS porque su unidad es 'ml'
-        tintas_maquina = df_tintas_db[df_tintas_db['item'].str.contains(impresora_sel, case=False, na=False)]
+        # --- BLINDAJE CONTRA EL KEYERROR ---
+        precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10) # Valor default
         
-        if not tintas_maquina.empty:
-            precio_tinta_ml = tintas_maquina['precio_usd'].mean()
-            st.success(f"✅ Precio promedio: ${precio_tinta_ml:.4f}/ml")
+        # Verificamos que el dataframe exista y tenga la columna 'item'
+        if not df_tintas_db.empty and 'item' in df_tintas_db.columns:
+            tintas_maquina = df_tintas_db[df_tintas_db['item'].str.contains(impresora_sel, case=False, na=False)]
+            
+            if not tintas_maquina.empty:
+                precio_tinta_ml = tintas_maquina['precio_usd'].mean()
+                st.success(f"✅ Precio detectado: ${precio_tinta_ml:.4f}/ml")
+            else:
+                st.info(f"💡 Sin precio específico en inventario. Usando base: ${precio_tinta_ml}/ml")
         else:
-            precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
-            st.info(f"💡 Usando precio base: ${precio_tinta_ml}/ml")
-
-    with c_file:
-        archivos_multiples = st.file_uploader("Sube tus diseños", type=['pdf', 'png', 'jpg', 'jpeg'], accept_multiple_files=True)
-
-    if archivos_multiples:
-        import fitz  
-        resultados = []
-        # Acumuladores por canal para el descuento final
-        totales_canales = {'c': 0.0, 'm': 0.0, 'y': 0.0, 'k': 0.0}
-        total_paginas_lote = 0
-        
-        with st.spinner('🚀 Analizando pixeles...'):
-            for arc in archivos_multiples:
-                imagenes_a_procesar = []
-                
-                # PROCESAMIENTO PDF/IMG (Mantenemos tu lógica fitz que es buena)
-                if arc.type == "application/pdf":
-                    doc = fitz.open(stream=arc.read(), filetype="pdf")
-                    for page_num in range(len(doc)):
-                        pix = doc.load_page(page_num).get_pixmap(colorspace=fitz.csCMYK)
-                        img_pil = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
-                        imagenes_a_procesar.append((f"{arc.name}_p{page_num+1}", img_pil))
-                else:
-                    img_pil = Image.open(arc).convert('CMYK')
-                    imagenes_a_procesar.append((arc.name, img_pil))
-
-                for nombre_item, img in imagenes_a_procesar:
-                    total_paginas_lote += 1
-                    datos = np.array(img)
-                    
-                    # Porcentajes de cobertura reales
-                    c_p = (np.mean(datos[:,:,0]) / 255)
-                    m_p = (np.mean(datos[:,:,1]) / 255)
-                    y_p = (np.mean(datos[:,:,2]) / 255)
-                    k_p = (np.mean(datos[:,:,3]) / 255)
-                    
-                    # Factor de consumo según impresora
-                    nombre_low = impresora_sel.lower()
-                    multi = 2.5 if "j210" in nombre_low else (1.8 if "subli" in nombre_low else 1.2)
-                    
-                    # ML por canal (Asumiendo 0.15ml promedio por cobertura 100% en A4)
-                    ml_c = c_p * 0.15 * multi
-                    ml_m = m_p * 0.15 * multi
-                    ml_y = y_p * 0.15 * multi
-                    ml_k = k_p * 0.15 * multi
-                    
-                    consumo_total_item = ml_c + ml_m + ml_y + ml_k
-                    costo_tinta = consumo_total_item * precio_tinta_ml
-                    
-                    # Guardamos en acumuladores
-                    totales_canales['c'] += ml_c
-                    totales_canales['m'] += ml_m
-                    totales_canales['y'] += ml_y
-                    totales_canales['k'] += ml_k
-                    
-                    resultados.append({
-                        "Archivo": nombre_item,
-                        "C%": f"{c_p*100:.1f}%", "M%": f"{m_p*100:.1f}%", "Y%": f"{y_p*100:.1f}%", "K%": f"{k_p*100:.1f}%",
-                        "ml Total": round(consumo_total_item, 4),
-                        "Costo USD": round(costo_tinta + costo_desgaste, 4)
-                    })
-
-        if resultados:
-            st.table(pd.DataFrame(resultados))
-            
-            total_usd = sum(r['Costo USD'] for r in resultados)
-            
-            # --- ENVÍO DE DATOS A COTIZACIÓN CON DESGLOSE CMYK ---
-            if st.button("📝 ENVIAR A COTIZACIÓN PROFESIONAL"):
-                st.session_state['datos_pre_cotizacion'] = {
-                    'trabajo': f"Impresión {impresora_sel}: {len(archivos_multiples)} archivos",
-                    'costo_base': total_usd,
-                    'c_ml': totales_canales['c'],
-                    'm_ml': totales_canales['m'],
-                    'y_ml': totales_canales['y'],
-                    'k_ml': totales_canales['k'],
-                    'unidades': total_paginas_lote
-                }
-                st.success("✅ Datos CMYK desglosados enviados a Cotizaciones.")
+            st.warning("⚠️ Inventario de tintas (ml) vacío. Usando costo de configuración.")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 
 elif menu == "🏗️ Activos":
@@ -857,6 +782,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
