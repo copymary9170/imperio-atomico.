@@ -738,48 +738,39 @@ elif menu == "📝 Cotizaciones":
     with st.expander("💎 Datos del Trabajo", expanded=True):
         col1, col2 = st.columns(2)
         desc = col1.text_input("Trabajo:", value=datos_cmyk.get('trabajo', ""))
-        cliente = col2.selectbox("Cliente:", st.session_state.df_cli['nombre'].tolist())
         
-        c1, c2, c3 = st.columns(3)
-        costo_base = c1.number_input("Costo Materiales ($):", value=float(datos_cmyk.get('costo_base', 0.0)), format="%.4f")
-        margen = c2.slider("Margen de Ganancia %:", 30, 300, 100)
-        cantidad = c3.number_input("Unidades:", value=int(datos_cmyk.get('unidades', 1)), min_value=1)
-
-    # Cálculo dinámico
-    precio_unitario = costo_base * (1 + (margen/100))
-    total_neto = precio_unitario * cantidad
-    total_con_impuestos = calcular_precio_con_impuestos(total_neto, 100)
-
-    st.subheader(f"Total a Cobrar: ${total_con_impuestos:.2f}")
-    
-    col_a, col_b = st.columns(2)
-    if col_a.button("📤 Generar PDF (Simulado)"):
-        st.write(f"Generando presupuesto para {cliente}...")
-    
-    if col_b.button("💰 Convertir en Venta Real"):
-        st.session_state['transaccion_pendiente'] = {
-            'cliente': cliente,
-            'monto': total_con_impuestos,
-            'detalle': desc
-        }
-        st.success("¡Datos enviados a Ventas!")
-
-# --- 2. CÁLCULO DE COSTOS Y PRECIOS ---
-        margen = col1.number_input("Margen de Ganancia (%)", min_value=0, value=100)
-        incluir_iva = col2.checkbox("¿Incluir Impuestos en factura?", value=True)
-
-        costo_base = datos_cmyk.get('costo_base', 0.0)
+        # Validación de seguridad para la lista de clientes
+        lista_clientes = st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Cliente Genérico"]
+        cliente = col2.selectbox("Cliente:", lista_clientes)
         
-        # USAMOS EL MOTOR DE PRECIOS QUE PEGASTE ARRIBA
-        precio_final = calcular_precio_con_impuestos(costo_base, margen, incluir_iva)
-
         st.divider()
-        res1, res2 = st.columns(2)
-        res1.metric("Precio de Venta (USD)", f"$ {precio_final:.2f}")
-        res2.metric("Precio de Venta (BCV)", f"Bs {(precio_final * t_bcv):,.2f}")
+        
+        # --- ENTRADA DE DATOS PARA EL MOTOR ---
+        c1, c2, c3 = st.columns(3)
+        # 1. Recuperamos el costo base (ya sea del Analizador CMYK o manual)
+        costo_base = c1.number_input("Costo Base de Producción ($)", 
+                                    value=float(datos_cmyk.get('costo_base', 0.0)), 
+                                    format="%.4f")
+        
+        # 2. Definimos el margen (Aquí es donde evitamos duplicar)
+        margen_ganancia = c2.number_input("Margen de Ganancia (%)", min_value=0, value=100)
+        
+        # 3. Opción de impuestos
+        incluir_impuestos = c3.checkbox("¿Aplicar Impuestos? (IVA/IGTF/Banc)", value=True)
 
+        # --- LLAMADA ÚNICA AL MOTOR (Cero duplicidad) ---
+        # El motor recibe Costo -> Suma Margen -> Suma Impuestos (si aplica)
+        precio_final_usd = calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos)
+
+        # --- RESULTADOS VISUALES ---
+        st.divider()
+        res1, res2, res3 = st.columns(3)
+        res1.metric("Costo Real", f"$ {costo_base:.2f}")
+        res2.metric("PRECIO VENTA (USD)", f"$ {precio_final_usd:.2f}", delta=f"Ganancia: ${(precio_final_usd/(1.21 if incluir_impuestos else 1) - costo_base):.2f}")
+        res3.metric("PRECIO VENTA (BS)", f"Bs {(precio_final_usd * t_bcv):,.2f}")
         if st.button("💾 Guardar Cotización"):
             st.success("Cotización guardada exitosamente (Simulado)")
+
 
 
 
