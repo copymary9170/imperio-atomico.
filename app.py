@@ -715,7 +715,7 @@ def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
     return total * (1 + iva + igtf + banco)
 
 # --- 11. MÓDULO DE COTIZACIONES (VERSIÓN PRO) ---
-elif menu == "📝 Cotizaciones":
+elif menu == "📝 Cotizaciones": # <--- ERROR AQUÍ
     st.title("📝 Generador de Cotizaciones Atómicas")
     
     # Recuperar datos del Analizador CMYK si existen
@@ -922,6 +922,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
