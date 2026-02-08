@@ -843,11 +843,15 @@ elif menu == "🏁 Cierre de Caja":
         df_ventas_dia = pd.DataFrame(columns=['monto_total', 'metodo'])
         df_movs_dia = pd.DataFrame(columns=['item', 'tipo', 'cantidad', 'usuario'])
 
-    # --- MÉTRICAS ---
-    c1, c2 = st.columns(2)
+   # --- MÉTRICAS ---
+    # Cambiamos a 3 columnas para que c3 tenga donde vivir
+    c1, c2, c3 = st.columns(3) 
+    
     total_usd = df_ventas_dia['monto_total'].sum() if not df_ventas_dia.empty else 0.0
+    
     c1.metric("💰 Ventas Totales", f"$ {total_usd:.2f}")
     c2.metric("📦 Movimientos de Stock", len(df_movs_dia))
+    c3.metric("🧾 Facturas Emitidas", len(df_ventas_dia)) # Ahora c3 ya existe
 
     if not df_ventas_dia.empty:
         st.subheader("💵 Desglose por Método")
@@ -866,12 +870,13 @@ elif menu == "🏁 Cierre de Caja":
     st.subheader("📋 Consumo de Almacén hoy")
     if not df_movs_dia.empty:
         st.dataframe(df_movs_dia, use_container_width=True, hide_index=True)
-    
+    n reporte por WhatsApp/Email 
+        # o guardar un log de "Cierre Finalizad
     # 5. Botón de Cierre Oficial
     if st.button("🔒 Ejecutar Cierre y Exportar PDF"):
-        # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
-        # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
+        # Aquí puedes agregar lógica para enviar uo" en una nueva tabla de auditoría.
         st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
+
 
 
 
