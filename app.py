@@ -203,51 +203,82 @@ with st.sidebar:
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
-# --- 6. MÓDULOS DE INTERFAZ: INVENTARIO (VERSIÓN MEJORADA) ---
+# --- 6. MÓDULOS DE INTERFAZ: INVENTARIO (VERSIÓN "BELLA" E INTELIGENTE) ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
     df_inv = st.session_state.df_inv
     
+    # --- MÉTRICAS SUPERIORES CON CAMBIO DINÁMICO ---
     if not df_inv.empty:
         valor_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
         c1, c2, c3 = st.columns(3)
-        c1.metric("Valor del Almacén", f"$ {valor_usd:,.2f}")
+        c1.metric("Valor Total ($)", f"$ {valor_usd:,.2f}")
         c2.metric("Valor en Bs (BCV)", f"Bs {(valor_usd * t_bcv):,.2f}")
-        c3.metric("Tasa de Cambio", f"{t_bcv} Bs")
+        c3.metric("Tasa", f"{t_bcv} Bs")
     
     st.divider()
     
-    # 3 Pestañas: Registro, Lista y la nueva de Edición
     tab_lista, tab_registro, tab_edicion = st.tabs(["📋 Inventario Actual", "🆕 Registro / Carga", "🛠️ Modificar / Borrar"])
     
     with tab_registro:
-        with st.form("form_inventario"):
-            st.subheader("Entrada de Mercancía / Nuevo Insumo")
-            it_nombre = st.text_input("Nombre del Insumo (Ej: Tinta Cyan L805)").strip()
-            it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
+        with st.form("form_inventario_bello"):
+            st.subheader("📥 Entrada de Mercancía")
             
-            col_a, col_b = st.columns(2)
-            it_cant = col_a.number_input("Cantidad a Ingresar", min_value=0.0, step=0.1)
-            it_precio = col_b.number_input("Costo Unitario ($) - Base Inflación", min_value=0.0, format="%.4f")
+            # Fila 1: Identificación básica
+            col_u, col_n = st.columns([1, 2])
+            u_medida = col_u.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
+            it_nombre = col_n.text_input("Nombre del Insumo (Ej: Papel Fotográfico A4)").strip()
             
-            if st.form_submit_button("🚀 PROCESAR ENTRADA"):
-                if it_nombre == "":
-                    st.error("❌ El nombre del insumo no puede estar vacío.")
+            # --- LÓGICA CONDICIONAL "COMO LAS FOTOS" ---
+            st.markdown("---")
+            if u_medida == "ml":
+                st.info("🎨 Configuración de Tintas detectada")
+                c1, c2, c3 = st.columns(3)
+                presentacion = c1.radio("Presentación:", ["Individual", "Kit CMYK (4)"], horizontal=True)
+                ml_por_bote = c2.number_input("ml por bote:", min_value=0.0, value=100.0)
+                cantidad_botes = c3.number_input("Cant. botes comprados:", min_value=1, value=1)
+                
+                total_unidades = (4 if "Kit" in presentacion else 1) * ml_por_bote * cantidad_botes
+                st.caption(f"📍 Total a cargar: {total_unidades} ml")
+            else:
+                total_unidades = st.number_input(f"Cantidad total en {u_medida}:", min_value=0.0, value=1.0, step=1.0)
+            
+            # --- SECCIÓN DE COSTOS (INFLATION-READY) ---
+            st.markdown("---")
+            col_p1, col_p2 = st.columns(2)
+            precio_pagado = col_p1.number_input("Monto Total Pagado ($):", min_value=0.0, format="%.2f")
+            delivery_bs = col_p2.number_input("Gastos Logística / Delivery (Bs):", min_value=0.0)
+            
+            # Cálculo del costo unitario real incluyendo delivery
+            costo_unitario_usd = (precio_pagado + (delivery_bs / t_bcv)) / total_unidades if total_unidades > 0 else 0.0
+            
+            if st.form_submit_button("🚀 PROCESAR ENTRADA AL IMPERIO"):
+                if not it_nombre:
+                    st.error("❌ El nombre es obligatorio.")
+                elif total_unidades <= 0:
+                    st.error("❌ La cantidad debe ser mayor a 0.")
                 else:
                     conn = conectar(); c = conn.cursor()
                     try:
+                        # Buscamos si existe
                         c.execute("SELECT id FROM inventario WHERE item = ?", (it_nombre,))
                         res = c.fetchone()
+                        
                         if res:
                             item_id = res[0]
-                            c.execute("UPDATE inventario SET cantidad = cantidad + ?, precio_usd = ? WHERE id = ?", (it_cant, it_precio, item_id))
+                            c.execute("UPDATE inventario SET cantidad = cantidad + ?, precio_usd = ? WHERE id = ?", 
+                                     (total_unidades, costo_unitario_usd, item_id))
                         else:
-                            c.execute("INSERT INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", (it_nombre, it_cant, it_unid, it_precio))
+                            c.execute("INSERT INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)", 
+                                     (it_nombre, total_unidades, u_medida, costo_unitario_usd))
                             item_id = c.lastrowid
                         
-                        c.execute("INSERT INTO inventario_movs (item_id, cantidad, tipo_mov, referencia) VALUES (?, ?, 'ENTRADA', 'Carga Inicial/Compra')", (item_id, it_cant))
+                        # Auditoría
+                        c.execute("INSERT INTO inventario_movs (item_id, cantidad, tipo_mov, referencia) VALUES (?, ?, 'ENTRADA', 'Carga Directa')", 
+                                 (item_id, total_unidades))
+                        
                         conn.commit()
-                        st.success(f"✅ {it_nombre} procesado correctamente.")
+                        st.success(f"✅ Cargados {total_unidades} {u_medida} de {it_nombre} a ${costo_unitario_usd:.4f} c/u")
                     except Exception as e:
                         conn.rollback(); st.error(f"❌ Error: {e}")
                     finally:
@@ -256,55 +287,49 @@ if menu == "📦 Inventario":
 
     with tab_lista:
         if not df_inv.empty:
+            # Estilo limpio: Rojo si el stock es bajo (<10)
             st.dataframe(
                 df_inv.style.highlight_between(left=0, right=10, subset=['cantidad'], color='#FF4B4B33'),
                 use_container_width=True, hide_index=True
             )
         else:
-            st.info("El inventario está vacío actualmente.")
+            st.info("El inventario está vacío.")
 
-    # --- PESTAÑA NUEVA: PARA CORREGIR Y BORRAR ---
     with tab_edicion:
-        st.subheader("🛠️ Zona de Edición de Materiales")
+        st.subheader("🛠️ Zona de Ajustes Rápidos")
         if not df_inv.empty:
-            opciones_items = {row['item']: row['id'] for _, row in df_inv.iterrows()}
-            item_sel_nombre = st.selectbox("Seleccione el material que desea modificar o eliminar:", ["-- Seleccionar --"] + list(opciones_items.keys()))
+            item_sel = st.selectbox("Elemento a corregir:", ["-- Seleccionar --"] + df_inv['item'].tolist())
             
-            if item_sel_nombre != "-- Seleccionar --":
-                # Extraemos los datos actuales de la fila seleccionada
-                datos_item = df_inv[df_inv['item'] == item_sel_nombre].iloc[0]
-                
-                with st.form("edicion_rapida"):
-                    col1, col2 = st.columns(2)
-                    edit_nombre = col1.text_input("Nombre del Insumo", value=datos_item['item'])
-                    edit_unid = col2.selectbox("Unidad", ["ml", "Hojas", "Resma", "Unidad", "Metros"], index=["ml", "Hojas", "Resma", "Unidad", "Metros"].index(datos_item['unidad']))
+            if item_sel != "-- Seleccionar --":
+                datos = df_inv[df_inv['item'] == item_sel].iloc[0]
+                with st.form("edicion_bella"):
+                    c1, c2 = st.columns(2)
+                    new_n = c1.text_input("Nombre", value=datos['item'])
+                    new_u = c2.selectbox("Unidad", ["ml", "Hojas", "Resma", "Unidad", "Metros"], 
+                                         index=["ml", "Hojas", "Resma", "Unidad", "Metros"].index(datos['unidad']))
                     
-                    col3, col4 = st.columns(2)
-                    edit_cant = col3.number_input("Stock Físico (Corrección)", value=float(datos_item['cantidad']))
-                    edit_precio = col4.number_input("Costo Unitario ($)", value=float(datos_item['precio_usd']), format="%.4f")
+                    c3, c4 = st.columns(2)
+                    new_q = c3.number_input("Cantidad Real en Estante", value=float(datos['cantidad']))
+                    new_p = c4.number_input("Precio Unitario ($)", value=float(datos['precio_usd']), format="%.4f")
                     
-                    c_upd, c_del = st.columns([3, 1])
-                    
-                    if c_upd.form_submit_button("💾 GUARDAR CAMBIOS"):
+                    btn_upd, btn_del = st.columns([3, 1])
+                    if btn_upd.form_submit_button("💾 GUARDAR CAMBIOS"):
                         conn = conectar(); c = conn.cursor()
-                        c.execute("UPDATE inventario SET item=?, unidad=?, cantidad=?, precio_usd=? WHERE id=?", (edit_nombre, edit_unid, edit_cant, edit_precio, datos_item['id']))
+                        c.execute("UPDATE inventario SET item=?, unidad=?, cantidad=?, precio_usd=? WHERE id=?", 
+                                 (new_n, new_u, new_q, new_p, datos['id']))
                         conn.commit(); conn.close()
-                        st.success("✅ Cambios aplicados.")
+                        st.success("Cambios guardados.")
                         cargar_datos_seguros(); st.rerun()
-                    
-                    if c_del.form_submit_button("🗑️ ELIMINAR MATERIAL"):
+                        
+                    if btn_del.form_submit_button("🗑️ BORRAR"):
                         if ROL == "Admin":
                             conn = conectar(); c = conn.cursor()
-                            # Borramos primero sus movimientos (por integridad) y luego el item
-                            c.execute("DELETE FROM inventario_movs WHERE item_id=?", (datos_item['id'],))
-                            c.execute("DELETE FROM inventario WHERE id=?", (datos_item['id'],))
+                            c.execute("DELETE FROM inventario_movs WHERE item_id=?", (datos['id'],))
+                            c.execute("DELETE FROM inventario WHERE id=?", (datos['id'],))
                             conn.commit(); conn.close()
-                            st.warning(f"⚠️ {item_sel_nombre} ha sido eliminado del Imperio.")
-                            cargar_datos_seguros(); st.rerun()
+                            st.rerun()
                         else:
-                            st.error("🚫 Solo la Jefa puede eliminar materiales permanentemente.")
-        else:
-            st.info("No hay nada que editar.")
+                            st.error("Solo Admin puede borrar.")
 elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
     conn = conectar()
@@ -1054,6 +1079,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
