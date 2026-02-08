@@ -155,12 +155,10 @@ with st.sidebar:
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"] # Todos ven esto
     
     if ROL == "Admin":
-        # Añadimos Ventas al Admin
-        opciones += ["💰 Ventas", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", 🏁 Cierre de Caja"]
+        opciones += ["💰 Ventas", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", "🏁 Cierre de Caja"]
     
     elif ROL == "Administracion":
-        # Añadimos Ventas a Administración
-        opciones += ["💰 Ventas", "📊 Dashboard", "⚙️ Configuración", 🏁 Cierre de Caja"]
+        opciones += ["💰 Ventas", "📊 Dashboard", "⚙️ Configuración", "🏁 Cierre de Caja"]
     
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
@@ -860,6 +858,7 @@ elif menu == "🏁 Cierre de Caja":
         # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
         # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
         st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
+
 
 
 
