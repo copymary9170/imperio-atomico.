@@ -1,32 +1,17 @@
 import pandas as pd
-
 import sqlite3
-
 import streamlit as st
-
 from datetime import datetime
-
 from PIL import Image
-
 import numpy as np
-
 import io
 
-
-
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
-
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide")
 
-
-
 # --- 2. MOTOR DE BASE DE DATOS Y CÁLCULOS ---
-
 def conectar():
-
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
-
-
 
 def inicializar_sistema():
 
@@ -1343,5 +1328,65 @@ elif menu == "🛠️ Otros Procesos":
             
 
             # ESTA ES LA LÍNEA QUE DABA ERROR (Ahora con 12 espacios exactos)
+
+# --- 15. MÓDULO DE VENTAS Y GASTOS ---
+elif menu == "💰 Ventas":
+    st.title("💰 Registro de Ingresos")
+    with st.form("registro_venta"):
+        c1, c2, c3 = st.columns(3)
+        cli_v = c1.selectbox("Cliente", st.session_state.df_cli['nombre'].tolist())
+        monto_v = c2.number_input("Monto Cobrado ($)", min_value=0.0)
+        metodo_v = c3.selectbox("Método de Pago", ["Efectivo $", "Zelle", "Pago Móvil", "Transferencia", "Binance"])
+        
+        if st.form_submit_button("💸 Registrar Venta"):
+            conn = conectar(); c = conn.cursor()
+            c.execute("INSERT INTO ventas (cliente_id, monto_total, metodo) VALUES ((SELECT id FROM clientes WHERE nombre=?), ?, ?)",
+                      (cli_v, monto_v, metodo_v))
+            conn.commit(); conn.close()
+            st.success("Venta guardada exitosamente.")
+
+elif menu == "📉 Gastos":
+    st.title("📉 Registro de Egresos")
+    with st.form("registro_gasto"):
+        c1, c2 = st.columns(2)
+        desc_g = c1.text_input("Descripción del Gasto")
+        monto_g = c2.number_input("Monto ($)", min_value=0.0)
+        cat_g = st.selectbox("Categoría", ["Insumos", "Servicios", "Sueldos", "Mantenimiento", "Otros"])
+        met_g = st.selectbox("Pagado desde", ["Caja Chica", "Zelle Personal", "Banco Bs"])
+        
+        if st.form_submit_button("❌ Registrar Gasto"):
+            conn = conectar(); c = conn.cursor()
+            c.execute("INSERT INTO gastos (descripcion, monto, categoria, metodo) VALUES (?,?,?,?)",
+                      (desc_g, monto_g, cat_g, met_g))
+            conn.commit(); conn.close()
+            st.error(f"Gasto de ${monto_g} registrado.")
+
+# --- 16. MÓDULO CIERRE DE CAJA (RESUMEN FINAL) ---
+elif menu == "🏁 Cierre de Caja":
+    st.title("🏁 Cierre de Caja del Día")
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    
+    conn = conectar()
+    v_hoy = pd.read_sql(f"SELECT * FROM ventas WHERE fecha LIKE '{hoy}%'", conn)
+    g_hoy = pd.read_sql(f"SELECT * FROM gastos WHERE fecha LIKE '{hoy}%'", conn)
+    conn.close()
+    
+    total_v = v_hoy['monto_total'].sum()
+    total_g = g_hoy['monto'].sum()
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ventas Hoy", f"$ {total_v:.2f}")
+    c2.metric("Gastos Hoy", f"$ {total_g:.2f}", delta=f"-{total_g:.2f}", delta_color="inverse")
+    c3.metric("Neto en Caja", f"$ {(total_v - total_g):.2f}")
+    
+    st.subheader("Detalle de Movimientos")
+    st.write("Ventas:")
+    st.dataframe(v_hoy, use_container_width=True)
+    st.write("Gastos:")
+    st.dataframe(g_hoy, use_container_width=True)
+    
+    if st.button("🖨️ Generar Reporte PDF (Simulado)"):
+        st.info("Función de reporte lista para conectar a impresora térmica.")
+
 
 
