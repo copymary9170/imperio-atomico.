@@ -6,26 +6,25 @@ from PIL import Image
 import numpy as np
 import io
 
-# --- 1. FUNCIÓN DE CONEXIÓN (BUSCA ESTA PARTE) ---
+# --- 1. FUNCIÓN DE CONEXIÓN ---
 def conectar():
-    """Establece la conexión con la base de datos V2"""
-    # Al cambiarle el nombre a v2, obligamos al sistema a empezar de cero y sin errores
+    # Usamos v2 para que la base de datos nazca limpia y sin errores de columnas
     return sqlite3.connect("imperio_v2.db", check_same_thread=False)
 
-# --- 2. INICIALIZAR SISTEMA (REEMPLAZA LA QUE TIENES POR ESTA) ---
+# --- 2. INICIALIZAR SISTEMA ---
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     
-    # Crear tabla de usuarios completa
+    # Crear tablas necesarias
     c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                     username TEXT PRIMARY KEY, 
                     password TEXT, 
                     rol TEXT, 
                     nombre TEXT)''')
     
-    # Insertar usuarios (con 4 datos para que coincida con la tabla)
+    # Insertar usuarios base
     usuarios = [
         ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
         ('mama', 'admin2026', 'Administracion', 'Mamá'),
@@ -33,23 +32,43 @@ def inicializar_sistema():
     ]
     c.executemany("INSERT OR IGNORE INTO usuarios (username, password, rol, nombre) VALUES (?,?,?,?)", usuarios)
     
-    # Tabla de Configuración para la INFLACIÓN
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
-    tasas = [
-        ('tasa_bcv', 36.50), ('tasa_binance', 38.00), 
-        ('iva_perc', 0.16), ('igtf_perc', 0.03), 
-        ('banco_perc', 0.02), ('costo_tinta_ml', 0.10)
-    ]
+    tasas = [('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('iva_perc', 0.16), 
+             ('igtf_perc', 0.03), ('banco_perc', 0.02), ('costo_tinta_ml', 0.10)]
     c.executemany("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", tasas)
-
-    # El resto de tus tablas necesarias
+    
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-
+    
     conn.commit()
     conn.close()
+
+def cargar_datos_seguros():
+    if 'df_inv' not in st.session_state:
+        conn = conectar()
+        st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
+        st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+        conn.close()
+
+# --- 3. EJECUCIÓN INICIAL Y LOGIN ---
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+
+inicializar_sistema()
+
+if not st.session_state.autenticado:
+    st.title("🔐 Acceso al Imperio Atómico")
+    with st.form("login"):
+        u = st.text_input("Usuario")
+        p = st.text_input("Clave", type="password")
+        if st.form_submit_button("Entrar"):
+            conn = conectar()
+            cur = conn.cursor()
+            cur.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (u, p))
+            res = cur.fetchone()
+            conn.close()
             
             if res:
                 st.session_state.autenticado = True
@@ -59,13 +78,13 @@ def inicializar_sistema():
             else:
                 st.error("❌ Usuario o clave incorrecta")
     st.stop()
-# --- 4. CONFIGURACIÓN DE PÁGINA (SOLO SI ESTÁ LOGUEADO) ---
 
+# --- 4. SI LLEGA AQUÍ, ESTÁ LOGUEADO ---
 st.set_page_config(page_title="Imperio Atómico - ERP", layout="wide")
 cargar_datos_seguros()
 ROL = st.session_state.rol
 
-# Cargar tasas globales para que todo el código las use
+# Cargar tasas globales
 conn = conectar()
 conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
 t_bcv = float(conf.loc['tasa_bcv', 'valor'])
@@ -747,6 +766,7 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
 
