@@ -759,28 +759,19 @@ elif menu == "🛠️ Otros Procesos":
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
 
             # Obtener datos del equipo seleccionado
-            datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
-
+           datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
+            
             if datos_eq:
-                unidades = col2.number_input(
-                    f"Cantidad de {datos_eq['unidad']}",
-                    min_value=1,
-                    value=1
-                )
-
-                margen_p = col3.number_input(
-                    "Margen Ganancia %",
-                    value=50
-                )
+                unidades_proc = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1, key="cant_proc")
+                margen_proc = col3.number_input("Margen %", value=50, key="marg_proc")
 
                 if st.form_submit_button("🧮 Calcular Proceso"):
-                    costo_u = datos_eq['desgaste']
-                    costo_t = costo_u * unidades
-
-                    precio_v = calcular_precio_con_impuestos(costo_t, margen_p)
-
+                    costo_t = datos_eq['desgaste'] * unidades_proc
+                    precio_v = costo_t * (1 + (margen_proc / 100))
+                    
                     st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
-                    st.success(f"Precio Sugerido (Con Impuestos): $ {precio_v:.2f}")
+                    st.success(f"Precio Sugerido: $ {precio_v:.2f}")
+
 
 
 # --- 11. MÓDULO DE COTIZACIONES ---
@@ -960,6 +951,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
