@@ -779,83 +779,68 @@ def cargar_datos_seguros():
 # --- 13. LÓGICA DE OTROS PROCESOS ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
-    st.markdown("Calcula el costo de acabados usando los activos guardados.")
-
+    
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
     conn.close()
     
     lista_activos = df_act_db.to_dict('records')
-    # Filtramos para no mostrar impresoras aquí, solo máquinas de procesos
+    # Filtramos para no mostrar impresoras aquí
     otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
 
     if not otros_equipos:
         st.warning("⚠️ No hay maquinaria registrada en '🏗️ Activos'.")
     else:
+        # Iniciamos el formulario (AQUÍ ESTABA EL ERROR DE ESPACIOS)
         with st.form("form_procesos_fijo"):
             col1, col2, col3 = st.columns(3)
             nombres_eq = [e['equipo'] for e in otros_equipos]
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
             
-            # Buscamos los datos de forma segura
+            # Buscamos los datos del equipo seleccionado
             datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
             
+            # Ahora está correctamente alineado dentro del 'with'
             if datos_eq:
                 unidades_p = col2.number_input(f"Cantidad ({datos_eq['unidad']})", min_value=1)
                 margen_p = col3.number_input("Margen %", value=50)
 
                 if st.form_submit_button("🧮 Calcular Proceso"):
-                    # Cálculo basado en el desgaste configurado (Anti-inflación)
+                    # Cálculo basado en desgaste (perfecto para ajustar por inflación)
                     costo_t = datos_eq['desgaste'] * unidades_p
                     precio_sugerido = costo_t * (1 + (margen_p / 100))
                     
                     st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
                     st.success(f"Precio Sugerido: $ {precio_sugerido:.2f}")
-                    
-                    # Guardamos temporalmente para la cotización final
-                    st.session_state['ultimo_proceso'] = {
-                        'trabajo': f"Proceso: {eq_sel}",
-                        'costo_base': costo_t,
-                        'unidades': unidades_p
-                    }
 
-# --- 14. GENERADOR DE COTIZACIONES (SISTEMA INTEGRADO) ---
+# --- 14. GENERADOR DE COTIZACIONES (PROTECCIÓN ANTI-INFLACIÓN) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
-    # Recuperamos datos automáticos si vienen de Análisis CMYK o Procesos
-    pre_datos = st.session_state.get('datos_pre_cotizacion', st.session_state.get('ultimo_proceso', {}))
+    # Recuperamos datos si vienen de Análisis CMYK o Procesos
+    pre_datos = st.session_state.get('datos_pre_cotizacion', {})
     
     with st.form("form_cotizacion_final"):
         c1, c2 = st.columns(2)
-        trabajo = c1.text_input("Descripción del Trabajo", value=pre_datos.get('trabajo', ""))
+        trabajo = c1.text_input("Descripción", value=pre_datos.get('trabajo', "Nuevo Trabajo"))
         
-        # Cargamos clientes registrados
-        conn = conectar()
-        df_c = pd.read_sql("SELECT nombre FROM clientes", conn)
-        conn.close()
-        lista_cli = df_c['nombre'].tolist() if not df_c.empty else ["Particular"]
-        cliente = c2.selectbox("Cliente", lista_cli)
+        lista_clientes = st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Particular"]
+        cliente = c2.selectbox("Cliente", lista_clientes)
         
         c3, c4, c5 = st.columns(3)
-        costo_base = c3.number_input("Costo Base ($)", value=float(pre_datos.get('costo_base', 0.0)), format="%.4f")
-        margen = c4.number_input("Margen de Ganancia %", value=100)
-        cantidad = c5.number_input("Cantidad", value=int(pre_datos.get('unidades', 1)), min_value=1)
+        costo_base = c3.number_input("Costo Base ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f")
+        margen = c4.number_input("Margen %", value=100)
+        cantidad = c5.number_input("Unidades", value=pre_datos.get('unidades', 1), min_value=1)
         
-        if st.form_submit_button("💰 GENERAR PRESUPUESTO"):
-            # Lógica de costos e impuestos configurables
-            precio_con_margen = costo_base * (1 + (margen / 100))
-            # Sumatoria de impuestos: IVA (16%) + IGTF (3%) + Banco (2%)
-            impuestos_totales = 0.16 + 0.03 + 0.02
-            precio_final_unitario = precio_con_margen * (1 + impuestos_totales)
-            total_general = precio_final_unitario * cantidad
+        if st.form_submit_button("💰 Calcular Total"):
+            # IVA (16%) + IGTF (3%) + Banco (2%) = 21% de impuestos
+            impuestos = 0.16 + 0.03 + 0.02
+            precio_u = (costo_base * (1 + (margen / 100))) * (1 + impuestos)
+            total = precio_u * cantidad
             
             st.divider()
-            col_a, col_b = st.columns(2)
-            col_a.metric("TOTAL A COBRAR ($)", f"$ {total_general:.2f}")
-            col_b.metric("TOTAL EN BS (BCV)", f"{(total_general * t_bcv):,.2f} Bs")
-            st.caption(f"Incluye IVA, IGTF y comisión bancaria. Tasa: {t_bcv} Bs/$")
-
+            st.metric("TOTAL A COBRAR", f"$ {total:.2f}")
+            st.info(f"Equivalente en Bs (BCV): **{(total * t_bcv):,.2f} Bs**")
 # --- 15. CIERRE DE CAJA RÁPIDO ---
 elif menu == "🏁 Cierre de Caja":
     st.title("🏁 Resumen de Operaciones")
@@ -1018,6 +1003,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
