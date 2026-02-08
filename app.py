@@ -776,7 +776,7 @@ def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos
 
 def cargar_datos_seguros():
     cargar_datos()
-# --- 13. LÓGICA DE OTROS PROCESOS (COMPLETO) ---
+# --- 13. LÓGICA DE OTROS PROCESOS ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
     st.markdown("Calcula el costo de acabados usando los activos guardados.")
@@ -786,6 +786,7 @@ elif menu == "🛠️ Otros Procesos":
     conn.close()
     
     lista_activos = df_act_db.to_dict('records')
+    # Filtramos para no mostrar impresoras aquí, solo máquinas de procesos
     otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
 
     if not otros_equipos:
@@ -804,31 +805,32 @@ elif menu == "🛠️ Otros Procesos":
                 margen_p = col3.number_input("Margen %", value=50)
 
                 if st.form_submit_button("🧮 Calcular Proceso"):
+                    # Cálculo basado en el desgaste configurado (Anti-inflación)
                     costo_t = datos_eq['desgaste'] * unidades_p
                     precio_sugerido = costo_t * (1 + (margen_p / 100))
                     
                     st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
                     st.success(f"Precio Sugerido: $ {precio_sugerido:.2f}")
                     
-                    # Guardamos en sesión para enviarlo a cotización si se desea
+                    # Guardamos temporalmente para la cotización final
                     st.session_state['ultimo_proceso'] = {
                         'trabajo': f"Proceso: {eq_sel}",
                         'costo_base': costo_t,
                         'unidades': unidades_p
                     }
 
-# --- 14. GENERADOR DE COTIZACIONES (ANTI-INFLACIÓN) ---
+# --- 14. GENERADOR DE COTIZACIONES (SISTEMA INTEGRADO) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
-    # Recuperamos datos si vienen del Analizador CMYK o de Otros Procesos
+    # Recuperamos datos automáticos si vienen de Análisis CMYK o Procesos
     pre_datos = st.session_state.get('datos_pre_cotizacion', st.session_state.get('ultimo_proceso', {}))
     
     with st.form("form_cotizacion_final"):
         c1, c2 = st.columns(2)
         trabajo = c1.text_input("Descripción del Trabajo", value=pre_datos.get('trabajo', ""))
         
-        # Carga de clientes desde DB
+        # Cargamos clientes registrados
         conn = conectar()
         df_c = pd.read_sql("SELECT nombre FROM clientes", conn)
         conn.close()
@@ -838,45 +840,42 @@ elif menu == "📝 Cotizaciones":
         c3, c4, c5 = st.columns(3)
         costo_base = c3.number_input("Costo Base ($)", value=float(pre_datos.get('costo_base', 0.0)), format="%.4f")
         margen = c4.number_input("Margen de Ganancia %", value=100)
-        cantidad = c5.number_input("Cantidad de Unidades", value=int(pre_datos.get('unidades', 1)), min_value=1)
+        cantidad = c5.number_input("Cantidad", value=int(pre_datos.get('unidades', 1)), min_value=1)
         
-        metodo_pago = st.selectbox("Método de Pago Sugerido", ["Efectivo/Zelle", "Transferencia BS", "Pago Móvil", "Binance"])
-
         if st.form_submit_button("💰 GENERAR PRESUPUESTO"):
-            # Lógica de Impuestos según tu configuración
-            precio_sin_impuestos = costo_base * (1 + (margen / 100))
-            
-            # Aplicamos IVA (16%), IGTF (3%) y Comisión Bancaria (2%) si no es efectivo
-            impuestos = 0.16 + 0.03 + 0.02
-            precio_final_u = precio_sin_impuestos * (1 + impuestos)
-            total_cotizacion = precio_final_u * cantidad
+            # Lógica de costos e impuestos configurables
+            precio_con_margen = costo_base * (1 + (margen / 100))
+            # Sumatoria de impuestos: IVA (16%) + IGTF (3%) + Banco (2%)
+            impuestos_totales = 0.16 + 0.03 + 0.02
+            precio_final_unitario = precio_con_margen * (1 + impuestos_totales)
+            total_general = precio_final_unitario * cantidad
             
             st.divider()
-            col_res1, col_res2 = st.columns(2)
-            col_res1.metric("TOTAL A COBRAR ($)", f"$ {total_cotizacion:.2f}")
-            col_res2.metric("TOTAL EN BS (BCV)", f"{(total_cotizacion * t_bcv):,.2f} Bs")
-            
-            st.info(f"💡 Precio Unitario Sugerido: $ {precio_final_u:.2f}")
+            col_a, col_b = st.columns(2)
+            col_a.metric("TOTAL A COBRAR ($)", f"$ {total_general:.2f}")
+            col_b.metric("TOTAL EN BS (BCV)", f"{(total_general * t_bcv):,.2f} Bs")
+            st.caption(f"Incluye IVA, IGTF y comisión bancaria. Tasa: {t_bcv} Bs/$")
 
-# --- 15. CIERRE DE CAJA ---
+# --- 15. CIERRE DE CAJA RÁPIDO ---
 elif menu == "🏁 Cierre de Caja":
-    st.title("🏁 Cierre de Jornada")
-    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+    st.title("🏁 Resumen de Operaciones")
+    hoy = datetime.now().strftime('%Y-%m-%d')
     
     conn = conectar()
-    ventas_hoy = pd.read_sql(f"SELECT SUM(monto_total) FROM ventas WHERE fecha LIKE '{fecha_hoy}%'", conn).iloc[0,0] or 0
-    gastos_hoy = pd.read_sql(f"SELECT SUM(monto) FROM gastos WHERE fecha LIKE '{fecha_hoy}%'", conn).iloc[0,0] or 0
+    v_hoy = pd.read_sql(f"SELECT SUM(monto_total) FROM ventas WHERE fecha LIKE '{hoy}%'", conn).iloc[0,0] or 0
+    g_hoy = pd.read_sql(f"SELECT SUM(monto) FROM gastos WHERE fecha LIKE '{hoy}%'", conn).iloc[0,0] or 0
     conn.close()
     
-    c1, c2 = st.columns(2)
-    c1.metric("Ingresos Hoy", f"$ {ventas_hoy:.2f}")
-    c2.metric("Egresos Hoy", f"$ {gastos_hoy:.2f}", delta=f"-{gastos_hoy:.2f}", delta_color="inverse")
-    
-    if st.button("📱 Enviar Resumen a WhatsApp"):
-        msg = f"Resumen Imperio Atómico ({fecha_hoy}):\n💰 Ventas: ${ventas_hoy}\n📉 Gastos: ${gastos_hoy}\n⚖️ Neto: ${ventas_hoy - gastos_hoy}"
-        st.write(f"Copia este mensaje: {msg}")
+    st.subheader(f"Balance del {hoy}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ingresos", f"$ {v_hoy:.2f}")
+    c2.metric("Gastos", f"$ {g_hoy:.2f}", delta=f"-{g_hoy:.2f}", delta_color="inverse")
+    c3.metric("Neto", f"$ {v_hoy - g_hoy:.2f}")
 
-# --- FIN DEL ARCHIVO ---
+# --- CIERRE DE LÓGICA ---
+def cargar_datos_seguros():
+    cargar_datos()
+
         
 if menu == "💰 Ventas":
     st.title("💰 Registro de Ventas")
@@ -1019,6 +1018,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
