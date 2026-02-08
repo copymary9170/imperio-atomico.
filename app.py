@@ -22,6 +22,12 @@ def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
         
     return round(total, 6) # Usamos 6 decimales para precisión en tintas
 
+# --- FUNCIÓN PARA CONECTAR A LA BASE DE DATOS ---
+def conectar():
+    """Establece la conexión con SQLite"""
+    conn = sqlite3.connect("imperio_data.db", check_same_thread=False)
+    return conn
+
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
@@ -827,5 +833,6 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
