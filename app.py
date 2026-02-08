@@ -702,22 +702,24 @@ def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos
     
     return precio_con_ganancia * (1 + iva + igtf + banco)
 
-def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
-    """Calcula el costo de entrada de mercancía"""
-    total = base_usd + logistica_usd
-    if not aplicar_impuestos:
-        return total
-    
+if st.form_submit_button("🧮 Calcular Proceso"):
+                costo_u = datos_eq['desgaste']
+                costo_t = costo_u * unidades
+                precio_v = calcular_precio_con_impuestos(costo_t, margen_p)
+                st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
+                st.success(f"Precio Sugerido: $ {precio_v:.2f}")
+
+# LAS FUNCIONES DEBEN ESTAR AQUÍ, PERO PEGADAS AL MARGEN IZQUIERDO
+def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
+    precio_con_ganancia = costo_base * (1 + (margen_ganancia / 100))
     iva = st.session_state.get('iva', 0.16)
     igtf = st.session_state.get('igtf', 0.03)
     banco = st.session_state.get('banco', 0.02)
-    
-    return total * (1 + iva + igtf + banco)
+    return precio_con_ganancia * (1 + iva + igtf + banco)
 
-# --- 11. MÓDULO DE COTIZACIONES (VERSIÓN PRO) ---
-elif menu == "📝 Cotizaciones": # <--- ERROR AQUÍ
-    st.title("📝 Generador de Cotizaciones Atómicas")
-    
+# AHORA SÍ, EL ELIF DE COTIZACIONES (También pegado al margen izquierdo)
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Cotizaciones Pro")    
     # Recuperar datos del Analizador CMYK si existen
     pre_datos = st.session_state.get('datos_pre_cotizacion', {})
     
@@ -922,6 +924,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
