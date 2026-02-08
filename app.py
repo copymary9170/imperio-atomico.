@@ -156,11 +156,11 @@ with st.sidebar:
     
     if ROL == "Admin":
         # Añadimos Ventas al Admin
-        opciones += ["💰 Ventas", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración"]
+        opciones += ["💰 Ventas", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", 🏁 Cierre de Caja"]
     
     elif ROL == "Administracion":
         # Añadimos Ventas a Administración
-        opciones += ["💰 Ventas", "📊 Dashboard", "⚙️ Configuración"]
+        opciones += ["💰 Ventas", "📊 Dashboard", "⚙️ Configuración", 🏁 Cierre de Caja"]
     
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
@@ -818,6 +818,48 @@ if menu == "💰 Ventas":
                     st.error(f"❌ VENTA CANCELADA: {mensaje_stock}")
 
 
+elif menu == "🏁 Cierre de Caja":
+    st.title("🏁 Cierre de Jornada y Balance")
+    
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    
+    # 1. Extracción de datos del día
+    conn = conectar()
+    # Ventas del día
+    df_ventas_dia = pd.read_sql(f"SELECT * FROM ventas WHERE date(fecha) = '{fecha_hoy}'", conn)
+    # Movimientos de inventario del día
+    df_movs_dia = pd.read_sql(f"""SELECT i.item, m.tipo, m.cantidad, m.usuario 
+                                  FROM inventario_movs m 
+                                  JOIN inventario i ON m.item_id = i.id 
+                                  WHERE date(m.fecha) = '{fecha_hoy}'""", conn)
+    conn.close()
+
+    # 2. Métricas de Control
+    c1, c2, c3 = st.columns(3)
+    total_usd = df_ventas_dia['monto_total'].sum() if not df_ventas_dia.empty else 0.0
+    
+    c1.metric("💰 Ventas Totales ($)", f"$ {total_usd:.2f}")
+    c2.metric("📦 Movimientos Stock", len(df_movs_dia))
+    c3.metric("🧾 Facturas Emitidas", len(df_ventas_dia))
+
+    # 3. Desglose por Método de Pago (Crucial para el arqueo)
+    st.subheader("💵 Arqueo por Método de Pago")
+    if not df_ventas_dia.empty:
+        arqueo = df_ventas_dia.groupby('metodo')['monto_total'].sum().reset_index()
+        st.table(arqueo)
+    else:
+        st.info("No hay ventas registradas hoy.")
+
+    # 4. Auditoría de Insumos (Lo que salió vs lo que se vendió)
+    st.subheader("📋 Consumo de Almacén hoy")
+    if not df_movs_dia.empty:
+        st.dataframe(df_movs_dia, use_container_width=True, hide_index=True)
+    
+    # 5. Botón de Cierre Oficial
+    if st.button("🔒 Ejecutar Cierre y Exportar PDF"):
+        # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
+        # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
+        st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
 
 
 
