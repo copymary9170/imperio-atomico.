@@ -64,36 +64,46 @@ def obtener_tintas_disponibles():
     df['unidad_check'] = df['unidad'].fillna('').str.strip().str.lower()
     return df[df['unidad_check'] == 'ml'].copy()
 
-def procesar_venta_con_descuento(id_cliente, monto, metodo, id_tinta=None, ml_consumidos=0):
-    """Transacción ATÓMICA: Registra venta y descuenta stock en un solo paso."""
+def procesar_venta_grafica_completa(id_cliente, monto, metodo, consumos_dict):
+    """
+    Transacción ACID Multi-Tinta: Registra venta y descuenta múltiples 
+    tintas simultáneamente. Si una falla, hace Rollback completo.
+    """
     conn = conectar()
     cur = conn.cursor()
     try:
         cur.execute("BEGIN TRANSACTION")
-        
-        # 1. Registrar Venta
+
+        # 1. Registrar la Venta Principal
         cur.execute("""INSERT INTO ventas (cliente_id, monto_total, metodo, fecha) 
                        VALUES (?, ?, ?, ?)""", 
                     (id_cliente, monto, metodo, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        
-        # 2. Descuento de Tinta (si aplica)
-        if id_tinta and ml_consumidos > 0:
+        venta_id = cur.lastrowid
+
+        # 2. Procesar cada tinta del set (C, M, Y, K)
+        for item_id, ml in consumos_dict.items():
+            if ml <= 0: continue
+            
+            # Intento de descuento con validación de stock atómica
             cur.execute("""UPDATE inventario SET cantidad = cantidad - ? 
-                           WHERE id = ? AND cantidad >= ?""", (ml_consumidos, id_tinta, ml_consumidos))
+                           WHERE id = ? AND cantidad >= ?""", (ml, item_id, ml))
             
             if cur.rowcount == 0:
-                raise Exception("Stock insuficiente de tinta para procesar esta venta.")
-            
-            # 3. Auditoría de movimiento
+                cur.execute("SELECT item FROM inventario WHERE id=?", (item_id,))
+                res = cur.fetchone()
+                nombre = res[0] if res else f"ID {item_id}"
+                raise Exception(f"Stock insuficiente para: {nombre}")
+
+            # 3. Auditoría de movimiento por color
             cur.execute("""INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) 
-                           VALUES (?, 'SALIDA', ?, 'Consumo por Venta', ?)""",
-                        (id_tinta, ml_consumidos, st.session_state.get('usuario_nombre', 'Sistema')))
-        
+                           VALUES (?, 'SALIDA', ?, ?, ?)""",
+                        (item_id, ml, f"Consumo Venta #{venta_id}", st.session_state.get('usuario_nombre', 'Sistema')))
+
         conn.commit()
-        return True, "✅ Venta registrada y stock actualizado con éxito."
+        return True, f"✅ Venta #{venta_id} procesada con éxito."
     except Exception as e:
         conn.rollback()
-        return False, f"❌ Error: {str(e)}"
+        return False, str(e)
     finally:
         conn.close()
 
@@ -852,15 +862,16 @@ elif menu == "🏁 Cierre de Caja":
     if st.button("🖨️ Generar Reporte PDF (Simulado)"):
         st.info("Función de reporte lista para conectar a impresora térmica.")
 
-# --- 11. MÓDULO DE COTIZACIONES (EL PUENTE ENTRE DISEÑO Y VENTA) ---
+# --- 11. MÓDULO DE COTIZACIONES (SISTEMA MULTI-TINTA PROFESIONAL) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones Atómicas")
     
-    # 1. Recuperar datos del Analizador CMYK si existen
+    # 1. Recuperar datos del Analizador CMYK
+    # Ahora esperamos un diccionario con desglose por color si viene del analizador
     datos_pre = st.session_state.get('datos_pre_cotizacion', {
         'trabajo': "Trabajo General",
         'costo_base': 0.0,
-        'ml_estimados': 0.0,
+        'c_ml': 0.0, 'm_ml': 0.0, 'y_ml': 0.0, 'k_ml': 0.0,
         'unidades': 1
     })
 
@@ -870,7 +881,6 @@ elif menu == "📝 Cotizaciones":
         
         with col1:
             descr = st.text_input("Descripción del trabajo:", value=datos_pre['trabajo'])
-            # Selector de cliente desde la BD
             conn = conectar()
             df_clis = pd.read_sql("SELECT id, nombre FROM clientes", conn)
             conn.close()
@@ -880,82 +890,94 @@ elif menu == "📝 Cotizaciones":
                 cliente_sel = st.selectbox("👤 Asignar a Cliente:", opciones_cli.keys())
                 id_cliente = opciones_cli[cliente_sel]
             else:
-                st.warning("⚠️ No hay clientes. Ve al módulo 'Clientes' primero.")
+                st.warning("⚠️ No hay clientes registrados.")
                 st.stop()
 
         with col2:
             unidades = st.number_input("Cantidad de piezas:", min_value=1, value=int(datos_pre['unidades']))
 
-    # --- CONTROL DE INVENTARIO DE TINTA (NUEVO) ---
-    st.subheader("💉 Descuento de Insumos")
+    # --- 💉 GESTIÓN DE CONSUMO MULTI-TINTA ---
+    st.subheader("💉 Despacho de Insumos por Color")
     df_tintas = obtener_tintas_disponibles()
     
-    id_tinta_a_descontar = None
-    ml_totales = float(datos_pre['ml_estimados'])
-
+    consumos_reales = {} # Diccionario {id_inventario: ml}
+    
     if not df_tintas.empty:
-        # Creamos un diccionario para el selectbox: "Nombre (Stock ml)" -> ID
-        dict_tintas = {f"{r['item']} ({r['cantidad']:.1f} ml disp.)": r['id'] for _, r in df_tintas.iterrows()}
-        tinta_label = st.selectbox("Selecciona la tinta a descontar:", dict_tintas.keys(), 
-                                   help="Solo aparecen ítems cuya unidad es 'ml'")
-        id_tinta_a_descontar = dict_tintas[tinta_label]
+        dict_t = {f"{r['item']} ({r['cantidad']:.1f} ml)": r['id'] for _, r in df_tintas.iterrows()}
         
-        if ml_totales > 0:
-            st.info(f"Se descontarán **{ml_totales:.4f} ml** de la tinta seleccionada.")
+        # Si hay datos de CMYK, habilitamos los 4 selectores
+        if any([datos_pre['c_ml'], datos_pre['m_ml'], datos_pre['y_ml'], datos_pre['k_ml']]):
+            st.info("🎨 Se detectó análisis CMYK. Asigne las botellas correspondientes:")
+            c1, c2, c3, c4 = st.columns(4)
+            
+            with c1:
+                t_c = st.selectbox("Cian (C)", dict_t.keys(), key="sel_c")
+                consumos_reales[dict_t[t_c]] = datos_pre['c_ml'] * unidades
+            with c2:
+                t_m = st.selectbox("Magenta (M)", dict_t.keys(), key="sel_m")
+                consumos_reales[dict_t[t_m]] = datos_pre['m_ml'] * unidades
+            with c3:
+                t_y = st.selectbox("Amarillo (Y)", dict_t.keys(), key="sel_y")
+                consumos_reales[dict_t[t_y]] = datos_pre['y_ml'] * unidades
+            with c4:
+                t_k = st.selectbox("Negro (K)", dict_t.keys(), key="sel_k")
+                consumos_reales[dict_t[t_k]] = datos_pre['k_ml'] * unidades
+        else:
+            # Si es una cotización manual, permitimos elegir una tinta genérica
+            st.warning("⚠️ No hay datos de color. Seleccione un insumo base si desea descontar stock:")
+            t_gen = st.selectbox("Insumo a descontar:", ["Ninguno"] + list(dict_t.keys()))
+            if t_gen != "Ninguno":
+                ml_manual = st.number_input("ML totales a descontar:", min_value=0.0, format="%.4f")
+                consumos_reales[dict_t[t_gen]] = ml_manual
     else:
-        st.error("🚨 No hay tintas registradas con unidad 'ml'. El stock no se moverá.")
+        st.error("🚨 No hay insumos con unidad 'ml' en el inventario.")
 
-    # --- CÁLCULO DE PRECIOS ---
-    st.subheader("💰 Estructura de Costos y Ganancia")
-    c1, c2, c3 = st.columns(3)
+    # --- 💰 CÁLCULO DE PRECIOS ---
+    st.subheader("💰 Estructura Comercial")
+    c1, c2 = st.columns(2)
     
     costo_unitario_base = c1.number_input("Costo Unit. Base ($)", 
-                                          value=float(datos_pre['costo_base'] / datos_pre['unidades'] if datos_pre['unidades'] > 0 else 0.0), 
+                                          value=float(datos_pre['costo_base'] / unidades if unidades > 0 else 0.0), 
                                           format="%.4f")
-    margen = c2.slider("Margen de Ganancia %", min_value=10, max_value=500, value=100, step=10)
+    margen = c2.slider("Margen de Ganancia %", 10, 500, 100, 10)
     
-    # Cálculos dinámicos
     costo_total_prod = costo_unitario_base * unidades
     precio_venta_total = costo_total_prod * (1 + (margen / 100))
-    ganancia_neta = precio_venta_total - costo_total_prod
 
-    # --- VISUALIZACIÓN DE RESULTADOS ---
     st.divider()
     v1, v2, v3 = st.columns(3)
-    v1.metric("Costo Producción", f"$ {costo_total_prod:.2f}")
-    v2.metric("Precio Sugerido", f"$ {precio_venta_total:.2f}", delta=f"Ganancia: ${ganancia_neta:.2f}")
-    v3.metric("Precio en Bs (BCV)", f"Bs {(precio_venta_total * t_bcv):,.2f}")
+    v1.metric("Costo Total", f"$ {costo_total_prod:.2f}")
+    v2.metric("Precio Venta", f"$ {precio_venta_total:.2f}", delta=f"${precio_venta_total-costo_total_prod:.2f} Ganancia")
+    v3.metric("Total Bs (BCV)", f"Bs {(precio_venta_total * t_bcv):,.2f}")
 
-    # --- ACCIÓN FINAL: REGISTRAR VENTA ---
+    # --- 🚀 REGISTRO ATÓMICO ---
     st.divider()
     metodo_pago = st.selectbox("💳 Método de Pago:", ["Efectivo $", "Zelle", "Pago Móvil", "Transferencia Bs", "Binance"])
     
-    if st.button("🚀 CONVERTIR EN VENTA Y REGISTRAR", use_container_width=True, type="primary"):
-        # Llamada a la función atómica (Venta + Stock + Auditoría)
-        exito, msg = procesar_venta_con_descuento(
-            id_cliente=id_cliente,
-            monto=precio_venta_total,
-            metodo=metodo_pago,
-            id_tinta=id_tinta_a_descontar,
-            ml_consumidos=ml_totales
-        )
-        
-        if exito:
-            st.balloons()
-            st.success(msg)
-            
-            # Limpiar datos temporales
-            if 'datos_pre_cotizacion' in st.session_state:
-                del st.session_state['datos_pre_cotizacion']
-                
-            st.info("🔄 Sincronizando inventario...")
-            cargar_datos_seguros()
-            st.rerun()
+    if st.button("🚀 REGISTRAR VENTA Y DESCONTAR STOCK", use_container_width=True, type="primary"):
+        if not consumos_reales and any([datos_pre['c_ml'], datos_pre['m_ml']]):
+            st.error("Debe asignar las tintas para poder descontar el stock.")
         else:
-            st.error(msg)
+            # Usamos la función de arquitectura senior: procesar_venta_grafica_completa
+            exito, msg = procesar_venta_grafica_completa(
+                id_cliente=id_cliente,
+                monto=precio_venta_total,
+                metodo=metodo_pago,
+                consumos_dict=consumos_reales
+            )
+            
+            if exito:
+                st.balloons()
+                st.success(msg)
+                if 'datos_pre_cotizacion' in st.session_state:
+                    del st.session_state['datos_pre_cotizacion']
+                cargar_datos_seguros()
+                st.rerun()
+            else:
+                st.error(msg)
 
-    # Botón para limpiar si se quiere empezar de cero
     if st.button("🗑️ Limpiar Cotización"):
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
