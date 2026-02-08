@@ -757,6 +757,22 @@ elif menu == "📝 Cotizaciones":
         }
         st.success("¡Datos enviados a Ventas!")
 
+# --- 2. CÁLCULO DE COSTOS Y PRECIOS ---
+        margen = col1.number_input("Margen de Ganancia (%)", min_value=0, value=100)
+        incluir_iva = col2.checkbox("¿Incluir Impuestos en factura?", value=True)
+
+        costo_base = datos_cmyk.get('costo_base', 0.0)
+        
+        # USAMOS EL MOTOR DE PRECIOS QUE PEGASTE ARRIBA
+        precio_final = calcular_precio_con_impuestos(costo_base, margen, incluir_iva)
+
+        st.divider()
+        res1, res2 = st.columns(2)
+        res1.metric("Precio de Venta (USD)", f"$ {precio_final:.2f}")
+        res2.metric("Precio de Venta (BCV)", f"Bs {(precio_final * t_bcv):,.2f}")
+
+        if st.button("💾 Guardar Cotización"):
+            st.success("Cotización guardada exitosamente (Simulado)")
 
 
 
