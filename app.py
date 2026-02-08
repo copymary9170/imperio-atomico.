@@ -776,44 +776,107 @@ def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos
 
 def cargar_datos_seguros():
     cargar_datos()
+# --- 13. LÓGICA DE OTROS PROCESOS (COMPLETO) ---
+elif menu == "🛠️ Otros Procesos":
+    st.title("🛠️ Calculadora de Procesos Especiales")
+    st.markdown("Calcula el costo de acabados usando los activos guardados.")
 
+    conn = conectar()
+    df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
+    conn.close()
+    
+    lista_activos = df_act_db.to_dict('records')
+    otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
 
+    if not otros_equipos:
+        st.warning("⚠️ No hay maquinaria registrada en '🏗️ Activos'.")
+    else:
+        with st.form("form_procesos_fijo"):
+            col1, col2, col3 = st.columns(3)
+            nombres_eq = [e['equipo'] for e in otros_equipos]
+            eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
+            
+            # Buscamos los datos de forma segura
+            datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
+            
+            if datos_eq:
+                unidades_p = col2.number_input(f"Cantidad ({datos_eq['unidad']})", min_value=1)
+                margen_p = col3.number_input("Margen %", value=50)
 
-# --- 11. MÓDULO DE COTIZACIONES ---
+                if st.form_submit_button("🧮 Calcular Proceso"):
+                    costo_t = datos_eq['desgaste'] * unidades_p
+                    precio_sugerido = costo_t * (1 + (margen_p / 100))
+                    
+                    st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
+                    st.success(f"Precio Sugerido: $ {precio_sugerido:.2f}")
+                    
+                    # Guardamos en sesión para enviarlo a cotización si se desea
+                    st.session_state['ultimo_proceso'] = {
+                        'trabajo': f"Proceso: {eq_sel}",
+                        'costo_base': costo_t,
+                        'unidades': unidades_p
+                    }
+
+# --- 14. GENERADOR DE COTIZACIONES (ANTI-INFLACIÓN) ---
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones")
     
-    pre_datos = st.session_state.get('datos_pre_cotizacion', {})
+    # Recuperamos datos si vienen del Analizador CMYK o de Otros Procesos
+    pre_datos = st.session_state.get('datos_pre_cotizacion', st.session_state.get('ultimo_proceso', {}))
     
     with st.form("form_cotizacion_final"):
         c1, c2 = st.columns(2)
-        trabajo = c1.text_input("Descripción", value=pre_datos.get('trabajo', "Nuevo Trabajo"))
-        # Cargamos clientes desde el session_state que ya llenamos al inicio
-        lista_clientes = st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Particular"]
-        cliente = c2.selectbox("Cliente", lista_clientes)
+        trabajo = c1.text_input("Descripción del Trabajo", value=pre_datos.get('trabajo', ""))
+        
+        # Carga de clientes desde DB
+        conn = conectar()
+        df_c = pd.read_sql("SELECT nombre FROM clientes", conn)
+        conn.close()
+        lista_cli = df_c['nombre'].tolist() if not df_c.empty else ["Particular"]
+        cliente = c2.selectbox("Cliente", lista_cli)
         
         c3, c4, c5 = st.columns(3)
-        costo_base = c3.number_input("Costo Base ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f")
-        margen = c4.number_input("Margen %", value=100)
-        cantidad = c5.number_input("Unidades", value=pre_datos.get('unidades', 1), min_value=1)
+        costo_base = c3.number_input("Costo Base ($)", value=float(pre_datos.get('costo_base', 0.0)), format="%.4f")
+        margen = c4.number_input("Margen de Ganancia %", value=100)
+        cantidad = c5.number_input("Cantidad de Unidades", value=int(pre_datos.get('unidades', 1)), min_value=1)
         
-        if st.form_submit_button("💰 Calcular"):
-            # Cálculo con los impuestos que mencionaste (IVA, IGTF, Banco)
-            precio_u = costo_base * (1 + (margen / 100))
-            precio_u_imp = precio_u * (1 + 0.16 + 0.03 + 0.02)
-            total = precio_u_imp * cantidad
+        metodo_pago = st.selectbox("Método de Pago Sugerido", ["Efectivo/Zelle", "Transferencia BS", "Pago Móvil", "Binance"])
+
+        if st.form_submit_button("💰 GENERAR PRESUPUESTO"):
+            # Lógica de Impuestos según tu configuración
+            precio_sin_impuestos = costo_base * (1 + (margen / 100))
+            
+            # Aplicamos IVA (16%), IGTF (3%) y Comisión Bancaria (2%) si no es efectivo
+            impuestos = 0.16 + 0.03 + 0.02
+            precio_final_u = precio_sin_impuestos * (1 + impuestos)
+            total_cotizacion = precio_final_u * cantidad
             
             st.divider()
-            st.metric("TOTAL A COBRAR", f"$ {total:.2f}")
-            st.info(f"Equivalente en Bs (BCV): **{(total * t_bcv):,.2f} Bs**")
+            col_res1, col_res2 = st.columns(2)
+            col_res1.metric("TOTAL A COBRAR ($)", f"$ {total_cotizacion:.2f}")
+            col_res2.metric("TOTAL EN BS (BCV)", f"{(total_cotizacion * t_bcv):,.2f} Bs")
+            
+            st.info(f"💡 Precio Unitario Sugerido: $ {precio_final_u:.2f}")
 
-# --- FUNCIONES DE CIERRE ---
-def cargar_datos_seguros():
-    cargar_datos()
-        
-        # Guardar en el historial de la sesión para no perderlo
-        st.session_state['ultima_venta_calc'] = total_usd
-        st.success("✅ Cotización lista. Si el cliente paga, puedes registrarla en el módulo de Ventas.")
+# --- 15. CIERRE DE CAJA ---
+elif menu == "🏁 Cierre de Caja":
+    st.title("🏁 Cierre de Jornada")
+    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+    
+    conn = conectar()
+    ventas_hoy = pd.read_sql(f"SELECT SUM(monto_total) FROM ventas WHERE fecha LIKE '{fecha_hoy}%'", conn).iloc[0,0] or 0
+    gastos_hoy = pd.read_sql(f"SELECT SUM(monto) FROM gastos WHERE fecha LIKE '{fecha_hoy}%'", conn).iloc[0,0] or 0
+    conn.close()
+    
+    c1, c2 = st.columns(2)
+    c1.metric("Ingresos Hoy", f"$ {ventas_hoy:.2f}")
+    c2.metric("Egresos Hoy", f"$ {gastos_hoy:.2f}", delta=f"-{gastos_hoy:.2f}", delta_color="inverse")
+    
+    if st.button("📱 Enviar Resumen a WhatsApp"):
+        msg = f"Resumen Imperio Atómico ({fecha_hoy}):\n💰 Ventas: ${ventas_hoy}\n📉 Gastos: ${gastos_hoy}\n⚖️ Neto: ${ventas_hoy - gastos_hoy}"
+        st.write(f"Copia este mensaje: {msg}")
+
+# --- FIN DEL ARCHIVO ---
         
 if menu == "💰 Ventas":
     st.title("💰 Registro de Ventas")
@@ -956,6 +1019,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
