@@ -203,31 +203,83 @@ with st.sidebar:
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
-# --- 6. MÓDULOS DE INTERFAZ ---
-
+# --- 6. MÓDULOS DE INTERFAZ: INVENTARIO ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
     df_inv = st.session_state.df_inv
+    
     if not df_inv.empty:
         valor_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total Dólares", f"$ {valor_usd:,.2f}")
-        c2.metric("Total BCV", f"Bs {(valor_usd * t_bcv):,.2f}")
-        c3.metric("Tasa Actual", f"{t_bcv} Bs")
+        c1.metric("Valor del Almacén", f"$ {valor_usd:,.2f}")
+        c2.metric("Valor en Bs (BCV)", f"Bs {(valor_usd * t_bcv):,.2f}")
+        c3.metric("Tasa de Cambio", f"{t_bcv} Bs")
     
     st.divider()
-    with st.form("form_inventario"):
-        it_nombre = st.text_input("Nombre del Insumo")
-        it_unid = st.selectbox("Unidad:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
-        it_cant = st.number_input("Cantidad", min_value=0.0)
-        it_precio = st.number_input("Costo Unitario ($)", min_value=0.0, format="%.4f")
-        if st.form_submit_button("🚀 GUARDAR EN INVENTARIO"):
-            conn = conectar(); c = conn.cursor()
-            c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)",
-                      (it_nombre, it_cant, it_unid, it_precio))
-            conn.commit(); conn.close()
-            cargar_datos_seguros(); st.rerun()
+    
+    # Pestañas para organizar la gestión
+    tab_registro, tab_lista = st.tabs(["🆕 Registro / Carga", "📋 Inventario Actual"])
+    
+    with tab_registro:
+        with st.form("form_inventario"):
+            st.subheader("Entrada de Mercancía / Nuevo Insumo")
+            it_nombre = st.text_input("Nombre del Insumo (Ej: Tinta Cyan L805)").strip()
+            it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
+            
+            col_a, col_b = st.columns(2)
+            it_cant = col_a.number_input("Cantidad a Ingresar", min_value=0.0, step=0.1)
+            it_precio = col_b.number_input("Costo Unitario ($) - Base Inflación", min_value=0.0, format="%.4f")
+            
+            if st.form_submit_button("🚀 PROCESAR ENTRADA"):
+                if it_nombre == "":
+                    st.error("❌ El nombre del insumo no puede estar vacío.")
+                else:
+                    conn = conectar()
+                    c = conn.cursor()
+                    try:
+                        # 1. Intentamos buscar si ya existe para obtener su ID
+                        c.execute("SELECT id FROM inventario WHERE item = ?", (it_nombre,))
+                        res = c.fetchone()
+                        
+                        if res:
+                            # ACTUALIZACIÓN: Sumamos stock y actualizamos precio (Costo promedio o reposición)
+                            item_id = res[0]
+                            c.execute("""UPDATE inventario 
+                                         SET cantidad = cantidad + ?, precio_usd = ? 
+                                         WHERE id = ?""", (it_cant, it_precio, item_id))
+                        else:
+                            # INSERCIÓN: Nuevo registro
+                            c.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd) 
+                                         VALUES (?,?,?,?)""", (it_nombre, it_cant, it_unid, it_precio))
+                            item_id = c.lastrowid
+                        
+                        # 2. AUDITORÍA OBLIGATORIA: Registramos el movimiento de entrada
+                        # Usamos la nueva estructura relacional con item_id
+                        c.execute("""INSERT INTO inventario_movs (item_id, cantidad, unidad, tipo_mov, referencia) 
+                                     VALUES (?, ?, ?, 'ENTRADA', 'Carga Inicial/Compra')""",
+                                  (item_id, it_cant, it_unid))
+                        
+                        conn.commit()
+                        st.success(f"✅ {it_nombre} procesado correctamente.")
+                    except Exception as e:
+                        conn.rollback()
+                        st.error(f"❌ Error de Base de Datos: {e}")
+                    finally:
+                        conn.close()
+                    
+                    cargar_datos_seguros()
+                    st.rerun()
 
+    with tab_lista:
+        if not df_inv.empty:
+            # Resaltar en rojo si hay stock bajo (menos de 10 unidades o ml)
+            st.dataframe(
+                df_inv.style.highlight_between(left=0, right=10, subset=['cantidad'], color='#FF4B4B33'),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("El inventario está vacío actualmente.")
 elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
     conn = conectar()
@@ -783,8 +835,7 @@ elif menu == "📝 Cotizaciones":
         
         with col1:
             descr = st.text_input("Descripción del trabajo:", value=datos_pre['trabajo'])
-            # Usamos el dataframe ya cargado en session_state para mayor velocidad
-            df_clis = st.session_state.df_cli
+            df_clis = st.session_state.get('df_cli', pd.DataFrame())
             
             if not df_clis.empty:
                 opciones_cli = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
@@ -797,18 +848,22 @@ elif menu == "📝 Cotizaciones":
         with col2:
             unidades = st.number_input("Cantidad de piezas:", min_value=1, value=int(datos_pre['unidades']))
 
-    # --- 💉 GESTIÓN DE CONSUMO MULTI-TINTA ---
+    # --- 💉 GESTIÓN DE CONSUMO MULTI-TINTA (VINCULACIÓN POR ID) ---
     st.subheader("💉 Despacho de Insumos por Color")
-    df_tintas = obtener_tintas_disponibles()
+    df_tintas = obtener_tintas_disponibles() # Filtra por unidad = 'ml'
     consumos_reales = {} 
     
     if not df_tintas.empty:
+        # Creamos un diccionario: "Nombre (Stock ml)" -> ID
+        # Esto asegura que el usuario vea el nombre pero el sistema procese el ID
         dict_t = {f"{r['item']} ({r['cantidad']:.1f} ml)": r['id'] for _, r in df_tintas.iterrows()}
         
+        # Si vienen datos del Analizador CMYK
         if any([datos_pre['c_ml'], datos_pre['m_ml'], datos_pre['y_ml'], datos_pre['k_ml']]):
-            st.info("🎨 Se detectó análisis CMYK. Asigne las botellas correspondientes:")
+            st.info("🎨 Se detectó análisis CMYK. Asigne las botellas físicas:")
             c1, c2, c3, c4 = st.columns(4)
             
+            # El sistema mapea el consumo calculado al ID de la botella seleccionada
             with c1:
                 t_c = st.selectbox("Cian (C)", dict_t.keys(), key="sel_c")
                 consumos_reales[dict_t[t_c]] = datos_pre['c_ml'] * unidades
@@ -822,18 +877,19 @@ elif menu == "📝 Cotizaciones":
                 t_k = st.selectbox("Negro (K)", dict_t.keys(), key="sel_k")
                 consumos_reales[dict_t[t_k]] = datos_pre['k_ml'] * unidades
         else:
-            st.warning("⚠️ No hay datos de color. Seleccione un insumo base si desea descontar stock:")
-            t_gen = st.selectbox("Insumo a descontar:", ["Ninguno"] + list(dict_t.keys()))
+            st.warning("⚠️ Sin datos de color. Despacho manual:")
+            t_gen = st.selectbox("Seleccione Insumo:", ["Ninguno"] + list(dict_t.keys()))
             if t_gen != "Ninguno":
                 ml_manual = st.number_input("ML totales a descontar:", min_value=0.0, format="%.4f")
                 consumos_reales[dict_t[t_gen]] = ml_manual
     else:
-        st.error("🚨 No hay insumos con unidad 'ml' en el inventario.")
+        st.error("🚨 Error Crítico: No hay tintas 'ml' configuradas en Inventario.")
 
-    # --- 💰 CÁLCULO DE PRECIOS ---
-    st.subheader("💰 Estructura Comercial")
+    # --- 💰 ESTRUCTURA COMERCIAL (AJUSTABLE POR INFLACIÓN) ---
+    st.subheader("💰 Costos y Precios")
     c1, c2 = st.columns(2)
     
+    # El costo unitario base viene del análisis CMYK + desgaste seleccionado
     costo_unitario_base = c1.number_input("Costo Unit. Base ($)", 
                                           value=float(datos_pre['costo_base'] / unidades if unidades > 0 else 0.0), 
                                           format="%.4f")
@@ -844,51 +900,49 @@ elif menu == "📝 Cotizaciones":
 
     st.divider()
     v1, v2, v3 = st.columns(3)
-    v1.metric("Costo Total", f"$ {costo_total_prod:.2f}")
-    v2.metric("Precio Venta", f"$ {precio_venta_total:.2f}", delta=f"${precio_venta_total-costo_total_prod:.2f} Ganancia")
+    v1.metric("Costo Producción", f"$ {costo_total_prod:.2f}")
+    v2.metric("Precio Venta Total", f"$ {precio_venta_total:.2f}", delta=f"${precio_venta_total-costo_total_prod:.2f} Bruto")
     v3.metric("Total Bs (BCV)", f"Bs {(precio_venta_total * t_bcv):,.2f}")
 
-    # --- 🚀 REGISTRO ATÓMICO Y PREVENCIÓN DE DUPLICADOS ---
+    # --- 🚀 EJECUCIÓN DE VENTA Y REGISTRO DE MOVIMIENTOS ---
     st.divider()
-    metodo_pago = st.selectbox("💳 Método de Pago:", ["Efectivo $", "Zelle", "Pago Móvil", "Transferencia Bs", "Binance"])
+    metodo_pago = st.selectbox("💳 Cobro vía:", ["Efectivo $", "Zelle", "Pago Móvil", "Transferencia Bs", "Binance"])
     
-    # Generamos la llave de integridad para evitar doble clic
-    llave_operacion = f"v_{id_cliente}_{precio_venta_total:.2f}_{unidades}_{descr}"
+    # LLAVE DE INTEGRIDAD: Evita que el mismo post llegue dos veces a la base de datos
+    llave_operacion = f"v_{id_cliente}_{precio_venta_total:.4f}_{unidades}_{descr}"
 
-    if st.button("🚀 REGISTRAR VENTA Y DESCONTAR STOCK", use_container_width=True, type="primary"):
-        # Verificación anti-duplicados
+    if st.button("🚀 CONFIRMAR VENTA Y DESCONTAR INVENTARIO", use_container_width=True, type="primary"):
         if st.session_state.get('last_op_key') == llave_operacion:
-            st.warning("⚠️ Esta operación ya fue procesada.")
-        elif not consumos_reales and any([datos_pre['c_ml'], datos_pre['m_ml']]):
-            st.error("Debe asignar las tintas para poder descontar el stock.")
+            st.warning("⚠️ Operación duplicada bloqueada por el sistema.")
+        elif not consumos_reales:
+            st.error("❌ Error: No se han asignado insumos para el descuento de stock.")
         else:
-            with st.spinner("Registrando transacción en el Imperio..."):
+            with st.spinner("Procesando Transacción ACID..."):
+                # Llamada a la función Maestra que debe manejar el item_id en inventario_movs
                 exito, msg = procesar_venta_grafica_completa(
                     id_cliente=id_cliente,
                     monto=precio_venta_total,
                     metodo=metodo_pago,
-                    consumos_dict=consumos_reales
+                    consumos_dict=consumos_reales # Envía {id_item: ml_a_descontar}
                 )
                 
                 if exito:
-                    # Bloqueamos la llave y limpiamos datos
                     st.session_state['last_op_key'] = llave_operacion
                     st.balloons()
-                    st.success(msg)
+                    st.success(f"✅ Venta registrada: {msg}")
+                    # Limpieza de sesión post-venta
                     if 'datos_pre_cotizacion' in st.session_state:
                         del st.session_state['datos_pre_cotizacion']
                     
-                    cargar_datos_seguros()
+                    cargar_datos_seguros() # Recarga dataframes globales
                     st.rerun()
                 else:
-                    # El Trigger de SQLite o la lógica de stock dispararán este error si falla
-                    st.error(msg)
+                    st.error(f"❌ Fallo en Transacción: {msg}")
 
-    if st.button("🗑️ Limpiar Cotización"):
+    if st.button("🗑️ Cancelar Todo"):
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
-
 # --- 13. MÓDULO DE AUDITORÍA Y MÉTRICAS (VISIÓN GERENCIAL) ---
 elif menu == "📊 Auditoría y Métricas":
     st.title("📊 Auditoría de Producción e Insumos")
@@ -896,45 +950,50 @@ elif menu == "📊 Auditoría y Métricas":
     conn = conectar()
     cursor = conn.cursor()
     
-    # --- 🛡️ BLINDAJE: CREACIÓN Y ACTUALIZACIÓN AUTOMÁTICA ---
-    # 1. Asegurar que la tabla base exista
+    # --- 🛡️ BLINDAJE ARQUITECTÓNICO: MIGRACIÓN A MODELO RELACIONAL ---
+    # Aseguramos que la tabla exista con la columna item_id (La llave maestra)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventario_movs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            item_id INTEGER, -- Referencia al ID real de la tabla inventario
+            cantidad REAL,
+            tipo_mov TEXT, -- 'ENTRADA' o 'SALIDA'
+            referencia TEXT,
+            FOREIGN KEY (item_id) REFERENCES inventario(id)
         )
     """)
     
-    # 2. CIRUJANO DE DB: Inyectar columnas si la tabla existía pero estaba incompleta
-    columnas_necesarias = [
-        ("item", "TEXT"),
-        ("cantidad", "REAL"),
-        ("unidad", "TEXT"),
-        ("tipo_mov", "TEXT"),
-        ("referencia", "TEXT")
-    ]
-    
-    for col_nombre, col_tipo in columnas_necesarias:
-        try:
-            cursor.execute(f"ALTER TABLE inventario_movs ADD COLUMN {col_nombre} {col_tipo}")
-        except:
-            # Si da error es que la columna ya existe, ignoramos y seguimos
-            pass
+    # Cirujano de DB para migrar si la tabla era vieja
+    try:
+        cursor.execute("ALTER TABLE inventario_movs ADD COLUMN item_id INTEGER")
+    except:
+        pass # Ya existe
             
     conn.commit()
 
-    # 3. Consulta segura
+    # --- 🔗 CONSULTA PROFESIONAL CON JOIN ---
+    # Traemos el nombre y la unidad desde 'inventario', no desde la tabla de movimientos
     query_movs = """
-        SELECT fecha, item, cantidad, unidad, tipo_mov 
-        FROM inventario_movs 
-        WHERE unidad = 'ml' 
-        ORDER BY fecha DESC
+        SELECT 
+            m.fecha, 
+            i.item AS nombre_item, 
+            m.cantidad, 
+            i.precio_usd,
+            i.unidad, 
+            m.tipo_mov 
+        FROM inventario_movs m
+        JOIN inventario i ON m.item_id = i.id
+        WHERE i.unidad = 'ml' 
+        ORDER BY m.fecha DESC
     """
     
     try:
         df_movs = pd.read_sql_query(query_movs, conn)
     except Exception as e:
-        st.error(f"Error al leer auditoría: {e}")
+        st.error(f"Error en consulta relacional: {e}")
+        # Fallback por si la tabla aún no tiene item_id vinculado
+        st.warning("⚠️ Nota: Los registros antiguos sin 'item_id' no aparecerán en el reporte.")
         df_movs = pd.DataFrame()
     finally:
         conn.close()
@@ -944,34 +1003,33 @@ elif menu == "📊 Auditoría y Métricas":
     with tab1:
         st.subheader("Análisis de Consumo por Color")
         if not df_movs.empty:
-            # Filtramos solo salidas (ventas)
             df_salidas = df_movs[df_movs['tipo_mov'] == 'SALIDA'].copy()
             
             if not df_salidas.empty:
                 df_salidas['fecha'] = pd.to_datetime(df_salidas['fecha']).dt.date
-                consumo_total = df_salidas.groupby('item')['cantidad'].sum().reset_index()
+                # Agrupamos por el nombre real que viene del JOIN
+                consumo_total = df_salidas.groupby('nombre_item')['cantidad'].sum().reset_index()
                 
                 c1, c2 = st.columns([2, 1])
                 with c1:
-                    st.bar_chart(data=consumo_total, x='item', y='cantidad')
+                    st.bar_chart(data=consumo_total, x='nombre_item', y='cantidad')
                 with c2:
                     st.write("📋 **Resumen de Gastos**")
+                    # Calculamos costo estimado basado en precio actual (Inflación-Ready)
                     st.table(consumo_total)
                 
                 st.divider()
-                st.write("🔍 **Log de Salidas CMYK**")
+                st.write("🔍 **Log de Salidas Forense (Vinculado a Inventario)**")
                 st.dataframe(df_salidas, use_container_width=True, hide_index=True)
             else:
-                st.info("💡 No hay registros de 'SALIDA' aún. Procesa una venta para ver datos.")
+                st.info("💡 No hay registros de 'SALIDA' vinculados a tintas (ml).")
         else:
-            st.info("🔍 No hay movimientos de tinta registrados en la base de datos.")
+            st.info("🔍 No hay movimientos registrados. El sistema espera el primer item_id.")
 
     with tab2:
-        st.subheader("Historial Completo de Movimientos")
-        if not df_movs.empty:
-            st.dataframe(df_movs, use_container_width=True)
-        else:
-            st.warning("El historial está vacío. Realiza operaciones en Inventario o Ventas.")
+        st.subheader("Historial General")
+        st.dataframe(df_movs, use_container_width=True)
+
 
 
 
