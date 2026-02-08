@@ -422,11 +422,11 @@ elif menu == "👥 Clientes":
 
 
 
-# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (SOPORTA PDF, JPG, PNG) ---
 elif menu == "🎨 Análisis CMYK":
     st.title("🎨 Analizador de Cobertura y Costos Reales")
 
-    # 1. Carga de datos profesional con validación de seguridad (KeyError Fix)
+    # 1. Carga de datos profesional con validación de seguridad (Evita KeyError)
     df_tintas_db = obtener_tintas_disponibles()
     
     conn = conectar()
@@ -446,19 +446,20 @@ elif menu == "🎨 Análisis CMYK":
         datos_imp = next((e for e in df_act_db.to_dict('records') if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
-        # Blindaje de precio
+        # Blindaje de precio: Busca por nombre de impresora pero solo en ítems 'ml'
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
         if not df_tintas_db.empty and 'item' in df_tintas_db.columns:
             tintas_maquina = df_tintas_db[df_tintas_db['item'].str.contains(impresora_sel, case=False, na=False)]
             if not tintas_maquina.empty:
                 precio_tinta_ml = tintas_maquina['precio_usd'].mean()
+                st.success(f"✅ Precio detectado: ${precio_tinta_ml:.4f}/ml")
 
     with c_file:
-        # RE-ACTIVACIÓN DE CARGA MÚLTIPLE (Esto es lo que se había perdido)
+        # Restauración de carga múltiple y filtros de archivo
         archivos_multiples = st.file_uploader(
             "Sube tus diseños (PDF, JPG, PNG)", 
             type=['pdf', 'png', 'jpg', 'jpeg'], 
-            accept_multiple_files=True, # <--- IMPORTANTE
+            accept_multiple_files=True,
             key="uploader_cmyk_v_final"
         )
 
@@ -475,10 +476,9 @@ elif menu == "🎨 Análisis CMYK":
         with st.spinner('🚀 Analizando archivos...'):
             for arc in archivos_multiples:
                 imagenes_a_procesar = []
-                
-                # Leemos el contenido una sola vez para evitar errores de puntero
                 arc_bytes = arc.read()
                 
+                # Identificación de tipo por extensión
                 if arc.name.lower().endswith('.pdf'):
                     try:
                         doc = fitz.open(stream=arc_bytes, filetype="pdf")
@@ -496,46 +496,58 @@ elif menu == "🎨 Análisis CMYK":
                     except Exception as e:
                         st.error(f"Error Imagen {arc.name}: {e}")
 
-                # Cálculo de cobertura
+                # --- CÁLCULO DE COBERTURA CON DESGLOSE VISUAL ---
                 for nombre_item, img in imagenes_a_procesar:
                     total_paginas_lote += 1
                     datos = np.array(img)
+                    
+                    # Porcentajes de cobertura (0.0 a 1.0)
                     c_p, m_p, y_p, k_p = [np.mean(datos[:,:,i]) / 255 for i in range(4)]
                     
+                    # Multiplicadores de consumo por modelo
                     nombre_low = impresora_sel.lower()
                     multi = 2.5 if "j210" in nombre_low else (1.8 if "subli" in nombre_low else 1.2)
                     
+                    # ML por cada canal individual
                     ml_c, ml_m, ml_y, ml_k = [p * 0.15 * multi for p in [c_p, m_p, y_p, k_p]]
                     
-                    # Acumular
+                    # Acumuladores para el Módulo 11 (Cotizaciones)
                     totales_canales['c'] += ml_c
                     totales_canales['m'] += ml_m
                     totales_canales['y'] += ml_y
                     totales_canales['k'] += ml_k
                     
-                    consumo_total = sum([ml_c, ml_m, ml_y, ml_k])
-                    costo_usd = (consumo_total * precio_tinta_ml) + costo_desgaste
+                    consumo_total_item = ml_c + ml_m + ml_y + ml_k
+                    costo_tinta_item = consumo_total_item * precio_tinta_ml
+                    total_usd_item = costo_tinta_item + costo_desgaste
                     
                     resultados.append({
                         "Archivo": nombre_item,
-                        "ml": round(consumo_total, 4),
-                        "Costo USD": round(costo_usd, 4)
+                        "C%": f"{c_p*100:.1f}%", "M%": f"{m_p*100:.1f}%", 
+                        "Y%": f"{y_p*100:.1f}%", "K%": f"{k_p*100:.1f}%",
+                        "ml": round(consumo_total_item, 4),
+                        "Costo USD": round(total_usd_item, 4)
                     })
 
+        # --- MOSTRAR RESULTADOS ---
         if resultados:
-            st.table(pd.DataFrame(resultados))
+            st.divider()
+            df_res = pd.DataFrame(resultados)
+            st.subheader("📊 Desglose de Cobertura CMYK")
+            st.dataframe(df_res, use_container_width=True, hide_index=True)
+            
             total_usd_lote = sum(r['Costo USD'] for r in resultados)
-            st.success(f"💰 Costo Producción: **${total_usd_lote:.2f} USD**")
+            st.success(f"💰 Costo Producción Lote: **${total_usd_lote:.2f} USD**")
 
-            if st.button("📝 ENVIAR A COTIZACIÓN"):
+            if st.button("📝 ENVIAR TODO A COTIZACIÓN", use_container_width=True, type="primary"):
                 st.session_state['datos_pre_cotizacion'] = {
-                    'trabajo': f"Producción: {len(archivos_multiples)} archivos",
+                    'trabajo': f"Producción {impresora_sel}: {len(archivos_multiples)} archivos",
                     'costo_base': total_usd_lote,
                     'c_ml': totales_canales['c'], 'm_ml': totales_canales['m'],
                     'y_ml': totales_canales['y'], 'k_ml': totales_canales['k'],
                     'unidades': total_paginas_lote
                 }
-                st.toast("✅ Datos enviados")
+                st.toast("✅ Datos desglosados listos en Cotizaciones")
 # --- 12. LÓGICA DE ACTIVOS PERMANENTES ---
 
 elif menu == "🏗️ Activos":
@@ -858,6 +870,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
