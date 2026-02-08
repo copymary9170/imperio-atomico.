@@ -872,10 +872,13 @@ elif menu == "🏁 Cierre de Caja":
         st.dataframe(df_movs_dia, use_container_width=True, hide_index=True)
     n reporte por WhatsApp/Email 
         # o guardar un log de "Cierre Finalizad
-    # 5. Botón de Cierre Oficial
+   # 5. Botón de Cierre Oficial
     if st.button("🔒 Ejecutar Cierre y Exportar PDF"):
-        # Aquí puedes agregar lógica para enviar uo" en una nueva tabla de auditoría.
+        # Esta línea debe tener el '#' al principio:
+        # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
+        # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
         st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
+
 
 
 
