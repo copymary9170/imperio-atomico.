@@ -1,5 +1,4 @@
-import pandas as
-pd
+import pandas as pd
 
 import sqlite3
 
@@ -1344,4 +1343,5 @@ elif menu == "🛠️ Otros Procesos":
             
 
             # ESTA ES LA LÍNEA QUE DABA ERROR (Ahora con 12 espacios exactos)
+
 
