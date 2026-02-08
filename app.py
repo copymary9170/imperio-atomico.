@@ -1,33 +1,3 @@
-import streamlit as st
-import pandas as pd
-import sqlite3
-from datetime import datetime
-from PIL import Image
-import numpy as np
-import io
-
-# --- MOTOR ÚNICO DE COSTOS (Protección anti-error) ---
-def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
-    """
-    Calcula el costo real de un insumo sumando logística e impuestos.
-    Usa los valores globales de iva, igtf y banco.
-    """
-    # Sumamos la base más el envío/delivery
-    total = base_usd + logistica_usd
-    
-    if aplicar_impuestos:
-        # Aquí sumamos todos los porcentajes configurados
-        recargo = iva + igtf + banco
-        total *= (1 + recargo)
-        
-    return round(total, 6) # Usamos 6 decimales para precisión en tintas
-
-# --- FUNCIÓN PARA CONECTAR A LA BASE DE DATOS ---
-def conectar():
-    """Establece la conexión con SQLite"""
-    conn = sqlite3.connect("imperio_data.db", check_same_thread=False)
-    return conn
-
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
@@ -43,7 +13,7 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
     
-    # TABLA DE AUDITORÍA (Crucial para el control real)
+    # TABLA DE AUDITORÍA
     c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, 
                     item_id INTEGER, 
@@ -53,6 +23,13 @@ def inicializar_sistema():
                     usuario TEXT,
                     fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(item_id) REFERENCES inventario(id))''')
+
+    # --- 🛠️ PARCHE DE REPARACIÓN AUTOMÁTICA ---
+    # Esto agrega la columna 'minimo' si tu base de datos es vieja y no la tiene
+    try:
+        c.execute("ALTER TABLE inventario ADD COLUMN minimo REAL DEFAULT 5.0")
+    except:
+        pass # Si ya existe, no hace nada y sigue adelante
 
     # Usuarios iniciales
     c.execute("SELECT COUNT(*) FROM usuarios")
@@ -120,7 +97,7 @@ def cargar_datos_seguros():
     conn = conectar()
     st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
     st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-    conn.close()
+    conn.close() 
 
 # --- INICIO DEL SISTEMA ---
 inicializar_sistema()
@@ -833,6 +810,7 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
 
