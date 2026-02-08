@@ -205,13 +205,13 @@ with st.sidebar:
         st.rerun()
 
     # --- 3. INFORMACIÓN GENERAL ---
-    with st.container(border=True):
+   ith st.container(border=True):
         st.subheader("🛠️ Detalles del Trabajo")
         col1, col2 = st.columns([2, 1])
 
         with col1:
             descr = st.text_input("Descripción del trabajo:", value=datos_pre['trabajo'])
-
+            
             df_clis = st.session_state.get('df_cli', pd.DataFrame())
             if not df_clis.empty:
                 opciones_cli = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
@@ -1067,6 +1067,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
