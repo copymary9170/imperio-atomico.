@@ -23,26 +23,33 @@ def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=False):
     return total_base
 
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
-    """Registra auditoría y actualiza el stock real en SQLite"""
+    """Registra auditoría y actualiza stock protegiendo contra inventario negativo"""
     conn = conectar()
     cur = conn.cursor()
     try:
+        # 1. VALIDACIÓN DE SEGURIDAD (Solo si es una salida/descuento)
+        if cantidad_cambio < 0:
+            cur.execute("SELECT cantidad, item FROM inventario WHERE id = ?", (item_id,))
+            resultado = cur.fetchone()
+            if resultado:
+                stock_actual, nombre_item = resultado
+                if stock_actual + cantidad_cambio < 0:
+                    return False, f"Stock insuficiente de {nombre_item} (Disponible: {stock_actual})"
+
+        # 2. REGISTRO DE AUDITORÍA
         usuario = st.session_state.get('usuario_nombre', 'Sistema')
         fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 1. Insertar en historial
         cur.execute("""INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario, fecha)
                        VALUES (?, ?, ?, ?, ?, ?)""", 
                     (item_id, tipo_mov, cantidad_cambio, motivo, usuario, fecha))
         
-        # 2. Actualizar tabla maestra
+        # 3. ACTUALIZACIÓN REAL
         cur.execute("UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?", (cantidad_cambio, item_id))
         
         conn.commit()
-        return True
+        return True, "Operación exitosa"
     except Exception as e:
-        st.error(f"Error en motor de stock: {e}")
-        return False
+        return False, f"Error de base de datos: {e}"
     finally:
         conn.close()
 
@@ -773,6 +780,7 @@ elif menu == "📝 Cotizaciones":
 
         if st.button("💾 Guardar Cotización"):
             st.success("Cotización guardada exitosamente (Simulado)")
+
 
 
 
