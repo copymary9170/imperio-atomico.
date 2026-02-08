@@ -646,7 +646,7 @@ elif menu == "🏗️ Activos":
         if st.button("🗑️ Borrar Todos los Activos"):
             conn = conectar(); c = conn.cursor(); c.execute("DELETE FROM activos"); conn.commit(); conn.close()
             st.rerun()
-# --- 13. LÓGICA DE OTROS PROCESOS (CAMEO, PLASTIFICADORA, ETC.) ---
+# --- 13. LÓGICA DE OTROS PROCESOS (CORREGIDO) ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
     st.markdown("Calcula el costo de acabados usando los activos guardados.")
@@ -669,40 +669,50 @@ elif menu == "🛠️ Otros Procesos":
             nombres_eq = [e['equipo'] for e in otros_equipos]
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
             
-            # Buscamos los datos de esa máquina
+            # Buscamos los datos de esa máquina de forma segura
             datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
             
-            # Aquí estaba el error de alineación (Checklist #Indentation)
-            unidades = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1)
-            margen_p = col3.number_input("Margen Ganancia %", value=50)
+            if datos_eq:
+                unidades = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1)
+                margen_p = col3.number_input("Margen Ganancia %", value=50)
 
-            if st.form_submit_button("🧮 Calcular Proceso"):
-                costo_u = datos_eq['desgaste']
-                costo_t = costo_u * unidades
-                
-                # Función de precio final
-                precio_v = calcular_precio_con_impuestos(costo_t, margen_p)
-                
-                st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
-                st.success(f"Precio Sugerido: $ {precio_v:.2f}")
+                if st.form_submit_button("🧮 Calcular Proceso"):
+                    costo_u = datos_eq['desgaste']
+                    costo_t = costo_u * unidades
+                    
+                    # Llamada a la función de cálculo
+                    precio_v = calcular_precio_con_impuestos(costo_t, margen_p)
+                    
+                    st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
+                    st.success(f"Precio Sugerido (Con Impuestos): $ {precio_v:.2f}")
 
-# --- 14. FUNCIONES DE CÁLCULO (FUERA DE LOS IF DE MENÚ) ---
+# --- 14. FUNCIONES DE CÁLCULO GENERALES (FUERA DE LOS IF) ---
 
 def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
-    """Calcula el precio final aplicando ganancia e impuestos del session_state"""
+    """Calcula el precio final aplicando margen e impuestos"""
     precio_con_ganancia = costo_base * (1 + (margen_ganancia / 100))
     
     if not incluir_impuestos:
         return precio_con_ganancia
     
+    # Valores por defecto si no existen en session_state
     iva = st.session_state.get('iva', 0.16)
     igtf = st.session_state.get('igtf', 0.03)
     banco = st.session_state.get('banco', 0.02)
     
     return precio_con_ganancia * (1 + iva + igtf + banco)
 
-}
-
+def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
+    """Calcula el costo de entrada de mercancía"""
+    total = base_usd + logistica_usd
+    if not aplicar_impuestos:
+        return total
+    
+    iva = st.session_state.get('iva', 0.16)
+    igtf = st.session_state.get('igtf', 0.03)
+    banco = st.session_state.get('banco', 0.02)
+    
+    return total * (1 + iva + igtf + banco)
 
 elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Presupuestos")
@@ -886,6 +896,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
