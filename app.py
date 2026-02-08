@@ -24,37 +24,29 @@ def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
-    # ... (aquí va el resto del código que te pasé antes con el parche)
+    c.execute("PRAGMA foreign_keys = ON")
     
-    # Tablas Principales
+    # 1. Crear tablas si no existen
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente_id INTEGER, trabajo TEXT, monto_usd REAL, estado TEXT, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
-    c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo_pago TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cliente_id) REFERENCES clientes(id))')
-    c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
     
-    # TABLA DE AUDITORÍA
-    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                    item_id INTEGER, 
-                    tipo TEXT, 
-                    cantidad REAL, 
-                    motivo TEXT, 
-                    usuario TEXT,
-                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(item_id) REFERENCES inventario(id))''')
-
-    # --- 🛠️ PARCHE DE REPARACIÓN AUTOMÁTICA ---
-    # Esto agrega la columna 'minimo' si tu base de datos es vieja y no la tiene
+    # 2. 🛡️ PARCHES DE REPARACIÓN (Para bases de datos viejas)
+    # Reparar Tabla Inventario
     try:
         c.execute("ALTER TABLE inventario ADD COLUMN minimo REAL DEFAULT 5.0")
-    except:
-        pass # Si ya existe, no hace nada y sigue adelante
+    except: pass
 
-    # Usuarios iniciales
+    # Reparar Tabla Usuarios (Aquí estaba el error actual)
+    try:
+        c.execute("ALTER TABLE usuarios ADD COLUMN nombre TEXT")
+        # Si la acabamos de crear, ponemos nombres por defecto para que no de error
+        c.execute("UPDATE usuarios SET nombre = 'Usuario' WHERE nombre IS NULL")
+    except: pass
+
+    # 3. Usuarios iniciales (Solo si la tabla está vacía)
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         usuarios_iniciales = [
@@ -64,7 +56,7 @@ def inicializar_sistema():
         ]
         c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", usuarios_iniciales)
 
-    # Configuración inicial
+    # 4. Configuración inicial
     config_init = [
         ('tasa_bcv', 36.50), ('tasa_binance', 38.00),
         ('iva_perc', 0.16), ('igtf_perc', 0.03),
@@ -75,7 +67,6 @@ def inicializar_sistema():
     
     conn.commit()
     conn.close()
-
 # --- MOTOR DE INVENTARIO (EL CEREBRO QUE EVITA ERRORES) ---
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo="Ajuste Manual"):
     """
@@ -839,6 +830,7 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
 
