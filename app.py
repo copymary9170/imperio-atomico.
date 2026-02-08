@@ -646,133 +646,72 @@ elif menu == "🏗️ Activos":
         if st.button("🗑️ Borrar Todos los Activos"):
             conn = conectar(); c = conn.cursor(); c.execute("DELETE FROM activos"); conn.commit(); conn.close()
             st.rerun()
-# --- 13. LÓGICA DE OTROS PROCESOS (CORREGIDO) ---
+# --- 13. LÓGICA DE OTROS PROCESOS (CORREGIDO Y COMPLETO) ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
-    st.markdown("Calcula el costo de acabados usando los activos guardados.")
-
-    # 1. Cargar activos desde la base de datos
+    
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
     conn.close()
     
     lista_activos = df_act_db.to_dict('records')
-    # Filtramos activos que NO son impresoras
+    # Filtramos para no mostrar impresoras aquí
     otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
 
     if not otros_equipos:
-        st.warning("⚠️ No hay maquinaria registrada (Cameo, Plastificadora, etc.) en '🏗️ Activos'.")
+        st.warning("⚠️ No hay maquinaria registrada en '🏗️ Activos'.")
     else:
+        # Iniciamos el formulario (8 espacios de sangría)
         with st.form("form_procesos_fijo"):
             col1, col2, col3 = st.columns(3)
-            
             nombres_eq = [e['equipo'] for e in otros_equipos]
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
             
-            # Buscamos los datos de esa máquina de forma segura
+            # Buscamos los datos del equipo seleccionado (12 espacios de sangría)
             datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
             
+            # ESTA ES LA LÍNEA QUE DABA ERROR (Ahora con 12 espacios exactos)
             if datos_eq:
-                unidades = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1)
-                margen_p = col3.number_input("Margen Ganancia %", value=50)
+                unidades_p = col2.number_input(f"Cantidad ({datos_eq['unidad']})", min_value=1)
+                margen_p = col3.number_input("Margen %", value=50)
 
                 if st.form_submit_button("🧮 Calcular Proceso"):
-                    costo_u = datos_eq['desgaste']
-                    costo_t = costo_u * unidades
-                    
-                    # Llamada a la función de cálculo
-                    precio_v = calcular_precio_con_impuestos(costo_t, margen_p)
+                    # Cálculo basado en desgaste (perfecto para ajustar por inflación)
+                    costo_t = datos_eq['desgaste'] * unidades_p
+                    precio_sugerido = costo_t * (1 + (margen_p / 100))
                     
                     st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
-                    st.success(f"Precio Sugerido (Con Impuestos): $ {precio_v:.2f}")
+                    st.success(f"Precio Sugerido: $ {precio_sugerido:.2f}")
 
-# --- 14. FUNCIONES DE CÁLCULO GENERALES (FUERA DE LOS IF) ---
-
-def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
-    """Calcula el precio final aplicando margen e impuestos"""
-    precio_con_ganancia = costo_base * (1 + (margen_ganancia / 100))
+# --- 14. GENERADOR DE COTIZACIONES (ANTI-INFLACIÓN) ---
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Generador de Cotizaciones")
     
-    if not incluir_impuestos:
-        return precio_con_ganancia
+    # Recuperamos datos si vienen de CMYK o Otros Procesos
+    pre_datos = st.session_state.get('datos_pre_cotizacion', {})
     
-    iva = st.session_state.get('iva', 0.16)
-    igtf = st.session_state.get('igtf', 0.03)
-    banco = st.session_state.get('banco', 0.02)
-    
-    return precio_con_ganancia * (1 + iva + igtf + banco)
-
-
-def cargar_datos_seguros():
-    cargar_datos()
-if st.form_submit_button("🧮 Calcular Proceso"):
-                costo_u = datos_eq['desgaste']
-                costo_t = costo_u * unidades
-                precio_v = calcular_precio_con_impuestos(costo_t, margen_p)
-                st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
-                st.success(f"Precio Sugerido: $ {precio_v:.2f}")
-
-# LAS FUNCIONES DEBEN ESTAR AQUÍ, PERO PEGADAS AL MARGEN IZQUIERDO
-def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
-    precio_con_ganancia = costo_base * (1 + (margen_ganancia / 100))
-    iva = st.session_state.get('iva', 0.16)
-    igtf = st.session_state.get('igtf', 0.03)
-    banco = st.session_state.get('banco', 0.02)
-    return precio_con_ganancia * (1 + iva + igtf + banco)
-
-
-    datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
-            if datos_eq:
-                unidades_proc = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1, key="cant_proc")
-                margen_proc = col3.number_input("Margen %", value=50, key="marg_proc")
-
-                if st.form_submit_button("🧮 Calcular Proceso"):
-                    costo_t = datos_eq['desgaste'] * unidades_proc
-                    # Usamos la función de cálculo definida abajo
-                    precio_v = costo_t * (1 + (margen_proc / 100))
-                    
-                    st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
-                    st.success(f"Precio Sugerido: $ {precio_v:.2f}")
-
-# --- 13. MÓDULO DE OTROS PROCESOS (VERSIÓN DEFINITIVA Y LIMPIA) ---
-elif menu == "🛠️ Otros Procesos":
-    st.title("🛠️ Calculadora de Procesos Especiales")
-    st.markdown("Calcula el costo de acabados usando los activos guardados.")
-
-    # Cargar activos desde la base de datos
-    conn = conectar()
-    df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
-    conn.close()
-    
-    lista_activos = df_act_db.to_dict('records')
-
-    # Filtramos activos que NO son impresoras
-    otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
-
-    if not otros_equipos:
-        st.warning("⚠️ No hay maquinaria registrada (Cameo, Plastificadora, etc.) en '🏗️ Activos'.")
-    else:
-        with st.form("form_procesos_fijo"):
-            col1, col2, col3 = st.columns(3)
-
-            nombres_eq = [e['equipo'] for e in otros_equipos]
-            eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
-
-            # Obtener datos del equipo seleccionado
-         # --- 14. FUNCIONES DE CÁLCULO GENERALES ---
-
-def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
-    """Calcula el precio final aplicando margen e impuestos"""
-    precio_con_ganancia = costo_base * (1 + (margen_ganancia / 100))
-    
-    if not incluir_impuestos:
-        return precio_con_ganancia
-    
-    iva = st.session_state.get('iva', 0.16)
-    igtf = st.session_state.get('igtf', 0.03)
-    banco = st.session_state.get('banco', 0.02)
-    
-    return precio_con_ganancia * (1 + iva + igtf + banco)
-
+    with st.form("form_cotizacion_final"):
+        c1, c2 = st.columns(2)
+        trabajo = c1.text_input("Descripción", value=pre_datos.get('trabajo', "Nuevo Trabajo"))
+        
+        # Cargamos clientes registrados en la base de datos
+        lista_clientes = st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Particular"]
+        cliente = c2.selectbox("Cliente", lista_clientes)
+        
+        c3, c4, c5 = st.columns(3)
+        costo_base = c3.number_input("Costo Base ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f")
+        margen = c4.number_input("Margen %", value=100)
+        cantidad = c5.number_input("Unidades", value=pre_datos.get('unidades', 1), min_value=1)
+        
+        if st.form_submit_button("💰 Calcular Total"):
+            # Aplicamos tus impuestos: IVA (16%) + IGTF (3%) + Banco (2%)
+            tasa_impuestos = 0.16 + 0.03 + 0.02
+            precio_u = (costo_base * (1 + (margen / 100))) * (1 + tasa_impuestos)
+            total = precio_u * cantidad
+            
+            st.divider()
+            st.metric("TOTAL A COBRAR", f"$ {total:.2f}")
+            st.info(f"Equivalente en Bs (BCV): **{(total * t_bcv):,.2f} Bs**")
 
 def cargar_datos_seguros():
     cargar_datos()
@@ -1003,6 +942,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
