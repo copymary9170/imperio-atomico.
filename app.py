@@ -759,18 +759,24 @@ elif menu == "🛠️ Otros Procesos":
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
 
             # Obtener datos del equipo seleccionado
-           datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
-            
-            if datos_eq:
-                unidades_proc = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1, key="cant_proc")
-                margen_proc = col3.number_input("Margen %", value=50, key="marg_proc")
+         # --- 14. FUNCIONES DE CÁLCULO GENERALES ---
 
-                if st.form_submit_button("🧮 Calcular Proceso"):
-                    costo_t = datos_eq['desgaste'] * unidades_proc
-                    precio_v = costo_t * (1 + (margen_proc / 100))
-                    
-                    st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
-                    st.success(f"Precio Sugerido: $ {precio_v:.2f}")
+def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
+    """Calcula el precio final aplicando margen e impuestos"""
+    precio_con_ganancia = costo_base * (1 + (margen_ganancia / 100))
+    
+    if not incluir_impuestos:
+        return precio_con_ganancia
+    
+    iva = st.session_state.get('iva', 0.16)
+    igtf = st.session_state.get('igtf', 0.03)
+    banco = st.session_state.get('banco', 0.02)
+    
+    return precio_con_ganancia * (1 + iva + igtf + banco)
+
+
+def cargar_datos_seguros():
+    cargar_datos()
 
 
 
@@ -951,6 +957,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
