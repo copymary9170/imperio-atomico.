@@ -48,12 +48,43 @@ def inicializar_sistema():
     for param, valor in config_init:
         c.execute("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", (param, valor))
     
-    conn.commit()
-    conn.close()
+   # --- 2. MOTORES DE CÁLCULO (PÉGALO AQUÍ) ---
 
-# Ejecución inicial
+def calcular_precio_con_impuestos(costo_base_usd, margen_ganancia_perc, usar_impuestos=True):
+    """Calcula el precio final de venta al cliente"""
+    # 1. Aplicamos tu ganancia
+    precio_neto = costo_base_usd * (1 + (margen_ganancia_perc / 100))
+    
+    if not usar_impuestos:
+        return precio_neto
+    
+    # 2. Sumamos los impuestos (traídos de la configuración que maneja la inflación)
+    # Usamos .get() con valores por defecto por si la base de datos está cargando
+    iva = st.session_state.get('iva', 0.16)
+    igtf = st.session_state.get('igtf', 0.03)
+    banco = st.session_state.get('banco', 0.02)
+    
+    # Retornamos el precio con el recargo de impuestos
+    return precio_neto * (1 + iva + igtf + banco)
+
+def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
+    """Registra entradas/salidas y actualiza el stock real"""
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute("UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?", (cantidad_cambio, item_id))
+        cur.execute("""INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) 
+                       VALUES (?, ?, ?, ?, ?)""", 
+                    (item_id, tipo_mov, cantidad_cambio, motivo, st.session_state.get('usuario_nombre', 'Sistema')))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"Error actualizando stock: {e}")
+        return False
+
+# Ahora sí, continúa el resto de tu código
 inicializar_sistema()
-
 # --- 2. LOGIN REFORZADO ---
 st.set_page_config(page_title="Imperio Atómico - Sistema Pro", layout="wide")
 
@@ -980,6 +1011,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
