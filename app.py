@@ -6,7 +6,7 @@ from PIL import Image
 import numpy as np
 import io
 
-# --- 1. CONFIGURACIÓN DE PÁGINA (SIEMPRE PRIMERO) ---
+# --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide")
 
 # --- 2. MOTOR DE BASE DE DATOS Y CÁLCULOS ---
@@ -19,15 +19,16 @@ def inicializar_sistema():
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     
-    # Tablas
+    # Tablas Maestras
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
     c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     
-    # Tabla Ventas: Alineada a (id, cliente_id, monto_total, metodo, fecha)
+    # Auditoría y Transacciones
+    c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
+    # CORRECCIÓN: Tabla Ventas alineada a la estructura real
     c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
 
@@ -40,7 +41,7 @@ def inicializar_sistema():
             ('pro', 'diseno2026', 'Produccion', 'Hermana')
         ])
 
-    # Configuración de Inflación y Tasas
+    # Configuración de Inflación y Tasas (Ajustable para precios de tinta)
     config_init = [
         ('tasa_bcv', 36.50), ('tasa_binance', 38.00),
         ('iva_perc', 0.16), ('igtf_perc', 0.03),
@@ -53,7 +54,7 @@ def inicializar_sistema():
     conn.close()
 
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
-    """Actualiza stock y retorna (Éxito, Mensaje) - Checklist #2: Cierre en error"""
+    """Actualiza stock y retorna (Éxito, Mensaje)"""
     conn = conectar()
     try:
         cur = conn.cursor()
@@ -75,14 +76,13 @@ def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
         conn.close()
         return True, "OK"
     except Exception as e:
-        if conn: conn.close() # Checklist #2: Arreglado
+        if conn: conn.close() 
         return False, str(e)
 
-def cargar_datos(): # Checklist #1: Nombre unificado
+def cargar_datos(): # ÚNICO NOMBRE VÁLIDO
     """Carga configuración y tablas maestras en la sesión"""
     try:
         conn = conectar()
-        # Checklist #4: Garantizar existencia de df_inv
         st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
         st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
         conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
@@ -97,19 +97,11 @@ def cargar_datos(): # Checklist #1: Nombre unificado
     except Exception as e:
         st.error(f"Error en carga de datos: {e}")
 
-def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
-    costo_base = base_usd + logistica_usd
-    if not aplicar_impuestos: return costo_base
-    iva = st.session_state.get('iva', 0.16)
-    igtf = st.session_state.get('igtf', 0.03)
-    banco = st.session_state.get('banco', 0.02)
-    return costo_base * (1 + iva + igtf + banco)
-
 # --- 3. LÓGICA DE ACCESO ---
+inicializar_sistema()
+
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
-
-inicializar_sistema()
 
 if not st.session_state.autenticado:
     st.title("🔐 Acceso al Imperio Atómico")
@@ -122,11 +114,11 @@ if not st.session_state.autenticado:
             res = cur.fetchone(); conn.close()
             if res:
                 st.session_state.autenticado, st.session_state.rol, st.session_state.usuario_nombre = True, res[0], res[1]
+                cargar_datos() # Carga inicial inmediata
                 st.rerun()
             else:
                 st.error("❌ Credenciales incorrectas")
     st.stop()
-
 # --- 4. PREPARACIÓN DE INTERFAZ ---
 cargar_datos() # Llamada unificada (Checklist #1)
 t_bcv = st.session_state.tasa_bcv
@@ -900,6 +892,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
