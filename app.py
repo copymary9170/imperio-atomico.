@@ -714,45 +714,71 @@ def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
     
     return total * (1 + iva + igtf + banco)
 
+# --- 11. MÓDULO DE COTIZACIONES (VERSIÓN PRO) ---
 elif menu == "📝 Cotizaciones":
-    st.title("📝 Generador de Presupuestos")
+    st.title("📝 Generador de Cotizaciones Atómicas")
     
-    # Datos que vienen del Analizador CMYK (si se usó)
-    datos_cmyk = st.session_state.get('datos_pre_cotizacion', {})
+    # Recuperar datos del Analizador CMYK si existen
+    pre_datos = st.session_state.get('datos_pre_cotizacion', {})
     
-    with st.expander("💎 Datos del Trabajo", expanded=True):
-        col1, col2 = st.columns(2)
-        desc = col1.text_input("Trabajo:", value=datos_cmyk.get('trabajo', ""))
-        
-        # Validación de seguridad para la lista de clientes
-        df_cli = st.session_state.get('df_cli', pd.DataFrame())
-        lista_clientes = df_cli['nombre'].tolist() if not df_cli.empty else ["Cliente Genérico"]
-        cliente = col2.selectbox("Cliente:", lista_clientes)
-        
-        st.divider()
-        
-        c1, c2, c3 = st.columns(3)
-        costo_base = c1.number_input("Costo Base de Producción ($)", 
-                                    value=float(datos_cmyk.get('costo_base', 0.0)), 
-                                    format="%.4f")
-        
-        margen_ganancia = c2.number_input("Margen de Ganancia (%)", min_value=0, value=100)
-        incluir_impuestos = c3.checkbox("¿Aplicar Impuestos? (IVA/IGTF/Banc)", value=True)
+    with st.expander("🛠️ Configuración de la Cotización", expanded=True):
+        with st.form("form_cotizacion_completa"):
+            c1, c2 = st.columns(2)
+            with c1:
+                trabajo = st.text_input("Nombre del Proyecto", value=pre_datos.get('trabajo', "Impresión Personalizada"))
+                cliente = st.selectbox("Seleccionar Cliente", st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Cliente Particular"])
+                unidades = st.number_input("Cantidad de Unidades", value=pre_datos.get('unidades', 1), min_value=1)
+            
+            with c2:
+                # Insumos adicionales
+                costo_tinta = st.number_input("Costo Tinta Estimado ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f")
+                costo_papel = st.number_input("Costo de Papel/Material ($)", min_value=0.0, format="%.4f")
+                horas_diseno = st.number_input("Horas de Diseño/Mano de Obra", min_value=0.0, step=0.5)
+                precio_hora = st.number_input("Precio por Hora ($)", value=5.0)
 
-        # Aquí es donde ocurre la magia del motor que pegamos arriba
-        precio_final_usd = calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos)
+            st.divider()
+            c3, c4 = st.columns(2)
+            margen = c3.slider("Margen de Ganancia %", 10, 500, 100)
+            incluir_imp = c4.checkbox("Aplicar Impuestos de Ley (IVA/IGTF/Banco)", value=True)
 
-        st.divider()
+            btn_calcular = st.form_submit_button("💰 GENERAR PRESUPUESTO")
+
+    if btn_calcular:
+        # Lógica de cálculo
+        costo_base_total = costo_tinta + costo_papel + (horas_diseno * precio_hora)
+        
+        # Precio unitario con ganancia e impuestos
+        precio_unidad = calcular_precio_con_impuestos(costo_base_total, margen, incluir_imp)
+        total_proyecto = precio_unidad * unidades
+        
+        # --- RESULTADOS ---
+        st.success("### 📊 Resultado del Análisis")
         res1, res2, res3 = st.columns(3)
-        res1.metric("Costo Real", f"$ {costo_base:.2f}")
+        res1.metric("Costo Producción (Total)", f"$ {costo_base_total:.2f}")
+        res2.metric("Precio Unit. Venta", f"$ {precio_unidad:.2f}")
+        res3.metric("TOTAL A COBRAR", f"$ {total_proyecto:.2f}")
+
+        st.info(f"💵 **Total en Bolívares (BCV):** {(total_proyecto * t_bcv):,.2f} Bs")
+
+        # --- GENERADOR DE TEXTO PARA WHATSAPP ---
+        st.divider()
+        st.subheader("📱 Formato para enviar a Cliente")
         
-        # Cálculo de ganancia neta restando impuestos si se aplicaron
-        divisor = (1 + st.session_state.get('iva', 0.16) + st.session_state.get('igtf', 0.03) + st.session_state.get('banco', 0.02)) if incluir_impuestos else 1
-        ganancia_neta = (precio_final_usd / divisor) - costo_base
+        texto_ws = f"""*COTIZACIÓN: {trabajo}* 🚀
+---
+👤 *Cliente:* {cliente}
+📦 *Cantidad:* {unidades} unidades
+💵 *Precio Unitario:* ${precio_unidad:.2f}
+💰 *TOTAL:* ${total_proyecto:.2f}
+
+📌 *Tasa BCV:* {t_bcv} Bs.
+Total en Bs: {(total_proyecto * t_bcv):,.2f}
+
+_Precios sujetos a cambios según la tasa del día._
+¡Gracias por confiar en el Imperio Atómico! 👑"""
         
-        res2.metric("PRECIO VENTA (USD)", f"$ {precio_final_usd:.2f}", delta=f"Ganancia: ${ganancia_neta:.2f}")
-        res3.metric("PRECIO VENTA (BS)", f"Bs {(precio_final_usd * t_bcv):,.2f}")
-        
+        st.text_area("Copia este texto:", value=texto_ws, height=250)
+        st.caption("Copia el texto de arriba y pégalo directamente en el chat de tu cliente.")        
         if st.button("💾 Guardar Cotización"):
             st.success("✅ Cotización lista para procesar.")
 if menu == "💰 Ventas":
@@ -896,6 +922,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
