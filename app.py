@@ -70,36 +70,49 @@ def inicializar_sistema():
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     
-    # Crear tablas necesarias
-    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                item_id INTEGER, 
-                tipo TEXT, 
-                cantidad REAL, 
-                motivo TEXT, 
-                usuario TEXT, 
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    # Insertar usuarios base
-    usuarios = [
-        ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
-        ('mama', 'admin2026', 'Administracion', 'Mamá'),
-        ('pro', 'diseno2026', 'Produccion', 'Hermana')
-    ]
-    c.executemany("INSERT OR IGNORE INTO usuarios (username, password, rol, nombre) VALUES (?,?,?,?)", usuarios)
+    # --- Tablas de Usuarios y Configuración (Ya las tienes) ---
+    c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+                    username TEXT PRIMARY KEY, 
+                    password TEXT, 
+                    rol TEXT, 
+                    nombre TEXT)''')
     
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
-    tasas = [('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('iva_perc', 0.16), 
-             ('igtf_perc', 0.03), ('banco_perc', 0.02), ('costo_tinta_ml', 0.10)]
-    c.executemany("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", tasas)
     
+    # --- Tablas de Operaciones (Asegúrate de tener estas 4) ---
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
+    
+    # TU TABLA DE MOVIMIENTOS (Tal cual la tenías)
+    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    item_id INTEGER, 
+                    tipo TEXT, 
+                    cantidad REAL, 
+                    motivo TEXT, 
+                    usuario TEXT, 
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
+    # NUEVA TABLA DE GASTOS (Agrégala aquí abajo)
+    c.execute('''CREATE TABLE IF NOT EXISTS gastos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    descripcion TEXT, 
+                    monto REAL, 
+                    categoria TEXT, 
+                    metodo TEXT, 
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    
+    # Tablas de Ventas (Para que el Dashboard no falle al leerlas)
+    c.execute('''CREATE TABLE IF NOT EXISTS ventas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    cliente_id INTEGER, 
+                    monto_total REAL, 
+                    metodo TEXT, 
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
     
     conn.commit()
     conn.close()
-
 def cargar_datos_seguros():
     if 'df_inv' not in st.session_state:
         conn = conectar()
@@ -157,13 +170,18 @@ with st.sidebar:
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"] # Todos ven esto
     
     if ROL == "Admin":
-        opciones += ["💰 Ventas", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", "🏁 Cierre de Caja"]
+        # Agregamos "📉 Gastos" a la lista del Admin
+        opciones += ["💰 Ventas", "📉 Gastos", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", "🏁 Cierre de Caja"]
     
     elif ROL == "Administracion":
-        opciones += ["💰 Ventas", "📊 Dashboard", "⚙️ Configuración", "🏁 Cierre de Caja"]
+        # Agregamos "📉 Gastos" a Administracion
+        opciones += ["💰 Ventas", "📉 Gastos", "📊 Dashboard", "⚙️ Configuración", "🏁 Cierre de Caja"]
     
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
+
+    # Renderizar el menú
+    menu = st.radio("Seleccione una opción:", opciones)
 
     menu = st.radio("Módulos", opciones)
     
@@ -335,27 +353,27 @@ elif menu == "📊 Dashboard":
     conn = conectar()
     # 1. Cargar datos de Ventas, Gastos e Inventario
     df_ventas = pd.read_sql_query("SELECT * FROM ventas", conn)
-    df_gastos = pd.read_sql_query("SELECT * FROM gastos", conn)
-    df_inv_dash = pd.read_sql_query("SELECT cantidad, precio_usd FROM inventario", conn)
-    conn.close()
-
-    # --- FILA 1: MÉTRICAS PRINCIPALES ---
+   # --- FILA 1: MÉTRICAS PRINCIPALES ---
     c1, c2, c3, c4 = st.columns(4)
     
+    # Cálculos seguros
     ingresos_totales = df_ventas['monto_total'].sum() if not df_ventas.empty else 0.0
     gastos_totales = df_gastos['monto'].sum() if not df_gastos.empty else 0.0
     balance_neto = ingresos_totales - gastos_totales
-    valor_inventario = (df_inv_dash['cantidad'] * df_inv_dash['precio_usd']).sum()
+    valor_inventario = (df_inv_dash['cantidad'] * df_inv_dash['precio_usd']).sum() if not df_inv_dash.empty else 0.0
 
+    # Renderizado de métricas
     c1.metric("💰 Ingresos Totales", f"$ {ingresos_totales:.2f}")
-    c2.metric("📉 Gastos Totales", f"$ {gastos_totales:.2f}", delta=f"-{gastos_totales:.2f}", delta_color="inverse")
     
-    # Color dinámico para el balance
-    c3.metric("⚖️ Balance Neto", f"$ {balance_neto:.2f}", 
-              delta=f"{((balance_neto/ingresos_totales)*100 if ingresos_totales > 0 else 0):.1f}% Margen")
+    # El delta en rojo indica que es una salida de dinero
+    c2.metric("📉 Gastos Totales", f"$ {gastos_totales:.2f}", 
+              delta=f"-{gastos_totales:.2f}", delta_color="inverse")
+    
+    # El balance muestra el margen porcentual si hay ingresos
+    margen = (balance_neto / ingresos_totales * 100) if ingresos_totales > 0 else 0.0
+    c3.metric("⚖️ Balance Neto", f"$ {balance_neto:.2f}", delta=f"{margen:.1f}% Margen")
     
     c4.metric("📦 Valor Inventario", f"$ {valor_inventario:.2f}")
-
     # --- FILA 2: GRÁFICOS ---
     st.divider()
     col_izq, col_der = st.columns(2)
@@ -880,6 +898,38 @@ elif menu == "🏁 Cierre de Caja":
             file_name=f"cierre_{fecha_hoy}.csv",
             mime="text/csv",
         )
+# --- 15. MÓDULO DE GASTOS ---
+elif menu == "📉 Gastos":
+    st.title("📉 Registro de Egresos")
+    
+    with st.form("nuevo_gasto"):
+        col1, col2 = st.columns(2)
+        desc = col1.text_input("Descripción del Gasto", placeholder="Ej: Pago de Local, Electricidad...")
+        monto = col2.number_input("Monto en Dólares ($)", min_value=0.0, format="%.2f")
+        
+        cat = st.selectbox("Categoría", ["Servicios", "Local", "Sueldos", "Mantenimiento", "Otros"])
+        metodo_g = st.radio("Pagado desde:", ["Efectivo", "Zelle", "Pago Móvil", "Banesco"], horizontal=True)
+        
+        if st.form_submit_button("💸 Registrar Egreso"):
+            if desc and monto > 0:
+                conn = conectar()
+                cur = conn.cursor()
+                fecha_g = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cur.execute("INSERT INTO gastos (descripcion, monto, categoria, metodo, fecha) VALUES (?,?,?,?,?)",
+                            (desc, monto, cat, metodo_g, fecha_g))
+                conn.commit()
+                conn.close()
+                st.success(f"Gasto de $ {monto} registrado.")
+                st.rerun()
+
+    # Historial de Gastos del Mes
+    st.subheader("📋 Historial de Egresos")
+    conn = conectar()
+    df_g = pd.read_sql("SELECT descripcion, monto, categoria, metodo, fecha FROM gastos ORDER BY id DESC LIMIT 20", conn)
+    conn.close()
+    
+    if not df_g.empty:
+        st.dataframe(df_g, use_container_width=True, hide_index=True)
 
 
 
