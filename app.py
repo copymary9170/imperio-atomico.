@@ -9,20 +9,17 @@ import io
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide")
 
-# --- 2. MOTOR DE BASE DE DATOS Y CÁLCULOS ---
+# --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
 def inicializar_sistema():
-
     """Crea las tablas y valores iniciales si no existen"""
-
     conn = conectar()
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
 
     # Tablas Maestras
-
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
@@ -31,7 +28,6 @@ def inicializar_sistema():
 
     # Auditoría y Transacciones
     c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-    # CORRECCIÓN: Tabla Ventas alineada a la estructura real
     c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
 
@@ -44,7 +40,7 @@ def inicializar_sistema():
             ('pro', 'diseno2026', 'Produccion', 'Hermana')
         ])
 
-    # Configuración de Inflación y Tasas (Ajustable para precios de tinta)
+    # Configuración inicial
     config_init = [
         ('tasa_bcv', 36.50), ('tasa_binance', 38.00),
         ('iva_perc', 0.16), ('igtf_perc', 0.03),
@@ -56,8 +52,20 @@ def inicializar_sistema():
     conn.commit()
     conn.close()
 
+# --- 3. FUNCIONES DE CÁLCULO Y SOPORTE ---
+
+def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=False):
+    """Calcula el costo real sumando logística e impuestos"""
+    iva = st.session_state.get('iva', 0.16)
+    igtf = st.session_state.get('igtf', 0.03)
+    banco = st.session_state.get('banco', 0.02)
+    
+    total = base_usd + logistica_usd
+    if aplicar_impuestos:
+        total = total * (1 + iva + igtf + banco)
+    return total
+
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
-    """Actualiza stock y retorna (Éxito, Mensaje)"""
     conn = conectar()
     try:
         cur = conn.cursor()
@@ -68,10 +76,6 @@ def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
             return False, "Ítem no encontrado"
 
         nuevo_stock = res[0] + cantidad_cambio
-        if nuevo_stock < 0:
-            conn.close()
-            return False, f"Stock insuficiente de {res[1]}"
-
         cur.execute("UPDATE inventario SET cantidad = ? WHERE id = ?", (nuevo_stock, item_id))
         cur.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES (?,?,?,?,?)",
                     (item_id, tipo_mov, cantidad_cambio, motivo, st.session_state.get('usuario_nombre', 'Sistema')))
@@ -82,7 +86,7 @@ def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
         if conn: conn.close() 
         return False, str(e)
 
-def cargar_datos(): # ÚNICO NOMBRE VÁLIDO
+def cargar_datos():
     """Carga configuración y tablas maestras en la sesión"""
     try:
         conn = conectar()
@@ -100,464 +104,98 @@ def cargar_datos(): # ÚNICO NOMBRE VÁLIDO
     except Exception as e:
         st.error(f"Error en carga de datos: {e}")
 
-# --- 3. LÓGICA DE ACCESO ---
+def cargar_datos_seguros():
+    cargar_datos()
+    st.toast("🔄 Datos sincronizados")
 
+# --- 4. LÓGICA DE ACCESO ---
 inicializar_sistema()
 
-
-
 if 'autenticado' not in st.session_state:
-
     st.session_state.autenticado = False
 
-
-
 if not st.session_state.autenticado:
-
     st.title("🔐 Acceso al Imperio Atómico")
-
     with st.form("login"):
-
         u = st.text_input("Usuario").lower().strip()
-
         p = st.text_input("Clave", type="password")
-
         if st.form_submit_button("Entrar"):
-
             conn = conectar(); cur = conn.cursor()
-
             cur.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (u, p))
-
             res = cur.fetchone(); conn.close()
-
             if res:
-
                 st.session_state.autenticado, st.session_state.rol, st.session_state.usuario_nombre = True, res[0], res[1]
-
-                cargar_datos() # Carga inicial inmediata
-
+                cargar_datos()
                 st.rerun()
-
             else:
-
                 st.error("❌ Credenciales incorrectas")
-
     st.stop()
 
-# --- 4. PREPARACIÓN DE INTERFAZ ---
-
-cargar_datos() # Llamada unificada (Checklist #1)
-
+# --- 5. PREPARACIÓN DE INTERFAZ ---
+cargar_datos()
 t_bcv = st.session_state.tasa_bcv
-
 t_bin = st.session_state.tasa_binance
-
 ROL = st.session_state.rol
-
-# --- 4. PREPARACIÓN DE INTERFAZ ---
-
-cargar_datos() # Llamada unificada
-
-t_bcv = st.session_state.tasa_bcv
-
-t_bin = st.session_state.tasa_binance
-
-ROL = st.session_state.rol
-
-
 
 with st.sidebar:
-
     st.header(f"👋 Hola, {st.session_state.usuario_nombre}")
-
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
-
     
-
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
-
     if ROL == "Admin":
-
         opciones += ["💰 Ventas", "📉 Gastos", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", "🏁 Cierre de Caja"]
-
     elif ROL == "Administracion":
-
         opciones += ["💰 Ventas", "📉 Gastos", "📊 Dashboard", "⚙️ Configuración", "🏁 Cierre de Caja"]
-
     elif ROL == "Produccion":
-
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
-
-
-    menu = st.radio("Seleccione una opción:", opciones, key="menu_unico_final")
-
+    menu = st.radio("Seleccione una opción:", opciones, key="menu_principal")
     
-
-    st.divider()
-
     if st.button("🚪 Cerrar Sesión"):
-
         st.session_state.autenticado = False
-
         st.rerun()
 
-# --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL --- 
+# --- 6. MÓDULOS DE INTERFAZ ---
 
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
-    
-    # 1. Usar datos frescos de la memoria global
     df_inv = st.session_state.df_inv
-
-    # --- 📊 MÉTRICAS FINANCIERAS ---
     if not df_inv.empty:
-        st.subheader("💰 Inversión Activa en Almacén")
         valor_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
         c1, c2, c3 = st.columns(3)
         c1.metric("Total Dólares", f"$ {valor_usd:,.2f}")
         c2.metric("Total BCV", f"Bs {(valor_usd * t_bcv):,.2f}")
         c3.metric("Tasa Actual", f"{t_bcv} Bs")
-        
-        alertas = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
-        if not alertas.empty:
-            st.error(f"⚠️ Tienes {len(alertas)} insumos bajo el mínimo de stock.")
-    else:
-        st.info("Inventario vacío.")
-
+    
     st.divider()
-
-    # --- 📥 FORMULARIO DE ENTRADA ---
-    st.subheader("📥 Registrar Entrada de Mercancía")
-    it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"], key="u_medida_root")
-
-    with st.form("form_inventario_manual"):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**📦 Detalles del Producto**")
-            it_nombre = st.text_input("Nombre del Insumo (Ej: Papel Fotográfico)")
-            if it_unid == "ml":
-                tipo_carga = st.radio("Presentación:", ["Individual", "Dúo (2)", "Kit CMYK (4)"], horizontal=True)
-                capacidad = st.number_input("ml por cada bote", min_value=0.1, value=100.0)
-            else:
-                tipo_carga, capacidad = "Normal", 1.0
-            it_minimo = st.number_input("Punto de Alerta (Mínimo)", min_value=0.0, value=5.0)
-
-        with col2:
-            st.markdown("**💵 Costos y Logística**")
-            it_cant_packs = st.number_input("Cantidad comprada", min_value=1, value=1)
-            monto_compra = st.number_input("Precio pagado (Total)", min_value=0.0, format="%.2f")
-            moneda_pago = st.radio("Moneda de Pago:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
-            gastos_bs = st.number_input("Gastos Extras / Delivery (Bs)", min_value=0.0)
-            
-            st.markdown("**🛡️ Impuestos aplicados al costo**")
-            tx1, tx2, tx3 = st.columns(3)
-            p_iva = tx1.checkbox(f"IVA", value=False)
-            p_igtf = tx2.checkbox(f"IGTF", value=False)
-            p_banco = tx3.checkbox(f"Banco", value=False)
-
-        if st.form_submit_button("🚀 IMPACTAR INVENTARIO"):
-            if it_nombre and (monto_compra > 0 or gastos_bs > 0):
-                try:
-                    tasa_u = t_bcv if "BCV" in moneda_pago else (t_bin if "Binance" in moneda_pago else 1.0)
-                    base_usd = monto_compra / tasa_u
-                    logistica_usd = gastos_bs / t_bcv
-                    
-                    tiene_impuestos = p_iva or p_igtf or p_banco
-                    costo_final_usd = calcular_costo_total(base_usd, logistica_usd, aplicar_impuestos=tiene_impuestos)
-                    
-                    conn = conectar(); cur = conn.cursor()
-                    div = 4 if it_unid == "ml" and "Kit" in tipo_carga else (2 if it_unid == "ml" and "Dúo" in tipo_carga else 1)
-                    costo_por_ml_o_unidad = (costo_final_usd / (div * it_cant_packs)) / (capacidad if it_unid == "ml" else 1)
-                    
-                    colores = ["Cian", "Magenta", "Amarillo", "Negro"] if div==4 else (["Negro", "Color"] if div==2 else [""])
-                    
-                    for col in colores:
-                        n_item = f"{it_nombre} {col}".strip()
-                        cant_a_sumar = capacidad * it_cant_packs
-                        cur.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
-                                       VALUES (?, 0, ?, ?, ?) 
-                                       ON CONFLICT(item) DO UPDATE SET 
-                                       precio_usd=excluded.precio_usd, minimo=excluded.minimo""", 
-                                    (n_item, it_unid, costo_por_ml_o_unidad, it_minimo))
-                        conn.commit() 
-                        cur.execute("SELECT id FROM inventario WHERE item=?", (n_item,))
-                        prod_id = cur.fetchone()[0]
-                        ejecutar_movimiento_stock(prod_id, cant_a_sumar, "ENTRADA", motivo=f"Compra en {moneda_pago}")
-                    
-                    st.success("✅ Insumos registrados correctamente.")
-                    cargar_datos_seguros()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {e}")
-                finally:
-                    conn.close()
-
-    st.divider()
-
-    # --- 📋 TABLA DE AUDITORÍA ---
-    if not df_inv.empty:
-        st.subheader("📋 Auditoría de Almacén")
-        modo_ver = st.radio("Visualizar en:", ["Dólares ($)", "BCV (Bs)"], horizontal=True)
-        busc = st.text_input("🔍 Filtrar material...", placeholder="Ej: Tinta, Papel...")
-        
-        df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
-        tasa_vista = t_bcv if "BCV" in modo_ver else 1.0
-        df_f['Costo Unit.'] = df_f['precio_usd'] * tasa_vista
-        df_f['Valor Total'] = (df_f['cantidad'] * df_f['precio_usd']) * tasa_vista
-
-        st.dataframe(
-            df_f[['item', 'cantidad', 'unidad', 'Costo Unit.', 'Valor Total']], 
-            column_config={
-                "Costo Unit.": st.column_config.NumberColumn(format="%.4f"),
-                "Valor Total": st.column_config.NumberColumn(format="%.2f")
-            },
-            use_container_width=True, hide_index=True
-        )
-    # --- 📋 TABLA DE AUDITORÍA PROFESIONAL ---
-
-    if not df_inv.empty:
-
-        st.subheader("📋 Auditoría de Almacén")
-
-        
-
-        modo_ver = st.radio("Visualizar costos en:", ["Dólares ($)", "BCV (Bs)"], horizontal=True)
-
-        busc = st.text_input("🔍 Filtrar material...", placeholder="Ej: Tinta, Papel, Resma...")
-
-        
-
-        df_f = df_inv[df_inv['item'].str.contains(busc, case=False)].copy()
-
-        
-
-        tasa_vista = t_bcv if "BCV" in modo_ver else 1.0
-
-        df_f['Costo Unit.'] = df_f['precio_usd'] * tasa_vista
-
-        df_f['Valor Total'] = (df_f['cantidad'] * df_f['precio_usd']) * tasa_vista
-
-
-
-        st.dataframe(
-
-            df_f[['item', 'cantidad', 'unidad', 'Costo Unit.', 'Valor Total']], 
-
-            column_config={
-
-                "item": "Insumo", "cantidad": "Stock", "unidad": "Medida",
-
-                "Costo Unit.": st.column_config.NumberColumn("Costo Unit.", format="%.4f"),
-
-                "Valor Total": st.column_config.NumberColumn("Total", format="%.2f")
-
-            },
-
-            use_container_width=True, hide_index=True
-
-        )
-
-
-
-        # --- PANEL DE AJUSTES ---
-
-        st.write("🔧 **Ajustes de Inventario**")
-
-        col_aj, col_log = st.columns([1, 1])
-
-        
-
-        with col_aj:
-
-            with st.expander("📝 Corregir Stock Manual"):
-
-                it_aj = st.selectbox("Insumo:", df_f['item'].tolist(), key="sel_ajuste")
-
-                nueva_c = st.number_input("Cantidad Real en Estante:", min_value=0.0)
-
-                if st.button("Confirmar Cambio"):
-
-                    try:
-
-                        fila = df_f[df_f['item'] == it_aj].iloc[0]
-
-                        diferencia = nueva_c - fila['cantidad']
-
-                        ejecutar_movimiento_stock(fila['id'], diferencia, "AJUSTE", motivo="Conteo físico manual")
-
-                        st.success("Stock actualizado."); cargar_datos_seguros(); st.rerun()
-
-                    except Exception as e: st.error(e)
-
-        
-
-        with col_log:
-
-            with st.expander("📜 Historial Reciente"):
-
-                if it_aj:
-
-                    id_log = df_f[df_f['item'] == it_aj]['id'].values[0]
-
-                    conn_h = conectar()
-
-                    log = pd.read_sql(f"""SELECT m.fecha, m.tipo, m.cantidad, m.usuario 
-
-                                          FROM inventario_movs m 
-
-                                          WHERE m.item_id = {id_log} 
-
-                                          ORDER BY m.id DESC LIMIT 5""", conn_h)
-
-                    conn_h.close()
-
-                    st.table(log)
-
-                    
-
-
-
-
-
-            
-
-# --- 6. DASHBOARD FINANCIERO PROFESIONAL ---
+    with st.form("form_inventario"):
+        it_nombre = st.text_input("Nombre del Insumo")
+        it_unid = st.selectbox("Unidad:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
+        it_cant = st.number_input("Cantidad", min_value=0.0)
+        it_precio = st.number_input("Costo Unitario ($)", min_value=0.0, format="%.4f")
+        if st.form_submit_button("🚀 GUARDAR EN INVENTARIO"):
+            conn = conectar(); c = conn.cursor()
+            c.execute("INSERT OR REPLACE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?,?,?,?)",
+                      (it_nombre, it_cant, it_unid, it_precio))
+            conn.commit(); conn.close()
+            cargar_datos_seguros(); st.rerun()
 
 elif menu == "📊 Dashboard":
-
     st.title("📊 Centro de Control Financiero")
-
-    
-
     conn = conectar()
-
-    # CARGA COMPLETA DE DATOS PARA EL DASHBOARD
-
-    df_ventas = pd.read_sql_query("SELECT * FROM ventas", conn)
-
-    df_gastos = pd.read_sql_query("SELECT * FROM gastos", conn)
-
-    df_inv_dash = pd.read_sql_query("SELECT cantidad, precio_usd FROM inventario", conn)
-
+    df_ventas = pd.read_sql("SELECT * FROM ventas", conn)
+    df_gastos = pd.read_sql("SELECT * FROM gastos", conn)
     conn.close()
-
-
-
-    # --- FILA 1: MÉTRICAS PRINCIPALES ---
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    # ... resto de tus métricas ...
-
     
-
-    # Cálculos seguros
-
-    ingresos_totales = df_ventas['monto_total'].sum() if not df_ventas.empty else 0.0
-
-    gastos_totales = df_gastos['monto'].sum() if not df_gastos.empty else 0.0
-
-    balance_neto = ingresos_totales - gastos_totales
-
-    valor_inventario = (df_inv_dash['cantidad'] * df_inv_dash['precio_usd']).sum() if not df_inv_dash.empty else 0.0
-
-
-
-    # Renderizado de métricas
-
-    c1.metric("💰 Ingresos Totales", f"$ {ingresos_totales:.2f}")
-
+    ingresos = df_ventas['monto_total'].sum() if not df_ventas.empty else 0
+    egresos = df_gastos['monto'].sum() if not df_gastos.empty else 0
     
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ingresos", f"$ {ingresos:.2f}")
+    c2.metric("Egresos", f"$ {egresos:.2f}", delta=f"-{egresos:.2f}", delta_color="inverse")
+    c3.metric("Balance", f"$ {ingresos - egresos:.2f}")
 
-    # El delta en rojo indica que es una salida de dinero
-
-    c2.metric("📉 Gastos Totales", f"$ {gastos_totales:.2f}", 
-
-              delta=f"-{gastos_totales:.2f}", delta_color="inverse")
-
-    
-
-    # El balance muestra el margen porcentual si hay ingresos
-
-    margen = (balance_neto / ingresos_totales * 100) if ingresos_totales > 0 else 0.0
-
-    c3.metric("⚖️ Balance Neto", f"$ {balance_neto:.2f}", delta=f"{margen:.1f}% Margen")
-
-    
-
-    c4.metric("📦 Valor Inventario", f"$ {valor_inventario:.2f}")
-
-    # --- FILA 2: GRÁFICOS ---
-
-    st.divider()
-
-    col_izq, col_der = st.columns(2)
-
-
-
-    with col_izq:
-
-        st.subheader("📈 Histórico de Ventas ($)")
-
-        if not df_ventas.empty:
-
-            # Convertir fecha a formato datetime para graficar
-
-            df_ventas['fecha'] = pd.to_datetime(df_ventas['fecha']).dt.date
-
-            ventas_diarias = df_ventas.groupby('fecha')['monto_total'].sum().reset_index()
-
-            st.area_chart(data=ventas_diarias, x='fecha', y='monto_total', color="#28a745")
-
-        else:
-
-            st.info("Aún no hay ventas registradas.")
-
-
-
-    with col_der:
-
-        st.subheader("🍕 Distribución de Gastos")
-
-        if not df_gastos.empty:
-
-            gastos_cat = df_gastos.groupby('categoria')['monto'].sum().reset_index()
-
-            st.bar_chart(data=gastos_cat, x='categoria', y='monto', color="#ff4b4b")
-
-        else:
-
-            st.info("No hay gastos registrados.")
-
-
-
-    # --- FILA 3: TABLAS DE DETALLE ---
-
-    st.divider()
-
-    exp1 = st.expander("📄 Ver Últimos Movimientos de Caja")
-
-    with exp1:
-
-        col_v, col_g = st.columns(2)
-
-        with col_v:
-
-            st.write("**Últimas Ventas**")
-
-            st.dataframe(df_ventas.tail(10), use_container_width=True, hide_index=True)
-
-        with col_g:
-
-            st.write("**Últimos Gastos**")
-
-            st.dataframe(df_gastos.tail(10), use_container_width=True, hide_index=True)
-
-
-
-# --- 7. MÓDULO DE CONFIGURACIÓN (EL PANEL DE CONTROL) ---
-
+# --- CONTINÚA CON EL MÓDULO 7 EN EL SIGUIENTE BLOQUE ---
 elif menu == "⚙️ Configuración":
 
     # --- AGREGA ESTAS 3 LÍNEAS JUSTO DEBAJO ---
@@ -1297,6 +935,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
