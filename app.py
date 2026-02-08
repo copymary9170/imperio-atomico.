@@ -688,7 +688,7 @@ elif menu == "🛠️ Otros Procesos":
 
 # --- 14. FUNCIONES DE CÁLCULO GENERALES (FUERA DE LOS IF) ---
 
-ddef calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
+def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos=True):
     """Calcula el precio final aplicando margen e impuestos"""
     precio_con_ganancia = costo_base * (1 + (margen_ganancia / 100))
     
@@ -960,6 +960,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
