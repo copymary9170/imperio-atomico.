@@ -127,7 +127,7 @@ inicializar_sistema()
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
 
-# --- LOGIN (Simplificado y Funcional) ---
+# --- LOGIN (Versión Reforzada) ---
 if not st.session_state.autenticado:
     st.set_page_config(page_title="Acceso - Imperio", layout="centered")
     st.title("🔐 Acceso al Imperio Atómico")
@@ -135,19 +135,25 @@ if not st.session_state.autenticado:
         u = st.text_input("Usuario")
         p = st.text_input("Clave", type="password")
         if st.form_submit_button("Entrar"):
-            conn = conectar()
-            res = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", conn, params=(u, p))
-            conn.close()
-            if not res.empty:
-                st.session_state.autenticado = True
-                st.session_state.rol = res.iloc[0]['rol']
-                st.session_state.usuario_nombre = res.iloc[0]['nombre']
-                cargar_datos_seguros()
-                st.rerun()
-            else:
-                st.error("Usuario o clave incorrecta")
-    st.stop()
+            try:
+                conn = conectar()
+                # Usamos un método más directo para evitar errores de Pandas en el login
+                cur = conn.cursor()
+                cur.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (u, p))
+                res = cur.fetchone()
+                conn.close() # Cerramos de inmediato
 
+                if res:
+                    st.session_state.autenticado = True
+                    st.session_state.rol = res[0]
+                    st.session_state.usuario_nombre = res[1]
+                    cargar_datos_seguros()
+                    st.rerun()
+                else:
+                    st.error("❌ Usuario o clave incorrecta")
+            except Exception as e:
+                st.error(f"Error de base de datos: {e}")
+    st.stop()
 # --- SI ESTÁ AUTENTICADO, CARGAMOS EL RESTO ---
 st.set_page_config(page_title="Imperio Atómico - ERP", layout="wide")
 cargar_datos_seguros() # Datos frescos en cada recarga
@@ -833,6 +839,7 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
 
