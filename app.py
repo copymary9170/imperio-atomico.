@@ -717,18 +717,62 @@ def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos
     banco = st.session_state.get('banco', 0.02)
     return precio_con_ganancia * (1 + iva + igtf + banco)
 
-# --- 11. MÓDULO DE COTIZACIONES (VERSIÓN IMPERIO) ---
-elif menu == "📝 Cotizaciones":
-    st.title("📝 Generador de Presupuestos")
 
-    # Función interna para no romper la indentación del menú
-    def calcular_p_final(costo, marg, imp=True):
-        p_ganancia = costo * (1 + (marg / 100))
-        if not imp: return p_ganancia
-        iva = st.session_state.get('iva', 0.16)
-        igtf = st.session_state.get('igtf', 0.03)
-        banco = st.session_state.get('banco', 0.02)
-        return p_ganancia * (1 + iva + igtf + banco)
+datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
+            
+            if datos_eq:
+                unidades_proc = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1, key="cant_proc")
+                margen_proc = col3.number_input("Margen %", value=50, key="marg_proc")
+
+                if st.form_submit_button("🧮 Calcular Proceso"):
+                    costo_t = datos_eq['desgaste'] * unidades_proc
+                    # Usamos la función de cálculo definida abajo
+                    precio_v = costo_t * (1 + (margen_proc / 100))
+                    
+                    st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
+                    st.success(f"Precio Sugerido: $ {precio_v:.2f}")
+
+# --- 11. MÓDULO DE COTIZACIONES (LÍNEA 721 CORREGIDA) ---
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Generador de Cotizaciones Atómicas")
+    
+    # Recuperar datos del Analizador CMYK si existen
+    pre_datos = st.session_state.get('datos_pre_cotizacion', {})
+    
+    with st.form("form_cotizacion_final"):
+        c1, c2 = st.columns(2)
+        trabajo = c1.text_input("Descripción", value=pre_datos.get('trabajo', "Trabajo Nuevo"))
+        cliente = c2.selectbox("Cliente", st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Particular"])
+        
+        c3, c4, c5 = st.columns(3)
+        costo_base = c3.number_input("Costo Base ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f")
+        margen = c4.number_input("Margen Ganancia %", value=100)
+        cantidad = c5.number_input("Unidades", value=pre_datos.get('unidades', 1), min_value=1)
+        
+        if st.form_submit_button("💰 Generar Presupuesto"):
+            # Cálculo directo para evitar errores de funciones externas
+            precio_u = costo_base * (1 + (margen / 100))
+            # Aplicar impuestos (IVA 16%, IGTF 3%, Banco 2%)
+            precio_u_imp = precio_u * (1 + 0.16 + 0.03 + 0.02)
+            total = precio_u_imp * cantidad
+            
+            st.divider()
+            res1, res2 = st.columns(2)
+            res1.metric("Precio Unitario (c/imp)", f"$ {precio_u_imp:.2f}")
+            res2.metric("TOTAL A COBRAR", f"$ {total:.2f}")
+            st.info(f"Equivalente en Bs (BCV): **{(total * t_bcv):,.2f} Bs**")
+
+# --- FUNCIONES DE SOPORTE (AL FINAL Y FUERA DE LOS IF) ---
+def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
+    total = base_usd + logistica_usd
+    if not aplicar_impuestos:
+        return total
+    # Tasas estándar del Imperio
+    return total * (1 + 0.16 + 0.03 + 0.02)
+
+def cargar_datos_seguros():
+    """Alias para recargar datos sin errores"""
+    cargar_datos()
 
     # 1. Recuperar datos del Analizador CMYK (si existen)
     pre_datos = st.session_state.get('datos_pre_cotizacion', {})
@@ -933,6 +977,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
