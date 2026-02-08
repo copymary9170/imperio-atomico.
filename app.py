@@ -818,32 +818,40 @@ if menu == "💰 Ventas":
                     st.error(f"❌ VENTA CANCELADA: {mensaje_stock}")
 
 
+# --- 14. MÓDULO DE CIERRE DE CAJA ---
 elif menu == "🏁 Cierre de Caja":
     st.title("🏁 Cierre de Jornada y Balance")
-    
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
     
-    # 1. Extracción de datos del día
+    try:
         conn = conectar()
-        query_movs = f"""
+        # 1. Ventas del día
+        query_v = f"SELECT * FROM ventas WHERE date(fecha) = '{fecha_hoy}'"
+        df_ventas_dia = pd.read_sql(query_v, conn)
+        
+        # 2. Movimientos de inventario del día
+        query_m = f"""
             SELECT i.item, m.tipo, m.cantidad, m.usuario 
             FROM inventario_movs m 
             LEFT JOIN inventario i ON m.item_id = i.id 
             WHERE date(m.fecha) = '{fecha_hoy}'
         """
-        df_movs_dia = pd.read_sql(query_movs, conn)
+        df_movs_dia = pd.read_sql(query_m, conn)
         conn.close()
     except Exception as e:
-        st.warning("Aún no hay movimientos registrados para el cierre de hoy.")
+        st.warning("Iniciando balance del día...")
+        df_ventas_dia = pd.DataFrame(columns=['monto_total', 'metodo'])
         df_movs_dia = pd.DataFrame(columns=['item', 'tipo', 'cantidad', 'usuario'])
 
-    
-    # 2. Métricas de Control
-    c1, c2, c3 = st.columns(3)
+    # --- MÉTRICAS ---
+    c1, c2 = st.columns(2)
     total_usd = df_ventas_dia['monto_total'].sum() if not df_ventas_dia.empty else 0.0
-    
-    c1.metric("💰 Ventas Totales ($)", f"$ {total_usd:.2f}")
-    c2.metric("📦 Movimientos Stock", len(df_movs_dia))
+    c1.metric("💰 Ventas Totales", f"$ {total_usd:.2f}")
+    c2.metric("📦 Movimientos de Stock", len(df_movs_dia))
+
+    if not df_ventas_dia.empty:
+        st.subheader("💵 Desglose por Método")
+        st.table(df_ventas_dia.groupby('metodo')['monto_total'].sum())
     c3.metric("🧾 Facturas Emitidas", len(df_ventas_dia))
 
     # 3. Desglose por Método de Pago (Crucial para el arqueo)
@@ -864,6 +872,7 @@ elif menu == "🏁 Cierre de Caja":
         # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
         # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
         st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
+
 
 
 
