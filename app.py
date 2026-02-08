@@ -173,10 +173,28 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
+    
     if ROL == "Admin":
-        opciones += ["💰 Ventas", "📉 Gastos", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", "🏁 Cierre de Caja"]
+        opciones += [
+            "💰 Ventas", 
+            "📉 Gastos", 
+            "📦 Inventario", 
+            "📊 Dashboard", 
+            "📊 Auditoría y Métricas", # <--- NUEVO MÓDULO PARA EL JEFE
+            "🏗️ Activos", 
+            "🛠️ Otros Procesos", 
+            "⚙️ Configuración", 
+            "🏁 Cierre de Caja"
+        ]
     elif ROL == "Administracion":
-        opciones += ["💰 Ventas", "📉 Gastos", "📊 Dashboard", "⚙️ Configuración", "🏁 Cierre de Caja"]
+        opciones += [
+            "💰 Ventas", 
+            "📉 Gastos", 
+            "📊 Dashboard", 
+            "📊 Auditoría y Métricas", # <--- TAMBIÉN PARA ADMINISTRACIÓN
+            "⚙️ Configuración", 
+            "🏁 Cierre de Caja"
+        ]
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
@@ -870,6 +888,54 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
+# --- 13. MÓDULO DE AUDITORÍA Y MÉTRICAS (VISIÓN GERENCIAL) ---
+elif menu == "📊 Auditoría y Métricas":
+    st.title("📊 Auditoría de Producción e Insumos")
+    
+    # 1. Carga de datos desde la tabla de movimientos (La que llena la función ACID)
+    conn = conectar()
+    query_movs = """
+        SELECT fecha, item, cantidad, unidad, tipo_mov 
+        FROM inventario_movs 
+        WHERE unidad = 'ml' 
+        ORDER BY fecha DESC
+    """
+    df_movs = pd.read_sql_query(query_movs, conn)
+    conn.close()
+
+    tab1, tab2 = st.tabs(["🧪 Consumo de Tinta", "📈 Flujo de Inventario"])
+
+    with tab1:
+        st.subheader("Análisis de Consumo por Color")
+        if not df_movs.empty:
+            # Filtramos solo salidas (ventas) para ver el gasto
+            df_salidas = df_movs[df_movs['tipo_mov'] == 'SALIDA'].copy()
+            df_salidas['fecha'] = pd.to_datetime(df_salidas['fecha']).dt.date
+            
+            # Gráfica de consumo acumulado por ítem (Color)
+            consumo_total = df_salidas.groupby('item')['cantidad'].sum().reset_index()
+            
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.bar_chart(data=consumo_total, x='item', y='cantidad')
+            with c2:
+                st.write("📋 **ML Totales Consumidos**")
+                st.dataframe(consumo_total, hide_index=True)
+                
+            st.divider()
+            st.write("🔍 **Últimos descuentos realizados (Auditoría Forense)**")
+            st.dataframe(df_salidas.head(20), use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay datos de consumo registrados aún.")
+
+    with tab2:
+        st.subheader("Movimientos Generales del Almacén")
+        # Aquí puedes ver Entradas (compras) y Salidas (ventas)
+        if not df_movs.empty:
+            st.dataframe(df_movs, use_container_width=True)
+        else:
+            st.info("El historial de movimientos está vacío.")
 
 
 
