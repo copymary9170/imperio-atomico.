@@ -176,11 +176,10 @@ with st.sidebar:
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
-   # 2. UNA SOLA LLAMADA al radio button
-    # Si tienes otra línea que diga 'menu = st.radio' en otra parte, BÓRRALA.
-    menu = st.radio("Seleccione una opción:", opciones, key="menu_principal")
-
-    menu = st.radio("Módulos", opciones) # <--- ¡ESTA LÍNEA ES EL ERROR!
+    # 2. ÚNICA LLAMADA AL MENÚ (Eliminamos la duplicidad)
+    menu = st.radio("Seleccione una opción:", opciones, key="menu_unico_final")
+    
+    st.divider() # Una línea visual para separar el botón de salir
     
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
@@ -345,13 +344,17 @@ if menu == "📦 Inventario":
 # --- 6. DASHBOARD FINANCIERO PROFESIONAL ---
 elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
-    st.markdown("Análisis en tiempo real de ingresos, egresos y rentabilidad.")
-
+    
     conn = conectar()
-    # 1. Cargar datos de Ventas, Gastos e Inventario
+    # CARGA COMPLETA DE DATOS PARA EL DASHBOARD
     df_ventas = pd.read_sql_query("SELECT * FROM ventas", conn)
-   # --- FILA 1: MÉTRICAS PRINCIPALES ---
+    df_gastos = pd.read_sql_query("SELECT * FROM gastos", conn)
+    df_inv_dash = pd.read_sql_query("SELECT cantidad, precio_usd FROM inventario", conn)
+    conn.close()
+
+    # --- FILA 1: MÉTRICAS PRINCIPALES ---
     c1, c2, c3, c4 = st.columns(4)
+    # ... resto de tus métricas ...
     
     # Cálculos seguros
     ingresos_totales = df_ventas['monto_total'].sum() if not df_ventas.empty else 0.0
@@ -927,6 +930,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
