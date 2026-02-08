@@ -18,168 +18,87 @@ def inicializar_sistema():
     """Crea las tablas y valores iniciales si no existen"""
 
     conn = conectar()
-
     c = conn.cursor()
-
     c.execute("PRAGMA foreign_keys = ON")
-
-    
 
     # Tablas Maestras
 
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
-
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
-
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
-
     c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
-
     c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
 
-    
-
     # Auditoría y Transacciones
-
     c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-
     # CORRECCIÓN: Tabla Ventas alineada a la estructura real
-
     c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-
     c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
 
-
-
     # Usuarios iniciales
-
     c.execute("SELECT COUNT(*) FROM usuarios")
-
     if c.fetchone()[0] == 0:
-
         c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", [
-
             ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
-
             ('mama', 'admin2026', 'Administracion', 'Mamá'),
-
             ('pro', 'diseno2026', 'Produccion', 'Hermana')
-
         ])
 
-
-
     # Configuración de Inflación y Tasas (Ajustable para precios de tinta)
-
     config_init = [
-
         ('tasa_bcv', 36.50), ('tasa_binance', 38.00),
-
         ('iva_perc', 0.16), ('igtf_perc', 0.03),
-
         ('banco_perc', 0.02), ('costo_tinta_ml', 0.10)
-
     ]
-
     for param, valor in config_init:
-
         c.execute("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", (param, valor))
 
-    
-
     conn.commit()
-
     conn.close()
 
-
-
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
-
     """Actualiza stock y retorna (Éxito, Mensaje)"""
-
     conn = conectar()
-
     try:
-
         cur = conn.cursor()
-
         cur.execute("SELECT cantidad, item FROM inventario WHERE id=?", (item_id,))
-
         res = cur.fetchone()
-
         if not res: 
-
             conn.close()
-
             return False, "Ítem no encontrado"
 
-        
-
         nuevo_stock = res[0] + cantidad_cambio
-
         if nuevo_stock < 0:
-
             conn.close()
-
             return False, f"Stock insuficiente de {res[1]}"
 
-
-
         cur.execute("UPDATE inventario SET cantidad = ? WHERE id = ?", (nuevo_stock, item_id))
-
         cur.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES (?,?,?,?,?)",
-
                     (item_id, tipo_mov, cantidad_cambio, motivo, st.session_state.get('usuario_nombre', 'Sistema')))
-
         conn.commit()
-
         conn.close()
-
         return True, "OK"
-
     except Exception as e:
-
         if conn: conn.close() 
-
         return False, str(e)
 
-
-
 def cargar_datos(): # ÚNICO NOMBRE VÁLIDO
-
     """Carga configuración y tablas maestras en la sesión"""
-
     try:
-
         conn = conectar()
-
         st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
-
         st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-
         conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
 
-        
-
         st.session_state.tasa_bcv = float(conf.loc['tasa_bcv', 'valor'])
-
         st.session_state.tasa_binance = float(conf.loc['tasa_binance', 'valor'])
-
         st.session_state.iva = float(conf.loc['iva_perc', 'valor'])
-
         st.session_state.igtf = float(conf.loc['igtf_perc', 'valor'])
-
         st.session_state.banco = float(conf.loc['banco_perc', 'valor'])
-
         st.session_state.costo_tinta_ml = float(conf.loc['costo_tinta_ml', 'valor'])
-
         conn.close()
-
     except Exception as e:
-
         st.error(f"Error en carga de datos: {e}")
-
-
 
 # --- 3. LÓGICA DE ACCESO ---
 
@@ -283,209 +202,91 @@ with st.sidebar:
 
         st.rerun()
 
-# --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL --- 
-
-if menu == "📦 Inventario":
-
+elif menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
-
     
-
-    # 1. Usar datos frescos de la memoria global
-
     df_inv = st.session_state.df_inv
 
-
-
-    # --- 📊 MÉTRICAS FINANCIERAS (Calculadas al momento) ---
-
     if not df_inv.empty:
-
         st.subheader("💰 Inversión Activa en Almacén")
-
         valor_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
-
         c1, c2, c3 = st.columns(3)
-
         c1.metric("Total Dólares", f"$ {valor_usd:,.2f}")
-
         c2.metric("Total BCV", f"Bs {(valor_usd * t_bcv):,.2f}")
-
         c3.metric("Tasa Actual", f"{t_bcv} Bs")
-
         
-
         alertas = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
-
         if not alertas.empty:
-
             st.error(f"⚠️ Tienes {len(alertas)} insumos bajo el mínimo de stock.")
-
     else:
-
         st.info("Inventario vacío.")
 
-
-
     st.divider()
-
-
-
-    # --- 📥 FORMULARIO DE ENTRADA (USANDO EL MOTOR TRANSACCIONAL) ---
 
     st.subheader("📥 Registrar Entrada de Mercancía")
-
     it_unid = st.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"], key="u_medida_root")
 
-
-
     with st.form("form_inventario_manual"):
-
         col1, col2 = st.columns(2)
-
         with col1:
-
             st.markdown("**📦 Detalles del Producto**")
-
             it_nombre = st.text_input("Nombre del Insumo (Ej: Papel Fotográfico)")
-
             if it_unid == "ml":
-
                 tipo_carga = st.radio("Presentación:", ["Individual", "Dúo (2)", "Kit CMYK (4)"], horizontal=True)
-
                 capacidad = st.number_input("ml por cada bote", min_value=0.1, value=100.0)
-
             else:
-
                 tipo_carga, capacidad = "Normal", 1.0
-
             it_minimo = st.number_input("Punto de Alerta (Mínimo)", min_value=0.0, value=5.0)
 
-
-
         with col2:
-
             st.markdown("**💵 Costos y Logística**")
-
             it_cant_packs = st.number_input("Cantidad comprada", min_value=1, value=1)
-
             monto_compra = st.number_input("Precio pagado (Total)", min_value=0.0, format="%.2f")
-
             moneda_pago = st.radio("Moneda de Pago:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
-
             gastos_bs = st.number_input("Gastos Extras / Delivery (Bs)", min_value=0.0)
-
             
-
             st.markdown("**🛡️ Impuestos aplicados al costo**")
-
             tx1, tx2, tx3 = st.columns(3)
-
             p_iva = tx1.checkbox(f"IVA", value=False)
-
             p_igtf = tx2.checkbox(f"IGTF", value=False)
-
             p_banco = tx3.checkbox(f"Banco", value=False)
 
-
-
         if st.form_submit_button("🚀 IMPACTAR INVENTARIO"):
-
             if it_nombre and (monto_compra > 0 or gastos_bs > 0):
-
                 try:
-
-                    # 1. Cálculo de tasa y base
-
                     tasa_u = t_bcv if "BCV" in moneda_pago else (t_bin if "Binance" in moneda_pago else 1.0)
-
                     base_usd = monto_compra / tasa_u
-
                     logistica_usd = gastos_bs / t_bcv
-
                     
-
-                    # 2. Uso del Motor Único de Costos (LO NUEVO)
-
-                    # Aplicamos impuestos solo si alguno está marcado
-
                     tiene_impuestos = p_iva or p_igtf or p_banco
-
                     costo_final_usd = calcular_costo_total(base_usd, logistica_usd, aplicar_impuestos=tiene_impuestos)
-
                     
-
                     conn = conectar(); cur = conn.cursor()
-
-                    
-
-                    # 3. Lógica de distribución para Kits CMYK o individuales
-
                     div = 4 if it_unid == "ml" and "Kit" in tipo_carga else (2 if it_unid == "ml" and "Dúo" in tipo_carga else 1)
-
                     costo_por_ml_o_unidad = (costo_final_usd / (div * it_cant_packs)) / (capacidad if it_unid == "ml" else 1)
-
                     
-
                     colores = ["Cian", "Magenta", "Amarillo", "Negro"] if div==4 else (["Negro", "Color"] if div==2 else [""])
-
                     
-
                     for col in colores:
-
                         n_item = f"{it_nombre} {col}".strip()
-
                         cant_a_sumar = capacidad * it_cant_packs
-
-                        
-
-                        # Guardar/Actualizar en Inventario
-
                         cur.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
-
                                        VALUES (?, 0, ?, ?, ?) 
-
                                        ON CONFLICT(item) DO UPDATE SET 
-
                                        precio_usd=excluded.precio_usd, minimo=excluded.minimo""", 
-
                                     (n_item, it_unid, costo_por_ml_o_unidad, it_minimo))
-
-                        
-
                         conn.commit() 
-
                         cur.execute("SELECT id FROM inventario WHERE item=?", (n_item,))
-
                         prod_id = cur.fetchone()[0]
-
-                        
-
-                        # Auditoría
-
                         ejecutar_movimiento_stock(prod_id, cant_a_sumar, "ENTRADA", motivo=f"Compra en {moneda_pago}")
-
                     
-
-                    st.success("✅ Insumos registrados y auditados correctamente.")
-
+                    st.success("✅ Inventario actualizado.")
                     cargar_datos_seguros()
-
                     st.rerun()
-
                 except Exception as e:
-
                     st.error(f"Error: {e}")
-
                 finally:
-
                     conn.close()
-
-
-
-    st.divider()
-
-
 
     # --- 📋 TABLA DE AUDITORÍA PROFESIONAL ---
 
@@ -1279,55 +1080,43 @@ elif menu == "🏗️ Activos":
 
             st.rerun()
 
-# --- 13. LÓGICA DE OTROS PROCESOS (CORREGIDO Y COMPLETO) ---
-
 elif menu == "🛠️ Otros Procesos":
-
     st.title("🛠️ Calculadora de Procesos Especiales")
-
     
-
     conn = conectar()
-
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
-
     conn.close()
-
     
-
-    lista_activos = df_act_db.to_dict('records')
-
-    # Filtramos para no mostrar impresoras aquí
-
-    otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
-
-
+    otros_equipos = df_act_db[df_act_db['categoria'] != "Impresora (Gasta Tinta)"].to_dict('records')
 
     if not otros_equipos:
-
         st.warning("⚠️ No hay maquinaria registrada en '🏗️ Activos'.")
-
     else:
-
-        # Iniciamos el formulario (8 espacios de sangría)
-
         with st.form("form_procesos_fijo"):
-
             col1, col2, col3 = st.columns(3)
-
             nombres_eq = [e['equipo'] for e in otros_equipos]
-
             eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
-
             
-
-            # Buscamos los datos del equipo seleccionado (12 espacios de sangría)
-
             datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
-
             
-
-            # ESTA ES LA LÍNEA QUE DABA ERROR (Ahora con 12 espacios exactos)
+            # Lógica completada:
+            cantidad_uso = col2.number_input(f"Cantidad de {datos_eq['unidad']}:", min_value=1, value=1)
+            costo_insumo_extra = col3.number_input("Insumo Extra ($) (Ej: Vinil, Foil)", min_value=0.0)
+            
+            if st.form_submit_button("⚖️ Calcular Proceso"):
+                desgaste_total = datos_eq['desgaste'] * cantidad_uso
+                costo_final = desgaste_total + costo_insumo_extra
+                
+                st.metric("Costo Total del Proceso", f"$ {costo_final:.2f}")
+                
+                # Guardar para cotización
+                st.session_state['datos_pre_cotizacion'] = {
+                    'trabajo': f"Proceso: {eq_sel} ({cantidad_uso} {datos_eq['unidad']})",
+                    'costo_base': costo_final,
+                    'ml_estimados': 0,
+                    'unidades': 1
+                }
+                st.success("✅ Enviado a Cotizaciones")
 
 # --- 15. MÓDULO DE VENTAS Y GASTOS ---
 elif menu == "💰 Ventas":
@@ -1482,5 +1271,6 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
