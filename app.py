@@ -19,7 +19,7 @@ def inicializar_sistema():
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     
-    # Tablas principales
+    # Tablas
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
@@ -27,7 +27,7 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     
-    # Tablas de operaciones
+    # Tabla Ventas: Alineada a (id, cliente_id, monto_total, metodo, fecha)
     c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
 
@@ -53,7 +53,7 @@ def inicializar_sistema():
     conn.close()
 
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
-    """Actualiza stock con blindaje de conexión"""
+    """Actualiza stock y retorna (Éxito, Mensaje) - Checklist #2: Cierre en error"""
     conn = conectar()
     try:
         cur = conn.cursor()
@@ -75,18 +75,18 @@ def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
         conn.close()
         return True, "OK"
     except Exception as e:
-        if conn: conn.close()
+        if conn: conn.close() # Checklist #2: Arreglado
         return False, str(e)
 
-def cargar_datos():
-    """Carga configuraciones y tablas maestras en la sesión"""
+def cargar_datos(): # Checklist #1: Nombre unificado
+    """Carga configuración y tablas maestras en la sesión"""
     try:
         conn = conectar()
+        # Checklist #4: Garantizar existencia de df_inv
         st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
         st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
         conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
         
-        # Variables críticas de inflación
         st.session_state.tasa_bcv = float(conf.loc['tasa_bcv', 'valor'])
         st.session_state.tasa_binance = float(conf.loc['tasa_binance', 'valor'])
         st.session_state.iva = float(conf.loc['iva_perc', 'valor'])
@@ -127,6 +127,11 @@ if not st.session_state.autenticado:
                 st.error("❌ Credenciales incorrectas")
     st.stop()
 
+# --- 4. PREPARACIÓN DE INTERFAZ ---
+cargar_datos() # Llamada unificada (Checklist #1)
+t_bcv = st.session_state.tasa_bcv
+t_bin = st.session_state.tasa_binance
+ROL = st.session_state.rol
 # --- 4. PREPARACIÓN DE INTERFAZ ---
 cargar_datos() # Llamada unificada
 t_bcv = st.session_state.tasa_bcv
@@ -895,6 +900,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
