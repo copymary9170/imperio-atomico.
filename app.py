@@ -203,26 +203,6 @@ with st.sidebar:
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
-# --- 7. COTIZACIONES (OJO: Aquí es donde daba el error, revisa la indentación) ---
-elif menu == "📝 Cotizaciones":
-    st.title("📝 Cotizador de Trabajos")
-    # ... Resto de tu código de cotizaciones
-
-    # --- 1. DATOS PREVIOS (DESDE CMYK / OTROS PROCESOS) ---
-    datos_pre = st.session_state.get('datos_pre_cotizacion', {
-        'trabajo': "Trabajo General",
-        'costo_base': 0.0,
-        'c_ml': 0.0, 'm_ml': 0.0, 'y_ml': 0.0, 'k_ml': 0.0,
-        'unidades': 1
-    })
-
-    # --- 2. DEFINICIÓN CLAVE: ¿ESTE TRABAJO USA TINTA? ---
-    usa_tinta = any([
-        datos_pre.get('c_ml', 0),
-        datos_pre.get('m_ml', 0),
-        datos_pre.get('y_ml', 0),
-        datos_pre.get('k_ml', 0)
-    ])
 
     # --- 3. INFORMACIÓN GENERAL ---
     with st.container(border=True):
@@ -1087,6 +1067,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
