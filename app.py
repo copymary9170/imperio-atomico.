@@ -171,35 +171,37 @@ ROL = st.session_state.rol
 with st.sidebar:
     st.header(f"👋 Hola, {st.session_state.usuario_nombre}")
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
-    
+
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
-    
+
     if ROL == "Admin":
         opciones += [
-            "💰 Ventas", 
-            "📉 Gastos", 
-            "📦 Inventario", 
-            "📊 Dashboard", 
-            "📊 Auditoría y Métricas", # <--- NUEVO MÓDULO PARA EL JEFE
-            "🏗️ Activos", 
-            "🛠️ Otros Procesos", 
-            "⚙️ Configuración", 
+            "💰 Ventas",
+            "📉 Gastos",
+            "📦 Inventario",
+            "📊 Dashboard",
+            "📊 Auditoría y Métricas",
+            "🏗️ Activos",
+            "🛠️ Otros Procesos",
+            "⚙️ Configuración",
             "🏁 Cierre de Caja"
         ]
+
     elif ROL == "Administracion":
         opciones += [
-            "💰 Ventas", 
-            "📉 Gastos", 
-            "📊 Dashboard", 
-            "📊 Auditoría y Métricas", # <--- TAMBIÉN PARA ADMINISTRACIÓN
-            "⚙️ Configuración", 
+            "💰 Ventas",
+            "📉 Gastos",
+            "📊 Dashboard",
+            "📊 Auditoría y Métricas",
+            "⚙️ Configuración",
             "🏁 Cierre de Caja"
         ]
+
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
     menu = st.radio("Seleccione una opción:", opciones, key="menu_principal")
-    
+
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
@@ -1067,6 +1069,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
