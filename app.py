@@ -6,7 +6,7 @@ from PIL import Image
 import numpy as np
 import io
 
-# --- 1. CONFIGURACIÓN DE PÁGINA (DEBE SER LO PRIMERO) ---
+# --- 1. CONFIGURACIÓN DE PÁGINA (SIEMPRE PRIMERO) ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide")
 
 # --- 2. MOTOR DE BASE DE DATOS Y CÁLCULOS ---
@@ -19,14 +19,17 @@ def inicializar_sistema():
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     
-    # Tablas
+    # Tablas principales
     c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
     c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
     c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
     c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-    # ... (Otras tablas de ventas y gastos se mantienen igual)
+    
+    # Tablas de operaciones
+    c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
+    c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
 
     # Usuarios iniciales
     c.execute("SELECT COUNT(*) FROM usuarios")
@@ -50,41 +53,59 @@ def inicializar_sistema():
     conn.close()
 
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
-    """Actualiza stock y retorna (Éxito, Mensaje)"""
+    """Actualiza stock con blindaje de conexión"""
+    conn = conectar()
     try:
-        conn = conectar(); cur = conn.cursor()
-        # Validación de stock negativo
+        cur = conn.cursor()
         cur.execute("SELECT cantidad, item FROM inventario WHERE id=?", (item_id,))
         res = cur.fetchone()
-        if not res: return False, "Ítem no encontrado"
+        if not res: 
+            conn.close()
+            return False, "Ítem no encontrado"
         
         nuevo_stock = res[0] + cantidad_cambio
-        if nuevo_stock < 0: return False, f"Stock insuficiente de {res[1]}"
+        if nuevo_stock < 0:
+            conn.close()
+            return False, f"Stock insuficiente de {res[1]}"
 
         cur.execute("UPDATE inventario SET cantidad = ? WHERE id = ?", (nuevo_stock, item_id))
         cur.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES (?,?,?,?,?)",
                     (item_id, tipo_mov, cantidad_cambio, motivo, st.session_state.get('usuario_nombre', 'Sistema')))
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
         return True, "OK"
     except Exception as e:
+        if conn: conn.close()
         return False, str(e)
 
+def cargar_datos():
+    """Carga configuraciones y tablas maestras en la sesión"""
+    try:
+        conn = conectar()
+        st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
+        st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+        conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
+        
+        # Variables críticas de inflación
+        st.session_state.tasa_bcv = float(conf.loc['tasa_bcv', 'valor'])
+        st.session_state.tasa_binance = float(conf.loc['tasa_binance', 'valor'])
+        st.session_state.iva = float(conf.loc['iva_perc', 'valor'])
+        st.session_state.igtf = float(conf.loc['igtf_perc', 'valor'])
+        st.session_state.banco = float(conf.loc['banco_perc', 'valor'])
+        st.session_state.costo_tinta_ml = float(conf.loc['costo_tinta_ml', 'valor'])
+        conn.close()
+    except Exception as e:
+        st.error(f"Error en carga de datos: {e}")
+
 def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
-    """Cálculo dinámico basado en las tasas de inflación guardadas"""
     costo_base = base_usd + logistica_usd
     if not aplicar_impuestos: return costo_base
-    
-    # Buscamos en session_state (cargado de la DB)
     iva = st.session_state.get('iva', 0.16)
     igtf = st.session_state.get('igtf', 0.03)
     banco = st.session_state.get('banco', 0.02)
     return costo_base * (1 + iva + igtf + banco)
 
-def calcular_precio_con_impuestos(costo_base_usd, margen_ganancia_perc, usar_impuestos=True):
-    precio_neto = costo_base_usd * (1 + (margen_ganancia_perc / 100))
-    return calcular_costo_total(precio_neto, 0, aplicar_impuestos=usar_impuestos)
-
-# --- 3. LOGICA DE ARRANQUE Y SESIÓN ---
+# --- 3. LÓGICA DE ACCESO ---
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
 
@@ -106,48 +127,17 @@ if not st.session_state.autenticado:
                 st.error("❌ Credenciales incorrectas")
     st.stop()
 
-# --- 4. CARGA DE DATOS MAESTROS (LOGUEADO) ---
-def cargar_datos():
-    """Carga configuraciones y tablas maestras en la sesión para evitar lentitud"""
-    try:
-        conn = conectar()
-        # Cargar tablas para uso general
-        st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
-        st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-        
-        # Cargar configuración de tasas e impuestos
-        conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
-        
-        # Guardamos en session_state para que estén disponibles en todo el app
-        st.session_state.tasa_bcv = float(conf.loc['tasa_bcv', 'valor'])
-        st.session_state.tasa_binance = float(conf.loc['tasa_binance', 'valor'])
-        st.session_state.iva = float(conf.loc['iva_perc', 'valor'])
-        st.session_state.igtf = float(conf.loc['igtf_perc', 'valor'])
-        st.session_state.banco = float(conf.loc['banco_perc', 'valor'])
-        st.session_state.costo_tinta = float(conf.loc['costo_tinta_ml', 'valor'])
-        
-        conn.close()
-    except Exception as e:
-        st.error(f"Error cargando configuración: {e}")
-
-# Ejecutamos la carga
-cargar_datos()
-
-# Definimos variables locales rápidas para el menú y cálculos
+# --- 4. PREPARACIÓN DE INTERFAZ ---
+cargar_datos() # Llamada unificada
 t_bcv = st.session_state.tasa_bcv
-t_bin = st.session_state.tasa_binance # <--- Esto arregla el NameError
+t_bin = st.session_state.tasa_binance
 ROL = st.session_state.rol
 
-# --- 5. MENÚ LATERAL FILTRADO ---
 with st.sidebar:
     st.header(f"👋 Hola, {st.session_state.usuario_nombre}")
-    
-    # Barra de estado financiero rápida
     st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 BIN: {t_bin:.2f}")
     
-    # Definimos la lista de opciones según el Rol
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
-    
     if ROL == "Admin":
         opciones += ["💰 Ventas", "📉 Gastos", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "🛠️ Otros Procesos", "⚙️ Configuración", "🏁 Cierre de Caja"]
     elif ROL == "Administracion":
@@ -158,12 +148,9 @@ with st.sidebar:
     menu = st.radio("Seleccione una opción:", opciones, key="menu_unico_final")
     
     st.divider()
-    
     if st.button("🚪 Cerrar Sesión"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+        st.session_state.autenticado = False
         st.rerun()
-
 # --- 4. MÓDULO DE INVENTARIO: AUDITORÍA Y CONTROL TOTAL --- 
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
@@ -908,6 +895,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
