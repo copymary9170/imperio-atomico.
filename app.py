@@ -74,7 +74,7 @@ def inicializar_sistema():
     
     conn.commit()
     conn.close()
-# --- MOTOR DE INVENTARIO (EL CEREBRO QUE EVITA ERRORES) ---
+    # --- MOTOR DE INVENTARIO (EL CEREBRO QUE EVITA ERRORES) ---
 def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo="Ajuste Manual"):
     """
     Controla que no haya stock negativo y anota el movimiento.
@@ -837,6 +837,7 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
 
