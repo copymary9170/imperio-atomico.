@@ -771,6 +771,51 @@ elif menu == "📝 Cotizaciones":
         if st.button("💾 Guardar Cotización"):
             st.success("Cotización guardada exitosamente (Simulado)")
 
+if menu == "💰 Ventas":
+    st.title("💰 Registro de Ventas")
+    
+    with st.form("nueva_venta"):
+        col1, col2 = st.columns(2)
+        # 1. Selección de producto (traído del inventario)
+        item_sel = col1.selectbox("Producto Vendido", st.session_state.df_inv['item'].tolist())
+        cant_vender = col2.number_input("Cantidad", min_value=0.1, step=1.0)
+        
+        # 2. Datos financieros
+        monto_venta = col1.number_input("Monto Total Cobrado ($)", min_value=0.0)
+        metodo = col2.selectbox("Método de Pago", ["Efectivo", "Zelle", "Pago Móvil", "Transferencia"])
+        
+        if st.form_submit_button("💳 FINALIZAR VENTA ATÓMICA"):
+            if item_sel and cant_vender > 0:
+                # OBTENEMOS EL ID DEL ITEM
+                item_id = st.session_state.df_inv[st.session_state.df_inv['item'] == item_sel]['id'].values[0]
+                
+                # --- PASO CRÍTICO: IMPACTO EN INVENTARIO ---
+                # Usamos el motor con cantidad negativa para restar
+                exito_stock, mensaje_stock = ejecutar_movimiento_stock(
+                    item_id, 
+                    -cant_vender, 
+                    "SALIDA", 
+                    motivo=f"Venta a {metodo}"
+                )
+                
+                if exito_stock:
+                    # SI EL STOCK FUE EXITOSO, GUARDAMOS LA VENTA
+                    try:
+                        conn = conectar()
+                        cur = conn.cursor()
+                        cur.execute("""INSERT INTO ventas (fecha, producto_id, cantidad, monto_total, metodo) 
+                                       VALUES (?, ?, ?, ?, ?)""", 
+                                    (datetime.now(), item_id, cant_vender, monto_venta, metodo))
+                        conn.commit()
+                        conn.close()
+                        st.success("✅ Venta registrada y stock descontado.")
+                        cargar_datos_seguros()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar venta: {e}")
+                else:
+                    # SI EL MOTOR DIJO QUE NO HAY STOCK, BLOQUEAMOS TODO
+                    st.error(f"❌ VENTA CANCELADA: {mensaje_stock}")
 
 
 
