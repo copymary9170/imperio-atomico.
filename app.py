@@ -203,9 +203,10 @@ with st.sidebar:
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
-# --- 11. MÓDULO DE COTIZACIONES (INTELIGENTE: CON Y SIN TINTA) ---
+# --- 7. COTIZACIONES (OJO: Aquí es donde daba el error, revisa la indentación) ---
 elif menu == "📝 Cotizaciones":
-    st.title("📝 Generador de Cotizaciones Atómicas")
+    st.title("📝 Cotizador de Trabajos")
+    # ... Resto de tu código de cotizaciones
 
     # --- 1. DATOS PREVIOS (DESDE CMYK / OTROS PROCESOS) ---
     datos_pre = st.session_state.get('datos_pre_cotizacion', {
@@ -1086,6 +1087,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
