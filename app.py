@@ -176,11 +176,11 @@ with st.sidebar:
     elif ROL == "Produccion":
         opciones += ["📦 Inventario", "🏗️ Activos", "🛠️ Otros Procesos"]
 
-    # 2. UNA SOLA LLAMADA al radio button
+   # 2. UNA SOLA LLAMADA al radio button
     # Si tienes otra línea que diga 'menu = st.radio' en otra parte, BÓRRALA.
     menu = st.radio("Seleccione una opción:", opciones, key="menu_principal")
 
-    menu = st.radio("Módulos", opciones)
+    menu = st.radio("Módulos", opciones) # <--- ¡ESTA LÍNEA ES EL ERROR!
     
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
@@ -927,6 +927,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
