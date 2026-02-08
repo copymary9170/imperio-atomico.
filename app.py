@@ -6,137 +6,59 @@ from PIL import Image
 import numpy as np
 import io
 
-# --- 1. FUNCIÓN DE CONEXIÓN (Blindada) ---
-def conectar():
-    """Establece la conexión con SQLite"""
-    return sqlite3.connect("imperio_data.db", check_same_thread=False)
-
-# --- 2. INICIALIZAR SISTEMA (La base de todo) ---
+# --- 1. FUNCIÓN DE INICIALIZACIÓN (Crea la tabla limpia) ---
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
-    c.execute("PRAGMA foreign_keys = ON")
-    
-    # CREAR TABLA DE USUARIOS (Con todas las columnas exactas)
+    # Creamos la tabla definiendo cada columna claramente
     c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                     username TEXT PRIMARY KEY, 
                     password TEXT, 
                     rol TEXT, 
                     nombre TEXT)''')
     
-    # CREAR TABLA DE INVENTARIO
-    c.execute('''CREATE TABLE IF NOT EXISTS inventario (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                    item TEXT UNIQUE, 
-                    cantidad REAL, 
-                    unidad TEXT, 
-                    precio_usd REAL, 
-                    minimo REAL DEFAULT 5.0)''')
-    
-    # OTRAS TABLAS NECESARIAS
-    c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-
-    # INSERTAR USUARIOS INICIALES (Para que puedas entrar)
-    c.execute("SELECT COUNT(*) FROM usuarios")
-    if c.fetchone()[0] == 0:
-        usuarios_iniciales = [
-            ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
-            ('mama', 'admin2026', 'Administracion', 'Mamá'),
-            ('pro', 'diseno2026', 'Produccion', 'Hermana')
-        ]
-        c.executemany("INSERT INTO usuarios (username, password, rol, nombre) VALUES (?,?,?,?)", usuarios_iniciales)
-
-    # CONFIGURACIÓN INICIAL
-    config_init = [
-        ('tasa_bcv', 36.50), ('tasa_binance', 38.00),
-        ('iva_perc', 0.16), ('igtf_perc', 0.03),
-        ('banco_perc', 0.02), ('costo_tinta_ml', 0.10)
+    # Insertar los usuarios base (usando INSERT OR IGNORE para evitar errores)
+    usuarios = [
+        ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
+        ('mama', 'admin2026', 'Administracion', 'Mamá'),
+        ('pro', 'diseno2026', 'Produccion', 'Hermana')
     ]
-    for param, valor in config_init:
-        c.execute("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", (param, valor))
+    c.executemany("INSERT OR IGNORE INTO usuarios (username, password, rol, nombre) VALUES (?,?,?,?)", usuarios)
+    
+    # Crear el resto de las tablas básicas
+    c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
+    c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
+    
+    # Configuración de tasas iniciales
+    tasas = [('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('iva_perc', 0.16), ('igtf_perc', 0.03), ('banco_perc', 0.02), ('costo_tinta_ml', 0.10)]
+    c.executemany("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?, ?)", tasas)
     
     conn.commit()
     conn.close()
-    # --- MOTOR DE INVENTARIO (EL CEREBRO QUE EVITA ERRORES) ---
-def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo="Ajuste Manual"):
-    """
-    Controla que no haya stock negativo y anota el movimiento.
-    cantidad_cambio: Positivo para sumar, Negativo para restar.
-    """
-    conn = conectar()
-    try:
-        cur = conn.cursor()
-        cur.execute("BEGIN TRANSACTION")
-        
-        # Validar existencia
-        cur.execute("SELECT cantidad, item FROM inventario WHERE id = ?", (item_id,))
-        res = cur.fetchone()
-        if not res: raise ValueError("El producto no existe.")
-        
-        stock_actual, nombre = res
-        nuevo_stock = stock_actual + cantidad_cambio
-        
-        # Bloqueo de seguridad: No permite negativos
-        if nuevo_stock < 0:
-            raise ValueError(f"No hay suficiente {nombre}. Tienes {stock_actual} y pides {abs(cantidad_cambio)}.")
 
-        # Actualizar Inventario
-        cur.execute("UPDATE inventario SET cantidad = ? WHERE id = ?", (nuevo_stock, item_id))
-
-        # Registrar Auditoría
-        user = st.session_state.get('usuario_nombre', 'Sistema')
-        cur.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES (?,?,?,?,?)",
-                    (item_id, tipo_mov, cantidad_cambio, motivo, user))
-        
-        conn.commit()
-        return True
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
-def cargar_datos_seguros():
-    """Mantiene los datos frescos en todo el sistema"""
-    conn = conectar()
-    st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
-    st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-    conn.close() 
-
-# --- INICIO DEL SISTEMA ---
-inicializar_sistema()
-if 'autenticado' not in st.session_state:
-    st.session_state.autenticado = False
-
-# --- LOGIN (Versión Reforzada) ---
+# --- 2. EL BLOQUE DE LOGIN (Donde estaba el error de la columna) ---
+# Busca donde dice "if not st.session_state.autenticado:" y reemplaza todo ese bloque:
 if not st.session_state.autenticado:
-    st.set_page_config(page_title="Acceso - Imperio", layout="centered")
     st.title("🔐 Acceso al Imperio Atómico")
     with st.form("login"):
         u = st.text_input("Usuario")
         p = st.text_input("Clave", type="password")
         if st.form_submit_button("Entrar"):
-            try:
-                conn = conectar()
-                # Usamos un método más directo para evitar errores de Pandas en el login
-                cur = conn.cursor()
-                cur.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (u, p))
-                res = cur.fetchone()
-                conn.close() # Cerramos de inmediato
-
-                if res:
-                    st.session_state.autenticado = True
-                    st.session_state.rol = res[0]
-                    st.session_state.usuario_nombre = res[1]
-                    cargar_datos_seguros()
-                    st.rerun()
-                else:
-                    st.error("❌ Usuario o clave incorrecta")
-            except Exception as e:
-                st.error(f"Error de base de datos: {e}")
+            conn = conectar()
+            cur = conn.cursor()
+            # Esta es la consulta clave. Buscamos por columnas específicas, no con *
+            cur.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (u, p))
+            res = cur.fetchone()
+            conn.close()
+            
+            if res:
+                st.session_state.autenticado = True
+                st.session_state.rol = res[0]
+                st.session_state.usuario_nombre = res[1]
+                st.rerun()
+            else:
+                st.error("❌ Usuario o clave incorrecta")
     st.stop()
 # --- SI ESTÁ AUTENTICADO, CARGAMOS EL RESTO ---
 st.set_page_config(page_title="Imperio Atómico - ERP", layout="wide")
@@ -823,6 +745,7 @@ elif menu == "💰 Ventas":
         """, conn)
         conn.close()
         st.dataframe(df_h, use_container_width=True, hide_index=True)
+
 
 
 
