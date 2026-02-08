@@ -732,105 +732,71 @@ datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
                     st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
                     st.success(f"Precio Sugerido: $ {precio_v:.2f}")
 
-# --- 11. MÓDULO DE COTIZACIONES (LÍNEA 721 CORREGIDA) ---
-elif menu == "📝 Cotizaciones":
-    st.title("📝 Generador de Cotizaciones Atómicas")
+# --- 13. LÓGICA DE OTROS PROCESOS (LIMPIO) ---
+elif menu == "🛠️ Otros Procesos":
+    st.title("🛠️ Calculadora de Procesos Especiales")
     
-    # Recuperar datos del Analizador CMYK si existen
+    conn = conectar()
+    df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
+    conn.close()
+    
+    lista_activos = df_act_db.to_dict('records')
+    otros_equipos = [e for e in lista_activos if e['categoria'] != "Impresora (Gasta Tinta)"]
+
+    if not otros_equipos:
+        st.warning("⚠️ No hay maquinaria registrada en '🏗️ Activos'.")
+    else:
+        with st.form("form_procesos_fijo"):
+            col1, col2, col3 = st.columns(3)
+            nombres_eq = [e['equipo'] for e in otros_equipos]
+            eq_sel = col1.selectbox("Herramienta / Máquina", nombres_eq)
+            
+            # Buscamos los datos del equipo seleccionado
+            datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
+            
+            # ESTA ES LA LÍNEA QUE DABA ERROR: Ahora está perfectamente alineada
+            if datos_eq:
+                unidades_p = col2.number_input(f"Cantidad ({datos_eq['unidad']})", min_value=1)
+                margen_p = col3.number_input("Margen %", value=50)
+
+                if st.form_submit_button("🧮 Calcular Proceso"):
+                    costo_t = datos_eq['desgaste'] * unidades_p
+                    precio_sugerido = costo_t * (1 + (margen_p / 100))
+                    
+                    st.metric("Costo de Desgaste", f"$ {costo_t:.4f}")
+                    st.success(f"Precio Sugerido: $ {precio_sugerido:.2f}")
+
+# --- 11. MÓDULO DE COTIZACIONES ---
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Generador de Cotizaciones")
+    
     pre_datos = st.session_state.get('datos_pre_cotizacion', {})
     
     with st.form("form_cotizacion_final"):
         c1, c2 = st.columns(2)
-        trabajo = c1.text_input("Descripción", value=pre_datos.get('trabajo', "Trabajo Nuevo"))
-        cliente = c2.selectbox("Cliente", st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Particular"])
+        trabajo = c1.text_input("Descripción", value=pre_datos.get('trabajo', "Nuevo Trabajo"))
+        # Cargamos clientes desde el session_state que ya llenamos al inicio
+        lista_clientes = st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Particular"]
+        cliente = c2.selectbox("Cliente", lista_clientes)
         
         c3, c4, c5 = st.columns(3)
         costo_base = c3.number_input("Costo Base ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f")
-        margen = c4.number_input("Margen Ganancia %", value=100)
+        margen = c4.number_input("Margen %", value=100)
         cantidad = c5.number_input("Unidades", value=pre_datos.get('unidades', 1), min_value=1)
         
-        if st.form_submit_button("💰 Generar Presupuesto"):
-            # Cálculo directo para evitar errores de funciones externas
+        if st.form_submit_button("💰 Calcular"):
+            # Cálculo con los impuestos que mencionaste (IVA, IGTF, Banco)
             precio_u = costo_base * (1 + (margen / 100))
-            # Aplicar impuestos (IVA 16%, IGTF 3%, Banco 2%)
             precio_u_imp = precio_u * (1 + 0.16 + 0.03 + 0.02)
             total = precio_u_imp * cantidad
             
             st.divider()
-            res1, res2 = st.columns(2)
-            res1.metric("Precio Unitario (c/imp)", f"$ {precio_u_imp:.2f}")
-            res2.metric("TOTAL A COBRAR", f"$ {total:.2f}")
+            st.metric("TOTAL A COBRAR", f"$ {total:.2f}")
             st.info(f"Equivalente en Bs (BCV): **{(total * t_bcv):,.2f} Bs**")
 
-# --- FUNCIONES DE SOPORTE (AL FINAL Y FUERA DE LOS IF) ---
-def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=True):
-    total = base_usd + logistica_usd
-    if not aplicar_impuestos:
-        return total
-    # Tasas estándar del Imperio
-    return total * (1 + 0.16 + 0.03 + 0.02)
-
+# --- FUNCIONES DE CIERRE ---
 def cargar_datos_seguros():
-    """Alias para recargar datos sin errores"""
     cargar_datos()
-
-    # 1. Recuperar datos del Analizador CMYK (si existen)
-    pre_datos = st.session_state.get('datos_pre_cotizacion', {})
-    
-    # 2. Interfaz de Usuario
-    with st.container(border=True):
-        with st.form("form_cotiza_completo"):
-            col1, col2 = st.columns(2)
-            with col1:
-                trabajo = st.text_input("💎 Producto/Servicio", value=pre_datos.get('trabajo', ""), placeholder="Ej: 100 Stickers Brillantes")
-                cliente_sel = st.selectbox("👤 Cliente", st.session_state.df_cli['nombre'].tolist() if not st.session_state.df_cli.empty else ["Particular"])
-            
-            with col2:
-                unidades = st.number_input("📦 Cantidad", value=pre_datos.get('unidades', 1), min_value=1)
-                tasa_usada = st.radio("💹 Tasa de referencia", ["BCV", "Binance"], horizontal=True)
-
-            st.divider()
-            
-            c3, c4, c5 = st.columns(3)
-            costo_mat = c3.number_input("💰 Costo Material ($)", value=pre_datos.get('costo_base', 0.0), format="%.4f", help="Costo de tinta + papel + desgaste")
-            margen = c4.number_input("📈 Margen %", value=100, help="Tu ganancia sobre el costo")
-            incluir_imp = c5.checkbox("🛡️ Cobrar Impuestos", value=True)
-
-            enviar = st.form_submit_button("🚀 GENERAR PRESUPUESTO PROFESIONAL")
-
-    # 3. Lógica de Salida
-    if enviar:
-        tasa_v = t_bcv if tasa_usada == "BCV" else t_bin
-        precio_u = calcular_p_final(costo_mat, margen, incluir_imp)
-        total_usd = precio_u * unidades
-        total_bs = total_usd * tasa_v
-
-        # --- RECIBO VISUAL ---
-        st.balloons()
-        st.subheader("📋 Resumen de Cotización")
-        
-        fil1, fil2, fil3 = st.columns(3)
-        fil1.metric("Precio Unitario", f"$ {precio_u:.2f}")
-        fil2.metric("Total en Dólares", f"$ {total_usd:.2f}")
-        fil3.metric("Total en Bolívares", f"Bs {total_bs:,.2f}")
-
-        # --- GENERADOR DE WHATSAPP ---
-        st.divider()
-        st.markdown("### 📱 Mensaje para enviar al Cliente")
-        
-        texto_ws = f"""*COTIZACIÓN: {trabajo}* 🚀
----
-👤 *Cliente:* {cliente_sel}
-📦 *Cantidad:* {unidades} unidades
-💵 *Precio Unitario:* ${precio_u:.2f}
-💰 *TOTAL:* ${total_usd:.2f}
-
-📌 *Tasa {tasa_usada}:* {tasa_v:.2f} Bs.
-*Total en Bs: {total_bs:,.2f}*
-
-_Válido por 24 horas. ¡Gracias por elegirnos!_ 👑"""
-        
-        st.text_area("Copia este texto y pégalo en WhatsApp:", value=texto_ws, height=220)
         
         # Guardar en el historial de la sesión para no perderlo
         st.session_state['ultima_venta_calc'] = total_usd
@@ -977,6 +943,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
