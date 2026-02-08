@@ -71,12 +71,14 @@ def inicializar_sistema():
     c.execute("PRAGMA foreign_keys = ON")
     
     # Crear tablas necesarias
-    c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                    username TEXT PRIMARY KEY, 
-                    password TEXT, 
-                    rol TEXT, 
-                    nombre TEXT)''')
-    
+    c.execute('''CREATE TABLE IF NOT EXISTS inventario_movs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                item_id INTEGER, 
+                tipo TEXT, 
+                cantidad REAL, 
+                motivo TEXT, 
+                usuario TEXT, 
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP)''')
     # Insertar usuarios base
     usuarios = [
         ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
@@ -858,6 +860,7 @@ elif menu == "🏁 Cierre de Caja":
         # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
         # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
         st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
+
 
 
 
