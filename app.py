@@ -741,7 +741,7 @@ elif menu == "📝 Cotizaciones":
     # Cálculo dinámico
     precio_unitario = costo_base * (1 + (margen/100))
     total_neto = precio_unitario * cantidad
-    total_con_impuestos = calcular_precio_con_impuestos(total_neto)
+    total_con_impuestos = calcular_precio_con_impuestos(total_neto, 100)
 
     st.subheader(f"Total a Cobrar: ${total_con_impuestos:.2f}")
     
@@ -773,6 +773,7 @@ elif menu == "📝 Cotizaciones":
 
         if st.button("💾 Guardar Cotización"):
             st.success("Cotización guardada exitosamente (Simulado)")
+
 
 
 
