@@ -824,25 +824,21 @@ elif menu == "🏁 Cierre de Caja":
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
     
     # 1. Extracción de datos del día
-    try:
-    conn = conectar()
-    # Usamos un query más seguro
-    query_movs = f"""
-        SELECT i.item, m.tipo, m.cantidad, m.usuario 
-        FROM inventario_movs m 
-        LEFT JOIN inventario i ON m.item_id = i.id 
-        WHERE date(m.fecha) = '{fecha_hoy}'
-    """
-    df_movs_dia = pd.read_sql(query_movs, conn)
-    conn.close()
-except Exception as e:
-    st.warning("Aún no hay movimientos registrados para el cierre de hoy.")
-    df_movs_dia = pd.DataFrame(columns=['item', 'tipo', 'cantidad', 'usuario'])
+   try:
+        # Fíjate en el espacio (sangría) antes de cada línea aquí abajo:
+        conn = conectar()
+        query_movs = f"""
+            SELECT i.item, m.tipo, m.cantidad, m.usuario 
+            FROM inventario_movs m 
+            LEFT JOIN inventario i ON m.item_id = i.id 
+            WHERE date(m.fecha) = '{fecha_hoy}'
+        """
+        df_movs_dia = pd.read_sql(query_movs, conn)
+        conn.close()
+    except Exception as e:
+        st.warning("Aún no hay movimientos registrados para el cierre de hoy.")
+        df_movs_dia = pd.DataFrame(columns=['item', 'tipo', 'cantidad', 'usuario'])
 
-    
-    
-    
-    
     
     # 2. Métricas de Control
     c1, c2, c3 = st.columns(3)
@@ -870,6 +866,7 @@ except Exception as e:
         # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
         # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
         st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
+
 
 
 
