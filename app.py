@@ -872,12 +872,12 @@ elif menu == "🏁 Cierre de Caja":
         st.dataframe(df_movs_dia, use_container_width=True, hide_index=True)
     n reporte por WhatsApp/Email 
         # o guardar un log de "Cierre Finalizad
-   # 5. Botón de Cierre Oficial
-    if st.button("🔒 Ejecutar Cierre y Exportar PDF"):
-        # Esta línea debe tener el '#' al principio:
-        # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
-        # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
-        st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
+  # 5. Botón de Cierre Oficial
+    if st.button("🔒 Ejecutar Cierre y Exportar Registro"):
+        # Se asegura que todas las líneas de texto explicativo tengan el '#' al inicio
+        # Lógica futura: enviar reporte por WhatsApp/Email
+        # Lógica futura: guardar log de 'Cierre Finalizado' en auditoría.
+        st.success(f"✅ Cierre de caja del {fecha_hoy} completado con éxito.")
 
 
 
