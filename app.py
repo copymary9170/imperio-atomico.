@@ -11,6 +11,52 @@ def conectar():
     # Usamos v2 para que la base de datos nazca limpia y sin errores de columnas
     return sqlite3.connect("imperio_v2.db", check_same_thread=False)
 
+def calcular_costo_total(base_usd, logistica_usd=0, aplicar_impuestos=False):
+    """Calcula el costo real de entrada (Inversión)"""
+    total_base = base_usd + logistica_usd
+    if aplicar_impuestos:
+        # Usamos los valores que ya tienes en session_state
+        iva = st.session_state.get('iva', 0.16)
+        igtf = st.session_state.get('igtf', 0.03)
+        banco = st.session_state.get('banco', 0.02)
+        return total_base * (1 + iva + igtf + banco)
+    return total_base
+
+def ejecutar_movimiento_stock(item_id, cantidad_cambio, tipo_mov, motivo=""):
+    """Registra auditoría y actualiza el stock real en SQLite"""
+    conn = conectar()
+    cur = conn.cursor()
+    try:
+        usuario = st.session_state.get('usuario_nombre', 'Sistema')
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 1. Insertar en historial
+        cur.execute("""INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario, fecha)
+                       VALUES (?, ?, ?, ?, ?, ?)""", 
+                    (item_id, tipo_mov, cantidad_cambio, motivo, usuario, fecha))
+        
+        # 2. Actualizar tabla maestra
+        cur.execute("UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?", (cantidad_cambio, item_id))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error en motor de stock: {e}")
+        return False
+    finally:
+        conn.close()
+
+def calcular_precio_con_impuestos(costo_base_usd, margen_ganancia_perc, usar_impuestos=True):
+    """Calcula el precio final de venta al cliente"""
+    precio_neto = costo_base_usd * (1 + (margen_ganancia_perc / 100))
+    if not usar_impuestos:
+        return precio_neto
+    
+    iva = st.session_state.get('iva', 0.16)
+    igtf = st.session_state.get('igtf', 0.03)
+    banco = st.session_state.get('banco', 0.02)
+    return precio_neto * (1 + iva + igtf + banco)
+
 # --- 2. INICIALIZAR SISTEMA ---
 def inicializar_sistema():
     conn = conectar()
@@ -710,6 +756,7 @@ elif menu == "📝 Cotizaciones":
             'detalle': desc
         }
         st.success("¡Datos enviados a Ventas!")
+
 
 
 
