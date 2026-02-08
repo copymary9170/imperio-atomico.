@@ -720,7 +720,7 @@ def calcular_precio_con_impuestos(costo_base, margen_ganancia, incluir_impuestos
     return precio_con_ganancia * (1 + iva + igtf + banco)
 
 
-datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
+    datos_eq = next((e for e in otros_equipos if e['equipo'] == eq_sel), None)
             
             if datos_eq:
                 unidades_proc = col2.number_input(f"Cantidad de {datos_eq['unidad']}", min_value=1, key="cant_proc")
@@ -957,6 +957,7 @@ elif menu == "📉 Gastos":
     
     if not df_g.empty:
         st.dataframe(df_g, use_container_width=True, hide_index=True)
+
 
 
 
