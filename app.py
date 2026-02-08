@@ -824,8 +824,6 @@ elif menu == "🏁 Cierre de Caja":
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
     
     # 1. Extracción de datos del día
-   try:
-        # Fíjate en el espacio (sangría) antes de cada línea aquí abajo:
         conn = conectar()
         query_movs = f"""
             SELECT i.item, m.tipo, m.cantidad, m.usuario 
@@ -866,6 +864,7 @@ elif menu == "🏁 Cierre de Caja":
         # Aquí puedes agregar lógica para enviar un reporte por WhatsApp/Email 
         # o guardar un log de "Cierre Finalizado" en una nueva tabla de auditoría.
         st.success(f"Cierre de caja del {fecha_hoy} completado con éxito.")
+
 
 
 
