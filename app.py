@@ -14,7 +14,7 @@ def conectar():
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
 def inicializar_sistema():
-    """Crea las tablas y valores iniciales si no existen"""
+    """Crea las tablas, valores iniciales y Triggers de seguridad"""
     conn = conectar()
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
@@ -30,6 +30,20 @@ def inicializar_sistema():
     c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
+
+    # --- TRIGGER DE SEGURIDAD (Nivel Arquitecto) ---
+    # Evita que cualquier operación deje el stock en negativo, sin importar qué pase en Python
+    c.execute("""
+    CREATE TRIGGER IF NOT EXISTS prevent_negative_stock
+    BEFORE UPDATE ON inventario
+    FOR EACH ROW
+    BEGIN
+        SELECT CASE
+            WHEN NEW.cantidad < 0 THEN
+                RAISE(ABORT, 'Error: Stock insuficiente. La operación fue cancelada por seguridad.')
+        END;
+    END;
+    """)
 
     # Usuarios iniciales
     c.execute("SELECT COUNT(*) FROM usuarios")
@@ -60,7 +74,6 @@ def obtener_tintas_disponibles():
         return pd.DataFrame()
     
     df = st.session_state.df_inv.copy()
-    # Normalización de texto para evitar errores de espacios o mayúsculas
     df['unidad_check'] = df['unidad'].fillna('').str.strip().str.lower()
     return df[df['unidad_check'] == 'ml'].copy()
 
@@ -84,23 +97,20 @@ def procesar_venta_grafica_completa(id_cliente, monto, metodo, consumos_dict):
         for item_id, ml in consumos_dict.items():
             if ml <= 0: continue
             
-            # Intento de descuento con validación de stock atómica
+            # Intento de descuento. El Trigger de SQLite bloqueará si NEW.cantidad < 0
             cur.execute("""UPDATE inventario SET cantidad = cantidad - ? 
-                           WHERE id = ? AND cantidad >= ?""", (ml, item_id, ml))
+                           WHERE id = ?""", (ml, item_id))
             
-            if cur.rowcount == 0:
-                cur.execute("SELECT item FROM inventario WHERE id=?", (item_id,))
-                res = cur.fetchone()
-                nombre = res[0] if res else f"ID {item_id}"
-                raise Exception(f"Stock insuficiente para: {nombre}")
-
-            # 3. Auditoría de movimiento por color
+            # Auditoría de movimiento por color
             cur.execute("""INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) 
                            VALUES (?, 'SALIDA', ?, ?, ?)""",
                         (item_id, ml, f"Consumo Venta #{venta_id}", st.session_state.get('usuario_nombre', 'Sistema')))
 
         conn.commit()
         return True, f"✅ Venta #{venta_id} procesada con éxito."
+    except sqlite3.Error as e:
+        conn.rollback()
+        return False, f"Error de Base de Datos: {str(e)}"
     except Exception as e:
         conn.rollback()
         return False, str(e)
@@ -175,7 +185,6 @@ with st.sidebar:
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
-
 # --- 6. MÓDULOS DE INTERFAZ ---
 
 if menu == "📦 Inventario":
@@ -867,7 +876,6 @@ elif menu == "📝 Cotizaciones":
     st.title("📝 Generador de Cotizaciones Atómicas")
     
     # 1. Recuperar datos del Analizador CMYK
-    # Ahora esperamos un diccionario con desglose por color si viene del analizador
     datos_pre = st.session_state.get('datos_pre_cotizacion', {
         'trabajo': "Trabajo General",
         'costo_base': 0.0,
@@ -881,9 +889,8 @@ elif menu == "📝 Cotizaciones":
         
         with col1:
             descr = st.text_input("Descripción del trabajo:", value=datos_pre['trabajo'])
-            conn = conectar()
-            df_clis = pd.read_sql("SELECT id, nombre FROM clientes", conn)
-            conn.close()
+            # Usamos el dataframe ya cargado en session_state para mayor velocidad
+            df_clis = st.session_state.df_cli
             
             if not df_clis.empty:
                 opciones_cli = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
@@ -899,13 +906,11 @@ elif menu == "📝 Cotizaciones":
     # --- 💉 GESTIÓN DE CONSUMO MULTI-TINTA ---
     st.subheader("💉 Despacho de Insumos por Color")
     df_tintas = obtener_tintas_disponibles()
-    
-    consumos_reales = {} # Diccionario {id_inventario: ml}
+    consumos_reales = {} 
     
     if not df_tintas.empty:
         dict_t = {f"{r['item']} ({r['cantidad']:.1f} ml)": r['id'] for _, r in df_tintas.iterrows()}
         
-        # Si hay datos de CMYK, habilitamos los 4 selectores
         if any([datos_pre['c_ml'], datos_pre['m_ml'], datos_pre['y_ml'], datos_pre['k_ml']]):
             st.info("🎨 Se detectó análisis CMYK. Asigne las botellas correspondientes:")
             c1, c2, c3, c4 = st.columns(4)
@@ -923,7 +928,6 @@ elif menu == "📝 Cotizaciones":
                 t_k = st.selectbox("Negro (K)", dict_t.keys(), key="sel_k")
                 consumos_reales[dict_t[t_k]] = datos_pre['k_ml'] * unidades
         else:
-            # Si es una cotización manual, permitimos elegir una tinta genérica
             st.warning("⚠️ No hay datos de color. Seleccione un insumo base si desea descontar stock:")
             t_gen = st.selectbox("Insumo a descontar:", ["Ninguno"] + list(dict_t.keys()))
             if t_gen != "Ninguno":
@@ -950,34 +954,45 @@ elif menu == "📝 Cotizaciones":
     v2.metric("Precio Venta", f"$ {precio_venta_total:.2f}", delta=f"${precio_venta_total-costo_total_prod:.2f} Ganancia")
     v3.metric("Total Bs (BCV)", f"Bs {(precio_venta_total * t_bcv):,.2f}")
 
-    # --- 🚀 REGISTRO ATÓMICO ---
+    # --- 🚀 REGISTRO ATÓMICO Y PREVENCIÓN DE DUPLICADOS ---
     st.divider()
     metodo_pago = st.selectbox("💳 Método de Pago:", ["Efectivo $", "Zelle", "Pago Móvil", "Transferencia Bs", "Binance"])
     
+    # Generamos la llave de integridad para evitar doble clic
+    llave_operacion = f"v_{id_cliente}_{precio_venta_total:.2f}_{unidades}_{descr}"
+
     if st.button("🚀 REGISTRAR VENTA Y DESCONTAR STOCK", use_container_width=True, type="primary"):
-        if not consumos_reales and any([datos_pre['c_ml'], datos_pre['m_ml']]):
+        # Verificación anti-duplicados
+        if st.session_state.get('last_op_key') == llave_operacion:
+            st.warning("⚠️ Esta operación ya fue procesada.")
+        elif not consumos_reales and any([datos_pre['c_ml'], datos_pre['m_ml']]):
             st.error("Debe asignar las tintas para poder descontar el stock.")
         else:
-            # Usamos la función de arquitectura senior: procesar_venta_grafica_completa
-            exito, msg = procesar_venta_grafica_completa(
-                id_cliente=id_cliente,
-                monto=precio_venta_total,
-                metodo=metodo_pago,
-                consumos_dict=consumos_reales
-            )
-            
-            if exito:
-                st.balloons()
-                st.success(msg)
-                if 'datos_pre_cotizacion' in st.session_state:
-                    del st.session_state['datos_pre_cotizacion']
-                cargar_datos_seguros()
-                st.rerun()
-            else:
-                st.error(msg)
+            with st.spinner("Registrando transacción en el Imperio..."):
+                exito, msg = procesar_venta_grafica_completa(
+                    id_cliente=id_cliente,
+                    monto=precio_venta_total,
+                    metodo=metodo_pago,
+                    consumos_dict=consumos_reales
+                )
+                
+                if exito:
+                    # Bloqueamos la llave y limpiamos datos
+                    st.session_state['last_op_key'] = llave_operacion
+                    st.balloons()
+                    st.success(msg)
+                    if 'datos_pre_cotizacion' in st.session_state:
+                        del st.session_state['datos_pre_cotizacion']
+                    
+                    cargar_datos_seguros()
+                    st.rerun()
+                else:
+                    # El Trigger de SQLite o la lógica de stock dispararán este error si falla
+                    st.error(msg)
 
     if st.button("🗑️ Limpiar Cotización"):
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
