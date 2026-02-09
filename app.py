@@ -68,39 +68,61 @@ def inicializar_sistema():
     conn.commit()
     conn.close()
 
-# --- 3. FUNCIONES DE LÓGICA DE NEGOCIO ---
+# --- CONTINUACIÓN DE 3. FUNCIONES DE LÓGICA DE NEGOCIO ---
 
-def cargar_datos():
-    """Actualiza las variables de estado desde la DB."""
-    conn = conectar()
-    st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
-    st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-    conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
-    st.session_state.tasa_bcv = float(conf.loc['tasa_bcv', 'valor'])
-    st.session_state.tasa_binance = float(conf.loc['tasa_binance', 'valor'])
-    st.session_state.costo_tinta_ml = float(conf.loc['costo_tinta_ml', 'valor'])
-    conn.close()
+def obtener_tintas_disponibles():
+    """Filtra el inventario para obtener solo lo que es tinta (unidad ml)."""
+    if 'df_inv' not in st.session_state or st.session_state.df_inv.empty:
+        cargar_datos()
+    
+    df = st.session_state.df_inv.copy()
+    if not df.empty:
+        # Limpiamos espacios y pasamos a minúsculas para comparar bien
+        df['unidad_check'] = df['unidad'].fillna('').str.strip().str.lower()
+        return df[df['unidad_check'] == 'ml'].copy()
+    return pd.DataFrame()
 
-def login():
-    """Pantalla de acceso principal."""
-    st.title("🛡️ Acceso al Imperio Atómico")
-    with st.form("login_form"):
-        user = st.text_input("Usuario")
-        pw = st.text_input("Contraseña", type="password")
-        if st.form_submit_button("Entrar al Sistema"):
-            conn = conectar()
-            u_data = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", 
-                                     conn, params=(user, pw))
-            conn.close()
+def cargar_datos_seguros():
+    """Recarga datos y avisa al usuario."""
+    cargar_datos()
+    st.toast("🔄 Datos sincronizados con la base de datos")
+
+def procesar_venta_completa(id_cliente, monto, metodo, items_a_descontar):
+    """
+    Registra la venta y descuenta el inventario en una sola transacción.
+    items_a_descontar: diccionario {id_item: cantidad_a_restar}
+    """
+    try:
+        conn = conectar()
+        c = conn.cursor()
+        
+        # 1. Registrar la venta en la tabla ventas
+        c.execute("""
+            INSERT INTO ventas (cliente_id, monto_total, metodo) 
+            VALUES (?, ?, ?)
+        """, (id_cliente, monto, metodo))
+        
+        venta_id = c.lastrowid
+
+        # 2. Descontar cada item y registrar el movimiento de auditoría
+        for item_id, cant in items_a_descontar.items():
+            # El trigger prevent_negative_stock saltará si intentas gastar más de lo que hay
+            c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE id = ?", (cant, item_id))
             
-            if not u_data.empty:
-                st.session_state.autenticado = True
-                st.session_state.rol = u_data.iloc[0]['rol']
-                st.session_state.usuario_nombre = u_data.iloc[0]['nombre']
-                st.rerun()
-            else:
-                st.error("Credenciales incorrectas. Verifica mayúsculas/minúsculas.")
+            c.execute("""
+                INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+                VALUES (?, 'SALIDA', ?, ?, ?)
+            """, (item_id, cant, f"Venta #{venta_id}", st.session_state.usuario_nombre))
 
+        conn.commit()
+        conn.close()
+        cargar_datos() # Refrescamos la memoria de la app
+        return True, f"✅ Venta #{venta_id} procesada y stock actualizado."
+    
+    except sqlite3.Error as e:
+        if "Stock insuficiente" in str(e):
+            return False, "❌ Error: No tienes suficiente material en inventario."
+        return False, f"❌ Error en base de datos: {e}"
 # --- 4. CONTROL DE FLUJO ---
 
 # Inicialización por primera vez
@@ -490,11 +512,11 @@ elif menu == "👥 Clientes":
         st.info("No hay clientes que coincidan con la búsqueda.")
 
 
-# --- 10. ANALIZADOR CMYK (CORREGIDO) ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK ---
 elif menu == "🎨 Análisis CMYK":
-    st.title("🎨 Analizador de Cobertura y Costos Reales")
+    st.title("🎨 Analizador de Cobertura y Costos")
 
-    # Llamamos a la función que ya definimos arriba
+    # Llamada segura a la función
     df_tintas_db = obtener_tintas_disponibles()
 
     conn = conectar()
@@ -507,102 +529,98 @@ elif menu == "🎨 Análisis CMYK":
     ]
 
     if not impresoras_disponibles:
-        st.warning("⚠️ No hay impresoras registradas en 'Activos'.")
+        st.warning("⚠️ Registra una Impresora en el módulo de 'Activos' para continuar.")
         st.stop()
 
     c_printer, c_file = st.columns([1, 2])
 
     with c_printer:
-        impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
+        impresora_sel = st.selectbox("🖨️ Equipo de Impresión", impresoras_disponibles)
         
         datos_imp = next((e for e in df_act_db.to_dict('records') if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
-        # Precio de seguridad por si no hay stock
+        # Costo de tinta: prioridad al inventario, si no, usa el de configuración
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
-
-        # Si hay tintas cargadas en inventario, usamos ese precio
+        
         if not df_tintas_db.empty:
-            tintas_maquina = df_tintas_db[
-                df_tintas_db['item'].str.contains(impresora_sel, case=False, na=False)
-            ]
-            if not tintas_maquina.empty:
-                precio_tinta_ml = tintas_maquina['precio_usd'].mean()
-                st.success(f"✅ Precio real: ${precio_tinta_ml:.4f}/ml")
+            # Buscamos tintas que contengan el nombre de la impresora (Ej: "Tinta J210")
+            mask = df_tintas_db['item'].str.contains(impresora_sel, case=False, na=False)
+            tintas_especificas = df_tintas_db[mask]
+            
+            if not tintas_especificas.empty:
+                precio_tinta_ml = tintas_especificas['precio_usd'].mean()
+                st.success(f"✅ Precio Inventario: ${precio_tinta_ml:.4f}/ml")
+            else:
+                st.info(f"ℹ️ Usando precio base: ${precio_tinta_ml:.2f}/ml")
 
     with c_file:
         archivos_multiples = st.file_uploader(
-            "Sube tus diseños (PDF, JPG, PNG)",
+            "Carga tus diseños (PDF, PNG, JPG)",
             type=['pdf', 'png', 'jpg', 'jpeg'],
             accept_multiple_files=True
         )
 
     if archivos_multiples:
         import fitz  # PyMuPDF
-        
         resultados = []
-        totales_canales = {'c': 0.0, 'm': 0.0, 'y': 0.0, 'k': 0.0}
-        total_paginas_lote = 0
+        totales_cmyk = {'c': 0.0, 'm': 0.0, 'y': 0.0, 'k': 0.0}
+        total_pags = 0
 
         with st.spinner('🚀 Analizando píxeles...'):
             for arc in archivos_multiples:
-                imagenes = []
-                arc_bytes = arc.read()
-
-                if arc.name.lower().endswith('.pdf'):
-                    doc = fitz.open(stream=arc_bytes, filetype="pdf")
-                    for page_num in range(len(doc)):
-                        page = doc.load_page(page_num)
-                        pix = page.get_pixmap(colorspace=fitz.csCMYK, dpi=150)
-                        img_pil = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
-                        imagenes.append((f"{arc.name} (P{page_num+1})", img_pil))
-                    doc.close()
-                else:
-                    img_pil = Image.open(io.BytesIO(arc_bytes)).convert('CMYK')
-                    imagenes.append((arc.name, img_pil))
-
-                for nombre_item, img in imagenes:
-                    total_paginas_lote += 1
-                    datos = np.array(img)
+                try:
+                    paginas_items = []
+                    bytes_data = arc.read()
                     
-                    # Media de cobertura (0-1)
-                    c_p, m_p, y_p, k_p = [np.mean(datos[:, :, i]) / 255 for i in range(4)]
+                    if arc.name.lower().endswith('.pdf'):
+                        doc = fitz.open(stream=bytes_data, filetype="pdf")
+                        for i in range(len(doc)):
+                            page = doc.load_page(i)
+                            pix = page.get_pixmap(colorspace=fitz.csCMYK, dpi=150)
+                            img = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
+                            paginas_items.append((f"{arc.name} (P{i+1})", img))
+                        doc.close()
+                    else:
+                        img = Image.open(io.BytesIO(bytes_data)).convert('CMYK')
+                        paginas_items.append((arc.name, img))
 
-                    # Multiplicadores según máquina
-                    n_low = impresora_sel.lower()
-                    multi = 2.5 if "j210" in n_low else (1.8 if "subli" in n_low else 1.2)
-
-                    ml_c, ml_m, ml_y, ml_k = [p * 0.15 * multi for p in [c_p, m_p, y_p, k_p]]
-
-                    totales_canales['c'] += ml_c
-                    totales_canales['m'] += ml_m
-                    totales_canales['y'] += ml_y
-                    totales_canales['k'] += ml_k
-
-                    consumo_t = ml_c + ml_m + ml_y + ml_k
-                    total_usd = (consumo_t * precio_tinta_ml) + costo_desgaste
-
-                    resultados.append({
-                        "Archivo": nombre_item,
-                        "ml Total": round(consumo_t, 4),
-                        "Costo USD": round(total_usd, 4)
-                    })
+                    for nombre, img_obj in paginas_items:
+                        total_pags += 1
+                        arr = np.array(img_obj)
+                        # Cálculo de cobertura promedio
+                        c, m, y, k = [np.mean(arr[:, :, i]) / 255 for i in range(4)]
+                        
+                        # Multiplicador según máquina (Lógica Imperio Atómico)
+                        n_low = impresora_sel.lower()
+                        multi = 2.5 if "j210" in n_low else (1.8 if "subli" in n_low else 1.2)
+                        
+                        # Estimación de ml por canal
+                        ml_canales = [p * 0.15 * multi for p in [c, m, y, k]]
+                        consumo_ml = sum(ml_canales)
+                        
+                        costo_total = (consumo_ml * precio_tinta_ml) + costo_desgaste
+                        
+                        resultados.append({
+                            "Archivo": nombre, 
+                            "Consumo (ml)": round(consumo_ml, 4), 
+                            "Costo ($)": round(costo_total, 4)
+                        })
+                except Exception as e:
+                    st.error(f"Error en {arc.name}: {e}")
 
         if resultados:
             st.dataframe(pd.DataFrame(resultados), use_container_width=True, hide_index=True)
-            
-            total_lote = sum(r['Costo USD'] for r in resultados)
-            st.metric("Costo Total de Producción", f"$ {total_lote:.2f}")
+            total_usd = sum(r['Costo ($)'] for r in resultados)
+            st.metric("Total Estimado de Producción", f"$ {total_usd:.2f}")
 
             if st.button("📝 ENVIAR A COTIZACIÓN"):
                 st.session_state['datos_pre_cotizacion'] = {
-                    'trabajo': f"Prod. {impresora_sel}",
-                    'costo_base': total_lote,
-                    'unidades': total_paginas_lote
+                    'trabajo': f"Producción {impresora_sel}",
+                    'costo_base': total_usd,
+                    'unidades': total_pags
                 }
-                st.success("Cargado. Ve al menú Cotizaciones.")
-
-
+                st.success("✅ Datos listos en el Cotizador.")
 # --- 9. LÓGICA DE ACTIVOS (EQUIPOS Y MAQUINARIA) ---
 elif menu == "🏗️ Activos":
 
@@ -1076,6 +1094,7 @@ elif menu == "📊 Auditoría y Métricas":
                     st.error(f"**{row['item']}** bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
             else:
                 st.success("✅ Niveles de inventario óptimos.")
+
 
 
 
