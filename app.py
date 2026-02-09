@@ -8,55 +8,137 @@ import io
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide")
+
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
+
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
 
-    c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)')
-    c.execute('CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)')
-    c.execute('CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)')
-
-    c.execute('CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-    c.execute('CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
-    c.execute('CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)')
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS clientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            whatsapp TEXT
+        )
+    """)
 
     c.execute("""
-    CREATE TRIGGER IF NOT EXISTS prevent_negative_stock
-    BEFORE UPDATE ON inventario
-    FOR EACH ROW
-    BEGIN
-        SELECT CASE
-            WHEN NEW.cantidad < 0 THEN
-                RAISE(ABORT, 'Error: Stock insuficiente.')
+        CREATE TABLE IF NOT EXISTS inventario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item TEXT UNIQUE,
+            cantidad REAL,
+            unidad TEXT,
+            precio_usd REAL,
+            minimo REAL DEFAULT 5.0
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS configuracion (
+            parametro TEXT PRIMARY KEY,
+            valor REAL
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS activos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            equipo TEXT,
+            categoria TEXT,
+            inversion REAL,
+            unidad TEXT,
+            desgaste REAL
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            username TEXT PRIMARY KEY,
+            password TEXT,
+            rol TEXT,
+            nombre TEXT
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS inventario_movs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER,
+            tipo TEXT,
+            cantidad REAL,
+            motivo TEXT,
+            usuario TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS ventas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id INTEGER,
+            monto_total REAL,
+            metodo TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS gastos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            descripcion TEXT,
+            monto REAL,
+            categoria TEXT,
+            metodo TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute("""
+        CREATE TRIGGER IF NOT EXISTS prevent_negative_stock
+        BEFORE UPDATE ON inventario
+        FOR EACH ROW
+        BEGIN
+            SELECT CASE
+                WHEN NEW.cantidad < 0 THEN
+                    RAISE(ABORT, 'Error: Stock insuficiente.')
+            END;
         END;
-    END;
     """)
 
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
-        c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", [
-            ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
-            ('mama', 'admin2026', 'Administracion', 'Mamá'),
-            ('pro', 'diseno2026', 'Produccion', 'Hermana')
-        ])
+        c.executemany(
+            "INSERT INTO usuarios VALUES (?,?,?,?)",
+            [
+                ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
+                ('mama', 'admin2026', 'Administracion', 'Mamá'),
+                ('pro', 'diseno2026', 'Produccion', 'Hermana')
+            ]
+        )
 
     config_init = [
-        ('tasa_bcv', 36.50), ('tasa_binance', 38.00),
-        ('iva_perc', 0.16), ('igtf_perc', 0.03),
-        ('banco_perc', 0.02), ('costo_tinta_ml', 0.10)
+        ('tasa_bcv', 36.50),
+        ('tasa_binance', 38.00),
+        ('iva_perc', 0.16),
+        ('igtf_perc', 0.03),
+        ('banco_perc', 0.02),
+        ('costo_tinta_ml', 0.10)
     ]
 
     for param, valor in config_init:
-        c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (param, valor))
+        c.execute(
+            "INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?,?)",
+            (param, valor)
+        )
 
     conn.commit()
     conn.close()
+
+# --- 3. FUNCIONES BASE ---
 def obtener_tintas_disponibles():
     if 'df_inv' not in st.session_state or st.session_state.df_inv.empty:
         return pd.DataFrame()
@@ -64,31 +146,45 @@ def obtener_tintas_disponibles():
     df = st.session_state.df_inv.copy()
     df['unidad_check'] = df['unidad'].fillna('').str.strip().str.lower()
     return df[df['unidad_check'] == 'ml'].copy()
+
 def cargar_datos():
-    try:
-        conn = conectar()
-        st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
-        st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+    conn = conectar()
+    st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
+    st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
 
-        conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
+    conf = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
+    st.session_state.tasa_bcv = float(conf.loc['tasa_bcv', 'valor'])
+    st.session_state.tasa_binance = float(conf.loc['tasa_binance', 'valor'])
+    st.session_state.costo_tinta_ml = float(conf.loc['costo_tinta_ml', 'valor'])
 
-        st.session_state.tasa_bcv = float(conf.loc['tasa_bcv','valor'])
-        st.session_state.tasa_binance = float(conf.loc['tasa_binance','valor'])
-        st.session_state.costo_tinta_ml = float(conf.loc['costo_tinta_ml','valor'])
-
-        conn.close()
-    except Exception as e:
-        st.error(f"Error cargando datos: {e}")
+    conn.close()
 
 def cargar_datos_seguros():
     cargar_datos()
-    st.toast("Datos actualizados")
-t_bcv = st.session_state.tasa_bcv
-t_bin = st.session_state.tasa_binance
-ROL = st.session_state.rol
+    st.toast("🔄 Datos actualizados")
+
+# --- 4. BLINDAJE SESSION STATE ---
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+
+if 'rol' not in st.session_state:
+    st.session_state.rol = ""
+
+if 'usuario_nombre' not in st.session_state:
+    st.session_state.usuario_nombre = ""
+
+if 'tasa_bcv' not in st.session_state or 'tasa_binance' not in st.session_state:
+    cargar_datos()
+
+# --- 5. VARIABLES GLOBALES SEGURAS ---
+t_bcv = st.session_state.get('tasa_bcv', 0)
+t_bin = st.session_state.get('tasa_binance', 0)
+ROL = st.session_state.get('rol', "")
+
+# --- 6. SIDEBAR ---
 with st.sidebar:
-    st.header(f"Hola {st.session_state.usuario_nombre}")
-    st.info(f"BCV: {t_bcv:.2f} | Binance: {t_bin:.2f}")
+    st.header(f"👋 Hola {st.session_state.usuario_nombre}")
+    st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 Binance: {t_bin:.2f}")
 
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
 
@@ -104,9 +200,10 @@ with st.sidebar:
 
     menu = st.radio("Menú:", opciones)
 
-    if st.button("Cerrar Sesión"):
+    if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
+
 # --- 6. MÓDULOS DE INTERFAZ: INVENTARIO ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
@@ -579,20 +676,37 @@ elif menu == "📝 Cotizaciones":
         'unidades': 1
     })
 
-    with st.container(border=True):
+    # 🔑 Detectar si el trabajo usa tinta
+    usa_tinta = any([
+        datos_pre['c_ml'],
+        datos_pre['m_ml'],
+        datos_pre['y_ml'],
+        datos_pre['k_ml']
+    ])
 
+    # --- DETALLES DEL TRABAJO ---
+    with st.container():
         st.subheader("🛠️ Detalles del Trabajo")
 
         col1, col2 = st.columns([2, 1])
 
         with col1:
-            descr = st.text_input("Descripción del trabajo:", value=datos_pre['trabajo'])
+            descr = st.text_input(
+                "Descripción del trabajo:",
+                value=datos_pre['trabajo']
+            )
 
             df_clis = st.session_state.get('df_cli', pd.DataFrame())
 
             if not df_clis.empty:
-                opciones_cli = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
-                cliente_sel = st.selectbox("👤 Asignar a Cliente:", opciones_cli.keys())
+                opciones_cli = {
+                    row['nombre']: row['id']
+                    for _, row in df_clis.iterrows()
+                }
+                cliente_sel = st.selectbox(
+                    "👤 Asignar a Cliente:",
+                    opciones_cli.keys()
+                )
                 id_cliente = opciones_cli[cliente_sel]
             else:
                 st.warning("⚠️ No hay clientes registrados.")
@@ -605,52 +719,67 @@ elif menu == "📝 Cotizaciones":
                 value=int(datos_pre['unidades'])
             )
 
-    # --- CONSUMO DE TINTAS ---
-    st.subheader("💉 Despacho de Insumos por Color")
-
-    df_tintas = obtener_tintas_disponibles()
+    # --- CONSUMO DE INSUMOS ---
+    st.subheader("📦 Consumo de Insumos")
     consumos_reales = {}
 
-    if not df_tintas.empty:
+    if usa_tinta:
+        st.info("🎨 Este trabajo consume tinta")
+
+        df_tintas = obtener_tintas_disponibles()
+
+        if df_tintas.empty:
+            st.error("🚨 No hay tintas (unidad ml) registradas en inventario.")
+            st.stop()
 
         dict_t = {
             f"{r['item']} ({r['cantidad']:.1f} ml)": r['id']
             for _, r in df_tintas.iterrows()
         }
 
-        if any([datos_pre['c_ml'], datos_pre['m_ml'], datos_pre['y_ml'], datos_pre['k_ml']]):
-
+        if any([
+            datos_pre['c_ml'],
+            datos_pre['m_ml'],
+            datos_pre['y_ml'],
+            datos_pre['k_ml']
+        ]):
             st.info("🎨 Se detectó análisis CMYK. Asigne las botellas físicas:")
 
             c1, c2, c3, c4 = st.columns(4)
 
             with c1:
-                t_c = st.selectbox("Cian (C)", dict_t.keys())
+                t_c = st.selectbox("Cian (C)", dict_t.keys(), key="c_sel")
                 consumos_reales[dict_t[t_c]] = datos_pre['c_ml'] * unidades
 
             with c2:
-                t_m = st.selectbox("Magenta (M)", dict_t.keys())
+                t_m = st.selectbox("Magenta (M)", dict_t.keys(), key="m_sel")
                 consumos_reales[dict_t[t_m]] = datos_pre['m_ml'] * unidades
 
             with c3:
-                t_y = st.selectbox("Amarillo (Y)", dict_t.keys())
+                t_y = st.selectbox("Amarillo (Y)", dict_t.keys(), key="y_sel")
                 consumos_reales[dict_t[t_y]] = datos_pre['y_ml'] * unidades
 
             with c4:
-                t_k = st.selectbox("Negro (K)", dict_t.keys())
+                t_k = st.selectbox("Negro (K)", dict_t.keys(), key="k_sel")
                 consumos_reales[dict_t[t_k]] = datos_pre['k_ml'] * unidades
 
         else:
-            st.warning("⚠️ Sin datos CMYK, asignación manual:")
+            st.warning("⚠️ Sin datos CMYK. Despacho manual:")
 
-            t_gen = st.selectbox("Seleccione Insumo:", ["Ninguno"] + list(dict_t.keys()))
+            t_gen = st.selectbox(
+                "Seleccione Tinta:",
+                ["Ninguno"] + list(dict_t.keys())
+            )
 
             if t_gen != "Ninguno":
-                ml_manual = st.number_input("ML totales a descontar:", min_value=0.0)
+                ml_manual = st.number_input(
+                    "ML totales a descontar:",
+                    min_value=0.0
+                )
                 consumos_reales[dict_t[t_gen]] = ml_manual
 
     else:
-        st.error("🚨 No hay tintas registradas en inventario.")
+        st.success("📄 Trabajo sin consumo de tinta (resma, vinil, procesos secos)")
 
     # --- COSTOS Y PRECIOS ---
     st.subheader("💰 Costos y Precios")
@@ -658,20 +787,25 @@ elif menu == "📝 Cotizaciones":
     c1, c2 = st.columns(2)
 
     costo_unitario_base = c1.number_input(
-        "Costo Unit. Base ($)",
-        value=float(datos_pre['costo_base'] / unidades if unidades > 0 else 0.0),
+        "Costo Unitario Base ($)",
+        value=float(
+            datos_pre['costo_base'] / unidades
+            if unidades > 0 else 0.0
+        ),
         format="%.4f"
     )
 
-    margen = c2.slider("Margen de Ganancia %", 10, 500, 100, 10)
+    margen = c2.slider(
+        "Margen de Ganancia %",
+        10, 500, 100, 10
+    )
 
     costo_total_prod = costo_unitario_base * unidades
-    precio_venta_total = costo_total_prod * (1 + (margen / 100))
+    precio_venta_total = costo_total_prod * (1 + margen / 100)
 
     st.divider()
 
     v1, v2, v3 = st.columns(3)
-
     v1.metric("Costo Producción", f"$ {costo_total_prod:.2f}")
     v2.metric("Precio Venta Total", f"$ {precio_venta_total:.2f}")
     v3.metric("Total Bs (BCV)", f"Bs {(precio_venta_total * t_bcv):,.2f}")
@@ -688,27 +822,33 @@ elif menu == "📝 Cotizaciones":
 
     if st.button("🚀 CONFIRMAR VENTA Y DESCONTAR INVENTARIO"):
 
-        if not consumos_reales:
-            st.error("Debe asignar insumos a descontar")
-        else:
-            exito, msg = procesar_venta_grafica_completa(
-                id_cliente=id_cliente,
-                monto=precio_venta_total,
-                metodo=metodo_pago,
-                consumos_dict=consumos_reales
-            )
+        if usa_tinta and not consumos_reales:
+            st.error("❌ Debe asignar las tintas a descontar.")
+            st.stop()
 
-            if exito:
-                st.success(msg)
-                cargar_datos_seguros()
-                st.rerun()
-            else:
-                st.error(msg)
+        exito, msg = procesar_venta_grafica_completa(
+            id_cliente=id_cliente,
+            monto=precio_venta_total,
+            metodo=metodo_pago,
+            consumos_dict=consumos_reales
+        )
+
+        if exito:
+            st.success(msg)
+            cargar_datos_seguros()
+
+            if 'datos_pre_cotizacion' in st.session_state:
+                del st.session_state['datos_pre_cotizacion']
+
+            st.rerun()
+        else:
+            st.error(msg)
 
     if st.button("🗑️ Cancelar Todo"):
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 # --- 13. AUDITORÍA Y MÉTRICAS ---
@@ -760,6 +900,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial Completo")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
