@@ -14,7 +14,7 @@ def conectar():
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
 def cargar_datos():
-    """Sincroniza la base de datos con la memoria de la app."""
+    """Sincroniza la DB con la memoria de la App."""
     try:
         conn = conectar()
         st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
@@ -30,7 +30,7 @@ def cargar_datos():
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
-    # Creación de todas las tablas necesarias para tus secciones
+    # Creación de todas las tablas para tus módulos
     tablas = [
         "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
         "CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)",
@@ -38,26 +38,23 @@ def inicializar_sistema():
         "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
         "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, inversion REAL, desgaste REAL)"
+        "CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)"
     ]
     for tabla in tablas: c.execute(tabla)
-    
-    # Usuario Jefa
     c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
     
-    # Tasas iniciales
-    config_init = [('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('costo_tinta_ml', 0.10)]
+    # Configuración inicial (Inflación y Tinta)
+    config_init = [('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('costo_tinta_ml', 0.10), ('iva_perc', 0.16)]
     for p, v in config_init: c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
-    
     conn.commit()
     conn.close()
 
 def login():
     st.title("⚛️ Acceso al Imperio Atómico")
-    with st.form("login_form"):
+    with st.container(border=True):
         u = st.text_input("Usuario")
         p = st.text_input("Contraseña", type="password")
-        if st.form_submit_button("Entrar"):
+        if st.button("Entrar al Sistema", use_container_width=True):
             conn = conectar()
             res = conn.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (u, p)).fetchone()
             conn.close()
@@ -84,98 +81,82 @@ t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "Produccion")
 
-# --- 4. SIDEBAR (MENÚ COMPLETO) ---
+# --- 4. SIDEBAR (ORGANIZACIÓN COMPLETA) ---
 with st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
-    st.info(f"Tasa BCV: {t_bcv} | Bin: {t_bin}")
+    st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
     
-    # Aquí están todas tus secciones organizadas
-    opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
-    if ROL == "Admin":
-        opciones += ["📦 Inventario", "💰 Ventas", "📉 Gastos", "📊 Dashboard", "🏗️ Activos", "⚙️ Configuración", "📑 Auditoría", "💰 Cierre de Caja"]
+    # Lista exacta solicitada
+    opciones = [
+        "📦 Inventario", "📊 Dashboard", "📝 Cotizaciones", 
+        "🎨 Análisis CMYK", "👥 Clientes", "💰 Ventas", 
+        "📉 Gastos", "🏗️ Activos", "🏁 Cierre de Caja", 
+        "📊 Auditoría y Métricas", "⚙️ Configuración"
+    ]
     
-    menu = st.radio("Secciones:", opciones)
-    if st.button("Cerrar Sesión"):
+    menu = st.radio("Secciones del Imperio:", opciones)
+    
+    st.divider()
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state.clear()
         st.rerun()
 
-# --- 6. MÓDULO INVENTARIO ---
+# --- 5. LÓGICA DE MÓDULOS ---
+
 if menu == "📦 Inventario":
-    st.title("📦 Centro de Control de Inventario")
-    
-    df_inv = st.session_state.get('df_inv', pd.DataFrame())
+    st.title("📦 Gestión de Inventario")
+    # Pestañas: Stock, Compra, Mermas, Edición Maestro
+    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "🛠️ Ajustes"])
 
-    # --- PANEL DE CONTROL FINANCIERO ---
-    with st.container(border=True):
-        c_tasa, c_val, c_alert = st.columns([1.5, 1, 1])
-        with c_tasa:
-            moneda_ver = st.radio("💰 Ver costos en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True, key="moneda_inv")
-            tasa_ver = 1.0 if "USD" in moneda_ver else (t_bcv if "BCV" in moneda_ver else t_bin)
-            simbolo = "$" if "USD" in moneda_ver else "Bs"
+elif menu == "📊 Dashboard":
+    st.title("📊 Panel de Control y Métricas")
+    # KPIs: Ventas mes, Gastos mes, Utilidad.
+
+elif menu == "📝 Cotizaciones":
+    st.title("📝 Generador de Presupuestos")
+    # Formulario para calcular precios al cliente.
+
+elif menu == "🎨 Análisis CMYK":
+    st.title("🎨 Calculadora de Costos por Tinta")
+    # Basado en el costo_tinta_ml de configuración.
+
+elif menu == "👥 Clientes":
+    st.title("👥 Base de Datos de Clientes")
+
+elif menu == "💰 Ventas":
+    st.title("💰 Punto de Venta (POS)")
+
+elif menu == "📉 Gastos":
+    st.title("📉 Registro de Egresos")
+
+elif menu == "🏗️ Activos":
+    st.title("🏗️ Control de Maquinaria y Equipos")
+
+elif menu == "🏁 Cierre de Caja":
+    st.title("🏁 Cierre de Caja Diario")
+
+elif menu == "📊 Auditoría y Métricas":
+    st.title("📊 Auditoría de Movimientos")
+
+elif menu == "⚙️ Configuración":
+    st.title("⚙️ Ajustes del Sistema e Inflación")
+    # Aquí es donde modificas los precios de tinta y tasas.
+    with st.form("config_economy"):
+        c1, c2 = st.columns(2)
+        new_bcv = c1.number_input("Tasa BCV", value=float(t_bcv))
+        new_bin = c2.number_input("Tasa Binance", value=float(t_bin))
+        new_ink = st.number_input("Costo Tinta por ML ($)", value=float(st.session_state.get('costo_tinta_ml', 0.10)))
         
-        if not df_inv.empty:
-            valor_inventario = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
-            c_val.metric("Valor del Taller", f"{simbolo} {(valor_inventario * tasa_ver):,.2f}")
-            
-            criticos = len(df_inv[df_inv['cantidad'] <= df_inv['minimo']])
-            c_alert.metric("⚠️ Reposición Urgente", f"{criticos} Items")
-
-    st.divider()
-
-    # DEFINICIÓN DE TABS (Esto es lo que faltaba arriba para que no diera error)
-    tab_existencia, tab_compra, tab_mermas, tab_edicion = st.tabs([
-        "📋 Stock", "📥 Compra", "📉 Mermas", "🛠️ Modificar/Borrar"
-    ])
-
-    # --- TAB 1: STOCK ---
-    with tab_existencia:
-        if not df_inv.empty:
-            busqueda = st.text_input("🔍 Buscar material...", placeholder="Ej: Glase, Taza, Vinil...", key="search_bar")
-            df_ver = df_inv.copy()
-            if busqueda:
-                df_ver = df_ver[df_ver['item'].str.contains(busqueda, case=False)]
-
-            df_ver['Costo Reposición'] = df_ver['precio_usd'] * tasa_ver
-            st.dataframe(df_ver, hide_index=True, use_container_width=True)
-        else:
-            st.info("No hay materiales en el sistema.")
-
-    # --- TAB 2: COMPRA ---
-    with tab_compra:
-        st.subheader("📥 Registro de Factura / Compra")
-        with st.form("form_compra_vzla"):
-            col1, col2 = st.columns([2, 1])
-            nombre_it = col1.text_input("Nombre del Insumo")
-            unidad_it = col2.selectbox("Presentación:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
-            
-            f1, f2, f3 = st.columns(3)
-            monto_fac = f1.number_input("Monto Factura", min_value=0.0)
-            moneda_fac = f2.selectbox("Pagado en:", ["USD $", "Bs (BCV)", "Bs (Binance)"])
-            impuesto = f3.selectbox("Extras:", ["Ninguno", "16% IVA", "3% IGTF", "Envío/Delivery"])
-            
-            q1, q2, q3 = st.columns(3)
-            cant_recibida = q1.number_input("Cantidad total", min_value=0.1)
-            stock_min_alerta = q2.number_input("Mínimo Seguridad", value=5.0)
-            comision_pago = q3.slider("% Comisión Pago", 0.0, 5.0, 0.5)
-
-            if st.form_submit_button("💾 GUARDAR COMPRA"):
-                if nombre_it and cant_recibida > 0:
-                    t_momento = t_bcv if "BCV" in moneda_fac else (t_bin if "Binance" in moneda_fac else 1.0)
-                    costo_base_usd = (monto_fac / t_momento) * (1 + (comision_pago/100))
-                    p_unit_usd = costo_base_usd / cant_recibida
-
-                    conn = conectar()
-                    conn.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
-                                 VALUES (?, ?, ?, ?, ?) ON CONFLICT(item) DO UPDATE SET 
-                                 cantidad = cantidad + ?, precio_usd = ?, minimo = ?""", 
-                              (nombre_it, cant_recibida, unidad_it, p_unit_usd, stock_min_alerta, 
-                               cant_recibida, p_unit_usd, stock_min_alerta))
-                    conn.commit()
-                    conn.close()
-                    st.success("✅ Compra registrada.")
-                    cargar_datos_seguros()
-                    st.rerun()
-
+        if st.form_submit_button("💾 Guardar Cambios Económicos"):
+            conn = conectar()
+            conn.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_bcv'", (new_bcv,))
+            conn.execute("UPDATE configuracion SET valor=? WHERE parametro='tasa_binance'", (new_bin,))
+            conn.execute("UPDATE configuracion SET valor=? WHERE parametro='costo_tinta_ml'", (new_ink,))
+            conn.commit()
+            conn.close()
+            cargar_datos()
+            st.success("Economía actualizada.")
+            st.rerun()
     # --- TAB 3: MERMAS ---
     with tab_mermas:
         st.subheader("📉 Registrar Material Dañado")
@@ -1215,6 +1196,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
