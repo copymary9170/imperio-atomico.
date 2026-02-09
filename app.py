@@ -501,13 +501,11 @@ elif menu == "👥 Clientes":
         st.info("No hay clientes que coincidan con la búsqueda.")
 
 
-# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK ---
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK (DETALLADO) ---
 elif menu == "🎨 Análisis CMYK":
-    st.title("🎨 Analizador de Cobertura y Costos")
+    st.title("🎨 Analizador de Cobertura y Costos Reales")
 
-    # Llamada segura a la función
     df_tintas_db = obtener_tintas_disponibles()
-
     conn = conectar()
     df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
     conn.close()
@@ -525,38 +523,28 @@ elif menu == "🎨 Análisis CMYK":
 
     with c_printer:
         impresora_sel = st.selectbox("🖨️ Equipo de Impresión", impresoras_disponibles)
-        
         datos_imp = next((e for e in df_act_db.to_dict('records') if e['equipo'] == impresora_sel), None)
         costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
 
-        # Costo de tinta: prioridad al inventario, si no, usa el de configuración
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
-        
         if not df_tintas_db.empty:
-            # Buscamos tintas que contengan el nombre de la impresora (Ej: "Tinta J210")
             mask = df_tintas_db['item'].str.contains(impresora_sel, case=False, na=False)
             tintas_especificas = df_tintas_db[mask]
-            
             if not tintas_especificas.empty:
                 precio_tinta_ml = tintas_especificas['precio_usd'].mean()
-                st.success(f"✅ Precio Inventario: ${precio_tinta_ml:.4f}/ml")
-            else:
-                st.info(f"ℹ️ Usando precio base: ${precio_tinta_ml:.2f}/ml")
+                st.success(f"✅ Precio Ref: ${precio_tinta_ml:.4f}/ml")
 
     with c_file:
-        archivos_multiples = st.file_uploader(
-            "Carga tus diseños (PDF, PNG, JPG)",
-            type=['pdf', 'png', 'jpg', 'jpeg'],
-            accept_multiple_files=True
-        )
+        archivos_multiples = st.file_uploader("Carga tus diseños", type=['pdf', 'png', 'jpg', 'jpeg'], accept_multiple_files=True)
 
     if archivos_multiples:
-        import fitz  # PyMuPDF
+        import fitz  
         resultados = []
-        totales_cmyk = {'c': 0.0, 'm': 0.0, 'y': 0.0, 'k': 0.0}
+        # Diccionario para acumular el consumo total del lote por color
+        totales_lote_cmyk = {'C': 0.0, 'M': 0.0, 'Y': 0.0, 'K': 0.0}
         total_pags = 0
 
-        with st.spinner('🚀 Analizando píxeles...'):
+        with st.spinner('🚀 Analizando canales de color...'):
             for arc in archivos_multiples:
                 try:
                     paginas_items = []
@@ -577,39 +565,66 @@ elif menu == "🎨 Análisis CMYK":
                     for nombre, img_obj in paginas_items:
                         total_pags += 1
                         arr = np.array(img_obj)
-                        # Cálculo de cobertura promedio
-                        c, m, y, k = [np.mean(arr[:, :, i]) / 255 for i in range(4)]
                         
-                        # Multiplicador según máquina (Lógica Imperio Atómico)
+                        # 1. Obtener la media de cada canal (0 a 1)
+                        c_media, m_media, y_media, k_media = [np.mean(arr[:, :, i]) / 255 for i in range(4)]
+                        
+                        # 2. Aplicar multiplicadores de eficiencia por máquina
                         n_low = impresora_sel.lower()
                         multi = 2.5 if "j210" in n_low else (1.8 if "subli" in n_low else 1.2)
                         
-                        # Estimación de ml por canal
-                        ml_canales = [p * 0.15 * multi for p in [c, m, y, k]]
-                        consumo_ml = sum(ml_canales)
+                        # 3. Calcular ML individuales (Base 0.15ml por cobertura 100% en A4)
+                        ml_c = c_media * 0.15 * multi
+                        ml_m = m_media * 0.15 * multi
+                        ml_y = y_media * 0.15 * multi
+                        ml_k = k_media * 0.15 * multi
                         
-                        costo_total = (consumo_ml * precio_tinta_ml) + costo_desgaste
+                        consumo_total_f = ml_c + ml_m + ml_y + ml_k
+                        costo_f = (consumo_total_f * precio_tinta_ml) + costo_desgaste
                         
+                        # Acumular para el gran total
+                        totales_lote_cmyk['C'] += ml_c
+                        totales_lote_cmyk['M'] += ml_m
+                        totales_lote_cmyk['Y'] += ml_y
+                        totales_lote_cmyk['K'] += ml_k
+
                         resultados.append({
-                            "Archivo": nombre, 
-                            "Consumo (ml)": round(consumo_ml, 4), 
-                            "Costo ($)": round(costo_total, 4)
+                            "Archivo": nombre,
+                            "C (ml)": round(ml_c, 4),
+                            "M (ml)": round(ml_m, 4),
+                            "Y (ml)": round(ml_y, 4),
+                            "K (ml)": round(ml_k, 4),
+                            "Total ml": round(consumo_total_f, 4),
+                            "Costo $": round(costo_f, 4)
                         })
                 except Exception as e:
                     st.error(f"Error en {arc.name}: {e}")
 
         if resultados:
+            # Mostrar tabla detallada
+            st.subheader("📋 Desglose por Página/Imagen")
             st.dataframe(pd.DataFrame(resultados), use_container_width=True, hide_index=True)
-            total_usd = sum(r['Costo ($)'] for r in resultados)
-            st.metric("Total Estimado de Producción", f"$ {total_usd:.2f}")
 
-            if st.button("📝 ENVIAR A COTIZACIÓN"):
+            # Resumen de consumo de tintas
+            st.subheader("🧪 Consumo Total de Tintas (Lote)")
+            col_c, col_m, col_y, col_k = st.columns(4)
+            col_c.metric("Cian", f"{totales_lote_cmyk['C']:.3f} ml")
+            col_m.metric("Magenta", f"{totales_lote_cmyk['M']:.3f} ml")
+            col_y.metric("Amarillo", f"{totales_lote_cmyk['Y']:.3f} ml")
+            col_k.metric("Negro", f"{totales_lote_cmyk['K']:.3f} ml")
+
+            st.divider()
+            total_usd_lote = sum(r['Costo $'] for r in resultados)
+            st.metric("💰 Costo Total de Producción", f"$ {total_usd_lote:.2f}")
+
+            if st.button("📝 ENVIAR A COTIZACIÓN", use_container_width=True):
                 st.session_state['datos_pre_cotizacion'] = {
-                    'trabajo': f"Producción {impresora_sel}",
-                    'costo_base': total_usd,
-                    'unidades': total_pags
+                    'trabajo': f"Prod. {impresora_sel} ({total_pags} pgs)",
+                    'costo_base': total_usd_lote,
+                    'unidades': total_pags,
+                    'consumos': totales_lote_cmyk # Guardamos el desglose para descontar inventario luego
                 }
-                st.success("✅ Datos listos en el Cotizador.")
+                st.success("✅ Datos enviados. Ahora ve al menú de Cotizaciones.")
 # --- 9. LÓGICA DE ACTIVOS (EQUIPOS Y MAQUINARIA) ---
 elif menu == "🏗️ Activos":
 
@@ -1083,6 +1098,7 @@ elif menu == "📊 Auditoría y Métricas":
                     st.error(f"**{row['item']}** bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
             else:
                 st.success("✅ Niveles de inventario óptimos.")
+
 
 
 
