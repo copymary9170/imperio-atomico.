@@ -1040,7 +1040,6 @@ elif menu == "📊 Auditoría y Métricas":
     st.info("Rastrea cada mililitro de tinta y unidad de material utilizado en el taller.")
 
     conn = conectar()
-    # Query mejorada para incluir el costo del movimiento si fuera necesario
     query_movs = """
         SELECT 
             m.fecha, 
@@ -1060,64 +1059,49 @@ elif menu == "📊 Auditoría y Métricas":
 
     with tab_graficos:
         if not df_movs.empty:
-            # Filtrar solo salidas para ver consumo real de producción
             df_salidas = df_movs[df_movs['Operación'] == 'SALIDA']
-            
             if not df_salidas.empty:
                 st.subheader("🔥 Consumo Acumulado por Material")
                 resumen = df_salidas.groupby("Material")["Cant."].sum().reset_index()
-                
-                # Gráfico de barras horizontal para mejor lectura de nombres largos
                 st.bar_chart(data=resumen, x="Material", y="Cant.", color="#FF4B4B")
                 
-                # Estadísticas rápidas
                 c1, c2 = st.columns(2)
-                mas_usado = resumen.loc[resumen['Cant.'].idxmax()]
-                c1.metric("Material más demandado", mas_usado['Material'], f"{mas_usado['Cant.']:.2f} unidades")
+                id_max = resumen['Cant.'].idxmax()
+                mas_usado = resumen.loc[id_max]
+                c1.metric("Material más demandado", mas_usado['Material'], f"{mas_usado['Cant.']:.2f} uds")
                 c2.metric("Total Operaciones", len(df_movs))
             else:
-                st.info("Aún no hay 'Salidas' registradas para graficar consumo.")
+                st.info("No hay salidas registradas.")
         else:
-            st.info("Sin datos de movimientos.")
+            st.info("Sin datos.")
 
     with tab_historial:
         st.subheader("📜 Bitácora de Movimientos")
-        
-        # Aplicar estilo al DataFrame para diferenciar Entradas de Salidas
-        def resaltar_movs(val):
-            color = '#90ee90' if val == 'ENTRADA' else '#ffcccb'
-            return f'background-color: {color}'
-
         if not df_movs.empty:
+            # Función simple para colorear filas
+            def color_operacion(val):
+                color = 'background-color: #90ee90' if val == 'ENTRADA' else 'background-color: #ffcccb'
+                return color
+
             st.dataframe(
-                df_movs.style.applymap(resaltar_movs, subset=['Operación']),
+                df_movs.style.applymap(color_operacion, subset=['Operación']),
                 use_container_width=True,
                 hide_index=True
             )
-        else:
-            st.info("Historial vacío.")
 
     with tab_alertas:
         st.subheader("🚨 Insumos en Niveles Críticos")
-        # Cargamos el inventario actual para chequear stock bajo
         df_inv = st.session_state.get('df_inv', pd.DataFrame())
         
         if not df_inv.empty:
-            # Definimos un umbral crítico (ej: menos de 20ml o 10 unidades)
+            # Alerta si queda menos de 20 unidades/ml
             critico = df_inv[df_inv['cantidad'] < 20.0] 
-            
             if not critico.empty:
                 for _, row in critico.iterrows():
-                    st.error(f"**{row['item']}** está bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
-                
-                
-
-[Image of an inventory reorder point diagram]
-
+                    st.error(f"**{row['item']}** bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
             else:
-                st.success("✅ Todos los niveles de inventario están óptimos.")
-        else:
-            st.info("No hay datos de inventario para analizar.")
+                st.success("✅ Niveles de inventario óptimos.")
+
 
 
 
