@@ -68,52 +68,49 @@ def inicializar_sistema():
     conn.commit()
     conn.close()
 
-# --- CONTINUACIÓN DE 3. FUNCIONES DE LÓGICA DE NEGOCIO ---
+# --- CONTINUACIÓN Y CIERRE DE 3. FUNCIONES DE LÓGICA DE NEGOCIO ---
+
+def obtener_tintas_disponibles():
+    """Filtra el inventario de forma segura para el Analizador CMYK."""
+    # 1. Verificamos si los datos ya están en memoria
+    if 'df_inv' not in st.session_state:
+        cargar_datos()
+    
+    df = st.session_state.df_inv
+    
+    # 2. Si el DataFrame existe pero está vacío, devolvemos uno vacío con columnas
+    if df is None or df.empty:
+        return pd.DataFrame(columns=['id', 'item', 'cantidad', 'unidad', 'precio_usd'])
+    
+    # 3. Filtramos solo lo que sea tinta (unidad ml)
+    df_copy = df.copy()
+    df_copy['unidad_check'] = df_copy['unidad'].fillna('').str.strip().str.lower()
+    return df_copy[df_copy['unidad_check'] == 'ml']
 
 def actualizar_configuracion(parametro, nuevo_valor):
-    """Actualiza valores como tasas o precio de tinta en la DB y sesión."""
+    """Guarda cambios de inflación/precios en la DB y sesión."""
     try:
         conn = conectar()
         c = conn.cursor()
         c.execute("UPDATE configuracion SET valor = ? WHERE parametro = ?", (nuevo_valor, parametro))
         conn.commit()
         conn.close()
-        # Actualizamos la sesión para que el cambio sea instantáneo
+        # Actualizamos la sesión para que el cambio sea inmediato en los cálculos
         st.session_state[parametro] = nuevo_valor
         return True
     except Exception as e:
-        st.error(f"Error al actualizar configuración: {e}")
+        st.error(f"Error al actualizar {parametro}: {e}")
         return False
 
 def obtener_activos_impresion():
-    """Retorna una lista de equipos que generan gasto de tinta/desgaste."""
-    conn = conectar()
-    df = pd.read_sql("SELECT equipo, desgaste FROM activos WHERE categoria = 'Impresora (Gasta Tinta)'", conn)
-    conn.close()
-    return df
-
-def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo):
-    """Registra entradas o salidas manuales (fuera de ventas)."""
+    """Retorna las máquinas registradas para el selector del CMYK."""
     try:
         conn = conectar()
-        c = conn.cursor()
-        # Actualizar cantidad
-        operador = "+" if tipo == "ENTRADA" else "-"
-        c.execute(f"UPDATE inventario SET cantidad = cantidad {operador} ? WHERE id = ?", (cantidad, item_id))
-        
-        # Registrar auditoría
-        c.execute("""
-            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-            VALUES (?, ?, ?, ?, ?)
-        """, (item_id, tipo, cantidad, motivo, st.session_state.usuario_nombre))
-        
-        conn.commit()
+        df = pd.read_sql("SELECT equipo, desgaste FROM activos WHERE categoria = 'Impresora (Gasta Tinta)'", conn)
         conn.close()
-        cargar_datos()
-        return True
-    except Exception as e:
-        st.error(f"Error en movimiento: {e}")
-        return False
+        return df
+    except:
+        return pd.DataFrame(columns=['equipo', 'desgaste'])
 
 # --- 4. CONTROL DE FLUJO ---
 
@@ -1086,6 +1083,7 @@ elif menu == "📊 Auditoría y Métricas":
                     st.error(f"**{row['item']}** bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
             else:
                 st.success("✅ Niveles de inventario óptimos.")
+
 
 
 
