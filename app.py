@@ -36,8 +36,35 @@ def obtener_tintas_disponibles():
     """Busca en el inventario productos que sean tinta (ml)."""
     if 'df_inv' in st.session_state and not st.session_state.df_inv.empty:
         df = st.session_state.df_inv
+        # Filtra productos cuya unidad contenga 'ml'
         return df[df['unidad'].str.contains('ml', case=False, na=False)]
     return pd.DataFrame()
+
+def procesar_venta_grafica_completa(id_cliente, monto, metodo, consumos_dict):
+    """Registra la venta y descuenta automáticamente los ML del inventario."""
+    try:
+        conn = conectar()
+        cursor = conn.cursor()
+
+        # 1. Registrar la Venta en el historial
+        cursor.execute(
+            "INSERT INTO ventas (cliente_id, monto_total, metodo) VALUES (?, ?, ?)",
+            (id_cliente, monto, metodo)
+        )
+        
+        # 2. Descontar Inventario botella por botella
+        for id_insumo, cantidad_a_descontar in consumos_dict.items():
+            if cantidad_a_descontar > 0:
+                cursor.execute(
+                    "UPDATE inventario SET cantidad = cantidad - ? WHERE id = ?",
+                    (cantidad_a_descontar, id_insumo)
+                )
+
+        conn.commit()
+        conn.close()
+        return True, "✅ Venta registrada y stock actualizado."
+    except Exception as e:
+        return False, f"❌ Error en base de datos: {str(e)}"
 
 def inicializar_sistema():
     conn = conectar()
@@ -54,7 +81,15 @@ def inicializar_sistema():
     for tabla in tablas: c.execute(tabla)
     c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
     
-    config_init = [('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('costo_tinta_ml', 0.10), ('iva_perc', 0.16), ('igtf_perc', 0.03), ('banco_perc', 0.005)]
+    # 💡 Aquí están los precios base. Si hay inflación, los cambias en el panel de configuración.
+    config_init = [
+        ('tasa_bcv', 36.50), 
+        ('tasa_binance', 38.00), 
+        ('costo_tinta_ml', 0.10), # <--- PRECIO MODIFICABLE PARA INFLACIÓN
+        ('iva_perc', 0.16), 
+        ('igtf_perc', 0.03), 
+        ('banco_perc', 0.005)
+    ]
     for p, v in config_init: c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
     conn.commit()
     conn.close()
@@ -1042,15 +1077,14 @@ elif menu == "📝 Cotizaciones":
     # 1. Recuperamos datos de sesión de forma segura
     datos_crudos = st.session_state.get('datos_pre_cotizacion', {})
     
-    # 2. Normalizamos los datos para evitar el KeyError
-    # Si viene del CMYK, los ML están dentro de 'consumos'. Si no, ponemos 0.0
+    # 2. Normalizamos los datos para evitar el KeyError (Blindaje contra errores)
     consumos_base = datos_crudos.get('consumos', {})
     
     datos_pre = {
         'trabajo': datos_crudos.get('trabajo', "Trabajo General"),
         'costo_base': datos_crudos.get('costo_base', 0.0),
         'unidades': datos_crudos.get('unidades', 1),
-        'c_ml': consumos_base.get('C', 0.0), # Aquí está el arreglo
+        'c_ml': consumos_base.get('C', 0.0),
         'm_ml': consumos_base.get('M', 0.0),
         'y_ml': consumos_base.get('Y', 0.0),
         'k_ml': consumos_base.get('K', 0.0)
@@ -1132,14 +1166,35 @@ elif menu == "📝 Cotizaciones":
     v2.metric("Precio Venta Total", f"$ {precio_venta_total:.2f}")
     v3.metric("Total Bs (BCV)", f"Bs {(precio_venta_total * t_bcv):,.2f}")
 
-    # --- BOTÓN DE PROCESAR ---
+    # --- CIERRE DE VENTA ---
+    st.subheader("💳 Método de Pago")
+    metodo_pago = st.selectbox(
+        "Seleccione cómo paga el cliente:",
+        ["Efectivo $", "Zelle", "Pago Móvil", "Transferencia Bs", "Binance"]
+    )
+
     if st.button("🚀 CONFIRMAR VENTA Y DESCONTAR INVENTARIO", use_container_width=True):
-        # Aquí llamarías a tu función de procesar_venta_grafica_completa
-        # Por ahora simulamos el éxito:
-        st.success("✅ ¡Venta registrada y almacén actualizado!")
-        if 'datos_pre_cotizacion' in st.session_state:
-            del st.session_state['datos_pre_cotizacion']
-        st.rerun()
+        with st.spinner("Registrando en el Imperio..."):
+            # Ejecutamos la función crítica de base de datos
+            exito, msg = procesar_venta_grafica_completa(
+                id_cliente=id_cliente,
+                monto=precio_venta_total,
+                metodo=metodo_pago,
+                consumos_dict=consumos_reales
+            )
+
+            if exito:
+                st.success(msg)
+                st.balloons()
+                # Limpiamos los datos temporales para que no se duplique la venta
+                if 'datos_pre_cotizacion' in st.session_state:
+                    del st.session_state['datos_pre_cotizacion']
+                
+                # Forzamos recarga para ver el stock actualizado
+                cargar_datos()
+                st.rerun()
+            else:
+                st.error(msg)
 
 
 
