@@ -158,7 +158,6 @@ if menu == "📦 Inventario":
         c_tasa, c_val, c_alert, c_salud = st.columns([1.2, 1, 1, 1])
         
         with c_tasa:
-            # Las tasas las eliges tú desde el radio o vienen de tu estado de sesión
             moneda_ver = st.radio("💰 Moneda:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
             t_v = 1.0
             if "BCV" in moneda_ver: t_v = st.session_state.get('tasa_bcv', 36.5)
@@ -176,12 +175,13 @@ if menu == "📦 Inventario":
             c_salud.metric("Salud Almacén", f"{salud:.0f}%")
 
     # --- 2. TABS DE OPERACIÓN ---
-    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "🔧 Ajustes y Mermas", "📈 Historial"])
+    # Definimos las pestañas en una sola lista para evitar errores de nombres
+    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "🔧 Ajustes", "📊 Análisis"])
 
     with tabs[0]: # EXISTENCIAS
         if not df_inv.empty:
             c1, c2 = st.columns([3, 1])
-            busq = c1.text_input("🔍 Buscar material...", placeholder="Ej: Taza, Vinil, Tinta...")
+            busq = c1.text_input("🔍 Buscar material...", placeholder="Ej: Taza, Vinil...")
             bajos = c2.checkbox("🚨 Ver solo stock bajo")
             
             df_v = df_inv.copy()
@@ -204,117 +204,81 @@ if menu == "📦 Inventario":
                 hide_index=True, use_container_width=True
             )
 
-    with tabs[1]: # COMPRA (PERSONALIZADA)
-        st.subheader("📥 Registro de Compra con Gastos Detallados")
+    with tabs[1]: # COMPRA (Tus reglas: tasas e impuestos manuales)
+        st.subheader("📥 Registro de Compra Detallada")
         with st.form("form_compra_detallada"):
             c_nom, c_und = st.columns([2, 1])
             nombre = c_nom.text_input("Material / Insumo").strip()
-            und = c_und.selectbox("Unidad", ["Unidad", "ml", "Hojas", "Metros", "Kg", "Par"])
+            und = c_und.selectbox("Unidad", ["Unidad", "ml", "Hojas", "Metros", "Kg"])
 
             col1, col2, col3 = st.columns(3)
-            monto_neto = col1.number_input("Monto Factura (Neto)", min_value=0.0)
-            moneda_fac = col2.selectbox("Moneda de Pago", ["USD $", "Bs (BCV)", "Bs (Binance)"])
+            monto_neto = col1.number_input("Monto Factura", min_value=0.0)
+            moneda_fac = col2.selectbox("Pagado en:", ["USD $", "Bs (BCV)", "Bs (Binance)"])
             cant_rec = col3.number_input("Cantidad Recibida", min_value=0.001)
 
             st.write("---")
-            st.caption("Gastos Adicionales (Se sumarán al costo unitario)")
+            st.caption("Gastos Logísticos e Impuestos")
             g1, g2, g3 = st.columns(3)
-            impuesto_per = g1.number_input("Impuesto/IGTF (%)", min_value=0.0, value=0.0, step=1.0)
-            delivery_per = g2.number_input("Delivery / Envío ($)", min_value=0.0, value=0.0)
-            pasajes_per = g3.number_input("Pasajes / Otros ($)", min_value=0.0, value=0.0)
+            impuesto_per = g1.number_input("Impuesto (%)", value=0.0)
+            delivery_val = g2.number_input("Delivery ($)", value=0.0)
+            pasajes_val = g3.number_input("Pasajes ($)", value=0.0)
 
-            if st.form_submit_button("💾 REGISTRAR E INCREMENTAR STOCK", use_container_width=True):
+            if st.form_submit_button("💾 REGISTRAR COMPRA", use_container_width=True):
                 if nombre and cant_rec > 0:
-                    # Tasa según tu elección
                     t_c = 1.0
                     if "BCV" in moneda_fac: t_c = st.session_state.get('tasa_bcv', 36.5)
                     elif "Binance" in moneda_fac: t_c = st.session_state.get('tasa_binance', 38.0)
                     
-                    # 1. Convertir base a USD
+                    # Cálculo de costo real ponderado
                     base_usd = monto_neto / t_c
-                    # 2. Sumar porcentaje de impuestos
                     con_impuesto = base_usd * (1 + (impuesto_per / 100))
-                    # 3. Sumar costos fijos de logística (pasajes/delivery)
-                    costo_total_compra = con_impuesto + delivery_per + pasajes_per
-                    # 4. Costo unitario de esta compra
-                    costo_u_nuevo = costo_total_compra / cant_rec
+                    costo_total = con_impuesto + delivery_val + pasajes_val
+                    c_u_nuevo = costo_total / cant_rec
 
                     conn = conectar()
                     try:
-                        # COSTO PONDERADO (Mantiene tu margen real)
                         old = conn.execute("SELECT cantidad, precio_usd FROM inventario WHERE LOWER(item)=LOWER(?)", (nombre,)).fetchone()
-                        if old:
-                            p_final = ((old[0] * old[1]) + (cant_rec * costo_u_nuevo)) / (old[0] + cant_rec)
-                        else:
-                            p_final = costo_u_nuevo
+                        p_final = ((old[0] * old[1]) + (cant_rec * c_u_nuevo)) / (old[0] + cant_rec) if old else c_u_nuevo
 
                         conn.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
                                      VALUES (?,?,?,?,5) ON CONFLICT(item) DO UPDATE SET 
-                                     cantidad=cantidad+?, precio_usd=?""", 
-                                     (nombre, cant_rec, und, p_final, cant_rec, p_final))
+                                     cantidad=cantidad+?, precio_usd=?""", (nombre, cant_rec, und, p_final, cant_rec, p_final))
                         
+                        conn.execute("INSERT INTO historial_precios (item_id, precio_usd) VALUES ((SELECT id FROM inventario WHERE item=?), ?)", (nombre, c_u_nuevo))
                         conn.commit()
-                        st.success(f"✅ Insumo registrado. Costo Unitario final (con gastos): ${costo_u_nuevo:.4f}")
+                        st.success(f"✅ Stock de {nombre} actualizado.")
                         cargar_datos_seguros(); st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
                     finally: conn.close()
 
-    with tabs[2]: # AJUSTE RÁPIDO
-        st.subheader("🔧 Ajustes de Inventario")
+    with tabs[2]: # AJUSTE
+        st.subheader("🔧 Ajustes Manuales")
         if not df_inv.empty:
-            with st.form("ajuste_inventario"):
-                it_aj = st.selectbox("Selecciona Insumo", df_inv['item'].tolist())
-                c_real = st.number_input("Cantidad real en estante", min_value=0.0)
-                motivo = st.text_input("Motivo del ajuste")
-                if st.form_submit_button("🔨 Aplicar Corrección"):
+            with st.form("ajuste_inv"):
+                it_aj = st.selectbox("Insumo", df_inv['item'].tolist())
+                c_real = st.number_input("Cantidad Física Real", min_value=0.0)
+                if st.form_submit_button("🔨 Corregir"):
                     conn = conectar()
                     conn.execute("UPDATE inventario SET cantidad=? WHERE item=?", (c_real, it_aj))
                     conn.commit(); conn.close()
-                    st.warning("Stock actualizado manualmente."); cargar_datos_seguros(); st.rerun()
+                    st.warning("Stock corregido."); cargar_datos_seguros(); st.rerun()
 
-    with tabs[3]: # ANÁLISIS
-        st.subheader("📊 Resumen de Capital")
+    with tabs[3]: # ANÁLISIS (Se unificó aquí para evitar el NameError)
         if not df_inv.empty:
-            df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
-            st.bar_chart(df_inv.set_index('item')['Capital USD'])
-
-    with tab_analisis:
-        if not df_inv.empty:
-            st.subheader("📊 Análisis de Capital Atrapado")
-            # Gráfico de barras con los 10 items que más dinero representan
+            st.subheader("📊 Análisis de Capital e Inflación")
+            
+            # Gráfico de barras
             df_inv['Valor Stock ($)'] = df_inv['cantidad'] * df_inv['precio_usd']
-            chart_data = df_inv.nlargest(10, 'Valor Stock ($)')
-            st.bar_chart(chart_data, x="item", y="Valor Stock ($)")
+            st.bar_chart(df_inv.nlargest(10, 'Valor Stock ($)'), x="item", y="Valor Stock ($)")
             
-            # Historial de Precios para detectar inflación
+            # Gráfico de líneas (Detector de inflación)
             st.divider()
-            st.subheader("📈 Detector de Inflación por Insumo")
-            sel_it = st.selectbox("Selecciona para ver tendencia:", df_inv['item'].unique())
+            sel_it = st.selectbox("Tendencia de costo para:", df_inv['item'].unique())
             conn = conectar()
-            df_hist = pd.read_sql(f"SELECT h.precio_usd, h.fecha FROM historial_precios h JOIN inventario i ON h.item_id = i.id WHERE i.item = '{sel_it}' ORDER BY h.fecha ASC", conn)
+            df_h = pd.read_sql(f"SELECT h.precio_usd, h.fecha FROM historial_precios h JOIN inventario i ON h.item_id = i.id WHERE i.item = '{sel_it}' ORDER BY h.fecha ASC", conn)
             conn.close()
-            if not df_hist.empty:
-                st.line_chart(df_hist.set_index('fecha'))
-
-    # --- TAB 3: TENDENCIAS (NUEVO) ---
-    with tab_historial:
-        st.subheader("📊 Evolución de Costos")
-        if not df_inv.empty:
-            sel_it = st.selectbox("Ver historial de:", df_inv['item'].unique())
-            conn = conectar()
-            df_hist = pd.read_sql(f"""
-                SELECT h.precio_usd, h.fecha 
-                FROM historial_precios h
-                JOIN inventario i ON h.item_id = i.id
-                WHERE i.item = '{sel_it}' ORDER BY h.fecha ASC
-            """, conn)
-            conn.close()
-            
-            if not df_hist.empty:
-                st.line_chart(df_hist.set_index('fecha'))
-                st.caption(f"Este gráfico muestra cómo ha cambiado el costo unitario de {sel_it} en USD.")
-            else:
-                st.info("Aún no hay registros de compras para este material.")
+            if not df_h.empty:
+                st.line_chart(df_h.set_index('fecha'))
 elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
 
@@ -1235,6 +1199,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
