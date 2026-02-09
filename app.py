@@ -76,16 +76,19 @@ def inicializar_sistema():
         "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
         "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)"
+        "CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)",
+        # 🛡️ TABLAS CRÍTICAS PARA EL NUEVO INVENTARIO:
+        "CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS historial_precios (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, precio_usd REAL, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)"
     ]
     for tabla in tablas: c.execute(tabla)
     c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
     
-    # 💡 Aquí están los precios base. Si hay inflación, los cambias en el panel de configuración.
+    # 💡 Parámetros de configuración inicial
     config_init = [
         ('tasa_bcv', 36.50), 
         ('tasa_binance', 38.00), 
-        ('costo_tinta_ml', 0.10), # <--- PRECIO MODIFICABLE PARA INFLACIÓN
+        ('costo_tinta_ml', 0.10), # Precio ajustable por inflación
         ('iva_perc', 0.16), 
         ('igtf_perc', 0.03), 
         ('banco_perc', 0.005)
@@ -114,14 +117,16 @@ def login():
 # --- 3. CONTROL DE FLUJO ---
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
-    inicializar_sistema()
+    inicializar_sistema() # Se asegura que las tablas existan al abrir la app
 
 if not st.session_state.autenticado:
     login()
     st.stop()
 
+# Si llegó aquí, está autenticado. Cargamos datos si la sesión está limpia.
 if 'df_inv' not in st.session_state: cargar_datos()
 
+# Variables globales de fácil acceso para todo el código
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "Produccion")
@@ -143,7 +148,6 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- 6. MÓDULOS DE INTERFAZ: INVENTARIO (VERSIÓN VENEZUELA PRO) ---
 if menu == "📦 Inventario":
     st.title("📦 Gestión de Suministros y Materia Prima")
     
@@ -154,127 +158,109 @@ if menu == "📦 Inventario":
         c_tasa, c_val, c_alert = st.columns([1.5, 1, 1])
         with c_tasa:
             moneda_ver = st.radio("💰 Ver costos en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
-            tasa_ver = 1.0 if "USD" in moneda_ver else (t_bcv if "BCV" in moneda_ver else t_bin)
+            # Usamos get para evitar errores si las tasas no se han cargado
+            tasa_v = 1.0
+            if "BCV" in moneda_ver: tasa_v = st.session_state.get('tasa_bcv', 36.5)
+            elif "Binance" in moneda_ver: tasa_v = st.session_state.get('tasa_binance', 38.0)
             simbolo = "$" if "USD" in moneda_ver else "Bs"
         
         if not df_inv.empty:
-            # Valorización a precio de reposición
             valor_inventario = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
-            c_val.metric("Valor del Taller", f"{simbolo} {(valor_inventario * tasa_ver):,.2f}")
+            c_val.metric("Valor del Taller", f"{simbolo} {(valor_inventario * tasa_v):,.2f}")
             
             criticos = len(df_inv[df_inv['cantidad'] <= df_inv['minimo']])
             c_alert.metric("⚠️ Reposición Urgente", f"{criticos} Items", delta="Revisar" if criticos > 0 else "OK")
 
     st.divider()
 
-    tab_existencia, tab_compra, tab_mermas = st.tabs(["📋 Stock Disponible", "📥 Cargar Compra / Reposición", "📉 Registrar Merma / Daños"])
+    tab_existencia, tab_compra, tab_mermas = st.tabs(["📋 Stock Disponible", "📥 Cargar Compra", "📉 Registrar Merma"])
 
-    # --- TAB 1: STOCK CON ALERTAS VISUALES ---
+    # --- TAB 1: STOCK ---
     with tab_existencia:
         if not df_inv.empty:
-            st.subheader("Buscador de Insumos")
-            busqueda = st.text_input("🔍 Filtrar por nombre (Ej: Glase, Taza, Vinil...)", placeholder="Escribe para buscar...")
-            
+            busqueda = st.text_input("🔍 Filtrar por nombre:", placeholder="Ej: Taza, Vinil...")
             df_ver = df_inv.copy()
             if busqueda:
                 df_ver = df_ver[df_ver['item'].str.contains(busqueda, case=False)]
 
-            df_ver['Costo Reposición'] = df_ver['precio_usd'] * tasa_ver
+            df_ver['Costo Unit.'] = df_ver['precio_usd'] * tasa_v
             
-            # Estilo para alertar stock bajo
-            def destacar_agotados(s):
-                return ['color: #ff4b4b; font-weight: bold' if v <= s.minimo else '' for v in s]
-
             st.dataframe(
-                df_ver.style.apply(destacar_agotados, subset=['cantidad'], axis=0),
+                df_ver,
                 column_config={
                     "item": "Material",
-                    "cantidad": st.column_config.NumberColumn("En Existencia", format="%.2f"),
-                    "unidad": "Unidad",
-                    "precio_usd": None, # Ocultamos el USD original
-                    "Costo Reposición": st.column_config.NumberColumn(f"Costo Unit. ({simbolo})", format=f"{simbolo} %.2f"),
-                    "minimo": "Mín. Seguridad"
+                    "cantidad": st.column_config.NumberColumn("Stock", format="%.2f"),
+                    "unidad": "Und",
+                    "precio_usd": None,
+                    "Costo Unit.": st.column_config.NumberColumn(f"Costo ({simbolo})", format="%.2f"),
+                    "minimo": "Mínimo"
                 },
                 hide_index=True, use_container_width=True
             )
         else:
-            st.info("No hay materiales en el sistema.")
+            st.info("Inventario vacío.")
 
-    # --- TAB 2: CARGA DE COMPRA (ESTRUCTURA DE COSTOS VZLA) ---
+    # --- TAB 2: COMPRAS (COSTO PONDERADO) ---
     with tab_compra:
-        st.subheader("📥 Registro de Factura / Compra")
+        st.subheader("📥 Registro de Compra")
         with st.form("form_compra_vzla"):
             col1, col2 = st.columns([2, 1])
-            nombre_it = col1.text_input("Nombre del Insumo", placeholder="Ej: Resma Papel Bond base 20")
-            unidad_it = col2.selectbox("Presentación:", ["ml (Tintas)", "Hojas (Papel)", "Resma", "Unidad (Tazas/Gorras)", "Metros (Vinil)", "Par"])
+            nombre_it = col1.text_input("Nombre del Insumo")
+            unidad_it = col2.selectbox("Presentación:", ["ml", "Hojas", "Unidad", "Metros"])
 
-            st.write("📈 **Costos de Adquisición**")
             f1, f2, f3 = st.columns(3)
-            monto_fac = f1.number_input("Monto en Factura", min_value=0.0)
+            monto_fac = f1.number_input("Monto Factura", min_value=0.0)
             moneda_fac = f2.selectbox("Pagado en:", ["USD $", "Bs (BCV)", "Bs (Binance)"])
-            tasa_momento = t_bcv if "BCV" in moneda_fac else (t_bin if "Binance" in moneda_fac else 1.0)
+            impuesto = f3.selectbox("Extras:", ["Ninguno", "16% IVA", "3% IGTF", "Envío"])
             
-            impuesto = f3.selectbox("Impuestos/Gastos:", ["Ninguno", "16% IVA", "3% IGTF", "Envío / Delivery"])
-            
-            st.write("📦 **Cantidad y Seguridad**")
-            q1, q2, q3 = st.columns(3)
-            cant_recibida = q1.number_input("Cantidad total recibida", min_value=0.1)
-            stock_min_alerta = q2.number_input("Alerta stock bajo en:", value=5.0)
-            comision_pago = q3.slider("% Comisión Transacción (Punto/Binance)", 0.0, 5.0, 0.5)
+            q1, q2 = st.columns(2)
+            cant_recibida = q1.number_input("Cantidad recibida", min_value=0.1)
+            stock_min = q2.number_input("Alerta mínimo", value=5.0)
 
-            if st.form_submit_button("💾 REGISTRAR COMPRA Y AJUSTAR PRECIOS"):
+            if st.form_submit_button("💾 REGISTRAR COMPRA"):
                 if nombre_it and cant_recibida > 0:
-                    # Cálculo del costo real convertido a USD para la DB
-                    costo_base_usd = monto_fac / tasa_momento
-                    extra_pct = 0.16 if "16%" in impuesto else (0.03 if "3%" in impuesto else 0.0)
-                    if "Envío" in impuesto: costo_base_usd += 5.0 # Ejemplo envío fijo $5
+                    # Tasa del momento de compra
+                    t_m = 1.0
+                    if "BCV" in moneda_fac: t_m = st.session_state.get('tasa_bcv', 36.5)
+                    elif "Binance" in moneda_fac: t_m = st.session_state.get('tasa_binance', 38.0)
                     
-                    costo_total_real = costo_base_usd * (1 + extra_pct + (comision_pago/100))
-                    precio_unit_usd = costo_total_real / cant_recibida
+                    # Costo base en USD
+                    costo_usd = (monto_fac / t_m)
+                    if "16%" in impuesto: costo_usd *= 1.16
+                    elif "3%" in impuesto: costo_usd *= 1.03
+                    elif "Envío" in impuesto: costo_usd += 5.0
+                    
+                    precio_unit_nuevo = costo_usd / cant_recibida
 
-                    # Operación en Base de Datos
                     conn = conectar()
                     try:
-                        # Insertamos o actualizamos item
+                        # Buscar si ya existe para promediar
+                        existente = conn.execute("SELECT cantidad, precio_usd FROM inventario WHERE item=?", (nombre_it,)).fetchone()
+                        
+                        if existente:
+                            cant_actual, precio_actual = existente
+                            # Costo Ponderado: (StockAntiguo*PrecioAntiguo + StockNuevo*PrecioNuevo) / StockTotal
+                            precio_final = ((cant_actual * precio_actual) + (cant_recibida * precio_unit_nuevo)) / (cant_actual + cant_recibida)
+                        else:
+                            precio_final = precio_unit_nuevo
+
                         conn.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
                                      VALUES (?, ?, ?, ?, ?) 
                                      ON CONFLICT(item) DO UPDATE SET 
                                      cantidad = cantidad + ?, precio_usd = ?, minimo = ?""", 
-                                  (nombre_it, cant_recibida, unidad_it, precio_unit_usd, stock_min_alerta, 
-                                   cant_recibida, precio_unit_usd, stock_min_alerta))
+                                  (nombre_it, cant_recibida, unidad_it, precio_final, stock_min, 
+                                   cant_recibida, precio_final, stock_min))
                         
-                        # Registro en auditoría
-                        conn.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES ((SELECT id FROM inventario WHERE item=?), 'ENTRADA', ?, 'Compra Nacional/Importada', ?)",
-                                     (nombre_it, cant_recibida, st.session_state.usuario_nombre))
+                        # Registro de movimiento (Auditoría)
+                        conn.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES ((SELECT id FROM inventario WHERE item=?), 'ENTRADA', ?, 'Compra', ?)",
+                                     (nombre_it, cant_recibida, st.session_state.get('usuario_nombre', 'Admin')))
+                        
                         conn.commit()
-                        st.success(f"✅ Insumo registrado. Costo Unitario Real: ${precio_unit_usd:.4f}")
+                        st.success(f"✅ Registrado. Costo Unitario Ponderado: ${precio_final:.4f}")
                         cargar_datos_seguros()
                         st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
                     finally: conn.close()
-
-    # --- TAB 3: REGISTRO DE MERMAS (CLAVE EN PAPELERÍA) ---
-    with tab_mermas:
-        st.subheader("📉 Registro de Material Dañado / Merma")
-        st.info("Usa esto para tazas rotas, papel mal impreso o vinil desperdiciado.")
-        if not df_inv.empty:
-            with st.form("form_merma"):
-                item_m = st.selectbox("Material perdido:", df_inv['item'].tolist())
-                cant_m = st.number_input("Cantidad perdida:", min_value=0.1)
-                motivo_m = st.text_input("¿Qué pasó? (Ej: Cabezal sucio, Error diseño, Rotura)")
-                
-                if st.form_submit_button("🗑️ Registrar como Gasto"):
-                    conn = conectar()
-                    # 1. Restar del inventario
-                    conn.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_m, item_m))
-                    # 2. Registrar en auditoría
-                    conn.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES ((SELECT id FROM inventario WHERE item=?), 'SALIDA', ?, ?, ?)",
-                                 (item_m, cant_m, f"MERMA: {motivo_m}", st.session_state.usuario_nombre))
-                    conn.commit()
-                    conn.close()
-                    st.warning(f"Merma de {cant_m} registrada.")
-                    cargar_datos_seguros()
-                    st.rerun()
 elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
 
@@ -1195,6 +1181,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
