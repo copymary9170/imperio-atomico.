@@ -207,7 +207,7 @@ with st.sidebar:
         st.rerun()
 
     # --- 3. INFORMACIÓN GENERAL ---
-   ith st.container(border=True):
+  with st.container(border=True):
         st.subheader("🛠️ Detalles del Trabajo")
         col1, col2 = st.columns([2, 1])
 
@@ -1069,6 +1069,7 @@ elif menu == "📊 Auditoría y Métricas":
     with tab2:
         st.subheader("Historial General")
         st.dataframe(df_movs, use_container_width=True)
+
 
 
 
