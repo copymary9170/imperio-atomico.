@@ -158,122 +158,6 @@ with st.sidebar:
         st.session_state.clear() # Limpia todo para seguridad
         st.rerun()
 
-# --- 6. MÓDULOS DE INTERFAZ: INVENTARIO ---
-if menu == "📦 Inventario":
-    st.title("📦 Centro de Control de Inventario")
-    
-    # Asegurar que los datos estén frescos
-    df_inv = st.session_state.get('df_inv', pd.DataFrame())
-
-    # --- MÉTRICAS DE ENCABEZADO ---
-    col_v1, col_v2 = st.columns([2, 1])
-    with col_v1:
-        moneda_ver = st.radio("Ver valores en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
-
-    tasa_ver = 1.0 if "USD" in moneda_ver else (t_bcv if "BCV" in moneda_ver else t_bin)
-    simbolo = "$" if "USD" in moneda_ver else "Bs"
-
-    if not df_inv.empty:
-        valor_usd = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
-        c1, c2, c3 = st.columns(3)
-        c1.metric(f"Valor Total ({simbolo})", f"{simbolo} {(valor_usd * tasa_ver):,.2f}")
-        c2.metric("Referencia BCV", f"{t_bcv:.2f} Bs")
-        c3.metric("Referencia Binance", f"{t_bin:.2f} Bs")
-
-    st.divider()
-
-    tab_lista, tab_registro, tab_edicion = st.tabs(["📋 Inventario Actual", "🆕 Registro / Carga", "🛠️ Modificar / Borrar"])
-
-    # --- TAB: REGISTRO DE MERCANCÍA ---
-    with tab_registro:
-        with st.form("form_registro_pro"):
-            st.subheader("🆕 Cargar Nueva Mercancía")
-            c_u, c_n = st.columns([1, 2])
-            u_medida = c_u.selectbox("Unidad de Medida:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
-            it_nombre = c_n.text_input("Nombre del Material (Ej: Tinta Epson Cian)").strip()
-
-            # Lógica especial para tintas (ml)
-            if u_medida == "ml":
-                col1, col2 = st.columns(2)
-                ml_bote = col1.number_input("Contenido por bote (ml):", min_value=1.0, value=100.0)
-                cant_botes = col2.number_input("Número de botes:", min_value=1, value=1)
-                total_unidades = ml_bote * cant_botes
-            else:
-                total_unidades = st.number_input(f"Cantidad total ({u_medida}):", min_value=0.1, value=1.0)
-
-            st.markdown("---")
-            st.write("💰 **Costos y Comisiones (Combatiendo la Inflación)**")
-
-            cc1, cc2, cc3 = st.columns(3)
-            monto_pago = cc1.number_input("Monto pagado:", min_value=0.0, format="%.2f")
-            moneda_pago = cc2.selectbox("Moneda de pago:", ["USD $", "Bs (Tasa BCV)", "Bs (Tasa Binance)"])
-            imp_ley = cc3.selectbox("Impuestos aplicados:", ["Ninguno", "16% IVA", "3% IGTF"])
-
-            comision_banco = st.slider("Comisión Bancaria / Transacción (%)", 0.0, 5.0, 0.5, step=0.1)
-
-            if st.form_submit_button("🚀 REGISTRAR ENTRADA"):
-                if it_nombre and total_unidades > 0:
-                    # 1. Convertir a USD base
-                    t_compra = 1.0
-                    if "BCV" in moneda_pago: t_compra = t_bcv
-                    elif "Binance" in moneda_pago: t_compra = t_bin
-                    
-                    base_usd = monto_pago / t_compra
-                    
-                    # 2. Sumar impuestos y comisiones
-                    pct_gob = 0.16 if "16%" in imp_ley else (0.03 if "3%" in imp_ley else 0.0)
-                    costo_total_usd = base_usd * (1 + pct_gob + (comision_banco / 100))
-                    costo_unitario_final = costo_total_usd / total_unidades
-
-                    # 3. Guardar en Base de Datos
-                    conn = conectar()
-                    c = conn.cursor()
-                    try:
-                        # Insertar o actualizar
-                        c.execute("INSERT OR IGNORE INTO inventario (item, cantidad, unidad, precio_usd) VALUES (?, 0, ?, ?)",
-                                 (it_nombre, u_medida, costo_unitario_final))
-                        
-                        c.execute("UPDATE inventario SET cantidad = cantidad + ?, precio_usd = ? WHERE item = ?",
-                                 (total_unidades, costo_unitario_final, it_nombre))
-                        
-                        # Registrar movimiento
-                        c.execute("INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) VALUES ((SELECT id FROM inventario WHERE item=?), 'ENTRADA', ?, 'Compra de material', ?)",
-                                 (it_nombre, total_unidades, st.session_state.usuario_nombre))
-                        
-                        conn.commit()
-                        st.success(f"✅ {it_nombre} cargado. Costo unitario real: ${costo_unitario_final:.4f}")
-                        cargar_datos_seguros()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
-                    finally:
-                        conn.close()
-                else:
-                    st.error("⚠️ El nombre y la cantidad son obligatorios.")
-
-    # --- TAB: LISTADO ---
-    with tab_lista:
-        if not df_inv.empty:
-            df_ver = df_inv.copy()
-            # Aplicar conversión de moneda para visualización
-            df_ver['precio_usd'] = df_ver['precio_usd'] * tasa_ver
-            
-            # Formateo estético
-            st.dataframe(
-                df_ver.rename(columns={
-                    'item': 'Material',
-                    'cantidad': 'Stock',
-                    'unidad': 'Unidad',
-                    'precio_usd': f'Costo Unit. ({simbolo})'
-                }),
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.info("El inventario está vacío.")
-
-    # --- TAB: EDICIÓN ---
-    with tab_edicion:
 # --- 6. MÓDULO INVENTARIO ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
@@ -1390,6 +1274,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
