@@ -2,12 +2,12 @@ import pandas as pd
 import sqlite3
 import streamlit as st
 from datetime import datetime
-from PIL import Image
 import numpy as np
 import io
+from PIL import Image
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide")
+st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
 
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
@@ -18,7 +18,7 @@ def inicializar_sistema():
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
 
-    # Tablas base (Clientes, Inventario, Config, Activos, Usuarios)
+    # Creación de Tablas
     c.execute("CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)")
     c.execute("""CREATE TABLE IF NOT EXISTS inventario (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, 
@@ -48,7 +48,7 @@ def inicializar_sistema():
         END;
     """)
 
-    # Usuarios iniciales
+    # Usuarios iniciales (Solo se insertan si la tabla está vacía)
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", [
@@ -68,40 +68,10 @@ def inicializar_sistema():
     conn.commit()
     conn.close()
 
-# --- 3. FUNCIONES DE LÓGICA DE NEGOCIO (CORREGIDO) ---
-
-def procesar_venta_grafica_completa(id_cliente, monto, metodo, consumos_dict):
-    """Maneja la transacción de venta, descuento de stock y auditoría en un solo paso."""
-    try:
-        conn = conectar()
-        c = conn.cursor()
-        
-        # 1. Registrar Venta
-        c.execute("INSERT INTO ventas (cliente_id, monto_total, metodo) VALUES (?, ?, ?)", 
-                  (id_cliente, monto, metodo))
-        id_v = c.lastrowid
-
-        # 2. Descontar Inventario y Registrar Movimiento
-        for it_id, cant in consumos_dict.items():
-            c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE id = ?", (cant, it_id))
-            c.execute("""INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario) 
-                         VALUES (?, 'SALIDA', ?, ?, ?)""", 
-                      (it_id, cant, f"Venta #{id_v}", st.session_state.usuario_nombre))
-            
-        conn.commit()
-        conn.close()
-        return True, f"✅ Venta #{id_v} procesada con éxito."
-    except Exception as e:
-        return False, f"❌ Error de base de datos: {str(e)}"
-
-def obtener_tintas_disponibles():
-    if 'df_inv' not in st.session_state or st.session_state.df_inv.empty:
-        return pd.DataFrame()
-    df = st.session_state.df_inv.copy()
-    df['unidad_check'] = df['unidad'].fillna('').str.strip().str.lower()
-    return df[df['unidad_check'] == 'ml'].copy()
+# --- 3. FUNCIONES DE LÓGICA DE NEGOCIO ---
 
 def cargar_datos():
+    """Actualiza las variables de estado desde la DB."""
     conn = conectar()
     st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
     st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
@@ -111,41 +81,70 @@ def cargar_datos():
     st.session_state.costo_tinta_ml = float(conf.loc['costo_tinta_ml', 'valor'])
     conn.close()
 
-def cargar_datos_seguros():
-    cargar_datos()
-    st.toast("🔄 Datos actualizados")
+def login():
+    """Pantalla de acceso principal."""
+    st.title("🛡️ Acceso al Imperio Atómico")
+    with st.form("login_form"):
+        user = st.text_input("Usuario")
+        pw = st.text_input("Contraseña", type="password")
+        if st.form_submit_button("Entrar al Sistema"):
+            conn = conectar()
+            u_data = pd.read_sql_query("SELECT * FROM usuarios WHERE username=? AND password=?", 
+                                     conn, params=(user, pw))
+            conn.close()
+            
+            if not u_data.empty:
+                st.session_state.autenticado = True
+                st.session_state.rol = u_data.iloc[0]['rol']
+                st.session_state.usuario_nombre = u_data.iloc[0]['nombre']
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas. Verifica mayúsculas/minúsculas.")
 
-# --- 4. CONTROL DE SESIÓN ---
+# --- 4. CONTROL DE FLUJO ---
+
+# Inicialización por primera vez
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
-if 'rol' not in st.session_state:
-    st.session_state.rol = ""
-if 'usuario_nombre' not in st.session_state:
-    st.session_state.usuario_nombre = "Usuario"
-
-# Carga inicial si no existen tasas
-if 'tasa_bcv' not in st.session_state:
     inicializar_sistema()
+
+# Forzar login si no está autenticado
+if not st.session_state.autenticado:
+    login()
+    st.stop()
+
+# Carga de datos tras autenticación
+if 'df_inv' not in st.session_state:
     cargar_datos()
 
-# Variables Globales
+# Variables Globales de uso frecuente
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "")
 
 # --- 5. SIDEBAR (NAVEGACIÓN) ---
+
 with st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
-    st.info(f"🏦 BCV: {t_bcv:.2f} | 🔶 Binance: {t_bin:.2f}")
+    st.caption(f"Rol: {ROL}")
+    
+    # Visualizador de Tasas (Inflación)
+    with st.container(border=True):
+        st.write("📈 **Tasas del Día**")
+        st.write(f"🏦 BCV: **{t_bcv:.2f}**")
+        st.write(f"🔶 Bin: **{t_bin:.2f}**")
 
+    # Lógica de Menú según Rol
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
-    if ROL == "Admin":
+    
+    if ROL in ["Admin", "Administracion"]:
         opciones += ["💰 Ventas", "📉 Gastos", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "⚙️ Configuración"]
 
-    menu = st.radio("Menú:", opciones)
+    menu = st.radio("Ir a:", opciones)
 
-    if st.button("🚪 Cerrar Sesión"):
-        st.session_state.autenticado = False
+    st.divider()
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
+        st.session_state.clear() # Limpia todo para seguridad
         st.rerun()
 
 # --- 6. MÓDULOS DE INTERFAZ: INVENTARIO ---
@@ -1101,6 +1100,7 @@ elif menu == "📊 Auditoría y Métricas":
                     st.error(f"**{row['item']}** bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
             else:
                 st.success("✅ Niveles de inventario óptimos.")
+
 
 
 
