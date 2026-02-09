@@ -15,7 +15,7 @@ def conectar():
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
 def cargar_datos():
-    """Carga datos de la DB al session_state. DEBE estar definida antes que el login."""
+    """Carga datos de la DB al session_state."""
     try:
         conn = conectar()
         st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
@@ -26,7 +26,6 @@ def cargar_datos():
             st.session_state[row['parametro']] = row['valor']
         conn.close()
     except Exception as e:
-        # Si la tabla no existe aún, creamos DataFrames vacíos para evitar errores
         st.session_state.df_inv = pd.DataFrame()
         st.session_state.df_cli = pd.DataFrame()
 
@@ -87,9 +86,10 @@ def login():
             conn.close()
             if res:
                 st.session_state.autenticado = True
-                st.session_state.rol = res[0]
+                # Si el usuario es 'jefa', forzamos rol Admin por seguridad
+                st.session_state.rol = "Admin" if user == 'jefa' else res[0]
                 st.session_state.usuario_nombre = res[1]
-                cargar_datos() # Se llama después de estar seguro de que existe la DB
+                cargar_datos()
                 st.rerun()
             else:
                 st.error("❌ Credenciales incorrectas")
@@ -104,16 +104,14 @@ if not st.session_state.autenticado:
     login()
     st.stop()
 
-# Si llegamos aquí, es que estamos logueados. Cargamos datos si no están.
 if 'df_inv' not in st.session_state:
     cargar_datos()
 
-# Tasas Globales
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "Produccion")
 
-# --- 4. SIDEBAR ---
+# --- 4. SIDEBAR (CON PERMISOS COMPLETOS) ---
 
 with st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
@@ -124,13 +122,17 @@ with st.sidebar:
         st.write(f"🏦 BCV: **{t_bcv:.2f}**")
         st.write(f"🔶 Bin: **{t_bin:.2f}**")
 
+    # Módulos básicos
     opciones = ["📦 Inventario", "📊 Dashboard", "📝 Cotizaciones", "👥 Clientes"]
+    
+    # Módulos exclusivos de Jefa/Admin
     if ROL == "Admin":
-        opciones += ["⚙️ Configuración"]
+        opciones += ["💰 Ventas", "💸 Gastos", "⚙️ Configuración"]
 
     menu = st.radio("Ir a:", opciones)
     
-    if st.button("🚪 Cerrar Sesión"):
+    st.divider()
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state.clear()
         st.rerun()
 
@@ -1250,6 +1252,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
