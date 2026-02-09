@@ -274,7 +274,7 @@ if menu == "📦 Inventario":
 
     # --- TAB: EDICIÓN ---
     with tab_edicion:
-# --- 6. MÓDULOS DE INTERFAZ: INVENTARIO (VERSIÓN FINAL COMPLETA) ---
+# --- 6. MÓDULO INVENTARIO ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Inventario")
     
@@ -284,7 +284,7 @@ if menu == "📦 Inventario":
     with st.container(border=True):
         c_tasa, c_val, c_alert = st.columns([1.5, 1, 1])
         with c_tasa:
-            moneda_ver = st.radio("💰 Ver costos en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True)
+            moneda_ver = st.radio("💰 Ver costos en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], horizontal=True, key="moneda_inv")
             tasa_ver = 1.0 if "USD" in moneda_ver else (t_bcv if "BCV" in moneda_ver else t_bin)
             simbolo = "$" if "USD" in moneda_ver else "Bs"
         
@@ -293,47 +293,36 @@ if menu == "📦 Inventario":
             c_val.metric("Valor del Taller", f"{simbolo} {(valor_inventario * tasa_ver):,.2f}")
             
             criticos = len(df_inv[df_inv['cantidad'] <= df_inv['minimo']])
-            c_alert.metric("⚠️ Reposición Urgente", f"{criticos} Items", delta="Revisar" if criticos > 0 else "OK")
+            c_alert.metric("⚠️ Reposición Urgente", f"{criticos} Items")
 
     st.divider()
 
+    # DEFINICIÓN DE TABS (Esto es lo que faltaba arriba para que no diera error)
     tab_existencia, tab_compra, tab_mermas, tab_edicion = st.tabs([
         "📋 Stock", "📥 Compra", "📉 Mermas", "🛠️ Modificar/Borrar"
     ])
 
-    # --- TAB 1: STOCK (VISUALIZACIÓN) ---
+    # --- TAB 1: STOCK ---
     with tab_existencia:
         if not df_inv.empty:
-            busqueda = st.text_input("🔍 Buscar material...", placeholder="Ej: Glase, Taza, Vinil...")
+            busqueda = st.text_input("🔍 Buscar material...", placeholder="Ej: Glase, Taza, Vinil...", key="search_bar")
             df_ver = df_inv.copy()
             if busqueda:
                 df_ver = df_ver[df_ver['item'].str.contains(busqueda, case=False)]
 
             df_ver['Costo Reposición'] = df_ver['precio_usd'] * tasa_ver
-            
-            st.dataframe(
-                df_ver,
-                column_config={
-                    "item": "Material",
-                    "cantidad": st.column_config.NumberColumn("Existencia", format="%.2f"),
-                    "unidad": "Und",
-                    "precio_usd": None, 
-                    "Costo Reposición": st.column_config.NumberColumn(f"Costo ({simbolo})", format=f"{simbolo} %.2f"),
-                    "minimo": "Mín."
-                },
-                hide_index=True, use_container_width=True
-            )
+            st.dataframe(df_ver, hide_index=True, use_container_width=True)
         else:
             st.info("No hay materiales en el sistema.")
 
-    # --- TAB 2: CARGA DE COMPRA ---
+    # --- TAB 2: COMPRA ---
     with tab_compra:
         st.subheader("📥 Registro de Factura / Compra")
         with st.form("form_compra_vzla"):
             col1, col2 = st.columns([2, 1])
             nombre_it = col1.text_input("Nombre del Insumo")
             unidad_it = col2.selectbox("Presentación:", ["ml", "Hojas", "Resma", "Unidad", "Metros"])
-
+            
             f1, f2, f3 = st.columns(3)
             monto_fac = f1.number_input("Monto Factura", min_value=0.0)
             moneda_fac = f2.selectbox("Pagado en:", ["USD $", "Bs (BCV)", "Bs (Binance)"])
@@ -367,7 +356,7 @@ if menu == "📦 Inventario":
         st.subheader("📉 Registrar Material Dañado")
         if not df_inv.empty:
             with st.form("form_merma"):
-                item_m = st.selectbox("Seleccionar item:", df_inv['item'].tolist())
+                item_m = st.selectbox("Seleccionar item:", df_inv['item'].tolist(), key="select_merma")
                 cant_m = st.number_input("Cantidad perdida:", min_value=0.1)
                 if st.form_submit_button("🗑️ Descontar Merma"):
                     conn = conectar()
@@ -382,7 +371,7 @@ if menu == "📦 Inventario":
     with tab_edicion:
         st.subheader("🛠️ Maestro de Edición")
         if not df_inv.empty:
-            item_a_editar = st.selectbox("Item a corregir:", df_inv['item'].tolist())
+            item_a_editar = st.selectbox("Item a corregir:", df_inv['item'].tolist(), key="select_master_edit")
             datos_actuales = df_inv[df_inv['item'] == item_a_editar].iloc[0]
 
             with st.form("form_maestro_edit"):
@@ -409,17 +398,14 @@ if menu == "📦 Inventario":
                     cargar_datos_seguros()
                     st.rerun()
 
-                # BOTÓN DE BORRADO DEFINITIVO
                 if col_btn2.form_submit_button("🗑️ ELIMINAR ÍTEM", use_container_width=True):
                     conn = conectar()
                     conn.execute("DELETE FROM inventario WHERE id=?", (datos_actuales['id'],))
                     conn.commit()
                     conn.close()
-                    st.error(f"❌ '{item_a_editar}' ha sido eliminado del sistema.")
+                    st.error(f"❌ Ítem eliminado.")
                     cargar_datos_seguros()
                     st.rerun()
-        else:
-            st.write("Nada que editar.")
 
 elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
@@ -1404,6 +1390,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
