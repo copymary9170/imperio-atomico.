@@ -304,3 +304,265 @@ elif menu == "⚙️ Configuración":
 
     conn.close()
 
+# --- 8. LÓGICA DE CLIENTES ---
+elif menu == "👥 Clientes":
+    st.title("👥 Registro de Clientes")
+
+    busqueda = st.text_input("🔍 Buscar cliente por nombre...", placeholder="Escribe aquí para filtrar...")
+
+    with st.form("form_clientes"):
+        col1, col2 = st.columns(2)
+        nombre_cli = col1.text_input("Nombre del Cliente o Negocio")
+        whatsapp_cli = col2.text_input("WhatsApp (Ej: 04121234567)")
+
+        if st.form_submit_button("✅ Registrar Cliente"):
+            if nombre_cli:
+                c = conectar()
+                c.execute("INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)", (nombre_cli, whatsapp_cli))
+                c.commit()
+                c.close()
+
+                st.success(f"Cliente {nombre_cli} guardado con éxito.")
+                st.rerun()
+            else:
+                st.error("El nombre es obligatorio.")
+
+    c = conectar()
+    query = f"SELECT nombre as 'Nombre', whatsapp as 'WhatsApp' FROM clientes WHERE nombre LIKE '%{busqueda}%'"
+    df_clis = pd.read_sql_query(query, c)
+    c.close()
+
+    if not df_clis.empty:
+        st.subheader("📋 Directorio de Clientes")
+        st.dataframe(df_clis, use_container_width=True, hide_index=True)
+    else:
+        st.info("No se encontraron clientes con ese nombre.")
+
+
+# --- 10. ANALIZADOR MASIVO DE COBERTURA CMYK ---
+elif menu == "🎨 Análisis CMYK":
+    st.title("🎨 Analizador de Cobertura y Costos Reales")
+
+    df_tintas_db = obtener_tintas_disponibles()
+
+    conn = conectar()
+    df_act_db = pd.read_sql_query("SELECT equipo, categoria, desgaste FROM activos", conn)
+    conn.close()
+
+    impresoras_disponibles = [
+        e['equipo'] for e in df_act_db.to_dict('records')
+        if e['categoria'] == "Impresora (Gasta Tinta)"
+    ]
+
+    if not impresoras_disponibles:
+        st.warning("⚠️ No hay impresoras registradas en 'Activos'.")
+        st.stop()
+
+    c_printer, c_file = st.columns([1, 2])
+
+    with c_printer:
+        impresora_sel = st.selectbox("🖨️ Selecciona la Impresora", impresoras_disponibles)
+
+        datos_imp = next((e for e in df_act_db.to_dict('records') if e['equipo'] == impresora_sel), None)
+        costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
+
+        precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
+
+        if not df_tintas_db.empty:
+            tintas_maquina = df_tintas_db[
+                df_tintas_db['item'].str.contains(impresora_sel, case=False, na=False)
+            ]
+
+            if not tintas_maquina.empty:
+                precio_tinta_ml = tintas_maquina['precio_usd'].mean()
+                st.success(f"✅ Precio detectado: ${precio_tinta_ml:.4f}/ml")
+
+    with c_file:
+        archivos_multiples = st.file_uploader(
+            "Sube tus diseños (PDF, JPG, PNG)",
+            type=['pdf', 'png', 'jpg', 'jpeg'],
+            accept_multiple_files=True
+        )
+
+    if archivos_multiples:
+        import fitz
+
+        resultados = []
+        totales_canales = {'c': 0.0, 'm': 0.0, 'y': 0.0, 'k': 0.0}
+        total_paginas_lote = 0
+
+        with st.spinner('🚀 Analizando archivos...'):
+            for arc in archivos_multiples:
+                imagenes = []
+                arc_bytes = arc.read()
+
+                if arc.name.lower().endswith('.pdf'):
+                    doc = fitz.open(stream=arc_bytes, filetype="pdf")
+                    for page_num in range(len(doc)):
+                        page = doc.load_page(page_num)
+                        pix = page.get_pixmap(colorspace=fitz.csCMYK, dpi=150)
+                        img_pil = Image.frombytes("CMYK", [pix.width, pix.height], pix.samples)
+                        imagenes.append((f"{arc.name} (P{page_num+1})", img_pil))
+                else:
+                    img_pil = Image.open(io.BytesIO(arc_bytes)).convert('CMYK')
+                    imagenes.append((arc.name, img_pil))
+
+                for nombre_item, img in imagenes:
+                    total_paginas_lote += 1
+                    datos = np.array(img)
+
+                    c_p, m_p, y_p, k_p = [np.mean(datos[:, :, i]) / 255 for i in range(4)]
+
+                    nombre_low = impresora_sel.lower()
+                    multi = 2.5 if "j210" in nombre_low else (1.8 if "subli" in nombre_low else 1.2)
+
+                    ml_c, ml_m, ml_y, ml_k = [p * 0.15 * multi for p in [c_p, m_p, y_p, k_p]]
+
+                    totales_canales['c'] += ml_c
+                    totales_canales['m'] += ml_m
+                    totales_canales['y'] += ml_y
+                    totales_canales['k'] += ml_k
+
+                    consumo_total = ml_c + ml_m + ml_y + ml_k
+                    costo_tinta = consumo_total * precio_tinta_ml
+                    total_usd = costo_tinta + costo_desgaste
+
+                    resultados.append({
+                        "Archivo": nombre_item,
+                        "ml": round(consumo_total, 4),
+                        "Costo USD": round(total_usd, 4)
+                    })
+
+        if resultados:
+            st.dataframe(pd.DataFrame(resultados), use_container_width=True)
+
+            total_usd_lote = sum(r['Costo USD'] for r in resultados)
+
+            if st.button("📝 ENVIAR TODO A COTIZACIÓN"):
+                st.session_state['datos_pre_cotizacion'] = {
+                    'trabajo': f"Producción {impresora_sel}",
+                    'costo_base': total_usd_lote,
+                    'c_ml': totales_canales['c'],
+                    'm_ml': totales_canales['m'],
+                    'y_ml': totales_canales['y'],
+                    'k_ml': totales_canales['k'],
+                    'unidades': total_paginas_lote
+                }
+                st.toast("Datos listos para cotizar")
+
+
+# --- ACTIVOS ---
+elif menu == "🏗️ Activos":
+
+    if ROL != "Admin":
+        st.error("Acceso Denegado")
+        st.stop()
+
+    st.title("🏗️ Gestión de Activos")
+
+    with st.expander("➕ Registrar Nuevo Equipo"):
+
+        c1, c2 = st.columns(2)
+        nombre_eq = c1.text_input("Nombre del Equipo")
+        categoria = c2.selectbox("Categoría", [
+            "Impresora (Gasta Tinta)",
+            "Maquinaria (Solo Desgaste)",
+            "Herramienta Manual"
+        ])
+
+        monto = st.number_input("Monto Pagado", min_value=0.0)
+
+        vida_util = st.number_input("Vida Útil", min_value=1, value=5000)
+
+        if st.button("Guardar Equipo"):
+            desgaste_u = monto / vida_util
+            conn = conectar()
+            c = conn.cursor()
+
+            c.execute(
+                "INSERT INTO activos (equipo, categoria, inversion, unidad, desgaste) VALUES (?,?,?,?,?)",
+                (nombre_eq, categoria, monto, "uso", desgaste_u)
+            )
+
+            conn.commit()
+            conn.close()
+
+            st.success("Equipo guardado")
+            st.rerun()
+
+
+# --- OTROS PROCESOS ---
+elif menu == "🛠️ Otros Procesos":
+    st.title("🛠️ Calculadora de Procesos Especiales")
+
+    conn = conectar()
+    df_act_db = pd.read_sql_query("SELECT equipo, categoria, unidad, desgaste FROM activos", conn)
+    conn.close()
+
+    otros_equipos = df_act_db[df_act_db['categoria'] != "Impresora (Gasta Tinta)"].to_dict('records')
+
+    if otros_equipos:
+        nombres_eq = [e['equipo'] for e in otros_equipos]
+        eq_sel = st.selectbox("Equipo:", nombres_eq)
+
+        datos_eq = next(e for e in otros_equipos if e['equipo'] == eq_sel)
+
+        cantidad = st.number_input("Cantidad de usos:", min_value=1, value=1)
+
+        if st.button("Calcular"):
+            costo = datos_eq['desgaste'] * cantidad
+            st.metric("Costo Total", f"$ {costo:.2f}")
+
+
+# --- VENTAS ---
+elif menu == "💰 Ventas":
+    st.title("Registro de Ventas")
+
+    with st.form("venta"):
+        cliente = st.selectbox("Cliente", st.session_state.df_cli['nombre'])
+        monto = st.number_input("Monto", min_value=0.0)
+
+        if st.form_submit_button("Guardar"):
+            conn = conectar()
+            conn.execute("INSERT INTO ventas (cliente_id, monto_total) VALUES ((SELECT id FROM clientes WHERE nombre=?),?)", (cliente, monto))
+            conn.commit()
+            conn.close()
+
+            st.success("Venta registrada")
+
+
+# --- GASTOS ---
+elif menu == "📉 Gastos":
+    st.title("Registro de Gastos")
+
+    with st.form("gasto"):
+        desc = st.text_input("Descripción")
+        monto = st.number_input("Monto", min_value=0.0)
+
+        if st.form_submit_button("Guardar"):
+            conn = conectar()
+            conn.execute("INSERT INTO gastos (descripcion, monto) VALUES (?,?)", (desc, monto))
+            conn.commit()
+            conn.close()
+
+            st.success("Gasto registrado")
+
+
+# --- CIERRE DE CAJA ---
+elif menu == "🏁 Cierre de Caja":
+    st.title("Cierre de Caja del Día")
+
+    conn = conectar()
+    v = pd.read_sql("SELECT * FROM ventas", conn)
+    g = pd.read_sql("SELECT * FROM gastos", conn)
+    conn.close()
+
+    total_v = v['monto_total'].sum() if not v.empty else 0
+    total_g = g['monto'].sum() if not g.empty else 0
+
+    st.metric("Ventas", f"$ {total_v:.2f}")
+    st.metric("Gastos", f"$ {total_g:.2f}")
+    st.metric("Balance", f"$ {(total_v-total_g):.2f}")
+
+
+
