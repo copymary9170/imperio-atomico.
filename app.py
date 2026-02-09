@@ -48,7 +48,7 @@ def inicializar_sistema():
         END;
     """)
 
-    # Usuarios iniciales (Solo se insertan si la tabla está vacía)
+    # Usuarios iniciales
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", [
@@ -68,67 +68,62 @@ def inicializar_sistema():
     conn.commit()
     conn.close()
 
-# --- CONTINUACIÓN Y CIERRE DE 3. FUNCIONES DE LÓGICA DE NEGOCIO ---
+# --- 3. FUNCIONES DE LÓGICA DE NEGOCIO ---
 
-def obtener_tintas_disponibles():
-    """Filtra el inventario de forma segura para el Analizador CMYK."""
-    # 1. Verificamos si los datos ya están en memoria
-    if 'df_inv' not in st.session_state:
-        cargar_datos()
-    
-    df = st.session_state.df_inv
-    
-    # 2. Si el DataFrame existe pero está vacío, devolvemos uno vacío con columnas
-    if df is None or df.empty:
-        return pd.DataFrame(columns=['id', 'item', 'cantidad', 'unidad', 'precio_usd'])
-    
-    # 3. Filtramos solo lo que sea tinta (unidad ml)
-    df_copy = df.copy()
-    df_copy['unidad_check'] = df_copy['unidad'].fillna('').str.strip().str.lower()
-    return df_copy[df_copy['unidad_check'] == 'ml']
-
-def actualizar_configuracion(parametro, nuevo_valor):
-    """Guarda cambios de inflación/precios en la DB y sesión."""
+def cargar_datos():
+    """Carga datos de la DB al session_state."""
     try:
         conn = conectar()
-        c = conn.cursor()
-        c.execute("UPDATE configuracion SET valor = ? WHERE parametro = ?", (nuevo_valor, parametro))
-        conn.commit()
+        st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
+        st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+        
+        conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
+        for _, row in conf_df.iterrows():
+            st.session_state[row['parametro']] = row['valor']
         conn.close()
-        # Actualizamos la sesión para que el cambio sea inmediato en los cálculos
-        st.session_state[parametro] = nuevo_valor
-        return True
     except Exception as e:
-        st.error(f"Error al actualizar {parametro}: {e}")
-        return False
+        st.error(f"Error al cargar datos: {e}")
 
-def obtener_activos_impresion():
-    """Retorna las máquinas registradas para el selector del CMYK."""
-    try:
-        conn = conectar()
-        df = pd.read_sql("SELECT equipo, desgaste FROM activos WHERE categoria = 'Impresora (Gasta Tinta)'", conn)
-        conn.close()
-        return df
-    except:
-        return pd.DataFrame(columns=['equipo', 'desgaste'])
+def cargar_datos_seguros():
+    cargar_datos()
+    st.toast("🔄 Datos actualizados", icon="✅")
 
-# --- 4. CONTROL DE FLUJO ---
+def login():
+    """Formulario de acceso."""
+    st.title("⚛️ Imperio Atómico - Acceso")
+    with st.form("login_form"):
+        user = st.text_input("Usuario")
+        pw = st.text_input("Contraseña", type="password")
+        if st.form_submit_button("Entrar", use_container_width=True):
+            conn = conectar()
+            c = conn.cursor()
+            c.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (user, pw))
+            res = c.fetchone()
+            conn.close()
+            if res:
+                st.session_state.autenticado = True
+                st.session_state.rol = res[0]
+                st.session_state.usuario_nombre = res[1]
+                cargar_datos()
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas")
 
-# Inicialización por primera vez
+# --- 4. CONTROL DE FLUJO Y SEGURIDAD ---
+
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
     inicializar_sistema()
 
-# Forzar login si no está autenticado
 if not st.session_state.autenticado:
     login()
     st.stop()
 
-# Carga de datos tras autenticación
+# Garantizar que los datos existan después del login
 if 'df_inv' not in st.session_state:
     cargar_datos()
 
-# Variables Globales de uso frecuente
+# Variables Globales (Inflación)
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "")
@@ -139,23 +134,19 @@ with st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
     st.caption(f"Rol: {ROL}")
     
-    # Visualizador de Tasas (Inflación)
     with st.container(border=True):
         st.write("📈 **Tasas del Día**")
         st.write(f"🏦 BCV: **{t_bcv:.2f}**")
         st.write(f"🔶 Bin: **{t_bin:.2f}**")
 
-    # Lógica de Menú según Rol
     opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
-    
     if ROL in ["Admin", "Administracion"]:
-        opciones += ["💰 Ventas", "📉 Gastos", "📦 Inventario", "📊 Dashboard", "🏗️ Activos", "⚙️ Configuración"]
+        opciones += ["💰 Ventas", "📉 Gastos", "📦 Inventario", "📊 Dashboard", "⚙️ Configuración"]
 
     menu = st.radio("Ir a:", opciones)
-
     st.divider()
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
-        st.session_state.clear() # Limpia todo para seguridad
+        st.session_state.clear()
         st.rerun()
 
 # --- 6. MÓDULO INVENTARIO ---
@@ -1274,6 +1265,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
