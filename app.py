@@ -10,92 +10,66 @@ from PIL import Image
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
 
 # --- 2. MOTOR DE BASE DE DATOS Y FUNCIONES CRÍTICAS ---
-
 def conectar():
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
 def cargar_datos():
-    """Carga datos de la DB al session_state."""
+    """Sincroniza la base de datos con la memoria de la app."""
     try:
         conn = conectar()
         st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
         st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-        
         conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
         for _, row in conf_df.iterrows():
             st.session_state[row['parametro']] = row['valor']
         conn.close()
-    except Exception as e:
+    except:
         st.session_state.df_inv = pd.DataFrame()
         st.session_state.df_cli = pd.DataFrame()
-
-def cargar_datos_seguros():
-    cargar_datos()
-    st.toast("🔄 Sincronización exitosa", icon="✅")
 
 def inicializar_sistema():
     conn = conectar()
     c = conn.cursor()
-    c.execute("PRAGMA foreign_keys = ON")
-
-    # Creación de Tablas
-    c.execute("CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)")
-    c.execute("""CREATE TABLE IF NOT EXISTS inventario (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, 
-                unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)""")
-    c.execute("CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)")
-    c.execute("CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)")
-    c.execute("""CREATE TABLE IF NOT EXISTS ventas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, 
-                metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS gastos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, 
-                categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)""")
-
-    # Usuarios iniciales
-    c.execute("SELECT COUNT(*) FROM usuarios")
-    if c.fetchone()[0] == 0:
-        c.executemany("INSERT INTO usuarios VALUES (?,?,?,?)", [
-            ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio'),
-            ('mama', 'admin2026', 'Administracion', 'Mamá'),
-            ('pro', 'diseno2026', 'Produccion', 'Hermana')
-        ])
-
-    # Configuración de Tasas e Inflación
-    config_init = [
-        ('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('iva_perc', 0.16),
-        ('igtf_perc', 0.03), ('banco_perc', 0.005)
+    # Creación de todas las tablas necesarias para tus secciones
+    tablas = [
+        "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
+        "CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)",
+        "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
+        "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
+        "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, inversion REAL, desgaste REAL)"
     ]
-    for param, valor in config_init:
-        c.execute("INSERT OR IGNORE INTO configuracion (parametro, valor) VALUES (?,?)", (param, valor))
-
+    for tabla in tablas: c.execute(tabla)
+    
+    # Usuario Jefa
+    c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
+    
+    # Tasas iniciales
+    config_init = [('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('costo_tinta_ml', 0.10)]
+    for p, v in config_init: c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
+    
     conn.commit()
     conn.close()
 
 def login():
-    """Formulario de acceso."""
-    st.title("⚛️ Imperio Atómico - Acceso")
-    with st.container(border=True):
-        user = st.text_input("Usuario")
-        pw = st.text_input("Contraseña", type="password")
-        if st.button("Entrar al Imperio", use_container_width=True):
+    st.title("⚛️ Acceso al Imperio Atómico")
+    with st.form("login_form"):
+        u = st.text_input("Usuario")
+        p = st.text_input("Contraseña", type="password")
+        if st.form_submit_button("Entrar"):
             conn = conectar()
-            c = conn.cursor()
-            c.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (user, pw))
-            res = c.fetchone()
+            res = conn.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (u, p)).fetchone()
             conn.close()
             if res:
                 st.session_state.autenticado = True
-                # Si el usuario es 'jefa', forzamos rol Admin por seguridad
-                st.session_state.rol = "Admin" if user == 'jefa' else res[0]
+                st.session_state.rol = "Admin" if u == 'jefa' else res[0]
                 st.session_state.usuario_nombre = res[1]
                 cargar_datos()
                 st.rerun()
-            else:
-                st.error("❌ Credenciales incorrectas")
+            else: st.error("Acceso denegado")
 
 # --- 3. CONTROL DE FLUJO ---
-
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
     inicializar_sistema()
@@ -104,35 +78,24 @@ if not st.session_state.autenticado:
     login()
     st.stop()
 
-if 'df_inv' not in st.session_state:
-    cargar_datos()
+if 'df_inv' not in st.session_state: cargar_datos()
 
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "Produccion")
 
-# --- 4. SIDEBAR (CON PERMISOS COMPLETOS) ---
-
+# --- 4. SIDEBAR (MENÚ COMPLETO) ---
 with st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
-    st.caption(f"Rol: {ROL}")
+    st.info(f"Tasa BCV: {t_bcv} | Bin: {t_bin}")
     
-    with st.container(border=True):
-        st.write("📈 **Tasas del Día**")
-        st.write(f"🏦 BCV: **{t_bcv:.2f}**")
-        st.write(f"🔶 Bin: **{t_bin:.2f}**")
-
-    # Módulos básicos
-    opciones = ["📦 Inventario", "📊 Dashboard", "📝 Cotizaciones", "👥 Clientes"]
-    
-    # Módulos exclusivos de Jefa/Admin
+    # Aquí están todas tus secciones organizadas
+    opciones = ["📝 Cotizaciones", "🎨 Análisis CMYK", "👥 Clientes"]
     if ROL == "Admin":
-        opciones += ["💰 Ventas", "💸 Gastos", "⚙️ Configuración"]
-
-    menu = st.radio("Ir a:", opciones)
+        opciones += ["📦 Inventario", "💰 Ventas", "📉 Gastos", "📊 Dashboard", "🏗️ Activos", "⚙️ Configuración", "📑 Auditoría", "💰 Cierre de Caja"]
     
-    st.divider()
-    if st.button("🚪 Cerrar Sesión", use_container_width=True):
+    menu = st.radio("Secciones:", opciones)
+    if st.button("Cerrar Sesión"):
         st.session_state.clear()
         st.rerun()
 
@@ -1252,6 +1215,7 @@ elif menu == "📝 Cotizaciones":
         if 'datos_pre_cotizacion' in st.session_state:
             del st.session_state['datos_pre_cotizacion']
         st.rerun()
+
 
 
 
