@@ -564,5 +564,203 @@ elif menu == "🏁 Cierre de Caja":
     st.metric("Gastos", f"$ {total_g:.2f}")
     st.metric("Balance", f"$ {(total_v-total_g):.2f}")
 
+# --- 7. COTIZACIONES ---
+elif menu == "📝 Cotizaciones":
+
+    st.title("📝 Cotizador de Trabajos")
+
+    datos_pre = st.session_state.get('datos_pre_cotizacion', {
+        'trabajo': "Trabajo General",
+        'costo_base': 0.0,
+        'c_ml': 0.0,
+        'm_ml': 0.0,
+        'y_ml': 0.0,
+        'k_ml': 0.0,
+        'unidades': 1
+    })
+
+    with st.container(border=True):
+
+        st.subheader("🛠️ Detalles del Trabajo")
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            descr = st.text_input("Descripción del trabajo:", value=datos_pre['trabajo'])
+
+            df_clis = st.session_state.get('df_cli', pd.DataFrame())
+
+            if not df_clis.empty:
+                opciones_cli = {row['nombre']: row['id'] for _, row in df_clis.iterrows()}
+                cliente_sel = st.selectbox("👤 Asignar a Cliente:", opciones_cli.keys())
+                id_cliente = opciones_cli[cliente_sel]
+            else:
+                st.warning("⚠️ No hay clientes registrados.")
+                st.stop()
+
+        with col2:
+            unidades = st.number_input(
+                "Cantidad de piezas:",
+                min_value=1,
+                value=int(datos_pre['unidades'])
+            )
+
+    # --- CONSUMO DE TINTAS ---
+    st.subheader("💉 Despacho de Insumos por Color")
+
+    df_tintas = obtener_tintas_disponibles()
+    consumos_reales = {}
+
+    if not df_tintas.empty:
+
+        dict_t = {
+            f"{r['item']} ({r['cantidad']:.1f} ml)": r['id']
+            for _, r in df_tintas.iterrows()
+        }
+
+        if any([datos_pre['c_ml'], datos_pre['m_ml'], datos_pre['y_ml'], datos_pre['k_ml']]):
+
+            st.info("🎨 Se detectó análisis CMYK. Asigne las botellas físicas:")
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            with c1:
+                t_c = st.selectbox("Cian (C)", dict_t.keys())
+                consumos_reales[dict_t[t_c]] = datos_pre['c_ml'] * unidades
+
+            with c2:
+                t_m = st.selectbox("Magenta (M)", dict_t.keys())
+                consumos_reales[dict_t[t_m]] = datos_pre['m_ml'] * unidades
+
+            with c3:
+                t_y = st.selectbox("Amarillo (Y)", dict_t.keys())
+                consumos_reales[dict_t[t_y]] = datos_pre['y_ml'] * unidades
+
+            with c4:
+                t_k = st.selectbox("Negro (K)", dict_t.keys())
+                consumos_reales[dict_t[t_k]] = datos_pre['k_ml'] * unidades
+
+        else:
+            st.warning("⚠️ Sin datos CMYK, asignación manual:")
+
+            t_gen = st.selectbox("Seleccione Insumo:", ["Ninguno"] + list(dict_t.keys()))
+
+            if t_gen != "Ninguno":
+                ml_manual = st.number_input("ML totales a descontar:", min_value=0.0)
+                consumos_reales[dict_t[t_gen]] = ml_manual
+
+    else:
+        st.error("🚨 No hay tintas registradas en inventario.")
+
+    # --- COSTOS Y PRECIOS ---
+    st.subheader("💰 Costos y Precios")
+
+    c1, c2 = st.columns(2)
+
+    costo_unitario_base = c1.number_input(
+        "Costo Unit. Base ($)",
+        value=float(datos_pre['costo_base'] / unidades if unidades > 0 else 0.0),
+        format="%.4f"
+    )
+
+    margen = c2.slider("Margen de Ganancia %", 10, 500, 100, 10)
+
+    costo_total_prod = costo_unitario_base * unidades
+    precio_venta_total = costo_total_prod * (1 + (margen / 100))
+
+    st.divider()
+
+    v1, v2, v3 = st.columns(3)
+
+    v1.metric("Costo Producción", f"$ {costo_total_prod:.2f}")
+    v2.metric("Precio Venta Total", f"$ {precio_venta_total:.2f}")
+    v3.metric("Total Bs (BCV)", f"Bs {(precio_venta_total * t_bcv):,.2f}")
+
+    # --- PROCESAR VENTA ---
+    st.divider()
+
+    metodo_pago = st.selectbox(
+        "💳 Cobro vía:",
+        ["Efectivo $", "Zelle", "Pago Móvil", "Transferencia Bs", "Binance"]
+    )
+
+    llave_operacion = f"{id_cliente}_{precio_venta_total}_{unidades}_{descr}"
+
+    if st.button("🚀 CONFIRMAR VENTA Y DESCONTAR INVENTARIO"):
+
+        if not consumos_reales:
+            st.error("Debe asignar insumos a descontar")
+        else:
+            exito, msg = procesar_venta_grafica_completa(
+                id_cliente=id_cliente,
+                monto=precio_venta_total,
+                metodo=metodo_pago,
+                consumos_dict=consumos_reales
+            )
+
+            if exito:
+                st.success(msg)
+                cargar_datos_seguros()
+                st.rerun()
+            else:
+                st.error(msg)
+
+    if st.button("🗑️ Cancelar Todo"):
+        if 'datos_pre_cotizacion' in st.session_state:
+            del st.session_state['datos_pre_cotizacion']
+        st.rerun()
+
+
+# --- 13. AUDITORÍA Y MÉTRICAS ---
+elif menu == "📊 Auditoría y Métricas":
+
+    st.title("📊 Auditoría de Producción e Insumos")
+
+    conn = conectar()
+
+    query_movs = """
+        SELECT 
+            m.fecha,
+            i.item AS nombre_item,
+            m.cantidad,
+            i.unidad,
+            m.tipo
+        FROM inventario_movs m
+        JOIN inventario i ON m.item_id = i.id
+        ORDER BY m.fecha DESC
+    """
+
+    df_movs = pd.read_sql_query(query_movs, conn)
+    conn.close()
+
+    tab1, tab2 = st.tabs(["🧪 Consumo de Tinta", "📈 Flujo General"])
+
+    with tab1:
+
+        st.subheader("Consumo de Tintas")
+
+        if not df_movs.empty:
+
+            df_salidas = df_movs[df_movs['tipo'] == 'SALIDA']
+
+            if not df_salidas.empty:
+
+                resumen = df_salidas.groupby("nombre_item")["cantidad"].sum().reset_index()
+
+                st.bar_chart(data=resumen, x="nombre_item", y="cantidad")
+
+                st.subheader("Detalle")
+                st.dataframe(df_salidas, use_container_width=True)
+
+            else:
+                st.info("No hay consumos registrados aún.")
+        else:
+            st.info("No hay movimientos registrados.")
+
+    with tab2:
+        st.subheader("Historial Completo")
+        st.dataframe(df_movs, use_container_width=True)
+
+
 
 
