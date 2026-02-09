@@ -70,59 +70,51 @@ def inicializar_sistema():
 
 # --- CONTINUACIÓN DE 3. FUNCIONES DE LÓGICA DE NEGOCIO ---
 
-def obtener_tintas_disponibles():
-    """Filtra el inventario para obtener solo lo que es tinta (unidad ml)."""
-    if 'df_inv' not in st.session_state or st.session_state.df_inv.empty:
-        cargar_datos()
-    
-    df = st.session_state.df_inv.copy()
-    if not df.empty:
-        # Limpiamos espacios y pasamos a minúsculas para comparar bien
-        df['unidad_check'] = df['unidad'].fillna('').str.strip().str.lower()
-        return df[df['unidad_check'] == 'ml'].copy()
-    return pd.DataFrame()
-
-def cargar_datos_seguros():
-    """Recarga datos y avisa al usuario."""
-    cargar_datos()
-    st.toast("🔄 Datos sincronizados con la base de datos")
-
-def procesar_venta_completa(id_cliente, monto, metodo, items_a_descontar):
-    """
-    Registra la venta y descuenta el inventario en una sola transacción.
-    items_a_descontar: diccionario {id_item: cantidad_a_restar}
-    """
+def actualizar_configuracion(parametro, nuevo_valor):
+    """Actualiza valores como tasas o precio de tinta en la DB y sesión."""
     try:
         conn = conectar()
         c = conn.cursor()
-        
-        # 1. Registrar la venta en la tabla ventas
-        c.execute("""
-            INSERT INTO ventas (cliente_id, monto_total, metodo) 
-            VALUES (?, ?, ?)
-        """, (id_cliente, monto, metodo))
-        
-        venta_id = c.lastrowid
-
-        # 2. Descontar cada item y registrar el movimiento de auditoría
-        for item_id, cant in items_a_descontar.items():
-            # El trigger prevent_negative_stock saltará si intentas gastar más de lo que hay
-            c.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE id = ?", (cant, item_id))
-            
-            c.execute("""
-                INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-                VALUES (?, 'SALIDA', ?, ?, ?)
-            """, (item_id, cant, f"Venta #{venta_id}", st.session_state.usuario_nombre))
-
+        c.execute("UPDATE configuracion SET valor = ? WHERE parametro = ?", (nuevo_valor, parametro))
         conn.commit()
         conn.close()
-        cargar_datos() # Refrescamos la memoria de la app
-        return True, f"✅ Venta #{venta_id} procesada y stock actualizado."
-    
-    except sqlite3.Error as e:
-        if "Stock insuficiente" in str(e):
-            return False, "❌ Error: No tienes suficiente material en inventario."
-        return False, f"❌ Error en base de datos: {e}"
+        # Actualizamos la sesión para que el cambio sea instantáneo
+        st.session_state[parametro] = nuevo_valor
+        return True
+    except Exception as e:
+        st.error(f"Error al actualizar configuración: {e}")
+        return False
+
+def obtener_activos_impresion():
+    """Retorna una lista de equipos que generan gasto de tinta/desgaste."""
+    conn = conectar()
+    df = pd.read_sql("SELECT equipo, desgaste FROM activos WHERE categoria = 'Impresora (Gasta Tinta)'", conn)
+    conn.close()
+    return df
+
+def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo):
+    """Registra entradas o salidas manuales (fuera de ventas)."""
+    try:
+        conn = conectar()
+        c = conn.cursor()
+        # Actualizar cantidad
+        operador = "+" if tipo == "ENTRADA" else "-"
+        c.execute(f"UPDATE inventario SET cantidad = cantidad {operador} ? WHERE id = ?", (cantidad, item_id))
+        
+        # Registrar auditoría
+        c.execute("""
+            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+            VALUES (?, ?, ?, ?, ?)
+        """, (item_id, tipo, cantidad, motivo, st.session_state.usuario_nombre))
+        
+        conn.commit()
+        conn.close()
+        cargar_datos()
+        return True
+    except Exception as e:
+        st.error(f"Error en movimiento: {e}")
+        return False
+
 # --- 4. CONTROL DE FLUJO ---
 
 # Inicialización por primera vez
@@ -1094,6 +1086,7 @@ elif menu == "📊 Auditoría y Métricas":
                     st.error(f"**{row['item']}** bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
             else:
                 st.success("✅ Niveles de inventario óptimos.")
+
 
 
 
