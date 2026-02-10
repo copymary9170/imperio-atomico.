@@ -148,7 +148,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-ifif menu == "📦 Inventario":
+if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Suministros")
     
     df_inv = st.session_state.get('df_inv', pd.DataFrame())
@@ -1212,6 +1212,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
