@@ -1317,83 +1317,88 @@ elif menu == "📝 Cotizaciones":
                 st.error(msg)
 
 
-if st.form_submit_button("✅ PROCESAR VENTA Y DESCONTAR STOCK"):
-                if cantidad_v > 0:
-                    # 1. Operación en Base de Datos
+if menu == "🛒 Venta Directa":
+    st.title("🛒 Venta de Materiales e Insumos")
+    
+    # 1. Verificamos si hay inventario
+    if not st.session_state.df_inv.empty:
+        # Filtramos solo items que tengan stock real
+        items_con_stock = st.session_state.df_inv[st.session_state.df_inv['cantidad'] > 0]
+        
+        if not items_con_stock.empty:
+            with st.container(border=True):
+                col1, col2 = st.columns([2, 1])
+                prod_sel = col1.selectbox("Seleccionar Material", items_con_stock['item'].tolist())
+                datos_p = items_con_stock[items_con_stock['item'] == prod_sel].iloc[0]
+                col2.metric("Disponible", f"{datos_p['cantidad']:.2f} {datos_p['unidad']}")
+
+            with st.form("form_venta_prima"):
+                c1, c2, c3 = st.columns(3)
+                cant_v = c1.number_input("Cantidad", min_value=0.01, max_value=float(datos_p['cantidad']))
+                margen_v = c2.number_input("Margen %", value=30.0)
+                metodo_p = c3.selectbox("Pago", ["Efectivo $", "Pago Móvil", "Zelle", "Binance"])
+
+                st.write("---")
+                i1, i2, i3 = st.columns(3)
+                u_iva = i1.checkbox(f"IVA ({st.session_state.get('iva_perc', 16)}%)")
+                u_igtf = i2.checkbox(f"IGTF ({st.session_state.get('igtf_perc', 3)}%)")
+                u_ban = i3.checkbox(f"Banco ({st.session_state.get('banco_perc', 0.5)}%)")
+
+                # Cálculos
+                t_imp = (st.session_state.iva_perc if u_iva else 0) + (st.session_state.igtf_perc if u_igtf else 0) + (st.session_state.banco_perc if u_ban else 0)
+                subtotal = (cant_v * datos_p['precio_usd']) * (1 + (margen_v/100))
+                total_usd = subtotal * (1 + (t_imp/100))
+                
+                tasa = st.session_state.tasa_binance if metodo_p == "Binance" else st.session_state.tasa_bcv
+                total_bs = total_usd * tasa
+
+                st.subheader(f"Total: ${total_usd:.2f} / {total_bs:.2f} Bs.")
+
+                if st.form_submit_button("✅ PROCESAR VENTA"):
                     conn = conectar()
                     cursor = conn.cursor()
-                    try:
-                        # Restar del inventario
-                        cursor.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cantidad_v, prod_sel))
-                        
-                        # Registrar la venta
-                        cursor.execute("INSERT INTO ventas (monto_total, metodo) VALUES (?, ?)", (total_final_usd, metodo_p))
-                        
-                        conn.commit()
-                        conn.close()
-                        
-                        # 2. Preparar el Ticket para mostrar al usuario
-                        st.session_state.ultimo_ticket = {
-                            "nro": "V-" + str(int(time.time())), # ID único temporal
-                            "producto": prod_sel,
-                            "cantidad": f"{cantidad_v} {datos_p['unidad']}",
-                            "precio_u": f"${(total_final_usd/cantidad_v):.2f}",
-                            "total_usd": total_final_usd,
-                            "total_bs": total_final_bs,
-                            "metodo": metodo_p,
-                            "fecha": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-                        }
-                        
-                        cargar_datos() # Sincronizar memoria
-                        st.success("¡Venta procesada con éxito!")
-                    except Exception as e:
-                        st.error(f"Error al procesar: {e}")
-                else:
-                    st.error("La cantidad debe ser mayor a 0")
+                    cursor.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cant_v, prod_sel))
+                    cursor.execute("INSERT INTO ventas (monto_total, metodo) VALUES (?, ?)", (total_usd, metodo_p))
+                    conn.commit()
+                    conn.close()
+                    
+                    # Guardamos el ticket en memoria
+                    st.session_state.ultimo_ticket = {
+                        "nro": int(time.time()),
+                        "item": prod_sel,
+                        "cant": f"{cant_v} {datos_p['unidad']}",
+                        "usd": total_usd,
+                        "bs": total_bs,
+                        "pago": metodo_p
+                    }
+                    cargar_datos()
+                    st.rerun()
+        else:
+            st.warning("No hay productos con stock disponible.")
+    else:
+        st.info("El inventario está vacío.")
 
-    # --- 3. MOSTRAR EL TICKET (Si existe uno reciente) ---
+    # --- BLOQUE DE TICKET (Fuera del Formulario, dentro del Menú) ---
     if 'ultimo_ticket' in st.session_state:
-        st.markdown("---")
-        with st.container(border=True):
-            t = st.session_state.ultimo_ticket
-            st.subheader("📄 Ticket de Venta")
-            
-            ticket_txt = f"""
+        st.divider()
+        with st.expander("📄 VER ÚLTIMO TICKET GENERADO", expanded=True):
+            tk = st.session_state.ultimo_ticket
+            txt = f"""
             IMPERIO ATÓMICO - RECIBO
-            ------------------------------
-            Ticket Nro: {t['nro']}
-            Fecha: {t['fecha']}
-            ------------------------------
-            Prod: {t['producto']}
-            Cant: {t['cantidad']}
-            Precio Unit: {t['precio_u']}
-            ------------------------------
-            TOTAL USD: ${t['total_usd']:.2f}
-            TOTAL BS:  {t['total_bs']:.2f} Bs.
-            Método: {t['metodo']}
-            ------------------------------
-            ¡Gracias por su compra!
+            ---------------------------
+            Ticket: #{tk['nro']}
+            Producto: {tk['item']}
+            Cantidad: {tk['cant']}
+            ---------------------------
+            TOTAL USD: ${tk['usd']:.2f}
+            TOTAL BS:  {tk['bs']:.2f}
+            Método: {tk['pago']}
+            ---------------------------
             """
-            st.code(ticket_txt) # Se ve como un ticket real
-            
-            c1, c2 = st.columns(2)
-            if c1.button("Nuevo Ticket (Limpiar)"):
+            st.code(txt)
+            if st.button("Limpiar Pantalla"):
                 del st.session_state.ultimo_ticket
                 st.rerun()
-            
-            c2.download_button(
-                label="📥 Descargar Ticket",
-                data=ticket_txt,
-                file_name=f"ticket_{t['nro']}.txt",
-                mime="text/plain"
-            )
-
-
-
-
-
-
-
 
 
 
