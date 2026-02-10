@@ -686,98 +686,81 @@ elif menu == "🎨 Análisis CMYK":
                     'consumos': totales_lote_cmyk # Guardamos el desglose para descontar inventario luego
                 }
                 st.success("✅ Datos enviados. Ahora ve al menú de Cotizaciones.")
-# --- 9. LÓGICA DE ACTIVOS (EQUIPOS Y MAQUINARIA) - VERSIÓN IMPERIO ---
+# --- 9. LÓGICA DE ACTIVOS CATEGORIZADOS (MAQUINARIA, HERRAMIENTAS, REPUESTOS) ---
 elif menu == "🏗️ Activos":
 
     if ROL != "Admin":
-        st.error("🚫 Acceso Denegado. Solo la Jefa puede gestionar los activos del Imperio.")
+        st.error("🚫 Acceso Denegado.")
         st.stop()
 
-    st.title("🏗️ Gestión de Activos y Equipos")
+    st.title("🏗️ Gestión de Activos del Imperio")
     
-    # Métricas rápidas de inversión
-    conn = conectar()
-    df_activos = pd.read_sql_query("SELECT * FROM activos", conn)
-    conn.close()
-    
-    if not df_activos.empty:
-        total_inv = df_activos['inversion'].sum()
-        st.metric("Inversión Total en Maquinaria", f"$ {total_inv:,.2f}")
-
-    st.info("💡 Registra aquí tus máquinas. El 'Costo por Uso' ayudará a la calculadora a cobrar el desgaste de la máquina y ahorrar para la próxima.")
-
-    # --- FORMULARIO DE REGISTRO ---
-    with st.expander("➕ Registrar Nuevo Equipo o Herramienta"):
-        with st.form("form_activos"):
+    # --- 1. REGISTRO CATEGORIZADO ---
+    with st.expander("➕ Registrar Nuevo Activo"):
+        with st.form("form_activos_pro"):
             c1, c2 = st.columns(2)
-            nombre_eq = c1.text_input("Nombre del Equipo (Ej: Cameo 5 - Carro 1)")
-            categoria = c2.selectbox("Categoría", [
-                "Impresora (Gasta Tinta/Cabezal)",
-                "Plotter de Corte (Gasta Cuchilla/Motor)",
-                "Prensa Térmica (Gasta Resistencia)",
-                "Herramienta Manual (Larga duración)",
-                "Mobiliario / Otros"
+            nombre_eq = c1.text_input("Nombre del Activo (Ej: Cameo 5, Prensa, Cabezal)")
+            
+            # SECCIÓN DE CATEGORÍA DETERMINANTE
+            tipo_seccion = c2.selectbox("Tipo de Activo", [
+                "Maquinaria (Equipos Grandes)", 
+                "Herramienta Manual (Uso diario)", 
+                "Repuesto Crítico (Stock de seguridad)"
             ])
 
-            col_m1, col_m2 = st.columns(2)
-            monto_inv = col_m1.number_input("Inversión / Costo Adquisición ($)", min_value=0.0, format="%.2f")
-            # Ajustamos la vida útil por defecto según el tipo
-            vida_util_estimada = col_m2.number_input("Vida Útil Estimada (Cant. de usos/trabajos)", min_value=1, value=2000)
+            col_m1, col_m2, col_m3 = st.columns(3)
+            monto_inv = col_m1.number_input("Inversión ($)", min_value=0.0)
+            vida_util = col_m2.number_input("Vida Útil (Usos)", min_value=1, value=1000)
+            categoria_especifica = col_m3.selectbox("Categoría", ["Corte", "Impresión", "Calor", "Mobiliario", "Mantenimiento"])
 
-            st.caption("ℹ️ El sistema dividirá la inversión entre la vida útil para recuperar tu dinero poco a poco.")
-
-            if st.form_submit_button("🚀 Guardar en el Imperio"):
+            if st.form_submit_button("🚀 Guardar en Sección"):
                 if nombre_eq and monto_inv > 0:
-                    desgaste_u = monto_inv / vida_util_estimada
-                    
+                    desgaste_u = monto_inv / vida_util
                     conn = conectar()
-                    try:
-                        c = conn.cursor()
-                        c.execute(
-                            "INSERT INTO activos (equipo, categoria, inversion, unidad, desgaste) VALUES (?,?,?,?,?)",
-                            (nombre_eq, categoria, monto_inv, "uso", desgaste_u)
-                        )
-                        conn.commit()
-                        st.success(f"✅ {nombre_eq} registrado. Costo de amortización: ${desgaste_u:.4f} por trabajo.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
-                    finally:
-                        conn.close()
-                else:
-                    st.error("⚠️ Datos incompletos.")
+                    conn.execute(
+                        "INSERT INTO activos (equipo, categoria, inversion, unidad, desgaste) VALUES (?,?,?,?,?)",
+                        (f"[{tipo_seccion[:3].upper()}] {nombre_eq}", categoria_especifica, monto_inv, tipo_seccion, desgaste_u)
+                    )
+                    conn.commit(); conn.close()
+                    st.success(f"✅ Registrado en {tipo_seccion}")
+                    st.rerun()
 
-    # --- VISTA DE ACTIVOS EXISTENTES ---
+    # --- 2. VISUALIZACIÓN POR SECCIONES (TABS) ---
     st.divider()
-    if not df_activos.empty:
-        # Mostramos la tabla con mejor formato
-        df_ver = df_activos.copy().rename(columns={
-            'equipo': 'Nombre',
-            'categoria': 'Tipo de Activo',
-            'inversion': 'Costo Compra ($)',
-            'desgaste': 'Costo Recuperación x Uso ($)'
-        })
-        
-        st.dataframe(
-            df_ver.style.format({'Costo Compra ($)': '{:.2f}', 'Costo Recuperación x Uso ($)': '{:.4f}'}), 
-            use_container_width=True, 
-            hide_index=True
-        )
-        
-        # Opción para dar de baja
-        c_del1, c_del2 = st.columns([3,1])
-        with c_del1:
-            id_borrar = st.selectbox("Selecciona equipo para retirar del sistema:", df_activos['id'].tolist(), 
-                                       format_func=lambda x: df_activos[df_activos['id']==x]['equipo'].values[0])
-        with c_del2:
-            if st.button("🗑️ Eliminar", type="primary", use_container_width=True):
-                conn = conectar()
-                conn.execute("DELETE FROM activos WHERE id = ?", (id_borrar,))
-                conn.commit()
-                conn.close()
-                st.rerun()
+    t1, t2, t3, t4 = st.tabs(["📟 Maquinaria", "🛠️ Herramientas", "🔄 Repuestos", "📊 Resumen Global"])
+
+    conn = conectar()
+    df = pd.read_sql_query("SELECT * FROM activos", conn)
+    conn.close()
+
+    if not df.empty:
+        with t1:
+            st.subheader("Equipos y Maquinaria Principal")
+            df_maq = df[df['unidad'].str.contains("Maquinaria")]
+            st.dataframe(df_maq[['equipo', 'categoria', 'inversion', 'desgaste']], use_container_width=True, hide_index=True)
+
+        with t2:
+            st.subheader("Herramientas Manuales y Accesorios")
+            df_her = df[df['unidad'].str.contains("Herramienta")]
+            st.dataframe(df_her[['equipo', 'categoria', 'inversion', 'desgaste']], use_container_width=True, hide_index=True)
+
+        with t3:
+            st.subheader("Repuestos y Componentes Críticos")
+            df_rep = df[df['unidad'].str.contains("Repuesto")]
+            st.dataframe(df_rep[['equipo', 'categoria', 'inversion', 'desgaste']], use_container_width=True, hide_index=True)
+
+        with t4:
+            c_inv, c_des = st.columns(2)
+            c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
+            c_des.metric("Equipos Registrados", len(df))
+            
+            # Gráfico de distribución
+            import plotly.express as px
+            fig = px.bar(df, x='equipo', y='inversion', color='categoria', title="Valor por Activo")
+            st.plotly_chart(fig, use_container_width=True)
+
     else:
-        st.info("Aún no tienes activos registrados.")
+        st.info("No hay activos registrados aún.")
 # --- 11. OTROS PROCESOS (LAMINADO, CORTE, PLANCHADO) ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
@@ -1292,6 +1275,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
