@@ -156,6 +156,7 @@ if menu == "📦 Inventario":
     # --- 1. INDICADORES (Dashboard superior) ---
     if not df_inv.empty:
         t_ref = st.session_state.get('tasa_bcv', 36.5)
+        t_bin = st.session_state.get('tasa_binance', 38.0)
         with st.container(border=True):
             c_val, c_alert, c_salud = st.columns(3)
             v_inv = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
@@ -166,7 +167,7 @@ if menu == "📦 Inventario":
             c_salud.metric("Salud Almacén", f"{salud:.0f}%")
 
     # --- 2. PESTAÑAS DE OPERACIÓN ---
-    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "🔧 Ajustes", "📊 Análisis"])
+    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "🧮 Calculadora", "🔧 Ajustes", "📊 Análisis"])
 
     with tabs[0]: # EXISTENCIAS
         if not df_inv.empty:
@@ -174,10 +175,7 @@ if menu == "📦 Inventario":
             busq = c1.text_input("🔍 Buscar material...", placeholder="Ej: Taza, Vinil, Tinta...")
             moneda_v = c2.selectbox("Ver precios en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="view_mon")
             
-            if "BCV" in moneda_v: t_v = st.session_state.get('tasa_bcv', 36.5)
-            elif "Binance" in moneda_v: t_v = st.session_state.get('tasa_binance', 38.0)
-            else: t_v = 1.0
-            
+            t_v = t_ref if "BCV" in moneda_v else (t_bin if "Binance" in moneda_v else 1.0)
             simbolo = "$" if "USD" in moneda_v else "Bs"
             bajos = c3.checkbox("🚨 Solo Stock Bajo")
             
@@ -201,7 +199,15 @@ if menu == "📦 Inventario":
                 hide_index=True, use_container_width=True
             )
 
-    with tabs[1]: # COMPRA (Lógica unificada con Impuesto del Banco)
+            # --- ALERTAS VISUALES ---
+            if not crit_df.empty:
+                st.markdown("---")
+                st.error("🚨 **INSUMOS POR AGOTARSE:**")
+                cols = st.columns(4)
+                for i, row in crit_df.reset_index().iterrows():
+                    cols[i % 4].warning(f"**{row['item']}**\n\nQuedan: {row['cantidad']} {row['unidad']}")
+
+    with tabs[1]: # COMPRA (IVA, IGTF, BANCO)
         st.subheader("📥 Entrada de Mercancía Detallada")
         with st.form("form_compra_v12"):
             c_nom, c_und = st.columns([2, 1])
@@ -215,7 +221,6 @@ if menu == "📦 Inventario":
             cant_rec = f3.number_input(f"Cantidad Total en {und}", min_value=0.001)
 
             st.markdown("⚖️ **Impuestos y Comisiones**")
-            # Extraemos valores de configuración (IVA, IGTF y BANCO)
             val_iva = st.session_state.get('iva_config', 16.0) 
             val_igtf = st.session_state.get('igtf_config', 3.0)
             val_banco = st.session_state.get('tasa_banco_config', 0.5) 
@@ -225,69 +230,61 @@ if menu == "📦 Inventario":
             aplicar_igtf = c_imp2.checkbox(f"IGTF ({val_igtf}%)")
             aplicar_banco = c_imp3.checkbox(f"Banco ({val_banco}%)")
 
-            st.markdown("🚚 **Otros Gastos Logísticos**")
+            st.markdown("🚚 **Gastos Logísticos**")
             g2, g3 = st.columns(2)
-            delivery = g2.number_input("Delivery / Envío ($)", value=0.0, step=0.5)
-            pasajes = g3.number_input("Pasajes / Viáticos ($)", value=0.0, step=0.5)
+            delivery = g2.number_input("Delivery ($)", value=0.0, step=0.5)
+            pasajes = g3.number_input("Pasajes ($)", value=0.0, step=0.5)
 
             if st.form_submit_button("💾 REGISTRAR COMPRA", use_container_width=True):
                 if nombre and cant_rec > 0:
-                    # Selección de tasa de cambio automática
-                    if "BCV" in moneda_fac: t_c = st.session_state.get('tasa_bcv', 36.5)
-                    elif "Binance" in moneda_fac: t_c = st.session_state.get('tasa_binance', 38.0)
-                    else: t_c = 1.0
-                    
-                    # Sumatoria de impuestos seleccionados
-                    porcentaje_total = 0.0
-                    if aplicar_iva: porcentaje_total += val_iva
-                    if aplicar_igtf: porcentaje_total += val_igtf
-                    if aplicar_banco: porcentaje_total += val_banco
+                    t_c = t_ref if "BCV" in moneda_fac else (t_bin if "Binance" in moneda_fac else 1.0)
+                    porcentaje_total = (val_iva if aplicar_iva else 0) + (val_igtf if aplicar_igtf else 0) + (val_banco if aplicar_banco else 0)
 
-                    # Cálculo de costo real unitario en USD
                     base_usd = monto_neto / t_c
                     con_imp = base_usd * (1 + (porcentaje_total / 100))
-                    costo_real_usd = con_imp + delivery + pasajes
-                    c_u_nuevo = costo_real_usd / cant_rec
+                    c_u_nuevo = (con_imp + delivery + pasajes) / cant_rec
 
                     conn = conectar()
                     try:
                         old = conn.execute("SELECT cantidad, precio_usd FROM inventario WHERE LOWER(item)=LOWER(?)", (nombre,)).fetchone()
-                        
-                        # Promedio Ponderado de precios
-                        if old:
-                            p_final = ((old[0] * old[1]) + (cant_rec * c_u_nuevo)) / (old[0] + cant_rec)
-                        else:
-                            p_final = c_u_nuevo
-
+                        p_final = ((old[0] * old[1]) + (cant_rec * c_u_nuevo)) / (old[0] + cant_rec) if old else c_u_nuevo
                         conn.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
                                      VALUES (?,?,?,?,5) ON CONFLICT(item) DO UPDATE SET 
                                      cantidad=cantidad+?, precio_usd=?""", (nombre, cant_rec, und, p_final, cant_rec, p_final))
-                        
                         conn.commit()
-                        st.success(f"✅ ¡Hecho! {nombre} actualizado. Costo unitario real: ${c_u_nuevo:.4f}")
-                        cargar_datos_seguros(); st.rerun()
+                        st.success(f"✅ Registrado. Costo real: ${c_u_nuevo:.4f}"); cargar_datos_seguros(); st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
                     finally: conn.close()
 
-    with tabs[2]: # AJUSTES
+    with tabs[2]: # 🧮 CALCULADORA DE TRABAJO
+        st.subheader("🧮 Estimador de Costos de Material")
+        if not df_inv.empty:
+            c_sel, c_cant = st.columns([2,1])
+            insumo_p = c_sel.selectbox("Selecciona Insumo", df_inv['item'].tolist())
+            cant_p = c_cant.number_input("Cantidad a usar", min_value=0.01)
+            
+            datos_i = df_inv[df_inv['item'] == insumo_p].iloc[0]
+            costo_estimado = cant_p * datos_i['precio_usd']
+            
+            st.metric("Costo de este material", f"$ {costo_estimado:.4f}")
+            st.info(f"Basado en costo actual de: ${datos_i['precio_usd']:.4f} por {datos_i['unidad']}")
+
+    with tabs[3]: # AJUSTES
         st.subheader("🔧 Ajuste de Stock Físico")
         if not df_inv.empty:
             with st.form("ajuste_final"):
                 it_aj = st.selectbox("Insumo a corregir", df_inv['item'].tolist())
-                c_real = st.number_input("Cantidad Real en Estante", min_value=0.0)
-                motivo = st.text_input("Motivo (Ej: Merma, daño, error)")
+                c_real = st.number_input("Cantidad Real", min_value=0.0)
                 if st.form_submit_button("🔨 APLICAR CORRECCIÓN"):
                     conn = conectar()
                     conn.execute("UPDATE inventario SET cantidad=? WHERE item=?", (c_real, it_aj))
-                    conn.commit(); conn.close()
-                    st.warning(f"Stock de {it_aj} actualizado."); cargar_datos_seguros(); st.rerun()
+                    conn.commit(); conn.close(); st.rerun()
 
-    with tabs[3]: # ANÁLISIS
+    with tabs[4]: # ANÁLISIS
         if not df_inv.empty:
             st.subheader("📊 Capital Invertido por Insumo (USD)")
             df_inv['Capital'] = df_inv['cantidad'] * df_inv['precio_usd']
             st.bar_chart(df_inv.nlargest(10, 'Capital'), x="item", y="Capital")
-            st.caption("Gráfico de los 10 materiales con mayor valor monetario.")
 # --- AQUÍ TERMINA EL BLOQUE DE INVENTARIO Y SIGUE EL RESTO ---
 elif menu == "📊 Dashboard":
 
@@ -1208,6 +1205,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
