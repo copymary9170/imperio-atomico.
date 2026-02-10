@@ -11,61 +11,101 @@ from datetime import datetime
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
 
 # --- 2. MOTOR DE BASE DE DATOS Y FUNCIONES CRÍTICAS ---
+# --- 2. MOTOR DE BASE DE DATOS Y FUNCIONES CRÍTICAS ---
+
 def conectar():
+    """Conexión principal a la base de datos del Imperio."""
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
+def inicializar_sistema():
+    """Crea las tablas y configura los parámetros iniciales (Tasas, Impuestos, Usuario)."""
+    conn = conectar()
+    c = conn.cursor()
+    tablas = [
+        "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
+        # 🛠️ Tabla de inventario optimizada para cm2 y costos reales
+        "CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)",
+        "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
+        "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
+        "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)",
+        "CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS historial_precios (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, precio_usd REAL, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)"
+    ]
+    for tabla in tablas: 
+        c.execute(tabla)
+    
+    # Usuario Maestro
+    c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
+    
+    # 💡 PARÁMETROS CRÍTICOS: Tasas e Impuestos (Ajustables por inflación)
+    config_init = [
+        ('tasa_bcv', 36.50), 
+        ('tasa_binance', 38.00), 
+        ('costo_tinta_ml', 0.10), 
+        ('iva_perc', 16.0),      # IVA 16%
+        ('igtf_perc', 3.0),      # IGTF 3%
+        ('banco_perc', 0.5),     # Impuesto del Banco 0.5% (NUEVO)
+        ('delivery_predet', 0.0)  # Valor base para logística
+    ]
+    for p, v in config_init: 
+        c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
+    
+    conn.commit()
+    conn.close()
+
 def cargar_datos():
-    """Sincroniza la DB con la memoria de la App."""
+    """Sincroniza la DB con la memoria de la App (session_state)."""
     try:
         conn = conectar()
         st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
         st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
         conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
+        # Convertimos cada fila de la tabla configuración en una variable de sesión
         for _, row in conf_df.iterrows():
             st.session_state[row['parametro']] = row['valor']
         conn.close()
-    except:
+    except Exception as e:
+        st.error(f"Error al cargar datos: {e}")
         st.session_state.df_inv = pd.DataFrame()
         st.session_state.df_cli = pd.DataFrame()
 
 def cargar_datos_seguros():
-    """Función auxiliar para recargar y avisar al usuario."""
+    """Recarga datos y muestra confirmación visual."""
     cargar_datos()
-    st.toast("🔄 Datos sincronizados", icon="✅")
+    st.toast("🔄 Imperio Sincronizado", icon="⚛️")
 
 def obtener_tintas_disponibles():
-    """Busca en el inventario productos que sean tinta (ml)."""
+    """Filtra el inventario para obtener solo consumibles de impresión (ml)."""
     if 'df_inv' in st.session_state and not st.session_state.df_inv.empty:
         df = st.session_state.df_inv
-        # Filtra productos cuya unidad contenga 'ml'
         return df[df['unidad'].str.contains('ml', case=False, na=False)]
     return pd.DataFrame()
 
 def procesar_venta_grafica_completa(id_cliente, monto, metodo, consumos_dict):
-    """Registra la venta y descuenta automáticamente los ML del inventario."""
+    """Registra venta y descuenta stock (incluyendo tintas y cm2)."""
     try:
         conn = conectar()
         cursor = conn.cursor()
-
-        # 1. Registrar la Venta en el historial
+        # 1. Registrar Venta
         cursor.execute(
             "INSERT INTO ventas (cliente_id, monto_total, metodo) VALUES (?, ?, ?)",
             (id_cliente, monto, metodo)
         )
-        
-        # 2. Descontar Inventario botella por botella
+        # 2. Descuento de Inventario Automático
         for id_insumo, cantidad_a_descontar in consumos_dict.items():
             if cantidad_a_descontar > 0:
                 cursor.execute(
                     "UPDATE inventario SET cantidad = cantidad - ? WHERE id = ?",
                     (cantidad_a_descontar, id_insumo)
                 )
-
         conn.commit()
         conn.close()
-        return True, "✅ Venta registrada y stock actualizado."
+        cargar_datos_seguros()
+        return True, "✅ Venta y Stock procesados."
     except Exception as e:
-        return False, f"❌ Error en base de datos: {str(e)}"
+        return False, f"❌ Error: {str(e)}"
 
 def inicializar_sistema():
     conn = conectar()
@@ -149,41 +189,37 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- INICIO DEL MÓDULO DE INVENTARIO ---
 # --- INICIO DEL MÓDULO DE INVENTARIO COMPLETO ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Suministros")
     
-    # 0. Carga de Datos y Tasas (Asegúrate de que estas variables existan en session_state)
+    # 0. Carga de Datos y Tasas
     df_inv = st.session_state.get('df_inv', pd.DataFrame())
     t_ref = st.session_state.get('tasa_bcv', 36.5)
     t_bin = st.session_state.get('tasa_binance', 38.0)
 
-    # --- 1. DASHBOARD DE INDICADORES (KPIs) ---
+    # --- 1. DASHBOARD DE INDICADORES ---
     if not df_inv.empty:
         with st.container(border=True):
             c_val, c_alert, c_salud = st.columns(3)
-            # Valor total del almacén
             v_inv = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
             c_val.metric("Capital en Stock", f"$ {v_inv:,.2f}", help=f"Bs {v_inv * t_ref:,.2f}")
             
-            # Alertas de Stock Bajo (Críticos)
             crit_df = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
             c_alert.metric("Items Críticos", f"{len(crit_df)}", delta="Reabastecer" if len(crit_df) > 0 else "OK", delta_color="inverse")
             
-            # Nivel de abastecimiento
             salud = ((len(df_inv) - len(crit_df)) / len(df_inv)) * 100 if len(df_inv) > 0 else 0
             c_salud.write(f"**Salud del Almacén: {salud:.0f}%**")
             c_salud.progress(salud / 100)
 
-    # --- 2. PANEL DE OPERACIONES (TABS) ---
+    # --- 2. PANEL DE OPERACIONES ---
     tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "🧮 Calculadora", "🔧 Ajustes", "📊 Análisis"])
 
-    with tabs[0]: # PESTAÑA: LISTADO DE EXISTENCIAS
+    with tabs[0]: # PESTAÑA: EXISTENCIAS
         if not df_inv.empty:
             c1, c2, c3 = st.columns([2, 1, 1])
-            busq = c1.text_input("🔍 Filtro rápido", placeholder="Buscar por nombre...", key="busq_inv")
-            moneda_v = c2.selectbox("Mostrar en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="mon_vis")
+            busq = c1.text_input("🔍 Filtro rápido", placeholder="Buscar por nombre...")
+            moneda_v = c2.selectbox("Mostrar en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"])
             
             t_v = t_ref if "BCV" in moneda_v else (t_bin if "Binance" in moneda_v else 1.0)
             simbolo = "$" if "USD" in moneda_v else "Bs"
@@ -201,164 +237,125 @@ if menu == "📦 Inventario":
             st.dataframe(
                 df_v.style.apply(style_critico, axis=1),
                 column_config={
-                    "item": "Insumo",
-                    "cantidad": st.column_config.NumberColumn("Stock Actual", format="%.2f"),
-                    "unidad": "Und",
-                    "Costo Unit.": st.column_config.NumberColumn(f"Costo {simbolo}", format="%.3f"),
-                    "Total": st.column_config.NumberColumn(f"Subtotal {simbolo}", format="%.2f"),
-                    "minimo": "Alerta",
-                    "precio_usd": None, "id": None
+                    "item": "Insumo", "cantidad": "Stock Actual", "unidad": "Und",
+                    "Costo Unit.": f"Costo {simbolo}", "Total": f"Subtotal {simbolo}",
+                    "minimo": "Mín", "precio_usd": None, "id": None
                 },
                 hide_index=True, use_container_width=True
             )
         else:
-            st.info("El inventario está vacío. Registra tu primera compra.")
+            st.info("Inventario vacío.")
 
-    with tabs[1]: # PESTAÑA: REGISTRO DE COMPRAS (MÉTRICO + GASTOS)
-        st.subheader("📥 Registro de Compra Detallado")
-        with st.form("compra_form_full", clear_on_submit=True):
-            c_nom, c_und, c_min = st.columns([2, 1, 1])
-            nombre = c_nom.text_input("Nombre del Material").strip().upper()
-            und = c_und.selectbox("Unidad de Compra", ["Unidad", "Hojas", "Metros", "Cm", "ml", "Kg", "Lata"])
-            min_s = c_min.number_input("Alerta de Stock Mínimo", value=5.0)
+    with tabs[1]: # PESTAÑA: REGISTRO DE COMPRA (DINÁMICO)
+        st.subheader("📥 Entrada de Mercancía")
+        
+        # Campos reactivos fuera del form
+        c_nom, c_und, c_min = st.columns([2, 1, 1])
+        nombre_c = c_nom.text_input("Nombre del Material").strip().upper()
+        und_c = c_und.selectbox("Unidad de Compra", ["Unidad", "Hojas", "Metros", "Cm", "ml", "Kg", "Lata"])
+        min_c = c_min.number_input("Alerta Stock Mínimo", value=5.0)
 
-            # Lógica de medidas para materiales de superficie
-            area_unitaria = 1.0
-            if und in ["Hojas", "Metros", "Cm"]:
-                st.info("📏 Define medidas para calcular ahorro por cm²")
+        area_compra = 1.0
+        if und_c in ["Hojas", "Metros", "Cm"]:
+            with st.container(border=True):
+                st.write("📐 **Dimensiones para cálculo de área (cm)**")
                 m1, m2 = st.columns(2)
-                ancho = m1.number_input("Ancho (cm)", min_value=0.1, value=21.0)
-                alto = m2.number_input("Alto (cm)", min_value=0.1, value=29.7)
-                area_unitaria = ancho * alto
+                ancho_c = m1.number_input("Ancho (cm)", min_value=0.1, value=21.0)
+                alto_c = m2.number_input("Alto (cm)", min_value=0.1, value=29.7)
+                area_compra = ancho_c * alto_c
 
-            st.divider()
+        with st.form("form_compra_final"):
             f1, f2, f3 = st.columns(3)
             monto_neto = f1.number_input("Monto Factura", min_value=0.0, step=0.01)
             mon_pago = f2.selectbox("Moneda", ["USD $", "Bs (BCV)", "Bs (Binance)"])
-            cant_compra = f3.number_input("Cantidad de Unidades", min_value=0.001)
+            cant_recibida = f3.number_input("Cantidad Recibida", min_value=0.001)
 
-            st.markdown("⚖️ **Impuestos y Comisiones Bancarias**")
+            st.markdown("⚖️ **Impuestos y Comisiones**")
             v_iva = st.session_state.get('iva_config', 16.0)
             v_igtf = st.session_state.get('igtf_config', 3.0)
             v_ban = st.session_state.get('tasa_banco_config', 0.5)
-
             i1, i2, i3 = st.columns(3)
-            usa_iva = i1.checkbox(f"IVA (+{v_iva}%)")
-            usa_igtf = i2.checkbox(f"IGTF (+{v_igtf}%)")
-            usa_ban = i3.checkbox(f"Banco (+{v_ban}%)")
+            usa_iva, usa_igtf, usa_ban = i1.checkbox(f"IVA (+{v_iva}%)"), i2.checkbox(f"IGTF (+{v_igtf}%)"), i3.checkbox(f"Banco (+{v_ban}%)")
 
-            st.markdown("🚚 **Gastos de Logística y Movilidad**")
+            st.markdown("🚚 **Logística (Añadido al costo unitario)**")
             g1, g2 = st.columns(2)
-            delivery = g1.number_input("Delivery ($)", value=0.0)
-            pasajes = g2.number_input("Pasajes/Otros ($)", value=0.0)
+            delivery, pasajes = g1.number_input("Delivery ($)", value=0.0), g2.number_input("Pasajes/Otros ($)", value=0.0)
 
-            if st.form_submit_button("💾 REGISTRAR E INCREMENTAR STOCK", use_container_width=True):
-                if nombre and cant_compra > 0:
-                    t_pago = t_ref if "BCV" in mon_pago else (t_bin if "Binance" in mon_pago else 1.0)
-                    p_imp = (v_iva if usa_iva else 0) + (v_igtf if usa_igtf else 0) + (v_ban if usa_ban else 0)
+            if st.form_submit_button("💾 GUARDAR COMPRA", use_container_width=True):
+                if nombre_c and cant_recibida > 0:
+                    t_p = t_ref if "BCV" in mon_pago else (t_bin if "Binance" in mon_pago else 1.0)
+                    p_i = (v_iva if usa_iva else 0) + (v_igtf if usa_igtf else 0) + (v_ban if usa_ban else 0)
+                    costo_usd = (monto_neto / t_p) * (1 + (p_i/100)) + delivery + pasajes
                     
-                    # Cálculo de Costo Real
-                    costo_usd_base = (monto_neto / t_pago) * (1 + (p_imp/100))
-                    costo_total_real = costo_usd_base + delivery + pasajes
-                    
-                    # Precio por unidad final (o por cm2)
-                    stock_final = cant_compra * area_unitaria if und in ["Hojas", "Metros", "Cm"] else cant_compra
-                    costo_unitario = costo_total_real / stock_final
-                    und_almacen = "cm2" if und in ["Hojas", "Metros", "Cm"] else und
+                    stock_f = cant_recibida * area_compra
+                    costo_u = costo_usd / stock_f
+                    und_f = "cm2" if und_c in ["Hojas", "Metros", "Cm"] else und_c
 
                     conn = sqlite3.connect('mi_base_de_datos.db')
-                    try:
-                        cursor = conn.cursor()
-                        old = cursor.execute("SELECT cantidad, precio_usd FROM inventario WHERE item=?", (nombre,)).fetchone()
-                        
-                        # Promedio Ponderado para no perder ante inflación
-                        if old:
-                            q_act, p_act = old
-                            p_final = ((q_act * p_act) + (stock_final * costo_unitario)) / (q_act + stock_final)
-                        else:
-                            p_final = costo_unitario
+                    cursor = conn.cursor()
+                    old = cursor.execute("SELECT cantidad, precio_usd FROM inventario WHERE item=?", (nombre_c,)).fetchone()
+                    if old:
+                        p_ponderado = ((old[0]*old[1]) + (stock_f*costo_u)) / (old[0]+stock_f)
+                    else:
+                        p_ponderado = costo_u
+                    cursor.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
+                                   VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
+                                   cantidad=cantidad+?, precio_usd=?, minimo=?""", 
+                                   (nombre_c, stock_f, und_f, p_ponderado, min_c, stock_f, p_ponderado, min_c))
+                    conn.commit(); conn.close()
+                    st.success(f"Registrado: {nombre_c}. Costo real: ${p_ponderado:.5f}"); cargar_datos_seguros(); st.rerun()
 
-                        cursor.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
-                                       VALUES (?,?,?,?,?) ON CONFLICT(item) DO UPDATE SET 
-                                       cantidad=cantidad+?, precio_usd=?, minimo=?""", 
-                                       (nombre, stock_final, und_almacen, p_final, min_s, stock_final, p_final, min_s))
-                        conn.commit()
-                        st.success(f"✅ {nombre} registrado. Nuevo costo: ${p_final:.5f} / {und_almacen}")
-                        cargar_datos_seguros(); st.rerun()
-                    except Exception as e: st.error(f"Error: {e}")
-                    finally: conn.close()
-
-    with tabs[2]: # PESTAÑA: CALCULADORA DE PRODUCCIÓN (CON RETAZOS)
-        st.subheader("🧮 Calculadora de Presupuestos")
+    with tabs[2]: # PESTAÑA: CALCULADORA (DINÁMICA)
+        st.subheader("🧮 Calculadora de Presupuesto")
         if 'calc_list' not in st.session_state: st.session_state.calc_list = []
         
-        c_i, c_u = st.columns([2, 1])
-        item_sel = c_i.selectbox("Seleccionar Material", df_inv['item'].tolist() if not df_inv.empty else [])
+        item_sel = st.selectbox("Insumo", df_inv['item'].tolist() if not df_inv.empty else [])
         
         if not df_inv.empty:
-            datos_item = df_inv[df_inv['item'] == item_sel].iloc[0]
-            if datos_item['unidad'] == "cm2":
-                st.write("📐 **Medidas del retazo a usar (cm):**")
-                col_a, col_b = st.columns(2)
-                u_ancho = col_a.number_input("Ancho", min_value=0.0, step=0.1)
-                u_alto = col_b.number_input("Alto", min_value=0.0, step=0.1)
-                uso_total = u_ancho * u_alto
+            datos_i = df_inv[df_inv['item'] == item_sel].iloc[0]
+            if datos_i['unidad'] == "cm2":
+                st.write("📐 **Área del retazo a usar**")
+                m1, m2 = st.columns(2)
+                ancho_u = m1.number_input("Ancho (cm)", min_value=0.0, key="u_ancho")
+                alto_u = m2.number_input("Alto (cm)", min_value=0.0, key="u_alto")
+                uso_f = ancho_u * alto_u
             else:
-                uso_total = st.number_input(f"Cantidad ({datos_item['unidad']})", min_value=0.0)
+                uso_f = st.number_input(f"Cantidad ({datos_i['unidad']})", min_value=0.0)
 
-            if st.button("➕ Añadir a la lista"):
-                costo_calc = uso_total * datos_item['precio_usd']
-                st.session_state.calc_list.append({
-                    "Item": item_sel, "Uso": f"{uso_total:.2f} {datos_item['unidad']}", "Costo $": round(costo_calc, 4)
-                })
+            if st.button("➕ Agregar al cálculo"):
+                costo_c = uso_f * datos_i['precio_usd']
+                st.session_state.calc_list.append({"Item": item_sel, "Uso": f"{uso_f:.2f} {datos_i['unidad']}", "Costo $": round(costo_c, 4)})
 
         if st.session_state.calc_list:
-            df_resumen = pd.DataFrame(st.session_state.calc_list)
-            st.table(df_resumen)
-            total_calc = df_resumen['Costo $'].sum()
-            st.subheader(f"💰 Costo Total Base: ${total_calc:.2f}")
-            margen = st.slider("Margen de Ganancia %", 20, 400, 100)
-            st.metric("Precio Venta Sugerido", f"${total_calc * (1 + margen/100):.2f}")
-            if st.button("🗑️ Limpiar Calculadora"): st.session_state.calc_list = []; st.rerun()
+            st.table(pd.DataFrame(st.session_state.calc_list))
+            total_b = sum(x['Costo $'] for x in st.session_state.calc_list)
+            st.markdown(f"### Costo Materiales: **${total_b:.2f}**")
+            margen_g = st.slider("Margen %", 0, 500, 100)
+            st.metric("Precio Sugerido", f"${total_b * (1 + margen_g/100):.2f}")
+            if st.button("🗑️ Reiniciar"): st.session_state.calc_list = []; st.rerun()
 
-    with tabs[3]: # PESTAÑA: AJUSTES MANUALES (AUDITORÍA)
-        st.subheader("🔧 Corrección de Inventario")
+    with tabs[3]: # PESTAÑA: AJUSTES
+        st.subheader("🔧 Auditoría Manual")
         if not df_inv.empty:
-            with st.form("ajuste_form_final"):
-                item_aj = st.selectbox("Insumo a ajustar", df_inv['item'].tolist())
-                cant_real = st.number_input("Cantidad Real en Físico (Stock Actual)", min_value=0.0)
-                motivo = st.text_input("Motivo del Ajuste (Ej: Merma, Daño, Conteo)")
-                if st.form_submit_button("🔨 APLICAR CORRECCIÓN"):
+            with st.form("form_ajuste"):
+                it_aj = st.selectbox("Item", df_inv['item'].tolist())
+                cant_r = st.number_input("Cantidad Real en Estante", min_value=0.0)
+                if st.form_submit_button("🔨 CORREGIR"):
                     conn = sqlite3.connect('mi_base_de_datos.db')
-                    conn.execute("UPDATE inventario SET cantidad=? WHERE item=?", (cant_real, item_aj))
-                    conn.commit(); conn.close()
-                    st.warning(f"Se ha corregido el stock de {item_aj} a {cant_real}"); cargar_datos_seguros(); st.rerun()
+                    conn.execute("UPDATE inventario SET cantidad=? WHERE item=?", (cant_r, it_aj))
+                    conn.commit(); conn.close(); cargar_datos_seguros(); st.rerun()
 
-    with tabs[4]: # PESTAÑA: ANÁLISIS Y EXPORTACIÓN
+    with tabs[4]: # PESTAÑA: ANÁLISIS Y EXCEL
         if not df_inv.empty:
-            st.subheader("📊 Valorización de Inventario")
             df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
-            fig = px.pie(df_inv, values='Capital USD', names='item', hole=0.4, title="Distribución de Valor ($)")
-            st.plotly_chart(fig, use_container_width=True)
-
-            st.divider()
-            st.markdown("### 📥 Generar Reporte de Activos")
+            st.plotly_chart(px.pie(df_inv, values='Capital USD', names='item', title="Distribución de Capital"), use_container_width=True)
             
-            # Exportación Excel Pro
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df_rep = df_inv[['item', 'cantidad', 'unidad', 'precio_usd', 'Capital USD', 'minimo']].copy()
-                df_rep['Capital Bs'] = df_rep['Capital USD'] * t_ref
-                df_rep.columns = ['Insumo', 'Stock', 'Unidad', 'Costo USD', 'Total USD', 'Mínimo', f'Total Bs (@{t_ref})']
-                df_rep.to_excel(writer, index=False, sheet_name='Inventario')
-                
-            st.download_button(
-                label="🟢 DESCARGAR REPORTE EXCEL",
-                data=buffer.getvalue(),
-                file_name=f"Inventario_{datetime.now().strftime('%d_%m_%y')}.xlsx",
-                mime="application/vnd.ms-excel",
-                use_container_width=True
-            )
+                df_inv.to_excel(writer, index=False, sheet_name='Stock')
+            st.download_button("🟢 DESCARGAR EXCEL", buffer.getvalue(), f"Stock_{datetime.now().strftime('%d_%m')}.xlsx", use_container_width=True)
+
+
 elif menu == "📊 Dashboard":
 
     conn = conectar()
@@ -1278,6 +1275,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
