@@ -148,7 +148,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-if menu == "📦 Inventario":
+ifif menu == "📦 Inventario":
     st.title("📦 Centro de Control de Suministros")
     
     df_inv = st.session_state.get('df_inv', pd.DataFrame())
@@ -274,7 +274,25 @@ if menu == "📦 Inventario":
         if not df_inv.empty:
             st.subheader("📊 Valor del Inventario")
             df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
-            st.bar_chart(df_inv.nlargest(10, 'Capital USD'), x="item", y="Capital USD")elif menu == "📊 Dashboard":
+            st.bar_chart(df_inv.nlargest(10, 'Capital USD'), x="item", y="Capital USD")
+
+    with tabs[3]: # ANÁLISIS (Se unificó aquí para evitar el NameError)
+        if not df_inv.empty:
+            st.subheader("📊 Análisis de Capital e Inflación")
+            
+            # Gráfico de barras
+            df_inv['Valor Stock ($)'] = df_inv['cantidad'] * df_inv['precio_usd']
+            st.bar_chart(df_inv.nlargest(10, 'Valor Stock ($)'), x="item", y="Valor Stock ($)")
+            
+            # Gráfico de líneas (Detector de inflación)
+            st.divider()
+            sel_it = st.selectbox("Tendencia de costo para:", df_inv['item'].unique())
+            conn = conectar()
+            df_h = pd.read_sql(f"SELECT h.precio_usd, h.fecha FROM historial_precios h JOIN inventario i ON h.item_id = i.id WHERE i.item = '{sel_it}' ORDER BY h.fecha ASC", conn)
+            conn.close()
+            if not df_h.empty:
+                st.line_chart(df_h.set_index('fecha'))
+elif menu == "📊 Dashboard":
     st.title("📊 Centro de Control Financiero")
 
     conn = conectar()
@@ -1194,8 +1212,6 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
-
-
 
 
 
