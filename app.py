@@ -148,64 +148,122 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-with tabs[1]: # COMPRA (Donde defines si es ml, metros, etc.)
+if menu == "📦 Inventario":
+    st.title("📦 Centro de Control de Suministros")
+    
+    df_inv = st.session_state.get('df_inv', pd.DataFrame())
+
+    # --- 1. INDICADORES ---
+    if not df_inv.empty:
+        t_ref = st.session_state.get('tasa_bcv', 36.5)
+        with st.container(border=True):
+            c_val, c_alert, c_salud = st.columns(3)
+            v_inv = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
+            c_val.metric("Capital en Stock", f"$ {v_inv:,.2f}", help=f"Bs {v_inv * t_ref:,.2f}")
+            crit_df = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
+            c_alert.metric("Items Críticos", f"{len(crit_df)}", delta="Reabastecer", delta_color="inverse")
+            salud = ((len(df_inv) - len(crit_df)) / len(df_inv)) * 100 if len(df_inv) > 0 else 0
+            c_salud.metric("Salud Almacén", f"{salud:.0f}%")
+
+    # --- 2. PESTAÑAS ---
+    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "🔧 Ajustes", "📊 Análisis"])
+
+    with tabs[0]: # EXISTENCIAS
+        if not df_inv.empty:
+            c1, c2, c3 = st.columns([2, 1, 1])
+            busq = c1.text_input("🔍 Buscar material...", placeholder="Ej: Taza, Vinil...")
+            moneda_v = c2.selectbox("Ver precios en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="view_mon")
+            
+            # Tasas automáticas desde tu sesión
+            if "BCV" in moneda_v: t_v = st.session_state.get('tasa_bcv', 36.5)
+            elif "Binance" in moneda_v: t_v = st.session_state.get('tasa_binance', 38.0)
+            else: t_v = 1.0
+            
+            simbolo = "$" if "USD" in moneda_v else "Bs"
+            bajos = c3.checkbox("🚨 Solo Stock Bajo")
+            
+            df_v = df_inv.copy()
+            if busq: df_v = df_v[df_v['item'].str.contains(busq, case=False)]
+            if bajos: df_v = df_v[df_v['cantidad'] <= df_v['minimo']]
+
+            df_v['Costo Unit.'] = df_v['precio_usd'] * t_v
+            df_v['Total'] = df_v['cantidad'] * df_v['Costo Unit.']
+            
+            st.dataframe(
+                df_v,
+                column_config={
+                    "item": "Insumo",
+                    "cantidad": st.column_config.NumberColumn("Stock", format="%.2f"),
+                    "Costo Unit.": st.column_config.NumberColumn(f"Costo ({simbolo})", format="%.2f"),
+                    "Total": st.column_config.NumberColumn(f"Valor ({simbolo})", format="%.2f"),
+                    "minimo": st.column_config.ProgressColumn("Alerta", min_value=0, max_value=50),
+                    "precio_usd": None, "id": None, "unidad": "Und"
+                },
+                hide_index=True, use_container_width=True
+            )
+
+    with tabs[1]: # COMPRA (Aquí es donde pones ml, metros, etc.)
         st.subheader("📥 Entrada de Mercancía")
         with st.form("form_compra_v10"):
             c_nom, c_und = st.columns([2, 1])
-            nombre = c_nom.text_input("Material / Insumo (Ej: Tinta Negra, Vinil Oro)").strip()
-            
-            # Aquí defines CÓMO vas a medir este material siempre
+            nombre = c_nom.text_input("Nombre del Insumo").strip()
             und = c_und.selectbox("Unidad de Medida", ["Unidad", "ml", "Hojas", "Metros", "Kg", "Cm"])
 
             st.write("---")
             f1, f2, f3 = st.columns(3)
-            monto_neto = f1.number_input("Monto en Factura", min_value=0.0)
-            moneda_fac = f2.selectbox("¿En qué moneda pagaste?", ["USD $", "Bs (BCV)", "Bs (Binance)"])
-            
-            # Aquí colocas el NÚMERO (Ej: 1000 si son 1000ml / 1 litro)
-            cant_rec = f3.number_input(f"Cantidad Total en {und}", min_value=0.001, help="Ej: Si es 1 litro, pon 1000 y selecciona ml")
+            monto_fac = f1.number_input("Monto Factura", min_value=0.0)
+            moneda_fac = f2.selectbox("Moneda Pago", ["USD $", "Bs (BCV)", "Bs (Binance)"])
+            cant_rec = f3.number_input(f"Cantidad en {und}", min_value=0.001)
 
-            st.markdown("🚚 **Gastos Adicionales (Se prorratean al costo unitario)**")
+            st.caption("🚚 Gastos Adicionales (Impuestos, Delivery, Pasajes)")
             g1, g2, g3 = st.columns(3)
-            imp_per = g1.number_input("Impuesto/IGTF (%)", value=0.0)
+            imp_per = g1.number_input("Impuesto (%)", value=0.0)
             delivery = g2.number_input("Delivery ($)", value=0.0)
             pasajes = g3.number_input("Pasajes ($)", value=0.0)
 
             if st.form_submit_button("💾 REGISTRAR COMPRA", use_container_width=True):
                 if nombre and cant_rec > 0:
-                    # Usa tus tasas automáticas
-                    if "BCV" in moneda_fac: t_c = st.session_state.get('tasa_bcv', 36.5)
-                    elif "Binance" in moneda_fac: t_c = st.session_state.get('tasa_binance', 38.0)
-                    else: t_c = 1.0
+                    t_c = st.session_state.get('tasa_bcv', 36.5) if "BCV" in moneda_fac else (st.session_state.get('tasa_binance', 38.0) if "Binance" in moneda_fac else 1.0)
                     
-                    # Cálculo de costo real unitario (por cada ml, cada metro o cada unidad)
-                    base_usd = monto_neto / t_c
-                    con_imp = base_usd * (1 + (imp_per / 100))
-                    costo_real_usd = con_imp + delivery + pasajes
-                    c_u_nuevo = costo_real_usd / cant_rec
+                    # Cálculo costo real
+                    costo_base_usd = (monto_fac / t_c) * (1 + (imp_per / 100))
+                    costo_total_usd = costo_base_usd + delivery + pasajes
+                    c_u_nuevo = costo_total_usd / cant_rec
 
                     conn = conectar()
                     try:
-                        # Buscamos si ya existe
                         old = conn.execute("SELECT cantidad, precio_usd FROM inventario WHERE LOWER(item)=LOWER(?)", (nombre,)).fetchone()
-                        
-                        if old:
-                            # Promediamos el costo: (Stock actual * Costo anterior + Nuevo stock * Costo nuevo) / Stock total
-                            p_final = ((old[0] * old[1]) + (cant_rec * c_u_nuevo)) / (old[0] + cant_rec)
-                        else:
-                            p_final = c_u_nuevo
+                        p_final = ((old[0] * old[1]) + (cant_rec * c_u_nuevo)) / (old[0] + cant_rec) if old else c_u_nuevo
 
                         conn.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
                                      VALUES (?,?,?,?,5) ON CONFLICT(item) DO UPDATE SET 
                                      cantidad=cantidad+?, precio_usd=?""", (nombre, cant_rec, und, p_final, cant_rec, p_final))
-                        
                         conn.commit()
-                        st.success(f"✅ ¡Hecho! Ahora tienes {cant_rec} {und} más de {nombre}. Costo por {und}: ${c_u_nuevo:.4f}")
+                        st.success(f"✅ Registrado: {cant_rec} {und} a ${c_u_nuevo:.4f} c/u")
                         cargar_datos_seguros(); st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
                     finally: conn.close()
+
+    with tabs[2]: # AJUSTES
+        st.subheader("🔧 Ajuste de Stock")
+        if not df_inv.empty:
+            with st.form("ajuste_final"):
+                it_aj = st.selectbox("Insumo", df_inv['item'].tolist())
+                c_real = st.number_input("Cantidad Real Física", min_value=0.0)
+                if st.form_submit_button("🔨 Aplicar"):
+                    conn = conectar()
+                    conn.execute("UPDATE inventario SET cantidad=? WHERE item=?", (c_real, it_aj))
+                    conn.commit(); conn.close()
+                    st.warning("Stock actualizado."); cargar_datos_seguros(); st.rerun()
+
+    with tabs[3]: # ANÁLISIS
+        if not df_inv.empty:
+            st.subheader("📊 Capital por Insumo (USD)")
+            df_inv['Capital'] = df_inv['cantidad'] * df_inv['precio_usd']
+            st.bar_chart(df_inv.set_index('item')['Capital'])
+
+# --- AQUÍ TERMINA EL BLOQUE DE INVENTARIO Y SIGUE EL RESTO ---
 elif menu == "📊 Dashboard":
-    st.title("📊 Centro de Control Financiero")
 
     conn = conectar()
     # Cargamos datos con fechas parseadas para poder graficar
@@ -1124,6 +1182,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
