@@ -189,7 +189,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- INICIO DEL MÓDULO DE INVENTARIO COMPLETO Y BLINDADO (VERSIÓN FINAL) ---
+# --- INICIO DEL MÓDULO DE INVENTARIO COMPLETO Y BLINDADO (VERSIÓN FINAL INTEGRADA) ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Suministros")
     
@@ -253,11 +253,11 @@ if menu == "📦 Inventario":
         
         c_nom, c_und, c_min = st.columns([2, 1, 1])
         nombre_c = c_nom.text_input("Nombre del Material").strip().upper()
-        # Solo unidades de medida base como pediste
+        # Unidades simplificadas a medibles
         und_c = c_und.selectbox("Unidad de Medida", ["Unidad", "Área (cm/m)", "Líquido (ml/L)", "Peso (gr/kg)"])
         min_c = c_min.number_input("Alerta Stock Mínimo", value=5.0)
 
-        # Lógica de conversión dinámica
+        # Lógica de conversión dinámica mejorada
         mult_stock = 1.0
         und_final = "Unidad"
 
@@ -305,8 +305,6 @@ if menu == "📦 Inventario":
                     conn = conectar()
                     cursor = conn.cursor()
                     old = cursor.execute("SELECT cantidad, precio_usd FROM inventario WHERE item=?", (nombre_c,)).fetchone()
-                    
-                    # Promedio ponderado para proteger el costo contra inflación
                     p_ponderado = ((old[0]*old[1]) + (stock_ingreso*costo_u)) / (old[0]+stock_ingreso) if old else costo_u
                     
                     cursor.execute("""INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo) 
@@ -315,7 +313,7 @@ if menu == "📦 Inventario":
                                    (nombre_c, stock_ingreso, und_final, p_ponderado, min_c, stock_ingreso, und_final, p_ponderado, min_c))
                     conn.commit(); conn.close(); cargar_datos_seguros(); st.rerun()
 
-    with tabs[2]: # PESTAÑA: CALCULADORA (ADAPTATIVA)
+    with tabs[2]: # PESTAÑA: CALCULADORA (INTEGRADA)
         st.subheader("🧮 Calculadora de Costos por Trabajo")
         if 'calc_list' not in st.session_state: st.session_state.calc_list = []
         
@@ -366,6 +364,7 @@ if menu == "📦 Inventario":
             with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                 df_inv.to_excel(writer, index=False, sheet_name='Inventario')
             st.download_button("📥 Exportar a Excel", buffer.getvalue(), "inventario_atoma.xlsx")
+        
 elif menu == "📊 Dashboard":
 
     conn = conectar()
@@ -1285,6 +1284,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
