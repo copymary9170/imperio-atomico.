@@ -1316,6 +1316,78 @@ elif menu == "📝 Cotizaciones":
             else:
                 st.error(msg)
 
+if st.form_submit_button("✅ PROCESAR VENTA Y DESCONTAR STOCK"):
+                if cantidad_v > 0:
+                    # 1. Operación en Base de Datos
+                    conn = conectar()
+                    cursor = conn.cursor()
+                    try:
+                        # Restar del inventario
+                        cursor.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cantidad_v, prod_sel))
+                        
+                        # Registrar la venta
+                        cursor.execute("INSERT INTO ventas (monto_total, metodo) VALUES (?, ?)", (total_final_usd, metodo_p))
+                        
+                        conn.commit()
+                        conn.close()
+                        
+                        # 2. Preparar el Ticket para mostrar al usuario
+                        st.session_state.ultimo_ticket = {
+                            "nro": "V-" + str(int(time.time())), # ID único temporal
+                            "producto": prod_sel,
+                            "cantidad": f"{cantidad_v} {datos_p['unidad']}",
+                            "precio_u": f"${(total_final_usd/cantidad_v):.2f}",
+                            "total_usd": total_final_usd,
+                            "total_bs": total_final_bs,
+                            "metodo": metodo_p,
+                            "fecha": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+                        }
+                        
+                        cargar_datos() # Sincronizar memoria
+                        st.success("¡Venta procesada con éxito!")
+                    except Exception as e:
+                        st.error(f"Error al procesar: {e}")
+                else:
+                    st.error("La cantidad debe ser mayor a 0")
+
+    # --- 3. MOSTRAR EL TICKET (Si existe uno reciente) ---
+    if 'ultimo_ticket' in st.session_state:
+        st.markdown("---")
+        with st.container(border=True):
+            t = st.session_state.ultimo_ticket
+            st.subheader("📄 Ticket de Venta")
+            
+            ticket_txt = f"""
+            IMPERIO ATÓMICO - RECIBO
+            ------------------------------
+            Ticket Nro: {t['nro']}
+            Fecha: {t['fecha']}
+            ------------------------------
+            Prod: {t['producto']}
+            Cant: {t['cantidad']}
+            Precio Unit: {t['precio_u']}
+            ------------------------------
+            TOTAL USD: ${t['total_usd']:.2f}
+            TOTAL BS:  {t['total_bs']:.2f} Bs.
+            Método: {t['metodo']}
+            ------------------------------
+            ¡Gracias por su compra!
+            """
+            st.code(ticket_txt) # Se ve como un ticket real
+            
+            c1, c2 = st.columns(2)
+            if c1.button("Nuevo Ticket (Limpiar)"):
+                del st.session_state.ultimo_ticket
+                st.rerun()
+            
+            c2.download_button(
+                label="📥 Descargar Ticket",
+                data=ticket_txt,
+                file_name=f"ticket_{t['nro']}.txt",
+                mime="text/plain"
+            )
+
+
 
 
 
