@@ -1,11 +1,11 @@
+import streamlit as st
 import pandas as pd
 import sqlite3
-import streamlit as st
-from datetime import datetime
 import numpy as np
 import io
 import plotly.express as px
 from PIL import Image
+from datetime import datetime
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -1266,6 +1266,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
