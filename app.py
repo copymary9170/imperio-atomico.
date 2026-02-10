@@ -15,6 +15,7 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 
 def conectar():
     """Conexión principal a la base de datos del Imperio."""
+    # Mantenemos tu nombre de archivo 'imperio_v2.db'
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
 def inicializar_sistema():
@@ -23,7 +24,7 @@ def inicializar_sistema():
     c = conn.cursor()
     tablas = [
         "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
-        # 🛠️ Tabla de inventario optimizada para cm2 y costos reales
+        # Tabla de inventario optimizada: id único e item único para evitar duplicados
         "CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)",
         "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
         "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
@@ -39,17 +40,19 @@ def inicializar_sistema():
     # Usuario Maestro
     c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
     
-    # 💡 PARÁMETROS CRÍTICOS: Tasas e Impuestos (Ajustables por inflación)
+    # 💡 PARÁMETROS CRÍTICOS: Tasas e Impuestos (Incluye Impuesto Bancario del 10-Feb)
     config_init = [
         ('tasa_bcv', 36.50), 
         ('tasa_binance', 38.00), 
-        ('costo_tinta_ml', 0.10), 
-        ('iva_perc', 16.0),      # IVA 16%
+        ('costo_tinta_ml', 0.10), # Precio base editable para inflación
+        ('iva_perc', 16.0),       # IVA 16%
         ('igtf_perc', 3.0),      # IGTF 3%
-        ('banco_perc', 0.5),     # Impuesto del Banco 0.5% (NUEVO)
-        ('delivery_predet', 0.0)  # Valor base para logística
+        ('banco_perc', 0.5),     # Impuesto del Banco 0.5% (Agregado)
+        ('delivery_predet', 0.0) # Gastos logísticos base
     ]
+    
     for p, v in config_init: 
+        # INSERT OR IGNORE evita que se sobrescriban tus cambios manuales cada vez que abras la app
         c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
     
     conn.commit()
@@ -59,17 +62,22 @@ def cargar_datos():
     """Sincroniza la DB con la memoria de la App (session_state)."""
     try:
         conn = conectar()
+        # Carga de inventario y clientes
         st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
         st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+        
+        # Carga dinámica de configuración (Tasas, Impuestos, etc.)
         conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
-        # Convertimos cada fila de la tabla configuración en una variable de sesión
         for _, row in conf_df.iterrows():
-            st.session_state[row['parametro']] = row['valor']
+            # Esto crea variables como st.session_state.tasa_bcv automáticamente
+            st.session_state[row['parametro']] = float(row['valor'])
+            
         conn.close()
     except Exception as e:
-        st.error(f"Error al cargar datos: {e}")
-        st.session_state.df_inv = pd.DataFrame()
-        st.session_state.df_cli = pd.DataFrame()
+        st.error(f"⚠️ Error al sincronizar con el Imperio: {e}")
+        # Aseguramos que existan dataframes vacíos para no romper la UI
+        if 'df_inv' not in st.session_state: st.session_state.df_inv = pd.DataFrame()
+        if 'df_cli' not in st.session_state: st.session_state.df_cli = pd.DataFrame()
 
 def cargar_datos_seguros():
     """Recarga datos y muestra confirmación visual."""
@@ -342,29 +350,65 @@ if menu == "📦 Inventario":
             st.subheader(f"💰 Precio Sugerido: ${total_b * (1 + margen/100):.2f}")
             if st.button("🗑️ Reiniciar"): st.session_state.calc_list = []; st.rerun()
 
-    with tabs[3]: # PESTAÑA: AJUSTES
+with tabs[3]: # PESTAÑA: AJUSTES
         st.subheader("🔧 Corrección Manual")
         if not df_inv.empty:
+            # --- Sub-sección 1: Ajuste de Stock y Precio ---
             with st.form("form_ajuste"):
-                it_aj = st.selectbox("Insumo", df_inv['item'].tolist())
-                cant_r = st.number_input("Cantidad Real Física", min_value=0.0)
-                if st.form_submit_button("🔨 ACTUALIZAR STOCK"):
+                col_it, col_ca, col_pr = st.columns([2, 1, 1])
+                it_aj = col_it.selectbox("Seleccionar Insumo", df_inv['item'].tolist())
+                
+                # Obtenemos valores actuales para mostrar como sugerencia
+                val_actual = df_inv[df_inv['item'] == it_aj].iloc[0]
+                
+                cant_r = col_ca.number_input("Cantidad Real", min_value=0.0, value=float(val_actual['cantidad']))
+                prec_r = col_pr.number_input("Precio USD Unit.", min_value=0.0, value=float(val_actual['precio_usd']), format="%.4f")
+                
+                if st.form_submit_button("🔨 ACTUALIZAR DATOS"):
                     conn = conectar()
-                    conn.execute("UPDATE inventario SET cantidad=? WHERE item=?", (cant_r, it_aj))
+                    conn.execute("UPDATE inventario SET cantidad=?, precio_usd=? WHERE item=?", (cant_r, prec_r, it_aj))
                     conn.commit(); conn.close(); cargar_datos_seguros(); st.rerun()
+            
+            st.divider()
+            
+            # --- Sub-sección 2: Eliminación (Zona de Peligro) ---
+            st.subheader("⚠️ Zona de Peligro")
+            with st.expander("Haz clic aquí para eliminar un insumo permanentemente"):
+                it_del = st.selectbox("Insumo a eliminar", df_inv['item'].tolist(), key="del_sel")
+                confirmar = st.checkbox(f"Confirmo que deseo borrar '{it_del}' del inventario")
+                if st.button("❌ ELIMINAR PERMANENTEMENTE"):
+                    if confirmar:
+                        conn = conectar()
+                        conn.execute("DELETE FROM inventario WHERE item=?", (it_del,))
+                        conn.commit(); conn.close(); cargar_datos_seguros(); st.rerun()
+                    else:
+                        st.warning("Debes marcar la casilla de confirmación para eliminar.")
+        else:
+            st.info("No hay insumos para ajustar.")
 
     with tabs[4]: # PESTAÑA: ANÁLISIS
         st.subheader("📊 Reporte de Almacén")
         if not df_inv.empty:
             df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
-            fig = px.pie(df_inv, values='Capital USD', names='item', title="Distribución de Valor")
+            
+            # Gráfico de torta
+            fig = px.pie(df_inv, values='Capital USD', names='item', 
+                         title="Distribución de Valor en Inventario",
+                         hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig, use_container_width=True)
             
+            # Botón de exportación
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                 df_inv.to_excel(writer, index=False, sheet_name='Inventario')
-            st.download_button("📥 Exportar a Excel", buffer.getvalue(), "inventario_atoma.xlsx")
-        
+            st.download_button(
+                label="📥 Descargar Reporte Completo (Excel)",
+                data=buffer.getvalue(),
+                file_name="inventario_atoma.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.info("Sin datos para analizar.")
 elif menu == "📊 Dashboard":
 
     conn = conectar()
@@ -1275,6 +1319,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
