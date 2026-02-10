@@ -1190,8 +1190,8 @@ elif menu == "📊 Auditoría y Métricas":
                     st.error(f"**{row['item']}** bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
             else:
                 st.success("✅ Niveles de inventario óptimos.")
-                
-                elif menu == "📝 Cotizaciones":
+
+elif menu == "📝 Cotizaciones":
     st.title("📝 Cotizador de Trabajos")
 
     # 1. Recuperamos datos de sesión de forma segura
@@ -1316,6 +1316,7 @@ elif menu == "📊 Auditoría y Métricas":
             else:
                 st.error(msg)
 
+
 if st.form_submit_button("✅ PROCESAR VENTA Y DESCONTAR STOCK"):
                 if cantidad_v > 0:
                     # 1. Operación en Base de Datos
@@ -1386,13 +1387,6 @@ if st.form_submit_button("✅ PROCESAR VENTA Y DESCONTAR STOCK"):
                 file_name=f"ticket_{t['nro']}.txt",
                 mime="text/plain"
             )
-
-
-
-
-
-
-
 
 
 
