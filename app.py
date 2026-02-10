@@ -385,10 +385,10 @@ with tabs[3]: # PESTAÑA: AJUSTES
                         st.warning("Debes marcar la casilla de confirmación para eliminar.")
         else:
             st.info("No hay insumos para ajustar.")
-
-           with tabs[4]: # PESTAÑA: ANÁLISIS
-        st.subheader("📊 Reporte de Almacén")
-        if not df_inv.empty:
+            
+            with tabs[4]: # PESTAÑA: ANÁLISIS
+                st.subheader("📊 Reporte de Almacén")
+            if not df_inv.empty:
             df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
             
             # Gráfico de torta
@@ -1319,6 +1319,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
