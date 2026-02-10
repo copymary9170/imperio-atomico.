@@ -323,7 +323,8 @@ if menu == "📦 Inventario":
 
     with tabs[2]: # PESTAÑA: CALCULADORA (INTEGRADA)
         st.subheader("🧮 Calculadora de Costos por Trabajo")
-        if 'calc_list' not in st.session_state: st.session_state.calc_list = []
+        if 'calc_list' not in st.session_state: 
+            st.session_state.calc_list = []
         
         item_sel = st.selectbox("Seleccionar Insumo", df_inv['item'].tolist() if not df_inv.empty else [], key="sel_calc")
         
@@ -348,17 +349,16 @@ if menu == "📦 Inventario":
             st.metric("Subtotal de Materiales", f"${total_b:.4f}")
             margen = st.slider("Margen de Ganancia %", 0, 500, 100)
             st.subheader(f"💰 Precio Sugerido: ${total_b * (1 + margen/100):.2f}")
-            if st.button("🗑️ Reiniciar"): st.session_state.calc_list = []; st.rerun()
+            if st.button("🗑️ Reiniciar"): 
+                st.session_state.calc_list = []
+                st.rerun()
 
-with tabs[3]: # PESTAÑA: AJUSTES
+    with tabs[3]: # PESTAÑA: AJUSTES
         st.subheader("🔧 Corrección Manual")
         if not df_inv.empty:
-            # --- Sub-sección 1: Ajuste de Stock y Precio ---
             with st.form("form_ajuste"):
                 col_it, col_ca, col_pr = st.columns([2, 1, 1])
                 it_aj = col_it.selectbox("Seleccionar Insumo", df_inv['item'].tolist())
-                
-                # Obtenemos valores actuales para mostrar como sugerencia
                 val_actual = df_inv[df_inv['item'] == it_aj].iloc[0]
                 
                 cant_r = col_ca.number_input("Cantidad Real", min_value=0.0, value=float(val_actual['cantidad']))
@@ -367,39 +367,32 @@ with tabs[3]: # PESTAÑA: AJUSTES
                 if st.form_submit_button("🔨 ACTUALIZAR DATOS"):
                     conn = conectar()
                     conn.execute("UPDATE inventario SET cantidad=?, precio_usd=? WHERE item=?", (cant_r, prec_r, it_aj))
-                    conn.commit(); conn.close(); cargar_datos_seguros(); st.rerun()
+                    conn.commit(); conn.close(); cargar_datos(); st.rerun()
             
             st.divider()
-            
-            # --- Sub-sección 2: Eliminación (Zona de Peligro) ---
             st.subheader("⚠️ Zona de Peligro")
-            with st.expander("Haz clic aquí para eliminar un insumo permanentemente"):
+            with st.expander("Haz clic aquí para eliminar un insumo"):
                 it_del = st.selectbox("Insumo a eliminar", df_inv['item'].tolist(), key="del_sel")
-                confirmar = st.checkbox(f"Confirmo que deseo borrar '{it_del}' del inventario")
+                confirmar = st.checkbox(f"Confirmo que deseo borrar '{it_del}'")
                 if st.button("❌ ELIMINAR PERMANENTEMENTE"):
                     if confirmar:
                         conn = conectar()
                         conn.execute("DELETE FROM inventario WHERE item=?", (it_del,))
-                        conn.commit(); conn.close(); cargar_datos_seguros(); st.rerun()
+                        conn.commit(); conn.close(); cargar_datos(); st.rerun()
                     else:
-                        st.warning("Debes marcar la casilla de confirmación para eliminar.")
-       else:
+                        st.warning("Confirma la casilla para borrar.")
+        else:
             st.info("No hay insumos para ajustar.")
-            
+
     with tabs[4]: # PESTAÑA: ANÁLISIS
         st.subheader("📊 Reporte de Almacén")
-        
         if not df_inv.empty:
-            # Todo esto DEBE estar indentado (un paso a la derecha)
             df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
-            
-            # Gráfico de torta
             fig = px.pie(df_inv, values='Capital USD', names='item', 
                          title="Distribución de Valor en Inventario",
                          hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig, use_container_width=True)
             
-            # Botón de exportación
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                 df_inv.to_excel(writer, index=False, sheet_name='Inventario')
@@ -411,7 +404,6 @@ with tabs[3]: # PESTAÑA: AJUSTES
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            # Este else está alineado con el 'if not df_inv.empty'
             st.info("Sin datos para analizar.")
 elif menu == "📊 Dashboard":
 
@@ -1323,6 +1315,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
