@@ -5,7 +5,8 @@ import numpy as np
 import io
 import plotly.express as px
 from PIL import Image
-from datetime import datetime
+import datetime  # Importación base para fechas
+import time      # Para generar los números de ticket únicos
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -186,10 +187,18 @@ with st.sidebar:
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
     
     opciones = [
-        "📦 Inventario", "📊 Dashboard", "📝 Cotizaciones", 
-        "🎨 Análisis CMYK", "👥 Clientes", "💰 Ventas", 
-        "📉 Gastos", "🏗️ Activos", "🏁 Cierre de Caja", 
-        "📊 Auditoría y Métricas", "⚙️ Configuración"
+        "📦 Inventario", 
+        "🛒 Venta Directa",  # <--- Agregado aquí
+        "📊 Dashboard", 
+        "📝 Cotizaciones", 
+        "🎨 Análisis CMYK", 
+        "👥 Clientes", 
+        "💰 Ventas", 
+        "📉 Gastos", 
+        "🏗️ Activos", 
+        "🏁 Cierre de Caja", 
+        "📊 Auditoría y Métricas", 
+        "⚙️ Configuración"
     ]
     menu = st.radio("Secciones del Imperio:", opciones)
     
@@ -1317,22 +1326,30 @@ elif menu == "📝 Cotizaciones":
                 st.error(msg)
 
 
+# --- 4. CONTINUACIÓN DEL MENÚ PRINCIPAL ---
+
+# ... (Aquí iría el código de if menu == "📦 Inventario":)
+
+# --- NUEVO MÓDULO DE VENTA DIRECTA (MATERIA PRIMA) ---
 if menu == "🛒 Venta Directa":
     st.title("🛒 Venta de Materiales e Insumos")
     
-    # 1. Selección de Producto y Verificación de Inventario
-    if not st.session_state.df_inv.empty:
-        # Filtramos solo items que tengan stock para evitar ventas en cero
-        items_disponibles = st.session_state.df_inv[st.session_state.df_inv['cantidad'] > 0]
+    # Sincronizamos con el estado de la sesión
+    df_inv = st.session_state.get('df_inv', pd.DataFrame())
+    
+    if not df_inv.empty:
+        # Filtramos solo items que tengan stock real para evitar errores
+        items_disponibles = df_inv[df_inv['cantidad'] > 0]
         
         if items_disponibles.empty:
             st.warning("No hay productos con stock disponible en el inventario.")
         else:
+            # 1. Selección de Producto
             with st.container(border=True):
                 col1, col2 = st.columns([2, 1])
                 prod_sel = col1.selectbox("Seleccionar Material", items_disponibles['item'].tolist())
                 
-                # Datos del producto seleccionado
+                # Extraemos datos del producto seleccionado
                 datos_p = items_disponibles[items_disponibles['item'] == prod_sel].iloc[0]
                 stock_actual = datos_p['cantidad']
                 costo_base = datos_p['precio_usd']
@@ -1342,67 +1359,73 @@ if menu == "🛒 Venta Directa":
             # 2. Formulario de Venta
             with st.form("venta_directa_form"):
                 c1, c2, c3 = st.columns(3)
-                cantidad_v = c1.number_input(f"Cantidad a vender ({datos_p['unidad']})", min_value=0.01, max_value=float(stock_actual))
+                cantidad_v = c1.number_input(f"Cantidad a vender ({datos_p['unidad']})", 
+                                              min_value=0.01, 
+                                              max_value=float(stock_actual))
                 margen_v = c2.number_input("Margen de Ganancia %", value=30.0)
                 metodo_p = c3.selectbox("Método de Pago", ["Efectivo $", "Pago Móvil (BCV)", "Zelle", "Binance"])
 
                 st.markdown("---")
-                st.write("⚖️ **Impuestos y Comisiones:**")
+                st.write("⚖️ **Impuestos y Comisiones a aplicar:**")
                 i1, i2, i3 = st.columns(3)
+                
+                # Checkboxes de impuestos
                 usa_iva = i1.checkbox(f"IVA (+{st.session_state.get('iva_perc', 16)}%)")
                 usa_igtf = i2.checkbox(f"IGTF (+{st.session_state.get('igtf_perc', 3)}%)")
                 usa_banco = i3.checkbox(f"Banco (+{st.session_state.get('banco_perc', 0.5)}%)")
 
-                # Cálculos de precios
-                precio_con_margen = (cantidad_v * costo_base) * (1 + (margen_v / 100))
-                p_impuestos = (st.session_state.iva_perc if usa_iva else 0) + \
-                              (st.session_state.igtf_perc if usa_igtf else 0) + \
-                              (st.session_state.banco_perc if usa_banco else 0)
+                # --- Lógica de Cálculos ---
+                precio_costo_total = cantidad_v * costo_base
+                precio_con_margen = precio_costo_total * (1 + (margen_v / 100))
+                
+                # Suma de porcentajes de impuestos seleccionados
+                p_impuestos = (st.session_state.get('iva_perc', 0) if usa_iva else 0) + \
+                              (st.session_state.get('igtf_perc', 0) if usa_igtf else 0) + \
+                              (st.session_state.get('banco_perc', 0) if usa_banco else 0)
                 
                 total_final_usd = precio_con_margen * (1 + (p_impuestos / 100))
-                tasa_uso = st.session_state.tasa_binance if metodo_p == "Binance" else st.session_state.tasa_bcv
+                
+                # Selección de tasa según método de pago (usando tus variables t_bin y t_bcv)
+                tasa_uso = t_bin if metodo_p == "Binance" else t_bcv
                 total_final_bs = total_final_usd * tasa_uso
 
                 st.info(f"💰 **Total a Cobrar: ${total_final_usd:.2f} / {total_final_bs:.2f} Bs.**")
 
-                # --- BOTÓN UNIFICADO: PROCESAR + TICKET ---
+                # --- BOTÓN DE ACCIÓN ---
                 if st.form_submit_button("✅ PROCESAR VENTA Y GENERAR TICKET"):
-                    if cantidad_v > 0:
-                        try:
-                            conn = conectar()
-                            cursor = conn.cursor()
-                            # A. Descontar Inventario
-                            cursor.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cantidad_v, prod_sel))
-                            # B. Registrar Venta
-                            cursor.execute("INSERT INTO ventas (monto_total, metodo) VALUES (?, ?)", (total_final_usd, metodo_p))
-                            conn.commit()
-                            conn.close()
-                            
-                            # C. Crear Ticket en Session State
-                            st.session_state.ultimo_ticket = {
-                                "nro": "V-" + str(int(time.time())),
-                                "producto": prod_sel,
-                                "cantidad": f"{cantidad_v} {datos_p['unidad']}",
-                                "precio_u": f"${(total_final_usd/cantidad_v):.2f}",
-                                "total_usd": total_final_usd,
-                                "total_bs": total_final_bs,
-                                "metodo": metodo_p,
-                                "fecha": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-                            }
-                            
-                            cargar_datos() # Sincroniza stock
-                            st.success("¡Venta procesada y stock actualizado!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error en la operación: {e}")
-                    else:
-                        st.error("La cantidad debe ser mayor a cero.")
+                    try:
+                        conn = conectar()
+                        cursor = conn.cursor()
+                        # A. Descontar del inventario
+                        cursor.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cantidad_v, prod_sel))
+                        # B. Registrar en la tabla de ventas
+                        cursor.execute("INSERT INTO ventas (monto_total, metodo) VALUES (?, ?)", (total_final_usd, metodo_p))
+                        conn.commit()
+                        conn.close()
+                        
+                        # C. Crear Ticket en Session State para el visor
+                        st.session_state.ultimo_ticket = {
+                            "nro": "V-" + str(int(time.time())),
+                            "producto": prod_sel,
+                            "cantidad": f"{cantidad_v} {datos_p['unidad']}",
+                            "precio_u": f"${(total_final_usd/cantidad_v):.2f}",
+                            "total_usd": total_final_usd,
+                            "total_bs": total_final_bs,
+                            "metodo": metodo_p,
+                            "fecha": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+                        }
+                        
+                        cargar_datos() # Recarga el dataframe global
+                        st.success("Venta procesada con éxito.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error en la base de datos: {e}")
     else:
-        st.warning("El inventario está vacío. Agregue productos primero.")
+        st.warning("El inventario está vacío. Registre insumos primero.")
 
-    # --- 3. VISOR DEL TICKET (Fuera del Formulario) ---
+    # --- 3. VISOR DE TICKET (Aparece después de la venta) ---
     if 'ultimo_ticket' in st.session_state:
-        st.markdown("---")
+        st.divider()
         with st.container(border=True):
             t = st.session_state.ultimo_ticket
             st.subheader("📄 Ticket de Venta")
@@ -1413,9 +1436,9 @@ IMPERIO ATÓMICO - RECIBO
 Ticket Nro: {t['nro']}
 Fecha: {t['fecha']}
 ------------------------------
-Prod: {t['producto']}
-Cant: {t['cantidad']}
-Precio Unit: {t['precio_u']}
+Producto: {t['producto']}
+Cantidad: {t['cantidad']}
+Precio Unit (Final): {t['precio_u']}
 ------------------------------
 TOTAL USD: ${t['total_usd']:.2f}
 TOTAL BS:  {t['total_bs']:.2f} Bs.
@@ -1436,14 +1459,6 @@ Método: {t['metodo']}
                 file_name=f"ticket_{t['nro']}.txt",
                 mime="text/plain"
             )
-
-
-
-
-
-
-
-
 
 
 
