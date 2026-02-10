@@ -383,12 +383,14 @@ with tabs[3]: # PESTAÑA: AJUSTES
                         conn.commit(); conn.close(); cargar_datos_seguros(); st.rerun()
                     else:
                         st.warning("Debes marcar la casilla de confirmación para eliminar.")
-        else:
+       else:
             st.info("No hay insumos para ajustar.")
             
-            with tabs[4]: # PESTAÑA: ANÁLISIS
-                st.subheader("📊 Reporte de Almacén")
-            if not df_inv.empty:
+    with tabs[4]: # PESTAÑA: ANÁLISIS
+        st.subheader("📊 Reporte de Almacén")
+        
+        if not df_inv.empty:
+            # Todo esto DEBE estar indentado (un paso a la derecha)
             df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
             
             # Gráfico de torta
@@ -401,6 +403,7 @@ with tabs[3]: # PESTAÑA: AJUSTES
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                 df_inv.to_excel(writer, index=False, sheet_name='Inventario')
+            
             st.download_button(
                 label="📥 Descargar Reporte Completo (Excel)",
                 data=buffer.getvalue(),
@@ -408,6 +411,7 @@ with tabs[3]: # PESTAÑA: AJUSTES
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
+            # Este else está alineado con el 'if not df_inv.empty'
             st.info("Sin datos para analizar.")
 elif menu == "📊 Dashboard":
 
@@ -1319,6 +1323,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
