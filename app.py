@@ -686,7 +686,7 @@ elif menu == "🎨 Análisis CMYK":
                     'consumos': totales_lote_cmyk # Guardamos el desglose para descontar inventario luego
                 }
                 st.success("✅ Datos enviados. Ahora ve al menú de Cotizaciones.")
-# --- 9. LÓGICA DE ACTIVOS (EQUIPOS Y MAQUINARIA) ---
+# --- 9. LÓGICA DE ACTIVOS (EQUIPOS Y MAQUINARIA) - VERSIÓN IMPERIO ---
 elif menu == "🏗️ Activos":
 
     if ROL != "Admin":
@@ -694,30 +694,40 @@ elif menu == "🏗️ Activos":
         st.stop()
 
     st.title("🏗️ Gestión de Activos y Equipos")
-    st.info("💡 Registra aquí tus máquinas para calcular automáticamente el costo de desgaste por cada impresión o uso.")
+    
+    # Métricas rápidas de inversión
+    conn = conectar()
+    df_activos = pd.read_sql_query("SELECT * FROM activos", conn)
+    conn.close()
+    
+    if not df_activos.empty:
+        total_inv = df_activos['inversion'].sum()
+        st.metric("Inversión Total en Maquinaria", f"$ {total_inv:,.2f}")
+
+    st.info("💡 Registra aquí tus máquinas. El 'Costo por Uso' ayudará a la calculadora a cobrar el desgaste de la máquina y ahorrar para la próxima.")
 
     # --- FORMULARIO DE REGISTRO ---
     with st.expander("➕ Registrar Nuevo Equipo o Herramienta"):
         with st.form("form_activos"):
             c1, c2 = st.columns(2)
-            nombre_eq = c1.text_input("Nombre del Equipo (Ej: Epson L805)")
+            nombre_eq = c1.text_input("Nombre del Equipo (Ej: Cameo 5 - Carro 1)")
             categoria = c2.selectbox("Categoría", [
-                "Impresora (Gasta Tinta)",
-                "Maquinaria (Solo Desgaste)",
-                "Herramienta Manual",
-                "Mobiliario"
+                "Impresora (Gasta Tinta/Cabezal)",
+                "Plotter de Corte (Gasta Cuchilla/Motor)",
+                "Prensa Térmica (Gasta Resistencia)",
+                "Herramienta Manual (Larga duración)",
+                "Mobiliario / Otros"
             ])
 
             col_m1, col_m2 = st.columns(2)
-            monto_inv = col_m1.number_input("Inversión / Costo ($)", min_value=0.0, format="%.2f")
-            # La vida útil es cuántas veces se puede usar antes de que se pague sola
-            vida_util_estimada = col_m2.number_input("Vida Útil (Cant. de usos/impresiones)", min_value=1, value=5000)
+            monto_inv = col_m1.number_input("Inversión / Costo Adquisición ($)", min_value=0.0, format="%.2f")
+            # Ajustamos la vida útil por defecto según el tipo
+            vida_util_estimada = col_m2.number_input("Vida Útil Estimada (Cant. de usos/trabajos)", min_value=1, value=2000)
 
-            st.caption("ℹ️ El sistema calculará el costo de 'Desgaste' dividiendo la inversión entre la vida útil.")
+            st.caption("ℹ️ El sistema dividirá la inversión entre la vida útil para recuperar tu dinero poco a poco.")
 
-            if st.form_submit_button("🚀 Guardar Equipo"):
+            if st.form_submit_button("🚀 Guardar en el Imperio"):
                 if nombre_eq and monto_inv > 0:
-                    # Cálculo del desgaste por cada uso
                     desgaste_u = monto_inv / vida_util_estimada
                     
                     conn = conectar()
@@ -728,48 +738,46 @@ elif menu == "🏗️ Activos":
                             (nombre_eq, categoria, monto_inv, "uso", desgaste_u)
                         )
                         conn.commit()
-                        st.success(f"✅ {nombre_eq} registrado. Cada uso sumará ${desgaste_u:.4f} al costo de producción.")
+                        st.success(f"✅ {nombre_eq} registrado. Costo de amortización: ${desgaste_u:.4f} por trabajo.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
                     finally:
                         conn.close()
                 else:
-                    st.error("⚠️ Debes indicar el nombre y el monto de inversión.")
+                    st.error("⚠️ Datos incompletos.")
 
     # --- VISTA DE ACTIVOS EXISTENTES ---
     st.divider()
-    st.subheader("📋 Equipos Registrados")
-    
-    conn = conectar()
-    df_activos = pd.read_sql_query("SELECT id, equipo, categoria, inversion, desgaste FROM activos", conn)
-    conn.close()
-
     if not df_activos.empty:
-        # Renombrar columnas para que se vean bien en la tabla
+        # Mostramos la tabla con mejor formato
         df_ver = df_activos.copy().rename(columns={
             'equipo': 'Nombre',
-            'categoria': 'Tipo',
-            'inversion': 'Inversión ($)',
-            'desgaste': 'Costo/Uso ($)'
+            'categoria': 'Tipo de Activo',
+            'inversion': 'Costo Compra ($)',
+            'desgaste': 'Costo Recuperación x Uso ($)'
         })
         
-        st.dataframe(df_ver, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_ver.style.format({'Costo Compra ($)': '{:.2f}', 'Costo Recuperación x Uso ($)': '{:.4f}'}), 
+            use_container_width=True, 
+            hide_index=True
+        )
         
-        # Opción para eliminar
-        with st.expander("🗑️ Dar de baja un equipo"):
-            id_borrar = st.selectbox("Selecciona equipo a eliminar:", df_activos['id'].tolist(), 
-                                     format_func=lambda x: df_activos[df_activos['id']==x]['equipo'].values[0])
-            if st.button("Confirmar Eliminación", type="primary"):
+        # Opción para dar de baja
+        c_del1, c_del2 = st.columns([3,1])
+        with c_del1:
+            id_borrar = st.selectbox("Selecciona equipo para retirar del sistema:", df_activos['id'].tolist(), 
+                                       format_func=lambda x: df_activos[df_activos['id']==x]['equipo'].values[0])
+        with c_del2:
+            if st.button("🗑️ Eliminar", type="primary", use_container_width=True):
                 conn = conectar()
                 conn.execute("DELETE FROM activos WHERE id = ?", (id_borrar,))
                 conn.commit()
                 conn.close()
-                st.warning("Equipo eliminado del sistema.")
                 st.rerun()
     else:
-        st.info("Aún no has registrado ningún equipo.")
-
+        st.info("Aún no tienes activos registrados.")
 # --- 11. OTROS PROCESOS (LAMINADO, CORTE, PLANCHADO) ---
 elif menu == "🛠️ Otros Procesos":
     st.title("🛠️ Calculadora de Procesos Especiales")
@@ -1284,6 +1292,7 @@ elif menu == "📝 Cotizaciones":
                 st.rerun()
             else:
                 st.error(msg)
+
 
 
 
