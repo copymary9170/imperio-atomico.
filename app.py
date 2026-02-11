@@ -1749,31 +1749,41 @@ elif menu == "🏗️ Activos":
             df_rep = df[df['unidad'].str.contains("Repuesto")]
             st.dataframe(df_rep, use_container_width=True, hide_index=True)
 
-        with t4:
-            c_inv, c_des, c_prom = st.columns(3)
+with t4:
+    c_inv, c_des, c_prom = st.columns(3)
 
-            c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
-            c_des.metric("Activos Registrados", len(df))
+    c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
+    c_des.metric("Activos Registrados", len(df))
 
-            promedio = df['desgaste'].mean() if not df.empty else 0
-            c_prom.metric("Desgaste Promedio por Uso", f"$ {promedio:.4f}")
+    promedio = df['desgaste'].mean() if not df.empty else 0
+    c_prom.metric("Desgaste Promedio por Uso", f"$ {promedio:.4f}")
 
-            fig = px.bar(
-                df,
-                x='equipo',
-                y='inversion',
-                color='categoria',
-                title="Distribución de Inversión por Activo"
+    fig = px.bar(
+        df,
+        x='equipo',
+        y='inversion',
+        color='categoria',
+        title="Distribución de Inversión por Activo"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+with t5:
+    st.subheader("Historial de Movimientos de Activos")
+
+    try:
+        with conectar() as conn:
+            df_hist = pd.read_sql_query(
+                "SELECT activo, accion, detalle, costo, fecha FROM activos_historial ORDER BY fecha DESC",
+                conn
             )
-            st.plotly_chart(fig, use_container_width=True)
 
-        with t5:
-            st.subheader("Historial de Movimientos de Activos")
+        if not df_hist.empty:
+            st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay movimientos registrados aún.")
 
-            try:
-                with conectar() as conn:
-                    df_hist = pd.read_sql_query(
-                        "S
+    except Exception as e:
+        st.error(f"Error cargando historial: {e}")
 
 # ===========================================================
 # 11. MÓDULO PROFESIONAL DE OTROS PROCESOS
@@ -3119,6 +3129,7 @@ def registrar_venta_global(
 
     except Exception as e:
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
