@@ -124,29 +124,31 @@ def inicializar_sistema():
         "CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)",
         "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
         "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
-        "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        # 🛡️ TABLA ACTUALIZADA CON CLIENTE (TEXTO) Y DETALLE:
+        "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, cliente TEXT, detalle TEXT, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, equipo TEXT, categoria TEXT, inversion REAL, unidad TEXT, desgaste REAL)",
-        # 🛡️ TABLAS CRÍTICAS PARA EL NUEVO INVENTARIO:
         "CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE IF NOT EXISTS historial_precios (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, precio_usd REAL, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)"
     ]
     for tabla in tablas: c.execute(tabla)
+    
+    # Verificación de seguridad: Si la tabla ya existía sin las nuevas columnas, las agregamos
+    try:
+        c.execute("ALTER TABLE ventas ADD COLUMN cliente TEXT")
+        c.execute("ALTER TABLE ventas ADD COLUMN detalle TEXT")
+    except:
+        pass # Ya existen
+        
     c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
     
-    # 💡 Parámetros de configuración inicial
     config_init = [
-        ('tasa_bcv', 36.50), 
-        ('tasa_binance', 38.00), 
-        ('costo_tinta_ml', 0.10), # Precio ajustable por inflación
-        ('iva_perc', 0.16), 
-        ('igtf_perc', 0.03), 
-        ('banco_perc', 0.005)
+        ('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('costo_tinta_ml', 0.10),
+        ('iva_perc', 16.0), ('igtf_perc', 3.0), ('banco_perc', 0.5)
     ]
     for p, v in config_init: c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
     conn.commit()
     conn.close()
-
 def login():
     st.title("⚛️ Acceso al Imperio Atómico")
     with st.container(border=True):
@@ -184,23 +186,29 @@ ROL = st.session_state.get('rol', "Produccion")
 # --- 4. SIDEBAR ---
 with st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
+    
+    # Mostramos las tasas actuales directamente en el sidebar
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
     
     opciones = [
-        "📦 Inventario", 
-        "🛒 Venta Directa",  # <--- Agregado aquí
-        "📊 Dashboard", 
-        "📝 Cotizaciones", 
-        "🎨 Análisis CMYK", 
-        "👥 Clientes", 
-        "💰 Ventas", 
-        "📉 Gastos", 
-        "🏗️ Activos", 
-        "🏁 Cierre de Caja", 
-        "📊 Auditoría y Métricas", 
-        "⚙️ Configuración"
+        "📦 Inventario",           # Gestión de stock de materiales
+        "🛒 Venta Directa",        # Venta de insumos con descuento de stock
+        "🛠️ Otros Procesos",       # Servicios, mano de obra y trabajos especiales
+        "🎨 Análisis CMYK",        # Calculadora de tintas y cm2
+        "📝 Cotizaciones",         # Presupuestos
+        "💰 Ventas",               # Historial detallado (quién, qué y cuánto)
+        "👥 Clientes",             # Base de datos de contactos
+        "📊 Dashboard",            # Gráficas de rendimiento
+        "📉 Gastos",               # Registro de egresos
+        "🏗️ Activos",              # Maquinarias e inversión
+        "🏁 Cierre de Caja",       # Reporte final del día
+        "📊 Auditoría y Métricas", # Control de gestión
+        "⚙️ Configuración"         # Ajustes de Tasas, IVA, IGTF e Impuesto Bancario
     ]
+    
     menu = st.radio("Secciones del Imperio:", opciones)
+    
+    st.divider()
     
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state.clear()
@@ -866,74 +874,100 @@ elif menu == "🛠️ Otros Procesos":
             st.session_state.menu = "🏗️ Activos" # Intento de redirección
             st.rerun()
 
-# --- 7. MÓDULO DE VENTAS (REGISTRO MANUAL) ---
+# --- 7. MÓDULO DE VENTAS (HISTORIAL Y REGISTRO) ---
 elif menu == "💰 Ventas":
-    st.title("💰 Registro de Ventas")
-    st.info("Utiliza este módulo para registrar ventas directas que no pasaron por el cotizador CMYK.")
-
-    # Verificamos si hay clientes cargados
-    if st.session_state.df_cli.empty:
-        st.warning("⚠️ No hay clientes registrados. Ve al menú '👥 Clientes' primero.")
-    else:
-        with st.form("venta_manual", clear_on_submit=True):
-            st.subheader("📝 Detalles de la Transacción")
-            
-            # Selector de cliente con ID oculto para mayor precisión
-            opciones_cli = {row['nombre']: row['id'] for _, row in st.session_state.df_cli.iterrows()}
-            cliente_nombre = st.selectbox("Seleccionar Cliente:", options=list(opciones_cli.keys()))
-            
-            c1, c2 = st.columns(2)
-            monto_venta = c1.number_input("Monto Total ($):", min_value=0.01, format="%.2f", step=0.5)
-            metodo_pago = c2.selectbox("Método de Pago:", [
-                "Efectivo ($)", 
-                "Pago Móvil (BCV)", 
-                "Zelle", 
-                "Binance (USDT)", 
-                "Transferencia (Bs)"
-            ])
-
-            st.divider()
-            
-            # Cálculo informativo de la tasa en el momento
-            tasa_momento = t_bcv if "BCV" in metodo_pago or "Bs" in metodo_pago else (t_bin if "Binance" in metodo_pago else 1.0)
-            if tasa_momento > 1.0:
-                st.caption(f"💡 El cliente debe pagar aproximadamente: **Bs {(monto_venta * tasa_momento):,.2f}**")
-
-            if st.form_submit_button("🚀 REGISTRAR VENTA"):
-                cliente_id = opciones_cli[cliente_nombre]
-                
-                conn = conectar()
-                try:
-                    c = conn.cursor()
-                    # Insertamos la venta incluyendo el método de pago
-                    c.execute("""
-                        INSERT INTO ventas (cliente_id, monto_total, metodo) 
-                        VALUES (?, ?, ?)
-                    """, (cliente_id, monto_venta, metodo_pago))
-                    
-                    conn.commit()
-                    st.success(f"✅ Venta de ${monto_venta} registrada a {cliente_nombre}")
-                    st.balloons()
-                except Exception as e:
-                    st.error(f"❌ Error al guardar la venta: {e}")
-                finally:
-                    conn.close()
-
-    # --- HISTORIAL RÁPIDO ---
-    st.divider()
-    st.subheader("📂 Últimas Ventas Registradas")
-    conn = conectar()
-    df_recientes = pd.read_sql_query("""
-        SELECT v.fecha, c.nombre as Cliente, v.monto_total as 'Monto ($)', v.metodo as 'Método'
-        FROM ventas v
-        JOIN clientes c ON v.cliente_id = c.id
-        ORDER BY v.fecha DESC LIMIT 5
-    """, conn)
-    conn.close()
+    st.title("💰 Historial y Registro de Ventas")
     
-    if not df_recientes.empty:
-        st.table(df_recientes)
+    # Pestañas para organizar: una para registrar y otra para ver todo el historial
+    tab1, tab2 = st.tabs(["📝 Registrar Venta Manual", "📜 Historial Completo"])
 
+    with tab1:
+        if st.session_state.df_cli.empty:
+            st.warning("⚠️ No hay clientes registrados. Ve al menú '👥 Clientes' primero.")
+        else:
+            with st.form("venta_manual", clear_on_submit=True):
+                st.subheader("📝 Detalles de la Transacción")
+                
+                # Selector de cliente
+                opciones_cli = {row['nombre']: row['id'] for _, row in st.session_state.df_cli.iterrows()}
+                cliente_nombre = st.selectbox("Seleccionar Cliente:", options=list(opciones_cli.keys()))
+                
+                # NUEVO: Campo de Detalle para saber qué se vendió
+                detalle_v = st.text_area("¿Qué se vendió? (Detalle)", placeholder="Ej: 2 Impresiones Banner 2x1m / 3 Tintas Cyan")
+                
+                c1, c2 = st.columns(2)
+                monto_venta = c1.number_input("Monto Total ($):", min_value=0.01, format="%.2f", step=0.5)
+                metodo_pago = c2.selectbox("Método de Pago:", [
+                    "Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)"
+                ])
+
+                st.divider()
+                tasa_momento = t_bcv if "BCV" in metodo_pago or "Bs" in metodo_pago else (t_bin if "Binance" in metodo_pago else 1.0)
+                if tasa_momento > 1.0:
+                    st.caption(f"💡 El cliente debe pagar aproximadamente: **Bs {(monto_venta * tasa_momento):,.2f}**")
+
+                if st.form_submit_button("🚀 REGISTRAR VENTA"):
+                    cliente_id = opciones_cli[cliente_nombre]
+                    conn = conectar()
+                    try:
+                        c = conn.cursor()
+                        # Insertamos incluyendo los nuevos campos: cliente (nombre) y detalle
+                        c.execute("""
+                            INSERT INTO ventas (cliente_id, cliente, detalle, monto_total, metodo) 
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (cliente_id, cliente_nombre, detalle_v, monto_venta, metodo_pago))
+                        
+                        conn.commit()
+                        st.success(f"✅ Venta registrada a {cliente_nombre}")
+                        st.balloons()
+                        st.rerun() # Para que se actualice el historial en la otra pestaña
+                    except Exception as e:
+                        st.error(f"❌ Error al guardar: {e}")
+                    finally:
+                        conn.close()
+
+    with tab2:
+        st.subheader("📂 Buscador de Ventas")
+        
+        # Carga de datos completa
+        conn = conectar()
+        # Traemos todos los datos relevantes
+        df_historial = pd.read_sql_query("""
+            SELECT fecha, cliente, detalle, monto_total as 'Monto ($)', metodo as 'Método'
+            FROM ventas 
+            ORDER BY fecha DESC
+        """, conn)
+        conn.close()
+
+        if not df_historial.empty:
+            # Buscador dinámico por Cliente o por Producto
+            busc = st.text_input("🔍 Buscar por Cliente o por Detalle del producto:")
+            
+            if busc:
+                # Filtra si el texto está en el nombre del cliente O en el detalle del producto
+                df_historial = df_historial[
+                    df_historial['cliente'].str.contains(busc, case=False, na=False) | 
+                    df_historial['detalle'].str.contains(busc, case=False, na=False)
+                ]
+
+            # Mostramos la tabla interactiva
+            st.dataframe(
+                df_historial,
+                column_config={
+                    "fecha": "Fecha",
+                    "cliente": "Cliente",
+                    "detalle": "Lo vendido (Items)",
+                    "Monto ($)": st.column_config.NumberColumn("Total $", format="$ %.2f"),
+                    "Método": "Pago"
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Resumen de lo filtrado
+            st.metric("Total en Ventas (Filtro actual)", f"$ {df_historial['Monto ($)'].sum():.2f}")
+        else:
+            st.info("Aún no hay ventas registradas en el historial.")
 
 # --- 12. MÓDULO DE GASTOS ---
 elif menu == "📉 Gastos":
@@ -1330,140 +1364,152 @@ elif menu == "📝 Cotizaciones":
 
 # ... (Aquí iría el código de if menu == "📦 Inventario":)
 
-# --- NUEVO MÓDULO DE VENTA DIRECTA (MATERIA PRIMA) ---
+# --- NUEVO MÓDULO DE VENTA DIRECTA ---
 if menu == "🛒 Venta Directa":
     st.title("🛒 Venta de Materiales e Insumos")
-    
-    # Sincronizamos con el estado de la sesión
     df_inv = st.session_state.get('df_inv', pd.DataFrame())
     
     if not df_inv.empty:
-        # Filtramos solo items que tengan stock real para evitar errores
         items_disponibles = df_inv[df_inv['cantidad'] > 0]
-        
         if items_disponibles.empty:
-            st.warning("No hay productos con stock disponible en el inventario.")
+            st.warning("No hay stock disponible.")
         else:
-            # 1. Selección de Producto
             with st.container(border=True):
                 col1, col2 = st.columns([2, 1])
                 prod_sel = col1.selectbox("Seleccionar Material", items_disponibles['item'].tolist())
-                
-                # Extraemos datos del producto seleccionado
                 datos_p = items_disponibles[items_disponibles['item'] == prod_sel].iloc[0]
                 stock_actual = datos_p['cantidad']
                 costo_base = datos_p['precio_usd']
-                
-                col2.metric("Stock Disponible", f"{stock_actual:.2f} {datos_p['unidad']}")
+                col2.metric("Stock", f"{stock_actual:.2f} {datos_p['unidad']}")
 
-            # 2. Formulario de Venta
             with st.form("venta_directa_form"):
-                # Campo de Cliente
-                cliente_v = st.text_input("👤 Nombre del Cliente (Opcional)", placeholder="Ej. Juan Pérez / Consumidor Final")
-                
+                cliente_v = st.text_input("👤 Cliente", placeholder="Nombre o 'Consumidor Final'")
                 c1, c2, c3 = st.columns(3)
-                cantidad_v = c1.number_input(f"Cantidad a vender ({datos_p['unidad']})", 
-                                              min_value=0.01, 
-                                              max_value=float(stock_actual))
-                margen_v = c2.number_input("Margen de Ganancia %", value=30.0)
-                metodo_p = c3.selectbox("Método de Pago", ["Efectivo $", "Pago Móvil (BCV)", "Zelle", "Binance"])
+                cantidad_v = c1.number_input(f"Cantidad", min_value=0.01, max_value=float(stock_actual))
+                margen_v = c2.number_input("Margen %", value=30.0)
+                metodo_p = c3.selectbox("Método", ["Efectivo $", "Pago Móvil (BCV)", "Zelle", "Binance"])
 
-                st.markdown("---")
-                st.write("⚖️ **Impuestos y Comisiones a aplicar:**")
+                # Impuestos
                 i1, i2, i3 = st.columns(3)
-                
-                # Checkboxes de impuestos usando valores guardados en session_state
                 usa_iva = i1.checkbox(f"IVA (+{st.session_state.get('iva_perc', 16)}%)")
                 usa_igtf = i2.checkbox(f"IGTF (+{st.session_state.get('igtf_perc', 3)}%)")
                 usa_banco = i3.checkbox(f"Banco (+{st.session_state.get('banco_perc', 0.5)}%)")
 
-                # --- Lógica de Cálculos ---
-                precio_costo_total = cantidad_v * costo_base
-                precio_con_margen = precio_costo_total * (1 + (margen_v / 100))
-                
-                # Suma de porcentajes de impuestos seleccionados
-                p_impuestos = (st.session_state.get('iva_perc', 0) if usa_iva else 0) + \
-                              (st.session_state.get('igtf_perc', 0) if usa_igtf else 0) + \
-                              (st.session_state.get('banco_perc', 0) if usa_banco else 0)
-                
-                total_final_usd = precio_con_margen * (1 + (p_impuestos / 100))
-                
-                # Selección de tasa según método de pago (usando tus variables t_bin y t_bcv)
+                # Cálculos
+                precio_margen = (cantidad_v * costo_base) * (1 + (margen_v / 100))
+                p_imp = (st.session_state.get('iva_perc', 0) if usa_iva else 0) + \
+                        (st.session_state.get('igtf_perc', 0) if usa_igtf else 0) + \
+                        (st.session_state.get('banco_perc', 0) if usa_banco else 0)
+                total_usd = precio_margen * (1 + (p_p_imp / 100))
                 tasa_uso = t_bin if metodo_p == "Binance" else t_bcv
-                total_final_bs = total_final_usd * tasa_uso
+                total_bs = total_usd * tasa_uso
 
-                st.info(f"💰 **Total a Cobrar: ${total_final_usd:.2f} / {total_final_bs:.2f} Bs.**")
+                st.info(f"💰 Total: ${total_usd:.2f} / {total_bs:.2f} Bs.")
 
-                # --- BOTÓN DE ACCIÓN ---
-                if st.form_submit_button("✅ PROCESAR VENTA Y GENERAR TICKET"):
+                if st.form_submit_button("✅ PROCESAR VENTA"):
                     try:
+                        nombre_cliente = cliente_v if cliente_v else "Consumidor Final"
+                        # DETALLE: Aquí guardamos qué se vendió exactamente
+                        detalle_venta = f"{cantidad_v} {datos_p['unidad']} de {prod_sel}"
+                        
                         conn = conectar()
                         cursor = conn.cursor()
-                        # A. Descontar del inventario
                         cursor.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cantidad_v, prod_sel))
-                        # B. Registrar en la tabla de ventas
-                        cursor.execute("INSERT INTO ventas (monto_total, metodo) VALUES (?, ?)", (total_final_usd, metodo_p))
+                        # GUARDAR EN DB con Cliente y Detalle
+                        cursor.execute("INSERT INTO ventas (monto_total, metodo, cliente, detalle) VALUES (?, ?, ?, ?)", 
+                                     (total_usd, metodo_p, nombre_cliente, detalle_venta))
                         conn.commit()
                         conn.close()
                         
-                        # C. Crear Ticket en Session State para el visor
                         st.session_state.ultimo_ticket = {
                             "nro": "V-" + str(int(time.time())),
-                            "cliente": cliente_v if cliente_v else "Consumidor Final",
+                            "cliente": nombre_cliente,
                             "producto": prod_sel,
                             "cantidad": f"{cantidad_v} {datos_p['unidad']}",
-                            "precio_u": f"${(total_final_usd/cantidad_v):.2f}",
-                            "total_usd": total_final_usd,
-                            "total_bs": total_final_bs,
+                            "total_usd": total_usd,
+                            "total_bs": total_bs,
                             "metodo": metodo_p,
                             "fecha": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
                         }
-                        
-                        cargar_datos() # Recarga el dataframe global
-                        st.success("Venta procesada con éxito.")
+                        cargar_datos()
+                        st.success("Venta Guardada")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error en la base de datos: {e}")
-    else:
-        st.warning("El inventario está vacío. Registre insumos primero.")
+                        st.error(f"Error: {e}")
 
-    # --- 3. VISOR DE TICKET (Aparece después de la venta) ---
+    # Visor de Ticket (igual al anterior)
     if 'ultimo_ticket' in st.session_state:
-        st.divider()
-        with st.container(border=True):
-            t = st.session_state.ultimo_ticket
-            st.subheader("📄 Ticket de Venta")
-            
-            ticket_txt = f"""
-IMPERIO ATÓMICO - RECIBO
+        # ... (Mantén tu código del visor de ticket aquí) ...
+        pass
+
+# --- MÓDULO DE HISTORIAL DETALLADO ---
+if menu == "📊 Historial":
+    st.title("📊 Historial de Ventas")
+    
+    try:
+        conn = conectar()
+        # Traemos la nueva columna 'detalle'
+        df_ventas = pd.read_sql_query("SELECT * FROM ventas ORDER BY fecha DESC", conn)
+        conn.close()
+    except:
+        df_ventas = pd.DataFrame()
+
+    if not df_ventas.empty:
+        # Buscador por Cliente o Producto
+        busqueda = st.text_input("🔍 Buscar por Cliente o Producto (Detalle)", placeholder="Ej: Juan o Tinta...")
+        
+        if busqueda:
+            # Filtra en ambas columnas
+            mask = df_ventas['cliente'].str.contains(busqueda, case=False, na=False) | \
+                   df_ventas['detalle'].str.contains(busqueda, case=False, na=False)
+            df_ventas = df_ventas[mask]
+
+        st.metric("Ventas Totales", f"${df_ventas['monto_total'].sum():.2f}")
+
+        # Tabla con la columna DETALLE
+        st.dataframe(
+            df_ventas[['fecha', 'cliente', 'detalle', 'monto_total', 'metodo']],
+            column_config={
+                "fecha": "Fecha",
+                "cliente": "Cliente",
+                "detalle": "Items Vendidos", # <--- Aquí verás "5.00 ltr de Tinta"
+                "monto_total": st.column_config.NumberColumn("Total $", format="$ %.2f"),
+                "metodo": "Pago"
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("Sin registros.")
+
+        # --- DETALLE INDIVIDUAL ---
+        st.markdown("### 📋 Ver Detalle de Venta")
+        venta_idx = st.selectbox("Seleccione una venta para ver el recibo:", df_ventas.index)
+        
+        if venta_idx is not None:
+            v = df_ventas.loc[venta_idx]
+            with st.expander(f"Ver Ticket de {v['cliente']} - {v['fecha']}"):
+                ticket_reimpresion = f"""
+IMPERIO ATÓMICO - HISTORIAL
 ------------------------------
-Ticket Nro: {t['nro']}
-Fecha: {t['fecha']}
-Cliente: {t['cliente']}
+Fecha: {v['fecha']}
+Cliente: {v['cliente']}
 ------------------------------
-Producto: {t['producto']}
-Cantidad: {t['cantidad']}
-Precio Unit: {t['precio_u']}
+TOTAL: ${v['monto_total']:.2f}
+Método: {v['metodo']}
 ------------------------------
-TOTAL USD: ${t['total_usd']:.2f}
-TOTAL BS:  {t['total_bs']:.2f} Bs.
-Método: {t['metodo']}
-------------------------------
-¡Gracias por su compra!
-            """
-            st.code(ticket_txt)
-            
-            c1, c2 = st.columns(2)
-            if c1.button("Nuevo Ticket (Limpiar)"):
-                del st.session_state.ultimo_ticket
-                st.rerun()
-            
-            c2.download_button(
-                label="📥 Descargar Ticket",
-                data=ticket_txt,
-                file_name=f"ticket_{t['nro']}.txt",
-                mime="text/plain"
-            )
+                """
+                st.code(ticket_reimpresion)
+                
+                # Botón para descargar de nuevo si es necesario
+                st.download_button(
+                    label="📥 Re-descargar Ticket",
+                    data=ticket_reimpresion,
+                    file_name=f"ticket_historial_{v['id']}.txt",
+                    mime="text/plain"
+                )
+    else:
+        st.info("Aún no hay ventas registradas en el historial.")
 
 
 
