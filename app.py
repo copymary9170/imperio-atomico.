@@ -5,8 +5,8 @@ import numpy as np
 import io
 import plotly.express as px
 from PIL import Image
-import datetime  # Importación base para fechas
-import time      # Para generar los números de ticket únicos
+from datetime import datetime, date, timedelta  # <--- CAMBIO CLAVE
+import time
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -1540,6 +1540,7 @@ if menu == "🛒 Venta Directa":
             if st.button("🗑️ Cerrar Ticket"):
                 del st.session_state.ultimo_ticket
                 st.rerun()
+
 
 
 
