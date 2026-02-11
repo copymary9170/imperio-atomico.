@@ -421,7 +421,7 @@ if menu == "📦 Inventario":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         elif menu == "📊 Dashboard":
-    st.title("📊 Panel de Control Imperio")
+        st.title("📊 Panel de Control Imperio")
 
     conn = conectar()
     # Cargamos datos con fechas parseadas
@@ -1540,6 +1540,7 @@ if menu == "🛒 Venta Directa":
             if st.button("🗑️ Cerrar Ticket"):
                 del st.session_state.ultimo_ticket
                 st.rerun()
+
 
 
 
