@@ -1358,6 +1358,9 @@ if menu == "🛒 Venta Directa":
 
             # 2. Formulario de Venta
             with st.form("venta_directa_form"):
+                # Campo de Cliente
+                cliente_v = st.text_input("👤 Nombre del Cliente (Opcional)", placeholder="Ej. Juan Pérez / Consumidor Final")
+                
                 c1, c2, c3 = st.columns(3)
                 cantidad_v = c1.number_input(f"Cantidad a vender ({datos_p['unidad']})", 
                                               min_value=0.01, 
@@ -1369,7 +1372,7 @@ if menu == "🛒 Venta Directa":
                 st.write("⚖️ **Impuestos y Comisiones a aplicar:**")
                 i1, i2, i3 = st.columns(3)
                 
-                # Checkboxes de impuestos
+                # Checkboxes de impuestos usando valores guardados en session_state
                 usa_iva = i1.checkbox(f"IVA (+{st.session_state.get('iva_perc', 16)}%)")
                 usa_igtf = i2.checkbox(f"IGTF (+{st.session_state.get('igtf_perc', 3)}%)")
                 usa_banco = i3.checkbox(f"Banco (+{st.session_state.get('banco_perc', 0.5)}%)")
@@ -1406,6 +1409,7 @@ if menu == "🛒 Venta Directa":
                         # C. Crear Ticket en Session State para el visor
                         st.session_state.ultimo_ticket = {
                             "nro": "V-" + str(int(time.time())),
+                            "cliente": cliente_v if cliente_v else "Consumidor Final",
                             "producto": prod_sel,
                             "cantidad": f"{cantidad_v} {datos_p['unidad']}",
                             "precio_u": f"${(total_final_usd/cantidad_v):.2f}",
@@ -1435,10 +1439,11 @@ IMPERIO ATÓMICO - RECIBO
 ------------------------------
 Ticket Nro: {t['nro']}
 Fecha: {t['fecha']}
+Cliente: {t['cliente']}
 ------------------------------
 Producto: {t['producto']}
 Cantidad: {t['cantidad']}
-Precio Unit (Final): {t['precio_u']}
+Precio Unit: {t['precio_u']}
 ------------------------------
 TOTAL USD: ${t['total_usd']:.2f}
 TOTAL BS:  {t['total_bs']:.2f} Bs.
@@ -1459,6 +1464,7 @@ Método: {t['metodo']}
                 file_name=f"ticket_{t['nro']}.txt",
                 mime="text/plain"
             )
+
 
 
 
