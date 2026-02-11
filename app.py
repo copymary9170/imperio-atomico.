@@ -420,7 +420,7 @@ if menu == "📦 Inventario":
                 file_name="inventario_atoma.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-    elif menu == "📊 Dashboard":
+        elif menu == "📊 Dashboard":
     st.title("📊 Panel de Control Imperio")
 
     conn = conectar()
@@ -1540,6 +1540,7 @@ if menu == "🛒 Venta Directa":
             if st.button("🗑️ Cerrar Ticket"):
                 del st.session_state.ultimo_ticket
                 st.rerun()
+
 
 
 
