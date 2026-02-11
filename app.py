@@ -729,6 +729,9 @@ if menu == "📦 Inventario":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
+          else:
+            st.info("Inventario vacío.")
+
         elif menu == "📊 Dashboard":
 
     st.title("📊 Panel de Control Imperio")
@@ -3129,6 +3132,7 @@ def registrar_venta_global(
 
     except Exception as e:
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
