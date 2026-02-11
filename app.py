@@ -420,25 +420,41 @@ if menu == "📦 Inventario":
                 file_name="inventario_atoma.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        else:
-            st.info("Sin datos para analizar.")
-elif menu == "📊 Dashboard":
+        elif menu == "📊 Dashboard":
+    st.title("📊 Panel de Control Imperio")
 
     conn = conectar()
-    # Cargamos datos con fechas parseadas para poder graficar
+    # Cargamos datos con fechas parseadas
     df_ventas = pd.read_sql("SELECT * FROM ventas", conn, parse_dates=['fecha'])
     df_gastos = pd.read_sql("SELECT * FROM gastos", conn, parse_dates=['fecha'])
+    df_inv = pd.read_sql("SELECT * FROM inventario", conn) # Cargamos inventario para alertas
     conn.close()
+
+    # --- 🚨 SECCIÓN DE ALERTAS CRÍTICAS (NUEVO) ---
+    # Esto aparecerá solo si hay productos por debajo del mínimo
+    items_criticos = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
+    if not items_criticos.empty:
+        with st.container(border=True):
+            st.error(f"⚠️ **ATENCIÓN:** Tienes {len(items_criticos)} productos en nivel crítico.")
+            cols = st.columns(len(items_criticos) if len(items_criticos) <= 3 else 3)
+            for i, (_, row) in enumerate(items_criticos.head(3).iterrows()):
+                cols[i % 3].warning(f"**{row['item']}**\n\nQuedan: {row['cantidad']} {row['unidad']}")
+    
+    st.divider()
 
     # --- MÉTRICAS PRINCIPALES ---
     ingresos = df_ventas['monto_total'].sum() if not df_ventas.empty else 0
     egresos = df_gastos['monto'].sum() if not df_gastos.empty else 0
     balance = ingresos - egresos
+    
+    # Cálculo de deudas pendientes (NUEVO)
+    deudas_pendientes = df_ventas[df_ventas['metodo'].str.contains("Pendiente|Deuda", case=False, na=False)]['monto_total'].sum()
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Ingresos Totales", f"$ {ingresos:,.2f}")
     c2.metric("Egresos Totales", f"$ {egresos:,.2f}", delta=f"-{egresos:,.2f}", delta_color="inverse")
     c3.metric("Utilidad Neta", f"$ {balance:,.2f}", delta=f"{(balance/ingresos*100 if ingresos>0 else 0):.1f}% Margen")
+    c4.metric("Por Cobrar (Deudas)", f"$ {deudas_pendientes:,.2f}", delta="Pendiente", delta_color="off")
 
     st.divider()
 
@@ -448,7 +464,6 @@ elif menu == "📊 Dashboard":
     with col_g1:
         st.subheader("📈 Tendencia de Ventas ($)")
         if not df_ventas.empty:
-            # Agrupamos por día para ver el crecimiento
             df_ventas['fecha_dia'] = df_ventas['fecha'].dt.date
             ventas_diarias = df_ventas.groupby('fecha_dia')['monto_total'].sum()
             st.line_chart(ventas_diarias)
@@ -458,16 +473,28 @@ elif menu == "📊 Dashboard":
     with col_g2:
         st.subheader("💳 Ventas por Método")
         if not df_ventas.empty:
+            # Mostramos cuánto dinero entra por cada vía
             metodos = df_ventas.groupby('metodo')['monto_total'].sum()
             st.bar_chart(metodos)
         else:
             st.info("Sin datos de métodos de pago.")
 
+    # --- ANALÍTICA DE IMPUESTOS Y COMISIONES (NUEVO - Instrucción 10-02) ---
+    with st.expander("🏦 Desglose de Impuestos y Comisiones Estimados"):
+        # Calculamos el 0.5% de banco que definiste
+        comision_banco = ingresos * (st.session_state.get('banco_perc', 0.5) / 100)
+        iva_estimado = ingresos * (st.session_state.get('iva_perc', 16) / 100)
+        
+        i1, i2 = st.columns(2)
+        i1.write(f"🔹 **Comisión Bancaria (0.5%):** ${comision_banco:,.2f}")
+        i2.write(f"🔹 **IVA Estimado (16%):** ${iva_estimado:,.2f}")
+        st.caption("Nota: Estos valores son calculados sobre el ingreso bruto total.")
+
     # --- TABLA DE ÚLTIMOS MOVIMIENTOS ---
     st.divider()
     st.subheader("📑 Últimos Movimientos")
     
-    tab_v, tab_g = st.tabs(["Últimas Ventas", "Últimos Gastos"])
+    tab_v, tab_g, tab_d = st.tabs(["Últimas Ventas", "Últimos Gastos", "🛑 Deudas por Cobrar"])
     
     with tab_v:
         if not df_ventas.empty:
@@ -477,6 +504,14 @@ elif menu == "📊 Dashboard":
         if not df_gastos.empty:
             st.dataframe(df_gastos.sort_values('fecha', ascending=False).head(10), use_container_width=True)
 
+    with tab_d:
+        # Filtrado rápido de clientes que deben (NUEVO)
+        if not df_ventas.empty:
+            deudores = df_ventas[df_ventas['metodo'].str.contains("Pendiente|Deuda", case=False, na=False)]
+            if not deudores.empty:
+                st.dataframe(deudores[['fecha', 'cliente', 'detalle', 'monto_total']], use_container_width=True)
+            else:
+                st.success("No hay deudas pendientes actualmente.")
 elif menu == "⚙️ Configuración":
 
     if ROL not in ["Admin", "Administracion"]:
@@ -1166,28 +1201,54 @@ elif menu == "🏁 Cierre de Caja":
         st.toast("Generando resumen para imprimir...")
         st.success(f"Cierre de caja del {fecha_str} completado exitosamente.")
 
-# --- 13. AUDITORÍA Y MÉTRICAS ---
+# --- 13. AUDITORÍA Y MÉTRICAS (FINANCIERO + OPERATIVO) ---
 elif menu == "📊 Auditoría y Métricas":
-    st.title("📊 Auditoría de Producción e Insumos")
-    st.info("Rastrea cada mililitro de tinta y unidad de material utilizado en el taller.")
+    st.title("📊 Auditoría de Producción, Insumos y Finanzas")
+    st.info("Rastrea cada mililitro de tinta, unidad de material y cada centavo del flujo de caja.")
 
     conn = conectar()
+    # 1. Datos de Movimientos (Tu código original)
     query_movs = """
-        SELECT 
-            m.fecha, 
-            i.item AS 'Material', 
-            m.tipo AS 'Operación',
-            m.cantidad AS 'Cant.', 
-            i.unidad AS 'Unidad',
-            m.motivo AS 'Motivo'
+        SELECT m.fecha, i.item AS 'Material', m.tipo AS 'Operación',
+               m.cantidad AS 'Cant.', i.unidad AS 'Unidad', m.motivo AS 'Motivo'
         FROM inventario_movs m
         JOIN inventario i ON m.item_id = i.id
         ORDER BY m.fecha DESC
     """
     df_movs = pd.read_sql_query(query_movs, conn)
+    
+    # 2. Datos de Ventas y Gastos (Para métricas de dinero)
+    df_ventas = pd.read_sql_query("SELECT * FROM ventas", conn)
+    df_gastos = pd.read_sql_query("SELECT * FROM gastos", conn)
     conn.close()
 
-    tab_graficos, tab_historial, tab_alertas = st.tabs(["📈 Análisis Visual", "📋 Historial Detallado", "🚨 Alertas de Stock"])
+    tab_finanzas, tab_graficos, tab_historial, tab_alertas = st.tabs([
+        "💰 Auditoría Financiera", "📈 Análisis Visual", "📋 Historial Insumos", "🚨 Alertas de Stock"
+    ])
+
+    with tab_finanzas:
+        st.subheader("🕵️ Flujo de Caja Auditable")
+        
+        # Cálculos clave
+        total_ventas = df_ventas['monto_total'].sum() if not df_ventas.empty else 0
+        total_gastos = df_gastos['monto'].sum() if not df_gastos.empty else 0
+        
+        # Instrucción 10-02: Impuesto bancario disponible
+        banco_perc = st.session_state.get('banco_perc', 0.5)
+        comision_est = total_ventas * (banco_perc / 100)
+        
+        # Deudas (Cuentas por cobrar)
+        deudas_df = df_ventas[df_ventas['metodo'].str.contains("Pendiente|Deuda", case=False, na=False)]
+        total_deudas = deudas_df['monto_total'].sum()
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Ingresos Brutos", f"$ {total_ventas:,.2f}")
+        m2.metric("Comisión Banco (Est.)", f"$ {comision_est:,.2f}", delta=f"-{banco_perc}%", delta_color="inverse")
+        m3.metric("Cuentas por Cobrar", f"$ {total_deudas:,.2f}", delta="⚠️ Pendiente")
+
+        if not deudas_df.empty:
+            with st.expander("🔍 Ver Detalle de Deudores"):
+                st.dataframe(deudas_df[['fecha', 'cliente', 'detalle', 'monto_total']], use_container_width=True)
 
     with tab_graficos:
         if not df_movs.empty:
@@ -1204,33 +1265,27 @@ elif menu == "📊 Auditoría y Métricas":
                 c2.metric("Total Operaciones", len(df_movs))
             else:
                 st.info("No hay salidas registradas.")
-        else:
-            st.info("Sin datos.")
 
     with tab_historial:
-        st.subheader("📜 Bitácora de Movimientos")
+        st.subheader("📜 Bitácora de Movimientos de Almacén")
         if not df_movs.empty:
-            # Función simple para colorear filas
             def color_operacion(val):
-                color = 'background-color: #90ee90' if val == 'ENTRADA' else 'background-color: #ffcccb'
-                return color
-
+                return 'background-color: #d1f7d1' if val == 'ENTRADA' else 'background-color: #ffd1d1'
+            
             st.dataframe(
                 df_movs.style.applymap(color_operacion, subset=['Operación']),
-                use_container_width=True,
-                hide_index=True
+                use_container_width=True, hide_index=True
             )
 
     with tab_alertas:
-        st.subheader("🚨 Insumos en Niveles Críticos")
+        st.subheader("🚨 Control de Reposición")
         df_inv = st.session_state.get('df_inv', pd.DataFrame())
-        
         if not df_inv.empty:
-            # Alerta si queda menos de 20 unidades/ml
-            critico = df_inv[df_inv['cantidad'] < 20.0] 
+            # Usamos el 'minimo' configurado o 20 por defecto
+            critico = df_inv[df_inv['cantidad'] <= df_inv.get('minimo', 20.0)] 
             if not critico.empty:
                 for _, row in critico.iterrows():
-                    st.error(f"**{row['item']}** bajo: ¡Solo quedan {row['cantidad']} {row['unidad']}!")
+                    st.error(f"**{row['item']}** bajo: ¡Quedan {row['cantidad']} {row['unidad']}! (Mínimo: {row['minimo']})")
             else:
                 st.success("✅ Niveles de inventario óptimos.")
 
@@ -1360,7 +1415,7 @@ elif menu == "📝 Cotizaciones":
                 st.error(msg)
 
 
-# --- 🛒 MÓDULO DE VENTA DIRECTA PRO ---
+# --- 🛒 MÓDULO DE VENTA DIRECTA "IMPERIO ELITE" ---
 if menu == "🛒 Venta Directa":
     st.title("🛒 Venta de Materiales e Insumos")
     
@@ -1372,6 +1427,7 @@ if menu == "🛒 Venta Directa":
         if items_disponibles.empty:
             st.warning("⚠️ No hay stock disponible en el inventario.")
         else:
+            # --- 1. SELECCIÓN DE PRODUCTO Y VISUALIZACIÓN ---
             with st.container(border=True):
                 col1, col2 = st.columns([2, 1])
                 prod_sel = col1.selectbox("📦 Seleccionar Material/Insumo:", items_disponibles['item'].tolist())
@@ -1382,53 +1438,62 @@ if menu == "🛒 Venta Directa":
                 unidad_p = datos_p['unidad']
                 stock_minimo = datos_p.get('minimo', 5.0)
 
-                # Sugerencia 1: Barra de progreso visual para el stock
-                nivel = min(stock_actual / (stock_minimo * 3), 1.0) # Visualización relativa
+                # Barra de Stock
+                nivel = min(stock_actual / (stock_minimo * 3), 1.0)
                 col2.metric("Stock Actual", f"{stock_actual:.2f} {unidad_p}")
-                col2.progress(nivel, text="Nivel de Inventario")
+                col2.progress(nivel, text="Disponibilidad en Almacén")
 
-            # Formulario
+            # --- 2. FORMULARIO DE VENTA ---
             with st.form("venta_directa_form", clear_on_submit=True):
                 st.subheader("📝 Datos de la Operación")
                 cliente_v = st.text_input("👤 Cliente:", placeholder="Nombre del Cliente")
                 
                 c1, c2, c3 = st.columns(3)
                 cantidad_v = c1.number_input(f"Cantidad ({unidad_p}):", min_value=0.0, max_value=float(stock_actual), step=1.0)
-                
-                # Sugerencia 2: Info sobre el costo para ayudar a decidir el margen
                 margen_v = c2.number_input("Margen %:", value=30.0)
-                st.caption(f"💡 Costo Unitario: ${costo_base:.2f}")
-                
-                metodo_p = c3.selectbox("Método de Pago:", ["Efectivo $", "Pago Móvil (BCV)", "Zelle", "Binance", "Transferencia Bs"])
+                metodo_p = c3.selectbox("Método de Pago:", ["Efectivo $", "Pago Móvil (BCV)", "Zelle", "Binance", "Pendiente"])
 
                 st.divider()
-                st.write("⚖️ **Impuestos Aplicables:**")
+                
+                # --- NUEVO: DESCUENTO Y FIDELIZACIÓN ---
+                col_d1, col_d2 = st.columns(2)
+                usa_desc = col_d1.checkbox("💎 Aplicar Descuento 'Cliente Fiel'")
+                pct_desc = col_d2.number_input("Descuento %", value=5.0 if usa_desc else 0.0, disabled=not usa_desc)
+
+                st.write("⚖️ **Impuestos y Comisiones:**")
                 i1, i2, i3 = st.columns(3)
                 usa_iva = i1.checkbox(f"IVA (+{st.session_state.get('iva_perc', 16)}%)")
                 usa_igtf = i2.checkbox(f"IGTF (+{st.session_state.get('igtf_perc', 3)}%)")
-                usa_banco = i3.checkbox(f"Banco (+{st.session_state.get('banco_perc', 0.5)}%)")
+                # Impuesto del banco por instrucción del 10-02
+                usa_banco = i3.checkbox(f"Banco (+{st.session_state.get('banco_perc', 0.5)}%)", value=True)
 
-                # --- Cálculos ---
+                # --- CÁLCULOS INTEGRADOS ---
                 costo_total_material = cantidad_v * costo_base
-                ganancia_bruta = costo_total_material * (margen_v / 100)
-                precio_con_margen = costo_total_material + ganancia_bruta
                 
+                # Precio con margen
+                precio_con_margen = costo_total_material * (1 + (margen_v / 100))
+                
+                # Aplicar Descuento (Si aplica)
+                precio_tras_desc = precio_con_margen * (1 - (pct_desc / 100))
+                
+                # Sumar Impuestos
                 p_imp = (st.session_state.get('iva_perc', 0) if usa_iva else 0) + \
                         (st.session_state.get('igtf_perc', 0) if usa_igtf else 0) + \
                         (st.session_state.get('banco_perc', 0) if usa_banco else 0)
                 
-                total_usd = precio_con_margen * (1 + (p_imp / 100))
+                total_usd = precio_tras_desc * (1 + (p_imp / 100))
+                
+                # Conversión de Tasa
                 tasa_uso = t_bin if "Binance" in metodo_p else t_bcv
                 total_bs = total_usd * tasa_uso
 
-                st.info(f"💰 **TOTAL:** ${total_usd:.2f} | {total_bs:.2f} Bs. (Neto: **${ganancia_bruta:.2f}**)")
+                st.info(f"💰 **TOTAL FINAL:** ${total_usd:.2f} | {total_bs:.2f} Bs.")
+                if usa_desc: st.warning(f"Ahorro por fidelidad: -${(precio_con_margen - precio_tras_desc):.2f}")
 
-                # Sugerencia 3: Validación robusta al procesar
-                if st.form_submit_button("✅ PROCESAR VENTA"):
+                # --- 3. PROCESAMIENTO Y ACTUALIZACIÓN DE INVENTARIO ---
+                if st.form_submit_button("🚀 PROCESAR VENTA Y DESCONTAR STOCK"):
                     if cantidad_v <= 0:
-                        st.error("❌ La cantidad debe ser mayor a 0.")
-                    elif not cliente_v:
-                        st.warning("⚠️ Se recomienda poner un nombre de cliente.")
+                        st.error("❌ Introduce una cantidad válida.")
                     else:
                         try:
                             nombre_c = cliente_v if cliente_v else "Consumidor Final"
@@ -1436,32 +1501,46 @@ if menu == "🛒 Venta Directa":
                             
                             conn = conectar()
                             cursor = conn.cursor()
+                            
+                            # A. DESCUENTO REAL DEL INVENTARIO (SQL)
                             cursor.execute("UPDATE inventario SET cantidad = cantidad - ? WHERE item = ?", (cantidad_v, prod_sel))
+                            
+                            # B. REGISTRO DE VENTA
                             cursor.execute("INSERT INTO ventas (monto_total, metodo, cliente, detalle) VALUES (?, ?, ?, ?)", 
                                          (total_usd, metodo_p, nombre_c, detalle_f))
+                            
                             conn.commit()
                             conn.close()
-                            
-                            # Alerta de Stock Crítico
+
+                            # C. ALERTA DE STOCK CRÍTICO (Visual e Inmediata)
                             nuevo_stock = stock_actual - cantidad_v
                             if nuevo_stock <= stock_minimo:
-                                st.toast(f"🚨 CRÍTICO: {prod_sel} queda en {nuevo_stock:.2f}", icon="⚠️")
+                                st.error(f"🚨 ¡STOCK CRÍTICO! {prod_sel} queda en {nuevo_stock:.2f}. Reponer pronto.")
+                                st.toast(f"Reordenar {prod_sel}", icon="🔥")
                             
+                            # D. DATOS DEL TICKET
                             st.session_state.ultimo_ticket = {
                                 "nro": "V-" + str(int(time.time())),
-                                "fecha": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
                                 "cliente": nombre_c, "detalle": detalle_f,
                                 "total_usd": total_usd, "total_bs": total_bs, "metodo": metodo_p
                             }
                             
-                            cargar_datos() 
-                            st.success("¡Venta Exitosa!")
+                            cargar_datos() # Sincroniza stock en la app
+                            st.success("✅ Inventario actualizado y venta registrada.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error: {e}")
+                            st.error(f"Error técnico: {e}")
 
-    # Historial Rápido y Ticket (Se mantienen igual...)
-    # ... [Resto del código de historial y WhatsApp] ...
+    # --- TICKET Y ÚLTIMOS MOVIMIENTOS ---
+    if 'ultimo_ticket' in st.session_state:
+        st.divider()
+        t = st.session_state.ultimo_ticket
+        with st.expander("📄 RECIBO DE VENTA", expanded=True):
+            st.code(f"CLIENTE: {t['cliente']}\nITEM: {t['detalle']}\nTOTAL: ${t['total_usd']:.2f}\nMÉTODO: {t['metodo']}")
+            if st.button("🗑️ Cerrar Ticket"):
+                del st.session_state.ultimo_ticket
+                st.rerun()
+
 
 
 
