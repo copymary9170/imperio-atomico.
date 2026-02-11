@@ -701,7 +701,7 @@ if menu == "📦 Inventario":
     # TAB 5 – ANÁLISIS
     # ========================================================
     with tabs[4]:
-    st.subheader("📊 Reporte de Almacén")
+        st.subheader("📊 Reporte de Almacén")
 
     if not df_inv.empty:
         df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
@@ -3135,6 +3135,7 @@ def registrar_venta_global(
 
     except Exception as e:
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
