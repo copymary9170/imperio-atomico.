@@ -701,38 +701,40 @@ if menu == "📦 Inventario":
     # TAB 5 – ANÁLISIS
     # ========================================================
     with tabs[4]:
-        st.subheader("📊 Reporte de Almacén")
+    st.subheader("📊 Reporte de Almacén")
 
-        if not df_inv.empty:
-            df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
+    if not df_inv.empty:
+        df_inv['Capital USD'] = df_inv['cantidad'] * df_inv['precio_usd']
 
-            fig = px.pie(
-                df_inv,
-                values='Capital USD',
-                names='item',
-                title="Distribución de Valor en Inventario",
-                hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Pastel
-            )
+        fig = px.pie(
+            df_inv,
+            values='Capital USD',
+            names='item',
+            title="Distribución de Valor en Inventario",
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
 
-            st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 
-            buffer = io.BytesIO()
+        buffer = io.BytesIO()
 
-            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df_inv.to_excel(writer, index=False, sheet_name='Inventario')
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df_inv.to_excel(writer, index=False, sheet_name='Inventario')
 
-            st.download_button(
-                label="📥 Descargar Reporte Completo (Excel)",
-                data=buffer.getvalue(),
-                file_name="inventario_atoma.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        st.download_button(
+            label="📥 Descargar Reporte Completo (Excel)",
+            data=buffer.getvalue(),
+            file_name="inventario_atoma.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
-          else:
-            st.info("Inventario vacío.")
+    else:
+        st.info("No hay datos para análisis.")
 
-        elif menu == "📊 Dashboard":
+# ----- FIN DEL MÓDULO DE INVENTARIO -----
+
+elif menu == "📊 Dashboard":
 
     st.title("📊 Panel de Control Imperio")
 
@@ -809,6 +811,7 @@ if menu == "📦 Inventario":
             st.info("Sin datos de métodos de pago.")
 
     # --- ANÁLISIS FINANCIERO ADICIONAL ---
+
     st.divider()
 
     with st.expander("📅 Análisis Mensual de Ingresos vs Gastos"):
@@ -3132,6 +3135,7 @@ def registrar_venta_global(
 
     except Exception as e:
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
