@@ -1187,6 +1187,11 @@ elif menu == "👥 Clientes":
     st.divider()
 
     # --- ANÁLISIS COMERCIAL ---
+    if df_clientes.empty:
+        st.info("No hay clientes para analizar.")
+    else:
+        st.write("Módulo de análisis comercial activo.")
+
     resumen = []
 
     for _, cli in df_clientes.iterrows():
@@ -3135,6 +3140,7 @@ def registrar_venta_global(
 
     except Exception as e:
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
