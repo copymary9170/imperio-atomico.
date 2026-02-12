@@ -301,6 +301,151 @@ if menu == "📦 Inventario":
                 hide_index=True
             )
 
+    # =======================================================
+    # 📥 TAB 2 — REGISTRAR COMPRA
+    # =======================================================
+    with tabs[1]:
+
+        st.subheader("📥 Registro Profesional de Compra")
+
+        col1, col2 = st.columns(2)
+
+        nombre_c = col1.text_input("Nombre del Insumo").strip().upper()
+        proveedor = col2.text_input("Proveedor (opcional)").strip()
+
+        col3, col4, col5 = st.columns(3)
+
+        monto_factura = col3.number_input("Monto Factura", min_value=0.0)
+        moneda_pago = col4.selectbox("Moneda", ["USD $", "Bs (BCV)", "Bs (Binance)"])
+        cantidad_recibida = col5.number_input("Cantidad Recibida", min_value=0.001)
+
+        col6, col7, col8 = st.columns(3)
+
+        iva_activo = col6.checkbox(f"IVA (+{st.session_state.get('iva_perc',16)}%)")
+        igtf_activo = col7.checkbox(f"IGTF (+{st.session_state.get('igtf_perc',3)}%)")
+        banco_activo = col8.checkbox(f"Banco (+{st.session_state.get('banco_perc',0.5)}%)")
+
+        delivery = st.number_input("Gastos Logística / Delivery ($)", value=0.0)
+
+        if st.button("💾 Guardar Compra", use_container_width=True):
+
+            if not nombre_c:
+                st.error("Debe indicar nombre del insumo.")
+                st.stop()
+
+            if cantidad_recibida <= 0:
+                st.error("Cantidad inválida.")
+                st.stop()
+
+            # --- Selección de tasa ---
+            if "BCV" in moneda_pago:
+                tasa_usada = t_ref
+            elif "Binance" in moneda_pago:
+                tasa_usada = t_bin
+            else:
+                tasa_usada = 1.0
+
+            # --- Cálculo impuestos ---
+            porc_impuestos = 0
+            if iva_activo:
+                porc_impuestos += st.session_state.get("iva_perc", 16)
+            if igtf_activo:
+                porc_impuestos += st.session_state.get("igtf_perc", 3)
+            if banco_activo:
+                porc_impuestos += st.session_state.get("banco_perc", 0.5)
+
+            costo_total_usd = (monto_factura / tasa_usada) * (1 + (porc_impuestos / 100)) + delivery
+            costo_unitario = costo_total_usd / cantidad_recibida
+
+            # --- Conexión DB ---
+            with conectar() as conn:
+                cur = conn.cursor()
+
+                # Buscar proveedor
+                proveedor_id = None
+                if proveedor:
+                    cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
+                    prov = cur.fetchone()
+                    if not prov:
+                        cur.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor,))
+                        proveedor_id = cur.lastrowid
+                    else:
+                        proveedor_id = prov[0]
+
+                # Buscar inventario existente
+                old = cur.execute(
+                    "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
+                    (nombre_c,)
+                ).fetchone()
+
+                if old:
+                    nueva_cant = old[0] + cantidad_recibida
+                    precio_ponderado = (
+                        (old[0] * old[1] + cantidad_recibida * costo_unitario)
+                        / nueva_cant
+                    )
+                else:
+                    nueva_cant = cantidad_recibida
+                    precio_ponderado = costo_unitario
+
+                # Actualizar inventario
+                cur.execute("""
+                    INSERT INTO inventario (item, cantidad, unidad, precio_usd, ultima_actualizacion)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(item) DO UPDATE SET
+                        cantidad = ?,
+                        precio_usd = ?,
+                        ultima_actualizacion = CURRENT_TIMESTAMP
+                """, (
+                    nombre_c,
+                    nueva_cant,
+                    "Unidad",
+                    precio_ponderado,
+                    nueva_cant,
+                    precio_ponderado
+                ))
+
+                # Registrar historial
+                cur.execute("""
+                    INSERT INTO historial_compras
+                    (item, proveedor_id, cantidad, unidad,
+                     costo_total_usd, costo_unit_usd,
+                     impuestos, delivery,
+                     tasa_usada, moneda_pago, usuario)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    nombre_c,
+                    proveedor_id,
+                    cantidad_recibida,
+                    "Unidad",
+                    costo_total_usd,
+                    costo_unitario,
+                    porc_impuestos,
+                    delivery,
+                    tasa_usada,
+                    moneda_pago,
+                    usuario_actual
+                ))
+
+                # Registrar movimiento
+                cur.execute("""
+                    INSERT INTO inventario_movs
+                    (item, tipo, cantidad, motivo, usuario)
+                    VALUES (?,?,?,?,?)
+                """, (
+                    nombre_c,
+                    "ENTRADA",
+                    cantidad_recibida,
+                    "Compra registrada",
+                    usuario_actual
+                ))
+
+                conn.commit()
+
+            cargar_datos()
+            st.success("Compra registrada correctamente.")
+            st.rerun()
+
 
 elif menu == "⚙️ Configuración":
 
@@ -2864,6 +3009,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
