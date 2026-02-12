@@ -422,10 +422,9 @@ elif menu == "📊 Dashboard":
         else:
             st.info("Sin datos de métodos de pago.")
 
-    # --- ANÁLISIS FINANCIERO ADICIONAL ---
-
     st.divider()
 
+    # --- ANÁLISIS FINANCIERO ADICIONAL ---
     with st.expander("📅 Análisis Mensual de Ingresos vs Gastos"):
 
         if not df_ventas.empty:
@@ -511,6 +510,7 @@ elif menu == "📊 Dashboard":
         else:
             st.info("No hay información de deudas disponible.")
 
+
 elif menu == "⚙️ Configuración":
 
     # --- SEGURIDAD DE ACCESO ---
@@ -535,7 +535,7 @@ elif menu == "⚙️ Configuración":
     def get_conf(key, default):
         try:
             return float(conf_df.loc[key, 'valor'])
-        except:
+        except Exception:
             return default
 
     with st.form("config_general"):
@@ -628,7 +628,7 @@ elif menu == "⚙️ Configuración":
 
                         try:
                             val_anterior = float(conf_df.loc[param, 'valor'])
-                        except:
+                        except Exception:
                             val_anterior = None
 
                         cur.execute(
@@ -677,7 +677,7 @@ elif menu == "⚙️ Configuración":
             else:
                 st.info("Aún no hay cambios registrados.")
 
-        except:
+        except Exception:
             st.info("Historial aún no disponible.")
 
 
@@ -697,7 +697,7 @@ elif menu == "👥 Clientes":
         st.stop()
 
     # --- BUSCADOR AVANZADO ---
-    col_b1, col_b2 = st.columns([3,1])
+    col_b1, col_b2 = st.columns([3, 1])
 
     busqueda = col_b1.text_input(
         "🔍 Buscar cliente (nombre o teléfono)...",
@@ -750,7 +750,7 @@ elif menu == "👥 Clientes":
                                 conn.commit()
 
                                 st.success(f"✅ Cliente '{nombre_cli}' registrado correctamente.")
-                                cargar_datos_seguros()
+                                cargar_datos()
                                 st.rerun()
 
                     except Exception as e:
@@ -790,7 +790,7 @@ elif menu == "👥 Clientes":
                                 conn.commit()
 
                             st.success("✅ Cliente actualizado.")
-                            cargar_datos_seguros()
+                            cargar_datos()
                             st.rerun()
 
                         except Exception as e:
@@ -892,7 +892,6 @@ elif menu == "👥 Clientes":
                 else:
                     c4.success("Al día")
 
-                # Botón WhatsApp
                 if row['whatsapp']:
 
                     wa_num = row['whatsapp']
@@ -902,7 +901,6 @@ elif menu == "👥 Clientes":
                     link_wa = f"https://wa.me/{wa_num}"
                     c5.link_button("💬 Chat", link_wa)
 
-                # --- ELIMINACIÓN SEGURA ---
                 with st.expander("⚙️ Acciones"):
 
                     if row['operaciones'] > 0:
@@ -919,7 +917,7 @@ elif menu == "👥 Clientes":
                                     conn.commit()
 
                                 st.warning("Cliente eliminado.")
-                                cargar_datos_seguros()
+                                cargar_datos()
                                 st.rerun()
 
                             except Exception as e:
@@ -927,6 +925,7 @@ elif menu == "👥 Clientes":
 
     else:
         st.info("No hay clientes que coincidan con los filtros.")
+
 
 
 
@@ -939,13 +938,14 @@ elif menu == "🎨 Análisis CMYK":
 
     # --- CARGA SEGURA DE DATOS ---
     try:
-        df_tintas_db = obtener_tintas_disponibles()
-
         with conectar() as conn:
-            df_act_db = pd.read_sql_query(
-                "SELECT equipo, categoria, desgaste FROM activos", conn
+
+            # Usamos el inventario como fuente de tintas
+            df_tintas_db = pd.read_sql_query(
+                "SELECT * FROM inventario", conn
             )
 
+            # Tabla histórica
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS historial_cmyk (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -960,14 +960,25 @@ elif menu == "🎨 Análisis CMYK":
         st.error(f"Error cargando datos: {e}")
         st.stop()
 
-    # --- FILTRAR IMPRESORAS ---
+    # --- LISTA DE IMPRESORAS DISPONIBLES ---
     impresoras_disponibles = [
-        e['equipo'] for e in df_act_db.to_dict('records')
-        if "impresora" in e['categoria'].lower()
+        "Impresora Principal",
+        "Impresora Secundaria"
     ]
 
+    # Si hay equipos registrados en inventario que parezcan impresoras, los agregamos
+    if not df_tintas_db.empty:
+        posibles = df_tintas_db[
+            df_tintas_db['item'].str.contains("impresora", case=False, na=False)
+        ]['item'].tolist()
+
+        for p in posibles:
+            if p not in impresoras_disponibles:
+                impresoras_disponibles.append(p)
+
+    # --- VALIDACIÓN ---
     if not impresoras_disponibles:
-        st.warning("⚠️ Debes registrar al menos una impresora en Activos.")
+        st.warning("⚠️ No hay impresoras registradas en el sistema.")
         st.stop()
 
     # --- SELECCIÓN DE IMPRESORA Y ARCHIVOS ---
@@ -977,21 +988,16 @@ elif menu == "🎨 Análisis CMYK":
 
         impresora_sel = st.selectbox("🖨️ Equipo de Impresión", impresoras_disponibles)
 
-        datos_imp = next(
-            (e for e in df_act_db.to_dict('records') if e['equipo'] == impresora_sel),
-            None
-        )
-
-        costo_desgaste = datos_imp['desgaste'] if datos_imp else 0.0
+        costo_desgaste = 0.02  # costo base por página
 
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
 
         if not df_tintas_db.empty:
-            mask = df_tintas_db['item'].str.contains(impresora_sel, case=False, na=False)
-            tintas_especificas = df_tintas_db[mask]
+            mask = df_tintas_db['item'].str.contains("tinta", case=False, na=False)
+            tintas = df_tintas_db[mask]
 
-            if not tintas_especificas.empty:
-                precio_tinta_ml = tintas_especificas['precio_usd'].mean()
+            if not tintas.empty:
+                precio_tinta_ml = tintas['precio_usd'].mean()
                 st.success(f"💧 Precio de tinta detectado: ${precio_tinta_ml:.4f}/ml")
 
         st.subheader("⚙️ Ajustes de Calibración")
@@ -1030,7 +1036,7 @@ elif menu == "🎨 Análisis CMYK":
         totales_lote_cmyk = {'C': 0.0, 'M': 0.0, 'Y': 0.0, 'K': 0.0}
         total_pags = 0
 
-        with st.spinner('🚀 Analizando cobertura real con perfil mejorado...'):
+        with st.spinner('🚀 Analizando cobertura real...'):
 
             for arc in archivos_multiples:
 
@@ -1070,16 +1076,12 @@ elif menu == "🎨 Análisis CMYK":
                             np.mean(arr[:, :, i]) / 255 for i in range(4)
                         ]
 
-                        # --- CÁLCULO BASE ---
                         ml_c = c_media * 0.15 * factor
                         ml_m = m_media * 0.15 * factor
                         ml_y = y_media * 0.15 * factor
 
-                        # Negro con factor especial
                         ml_k = k_media * 0.15 * factor * factor_k
 
-                        # --- TU SUGERENCIA IMPLEMENTADA ---
-                        # Refuerzo de negro en mezclas oscuras
                         promedio_color = (c_media + m_media + y_media) / 3
 
                         if promedio_color > 0.55:
@@ -1090,7 +1092,6 @@ elif menu == "🎨 Análisis CMYK":
 
                         costo_f = (consumo_total_f * precio_tinta_ml) + costo_desgaste
 
-                        # Acumular totales
                         totales_lote_cmyk['C'] += ml_c
                         totales_lote_cmyk['M'] += ml_m
                         totales_lote_cmyk['Y'] += ml_y
@@ -1160,46 +1161,47 @@ elif menu == "🎨 Análisis CMYK":
                 else:
                     st.success("✅ Hay suficiente tinta para producir")
 
-            # --- ENVÍO A COTIZACIÓN ---
-            # --- ENVÍO A COTIZACIÓN ---
-if st.button("📝 ENVIAR A COTIZACIÓN", use_container_width=True):
 
-    # Guardamos información completa para el cotizador
-    st.session_state['datos_pre_cotizacion'] = {
-        'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
-        'costo_base': float(total_usd_lote),
-        'unidades': total_pags,
+                       # --- ENVÍO A COTIZACIÓN ---
+            if st.button("📝 ENVIAR A COTIZACIÓN", use_container_width=True):
 
-        # Desglose de consumo real
-        'consumos': totales_lote_cmyk,
+                # Guardamos información completa para el cotizador
+                st.session_state['datos_pre_cotizacion'] = {
+                    'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
+                    'costo_base': float(total_usd_lote),
+                    'unidades': total_pags,
 
-        # Información técnica adicional
-        'impresora': impresora_sel,
-        'factor_consumo': factor,
-        'factor_negro': factor_k,
-        'refuerzo_negro': refuerzo_negro,
-        'precio_tinta_ml': precio_tinta_ml,
-        'costo_desgaste': costo_desgaste,
+                    # Desglose de consumo real
+                    'consumos': totales_lote_cmyk,
 
-        # Historial detallado por archivo
-        'detalle_archivos': resultados
-    }
+                    # Información técnica adicional
+                    'impresora': impresora_sel,
+                    'factor_consumo': factor,
+                    'factor_negro': factor_k,
+                    'refuerzo_negro': refuerzo_negro,
+                    'precio_tinta_ml': precio_tinta_ml,
+                    'costo_desgaste': costo_desgaste,
 
-    try:
-        with conectar() as conn:
-            conn.execute("""
-                INSERT INTO historial_cmyk
-                (impresora, paginas, costo)
-                VALUES (?,?,?)
-            """, (impresora_sel, total_pags, total_usd_lote))
-            conn.commit()
-    except:
-        pass
+                    # Historial detallado por archivo
+                    'detalle_archivos': resultados
+                }
 
-    st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
-    st.toast("Listo para cotizar", icon="📨")
+                try:
+                    with conectar() as conn:
+                        conn.execute("""
+                            INSERT INTO historial_cmyk
+                            (impresora, paginas, costo)
+                            VALUES (?,?,?)
+                        """, (impresora_sel, total_pags, total_usd_lote))
+                        conn.commit()
+                except Exception as e:
+                    st.warning(f"No se pudo guardar en historial: {e}")
 
-    st.rerun()
+                st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
+                st.toast("Listo para cotizar", icon="📨")
+
+                st.rerun()
+
 
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
@@ -1372,41 +1374,45 @@ elif menu == "🏗️ Activos":
             df_rep = df[df['unidad'].str.contains("Repuesto")]
             st.dataframe(df_rep, use_container_width=True, hide_index=True)
 
-with t4:
-    c_inv, c_des, c_prom = st.columns(3)
+        with t4:
+            c_inv, c_des, c_prom = st.columns(3)
 
-    c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
-    c_des.metric("Activos Registrados", len(df))
+            c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
+            c_des.metric("Activos Registrados", len(df))
 
-    promedio = df['desgaste'].mean() if not df.empty else 0
-    c_prom.metric("Desgaste Promedio por Uso", f"$ {promedio:.4f}")
+            promedio = df['desgaste'].mean() if not df.empty else 0
+            c_prom.metric("Desgaste Promedio por Uso", f"$ {promedio:.4f}")
 
-    fig = px.bar(
-        df,
-        x='equipo',
-        y='inversion',
-        color='categoria',
-        title="Distribución de Inversión por Activo"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-with t5:
-    st.subheader("Historial de Movimientos de Activos")
-
-    try:
-        with conectar() as conn:
-            df_hist = pd.read_sql_query(
-                "SELECT activo, accion, detalle, costo, fecha FROM activos_historial ORDER BY fecha DESC",
-                conn
+            fig = px.bar(
+                df,
+                x='equipo',
+                y='inversion',
+                color='categoria',
+                title="Distribución de Inversión por Activo"
             )
+            st.plotly_chart(fig, use_container_width=True)
 
-        if not df_hist.empty:
-            st.dataframe(df_hist, use_container_width=True, hide_index=True)
-        else:
-            st.info("No hay movimientos registrados aún.")
+        with t5:
+            st.subheader("Historial de Movimientos de Activos")
 
-    except Exception as e:
-        st.error(f"Error cargando historial: {e}")
+            try:
+                with conectar() as conn:
+                    df_hist = pd.read_sql_query(
+                        "SELECT activo, accion, detalle, costo, fecha FROM activos_historial ORDER BY fecha DESC",
+                        conn
+                    )
+
+                if not df_hist.empty:
+                    st.dataframe(df_hist, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay movimientos registrados aún.")
+
+            except Exception as e:
+                st.error(f"Error cargando historial: {e}")
+
+    else:
+        st.info("No hay activos registrados todavía.")
+
 
 # ===========================================================
 # 11. MÓDULO PROFESIONAL DE OTROS PROCESOS
@@ -1437,6 +1443,7 @@ elif menu == "🛠️ Otros Procesos":
         st.error(f"Error cargando activos: {e}")
         st.stop()
 
+    # Filtrar solo equipos que NO gastan tinta
     otros_equipos = df_act_db[
         df_act_db['categoria'] != "Impresora (Gasta Tinta)"
     ].to_dict('records')
@@ -1460,11 +1467,12 @@ elif menu == "🛠️ Otros Procesos":
 
         cantidad = c2.number_input(
             f"Cantidad de {datos_eq['unidad']}:",
-            min_value=1,
-            value=1
+            min_value=1.0,
+            value=1.0
         )
 
-        costo_unitario = datos_eq['desgaste']
+        # Conversión segura del desgaste
+        costo_unitario = float(datos_eq.get('desgaste', 0.0))
         costo_total = costo_unitario * cantidad
 
         st.divider()
@@ -1528,11 +1536,10 @@ elif menu == "🛠️ Otros Procesos":
             else:
                 st.info("Sin registros aún.")
 
-        except:
+        except Exception as e:
             st.info("Historial no disponible.")
 
 
-# ===========================================================
 # ===========================================================
 # 12. MÓDULO PROFESIONAL DE VENTAS (VERSIÓN 2.0)
 # ===========================================================
@@ -1551,7 +1558,9 @@ elif menu == "💰 Ventas":
     # -----------------------------------
     with tab1:
 
-        if st.session_state.df_cli.empty:
+        df_cli = st.session_state.get("df_cli", pd.DataFrame())
+
+        if df_cli.empty:
             st.warning("⚠️ Registra clientes primero.")
             st.stop()
 
@@ -1561,7 +1570,7 @@ elif menu == "💰 Ventas":
 
             opciones_cli = {
                 row['nombre']: row['id']
-                for _, row in st.session_state.df_cli.iterrows()
+                for _, row in df_cli.iterrows()
             }
 
             c1, c2 = st.columns(2)
@@ -1600,14 +1609,13 @@ elif menu == "💰 Ventas":
 
             if st.form_submit_button("🚀 Registrar Venta"):
 
-                if not detalle_v:
+                if not detalle_v.strip():
                     st.error("Debes indicar el detalle de la venta.")
                     st.stop()
 
                 try:
                     with conectar() as conn:
 
-                        # Aseguramos que existan las columnas nuevas
                         conn.execute("""
                             CREATE TABLE IF NOT EXISTS ventas_extra (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1626,8 +1634,8 @@ elif menu == "💰 Ventas":
                         """, (
                             opciones_cli[cliente_nombre],
                             cliente_nombre,
-                            detalle_v,
-                            monto_venta,
+                            detalle_v.strip(),
+                            float(monto_venta),
                             metodo_pago
                         ))
 
@@ -1637,7 +1645,11 @@ elif menu == "💰 Ventas":
                             INSERT INTO ventas_extra
                             (venta_id, tasa, monto_bs)
                             VALUES (?, ?, ?)
-                        """, (venta_id, tasa_uso, monto_bs))
+                        """, (
+                            venta_id,
+                            float(tasa_uso),
+                            float(monto_bs)
+                        ))
 
                         conn.commit()
 
@@ -1684,7 +1696,7 @@ elif menu == "💰 Ventas":
         desde = c1.date_input("Desde", date.today() - timedelta(days=30))
         hasta = c2.date_input("Hasta", date.today())
 
-        df_historial['fecha'] = pd.to_datetime(df_historial['fecha'])
+        df_historial['fecha'] = pd.to_datetime(df_historial['fecha'], errors='coerce')
 
         df_fil = df_historial[
             (df_historial['fecha'].dt.date >= desde) &
@@ -1695,8 +1707,8 @@ elif menu == "💰 Ventas":
 
         if busc:
             df_fil = df_fil[
-                df_fil['cliente'].str.contains(busc, case=False) |
-                df_fil['detalle'].str.contains(busc, case=False)
+                df_fil['cliente'].str.contains(busc, case=False, na=False) |
+                df_fil['detalle'].str.contains(busc, case=False, na=False)
             ]
 
         st.dataframe(df_fil, use_container_width=True)
@@ -1767,7 +1779,7 @@ elif menu == "💰 Ventas":
         c1.metric("Ventas Totales", f"$ {total:.2f}")
 
         pendientes = df_v[
-            df_v['metodo'].str.contains("Pendiente", case=False)
+            df_v['metodo'].str.contains("Pendiente", case=False, na=False)
         ]['monto_total'].sum()
 
         c2.metric("Por Cobrar", f"$ {pendientes:.2f}")
@@ -1782,8 +1794,9 @@ elif menu == "💰 Ventas":
         st.subheader("Ventas por Cliente")
         st.bar_chart(top.set_index("cliente"))
 
+
 # ===========================================================
-# 12. MÓDULO PROFESIONAL DE GASTOS (VERSIÓN 2.0)
+# 12. MÓDULO PROFESIONAL DE GASTOS (VERSIÓN 2.1 MEJORADA)
 # ===========================================================
 elif menu == "📉 Gastos":
 
@@ -1813,13 +1826,13 @@ elif menu == "📉 Gastos":
             desc = col_d.text_input(
                 "Descripción del Gasto",
                 placeholder="Ej: Pago de luz, resma de papel, repuesto..."
-            )
+            ).strip()
 
             categoria = col_c.selectbox("Categoría:", [
-                "Materia Prima", 
-                "Mantenimiento de Equipos", 
-                "Servicios (Luz/Internet)", 
-                "Publicidad", 
+                "Materia Prima",
+                "Mantenimiento de Equipos",
+                "Servicios (Luz/Internet)",
+                "Publicidad",
                 "Sueldos/Retiros",
                 "Logística",
                 "Otros"
@@ -1834,10 +1847,10 @@ elif menu == "📉 Gastos":
             )
 
             metodo_pago = c2.selectbox("Método de Pago:", [
-                "Efectivo ($)", 
-                "Pago Móvil (BCV)", 
-                "Zelle", 
-                "Binance (USDT)", 
+                "Efectivo ($)",
+                "Pago Móvil (BCV)",
+                "Zelle",
+                "Binance (USDT)",
                 "Transferencia (Bs)"
             ])
 
@@ -1860,7 +1873,6 @@ elif menu == "📉 Gastos":
                 try:
                     with conectar() as conn:
 
-                        # Aseguramos columnas extra
                         conn.execute("""
                             CREATE TABLE IF NOT EXISTS gastos_extra (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1877,7 +1889,7 @@ elif menu == "📉 Gastos":
                             INSERT INTO gastos 
                             (descripcion, monto, categoria, metodo) 
                             VALUES (?, ?, ?, ?)
-                        """, (desc, monto_gasto, categoria, metodo_pago))
+                        """, (desc, float(monto_gasto), categoria, metodo_pago))
 
                         gasto_id = cur.lastrowid
 
@@ -1887,8 +1899,8 @@ elif menu == "📉 Gastos":
                             VALUES (?, ?, ?, ?)
                         """, (
                             gasto_id,
-                            tasa_ref,
-                            monto_bs,
+                            float(tasa_ref),
+                            float(monto_bs),
                             st.session_state.get("usuario_nombre", "Sistema")
                         ))
 
@@ -1938,7 +1950,7 @@ elif menu == "📉 Gastos":
         desde = c1.date_input("Desde", date.today() - timedelta(days=30))
         hasta = c2.date_input("Hasta", date.today())
 
-        df_g['fecha'] = pd.to_datetime(df_g['fecha'])
+        df_g['fecha'] = pd.to_datetime(df_g['fecha'], errors='coerce')
 
         df_fil = df_g[
             (df_g['fecha'].dt.date >= desde) &
@@ -1949,7 +1961,7 @@ elif menu == "📉 Gastos":
 
         if busc:
             df_fil = df_fil[
-                df_fil['descripcion'].str.contains(busc, case=False)
+                df_fil['descripcion'].str.contains(busc, case=False, na=False)
             ]
 
         st.dataframe(df_fil, use_container_width=True)
@@ -1961,7 +1973,7 @@ elif menu == "📉 Gastos":
 
         gasto_sel = st.selectbox(
             "Seleccionar gasto para editar/eliminar:",
-            df_fil['descripcion']
+            df_fil['descripcion'].tolist()
         )
 
         datos = df_fil[df_fil['descripcion'] == gasto_sel].iloc[0]
@@ -1970,7 +1982,8 @@ elif menu == "📉 Gastos":
 
             nuevo_monto = st.number_input(
                 "Monto $",
-                value=float(datos['monto'])
+                value=float(datos['monto']),
+                format="%.2f"
             )
 
             if st.button("💾 Guardar Cambios"):
@@ -1981,7 +1994,7 @@ elif menu == "📉 Gastos":
                             UPDATE gastos
                             SET monto = ?
                             WHERE id = ?
-                        """, (nuevo_monto, int(datos['id'])))
+                        """, (float(nuevo_monto), int(datos['id'])))
                         conn.commit()
 
                     st.success("Actualizado correctamente")
@@ -1992,21 +2005,26 @@ elif menu == "📉 Gastos":
 
         with st.expander("🗑️ Eliminar Gasto"):
 
+            confirmar = st.checkbox("Confirmo que deseo eliminar este gasto")
+
             if st.button("Eliminar definitivamente"):
 
-                try:
-                    with conectar() as conn:
-                        conn.execute(
-                            "DELETE FROM gastos WHERE id = ?",
-                            (int(datos['id']),)
-                        )
-                        conn.commit()
+                if not confirmar:
+                    st.warning("Debes confirmar para eliminar")
+                else:
+                    try:
+                        with conectar() as conn:
+                            conn.execute(
+                                "DELETE FROM gastos WHERE id = ?",
+                                (int(datos['id']),)
+                            )
+                            conn.commit()
 
-                    st.warning("Gasto eliminado")
-                    st.rerun()
+                        st.warning("Gasto eliminado")
+                        st.rerun()
 
-                except Exception as e:
-                    st.error(str(e))
+                    except Exception as e:
+                        st.error(str(e))
 
         # --- EXPORTACIÓN ---
         buffer = io.BytesIO()
@@ -2045,13 +2063,16 @@ elif menu == "📉 Gastos":
 
         por_cat = df.groupby('categoria')['monto'].sum()
 
-        c2.metric("Categoría Principal", por_cat.idxmax())
+        categoria_top = por_cat.idxmax() if not por_cat.empty else "N/A"
+
+        c2.metric("Categoría Principal", categoria_top)
 
         st.subheader("Gastos por Categoría")
         st.bar_chart(por_cat)
 
+
 # ===========================================================
-# 13. MÓDULO PROFESIONAL DE CIERRE DE CAJA (VERSIÓN MEJORADA)
+# 13. MÓDULO PROFESIONAL DE CIERRE DE CAJA (VERSIÓN 2.1 MEJORADA)
 # ===========================================================
 elif menu == "🏁 Cierre de Caja":
 
@@ -2098,17 +2119,21 @@ elif menu == "🏁 Cierre de Caja":
         st.error(f"Error cargando datos: {e}")
         st.stop()
 
+    # Asegurar que existan columnas esperadas
+    if not df_v.empty and 'metodo' not in df_v.columns:
+        df_v['metodo'] = ""
+
     # --- SEPARAR COBRADO Y PENDIENTE ---
     if not df_v.empty:
-        cobradas = df_v[~df_v['metodo'].str.contains("Pendiente", case=False)]
-        pendientes = df_v[df_v['metodo'].str.contains("Pendiente", case=False)]
+        cobradas = df_v[~df_v['metodo'].str.contains("Pendiente", case=False, na=False)]
+        pendientes = df_v[df_v['metodo'].str.contains("Pendiente", case=False, na=False)]
     else:
-        cobradas = pd.DataFrame()
-        pendientes = pd.DataFrame()
+        cobradas = pd.DataFrame(columns=df_v.columns)
+        pendientes = pd.DataFrame(columns=df_v.columns)
 
-    t_ventas_cobradas = cobradas['monto_total'].sum() if not cobradas.empty else 0
-    t_pendientes = pendientes['monto_total'].sum() if not pendientes.empty else 0
-    t_gastos = df_g['monto'].sum() if not df_g.empty else 0
+    t_ventas_cobradas = float(cobradas['monto_total'].sum()) if not cobradas.empty else 0.0
+    t_pendientes = float(pendientes['monto_total'].sum()) if not pendientes.empty else 0.0
+    t_gastos = float(df_g['monto'].sum()) if not df_g.empty else 0.0
 
     balance_dia = t_ventas_cobradas - t_gastos
 
@@ -2131,7 +2156,7 @@ elif menu == "🏁 Cierre de Caja":
         if not cobradas.empty:
             resumen_v = cobradas.groupby('metodo')['monto_total'].sum()
             for metodo, monto in resumen_v.items():
-                st.write(f"✅ **{metodo}:** ${monto:,.2f}")
+                st.write(f"✅ **{metodo}:** ${float(monto):,.2f}")
         else:
             st.info("No hubo ingresos cobrados.")
 
@@ -2141,7 +2166,7 @@ elif menu == "🏁 Cierre de Caja":
         if not df_g.empty:
             resumen_g = df_g.groupby('metodo')['monto'].sum()
             for metodo, monto in resumen_g.items():
-                st.write(f"❌ **{metodo}:** ${monto:,.2f}")
+                st.write(f"❌ **{metodo}:** ${float(monto):,.2f}")
         else:
             st.info("No hubo gastos.")
 
@@ -2151,13 +2176,22 @@ elif menu == "🏁 Cierre de Caja":
     with st.expander("📝 Ver detalle completo"):
 
         st.write("### Ventas Cobradas")
-        st.dataframe(cobradas, use_container_width=True, hide_index=True)
+        if not cobradas.empty:
+            st.dataframe(cobradas, use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin ventas cobradas")
 
         st.write("### Ventas Pendientes")
-        st.dataframe(pendientes, use_container_width=True, hide_index=True)
+        if not pendientes.empty:
+            st.dataframe(pendientes, use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin ventas pendientes")
 
         st.write("### Gastos")
-        st.dataframe(df_g, use_container_width=True, hide_index=True)
+        if not df_g.empty:
+            st.dataframe(df_g, use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin gastos registrados")
 
     # --- GUARDAR CIERRE ---
     if st.button("💾 Guardar Cierre del Día"):
@@ -2209,12 +2243,13 @@ elif menu == "🏁 Cierre de Caja":
         else:
             st.info("Aún no hay cierres guardados.")
 
-    except:
+    except Exception as e:
         st.info("No hay historial disponible.")
 
 
+
 # ===========================================================
-# 13. AUDITORÍA Y MÉTRICAS - VERSIÓN PROFESIONAL MEJORADA
+# 13. AUDITORÍA Y MÉTRICAS - VERSIÓN PROFESIONAL MEJORADA 2.1
 # ===========================================================
 elif menu == "📊 Auditoría y Métricas":
 
@@ -2232,6 +2267,7 @@ elif menu == "📊 Auditoría y Métricas":
                     tipo TEXT,
                     cantidad REAL,
                     motivo TEXT,
+                    usuario TEXT,
                     fecha DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -2256,6 +2292,10 @@ elif menu == "📊 Auditoría y Métricas":
         st.error(f"Error cargando datos: {e}")
         st.stop()
 
+    # Asegurar columnas necesarias
+    if not df_ventas.empty and 'metodo' not in df_ventas.columns:
+        df_ventas['metodo'] = ""
+
     tab1, tab2, tab3, tab4 = st.tabs([
         "💰 Finanzas",
         "📦 Insumos",
@@ -2270,21 +2310,26 @@ elif menu == "📊 Auditoría y Métricas":
 
         st.subheader("Resumen Financiero")
 
-        total_ventas = df_ventas['monto_total'].sum() if not df_ventas.empty else 0
-        total_gastos = df_gastos['monto'].sum() if not df_gastos.empty else 0
+        total_ventas = float(df_ventas['monto_total'].sum()) if not df_ventas.empty else 0.0
+        total_gastos = float(df_gastos['monto'].sum()) if not df_gastos.empty else 0.0
 
         # Solo comisiones en métodos bancarios
-        ventas_bancarias = df_ventas[
-            df_ventas['metodo'].str.contains("Pago|Transferencia", case=False, na=False)
-        ]
+        if not df_ventas.empty:
+            ventas_bancarias = df_ventas[
+                df_ventas['metodo'].str.contains("Pago|Transferencia", case=False, na=False)
+            ]
+        else:
+            ventas_bancarias = pd.DataFrame()
 
         banco_perc = st.session_state.get('banco_perc', 0.5)
 
-        comision_est = ventas_bancarias['monto_total'].sum() * (banco_perc / 100)
+        comision_est = float(ventas_bancarias['monto_total'].sum() * (banco_perc / 100)) if not ventas_bancarias.empty else 0.0
 
-        deudas = df_ventas[
-            df_ventas['metodo'].str.contains("Pendiente", case=False, na=False)
-        ]['monto_total'].sum()
+        deudas = float(
+            df_ventas[
+                df_ventas['metodo'].str.contains("Pendiente", case=False, na=False)
+            ]['monto_total'].sum()
+        ) if not df_ventas.empty else 0.0
 
         c1, c2, c3, c4 = st.columns(4)
 
@@ -2302,17 +2347,30 @@ elif menu == "📊 Auditoría y Métricas":
     # ---------------------------------------
     with tab2:
 
-        st.subheader("Bitácora de Movimientos")
+        st.subheader("Bitácora de Movimientos de Inventario")
 
         if df_movs.empty:
             st.info("Aún no hay movimientos registrados.")
         else:
             st.dataframe(df_movs, use_container_width=True)
 
+            # Exportación
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                df_movs.to_excel(writer, index=False, sheet_name='Movimientos')
+
+            st.download_button(
+                "📥 Descargar Movimientos (Excel)",
+                buffer.getvalue(),
+                "auditoria_movimientos.xlsx"
+            )
+
     # ---------------------------------------
     # TAB GRÁFICOS
     # ---------------------------------------
     with tab3:
+
+        st.subheader("Consumo de Insumos")
 
         if not df_movs.empty:
 
@@ -2334,6 +2392,8 @@ elif menu == "📊 Auditoría y Métricas":
                     )
             else:
                 st.info("No hay salidas registradas aún.")
+        else:
+            st.info("No hay datos para graficar.")
 
     # ---------------------------------------
     # TAB ALERTAS
@@ -2352,11 +2412,14 @@ elif menu == "📊 Auditoría y Métricas":
             if criticos.empty:
                 st.success("Niveles de inventario óptimos")
             else:
+                st.error(f"⚠️ Hay {len(criticos)} productos en nivel crítico")
+
                 for _, r in criticos.iterrows():
-                    st.error(
-                        f"{r['item']} bajo: {r['cantidad']} {r['unidad']} "
+                    st.warning(
+                        f"**{r['item']}** bajo: {r['cantidad']} {r['unidad']} "
                         f"(mín: {r['minimo']})"
                     )
+
 # ===========================================================
 # MÓDULO DE COTIZACIONES - INTEGRADO CON NÚCLEO GLOBAL
 # ===========================================================
@@ -2496,7 +2559,175 @@ if menu == "🛒 Venta Directa":
     # --- SELECCIÓN DE PRODUCTO ---
     with st.container(border=True):
 
-        c1, c2 = st.columns([2,1])
+        c1, c2 = st.columns([2, 1])
+
+        prod_sel = c1.selectbox(
+            "📦 Seleccionar Producto:",
+            disponibles['item'].tolist()
+        )
+
+        datos = disponibles[disponibles['item'] == prod_sel].iloc[0]
+
+        id_producto = int(datos['id'])
+        stock_actual = float(datos['cantidad'])
+        precio_base = float(datos['precio_usd'])
+        unidad = datos['unidad']
+        minimo = float(datos['minimo'])
+
+        c2.metric("Stock Disponible", f"{stock_actual:.2f} {unidad}")
+
+    # --- FORMULARIO DE VENTA ---
+    with st.form("form_venta_directa", clear_on_submit=True):
+
+        st.subheader("Datos de la Venta")
+
+        # Cliente integrado
+        if not df_cli.empty:
+            opciones_cli = {
+                row['nombre']: row['id']
+                for _, row in df_cli.iterrows()
+            }
+
+            cliente_nombre = st.selectbox(
+                "Cliente:",
+                list(opciones_cli.keys())
+            )
+
+            id_cliente = opciones_cli[cliente_nombre]
+        else:
+            cliente_nombre = "Consumidor Final"
+            id_cliente = None
+            st.info("Venta sin cliente registrado")
+
+        c1, c2, c3 = st.columns(3)
+
+        cantidad = c1.number_input(
+            f"Cantidad ({unidad})",
+            min_value=0.0,
+            max_value=stock_actual,
+            step=1.0
+        )
+
+        margen = c2.number_input("Margen %", value=30.0, format="%.2f")
+
+        metodo = c3.selectbox(
+            "Método de Pago",
+            [
+                "Efectivo $",
+                "Pago Móvil (BCV)",
+                "Transferencia (Bs)",
+                "Zelle",
+                "Binance",
+                "Pendiente"
+            ]
+        )
+
+        usa_desc = st.checkbox("Aplicar descuento cliente fiel")
+        desc = st.number_input(
+            "Descuento %",
+            value=5.0 if usa_desc else 0.0,
+            disabled=not usa_desc,
+            format="%.2f"
+        )
+
+        # Impuestos
+        st.write("Impuestos aplicables:")
+
+        i1, i2 = st.columns(2)
+
+        usa_iva = i1.checkbox("Aplicar IVA")
+        usa_banco = i2.checkbox("Comisión bancaria", value=True)
+
+        # ---- CÁLCULOS ----
+        costo_material = cantidad * precio_base
+        con_margen = costo_material * (1 + margen / 100)
+        con_desc = con_margen * (1 - desc / 100)
+
+        impuestos = 0.0
+
+        if usa_iva:
+            impuestos += float(st.session_state.get('iva_perc', 16))
+
+        if usa_banco and metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
+            impuestos += float(st.session_state.get('banco_perc', 0.5))
+
+        total_usd = con_desc * (1 + impuestos / 100)
+
+        # Conversión a Bs SOLO si aplica
+        total_bs = 0.0
+
+        if metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
+            total_bs = total_usd * float(st.session_state.get('tasa_bcv', 1.0))
+
+        elif metodo == "Binance":
+            total_bs = total_usd * float(st.session_state.get('tasa_binance', 1.0))
+
+        st.divider()
+
+        st.metric("Total a Cobrar", f"$ {total_usd:.2f}")
+
+        if total_bs > 0:
+            st.info(f"Equivalente: Bs {total_bs:,.2f}")
+
+        # ---- VALIDACIONES FINALES ----
+        if st.form_submit_button("🧾 Confirmar Venta"):
+
+            if cantidad <= 0:
+                st.error("⚠️ Debe vender al menos una unidad.")
+                st.stop()
+
+            if cantidad > stock_actual:
+                st.error("⚠️ No puedes vender más de lo que hay en inventario.")
+                st.stop()
+
+            # Preparar consumo para el núcleo
+            consumos = {id_producto: cantidad}
+
+            try:
+                exito, mensaje = registrar_venta_global(
+                    id_cliente=id_cliente,
+                    nombre_cliente=cliente_nombre,
+                    detalle=f"Venta directa de {prod_sel}",
+                    monto_usd=float(total_usd),
+                    metodo=metodo,
+                    consumos=consumos
+                )
+
+                if exito:
+                    st.success(mensaje)
+                    cargar_datos()
+                    st.rerun()
+                else:
+                    st.error(mensaje)
+
+            except Exception as e:
+                st.error(f"Error registrando venta: {e}")
+
+
+        # ===========================================================
+# 🛒 MÓDULO DE VENTA DIRECTA - INTEGRADO CON NÚCLEO GLOBAL
+# ===========================================================
+if menu == "🛒 Venta Directa":
+
+    st.title("🛒 Venta Rápida de Materiales")
+
+    df_inv = st.session_state.get('df_inv', pd.DataFrame())
+    df_cli = st.session_state.get('df_cli', pd.DataFrame())
+
+    if df_inv.empty:
+        st.warning("No hay inventario cargado.")
+        st.stop()
+
+    disponibles = df_inv[df_inv['cantidad'] > 0]
+
+    if disponibles.empty:
+        st.warning("⚠️ No hay productos con stock disponible.")
+        st.stop()
+
+    # --- SELECCIÓN DE PRODUCTO ---
+    with st.container(border=True):
+
+        c1, c2 = st.columns([2, 1])
 
         prod_sel = c1.selectbox(
             "📦 Seleccionar Producto:",
@@ -2589,7 +2820,6 @@ if menu == "🛒 Venta Directa":
 
         total_usd = con_desc * (1 + impuestos / 100)
 
-        # Conversión a Bs SOLO si aplica
         if metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
             total_bs = total_usd * t_bcv
         elif metodo == "Binance":
@@ -2610,15 +2840,17 @@ if menu == "🛒 Venta Directa":
         if st.form_submit_button("🚀 PROCESAR VENTA"):
 
             if cantidad <= 0:
-                st.error("Cantidad inválida")
+                st.error("⚠️ Debes vender al menos una unidad.")
                 st.stop()
 
-            # Construimos el diccionario de consumos
+            if cantidad > stock_actual:
+                st.error("⚠️ No puedes vender más de lo que hay en inventario.")
+                st.stop()
+
             consumos = {
                 id_producto: cantidad
             }
 
-            # Llamada al núcleo único
             exito, mensaje = registrar_venta_global(
                 id_cliente=id_cliente,
                 nombre_cliente=cliente_nombre,
@@ -2667,6 +2899,7 @@ MÉTODO: {t['metodo']}
                 del st.session_state.ultimo_ticket
                 st.rerun()
 
+
 # ===========================================================
 # 🔐 NÚCLEO CENTRAL DE REGISTRO DE VENTAS DEL IMPERIO
 # ===========================================================
@@ -2680,40 +2913,55 @@ def registrar_venta_global(
     consumos=None
 ):
     """
-    FUNCIÓN MAESTRA DEL IMPERIO
-
-    - Registra ventas
-    - Descuenta inventario
-    - Registra movimientos
-    - Valida stock
-    - Unifica lógica para:
-        * Venta directa
-        * Cotizaciones
-        * CMYK
+    FUNCIÓN MAESTRA DEL IMPERIO – VERSIÓN SEGURA Y TRANSACCIONAL
     """
 
     if consumos is None:
         consumos = {}
 
+    if monto_usd <= 0:
+        return False, "⚠️ El monto de la venta debe ser mayor a 0"
+
+    if not detalle:
+        return False, "⚠️ El detalle de la venta no puede estar vacío"
+
     try:
         conn = conectar()
         cursor = conn.cursor()
 
-        # --- 1. VALIDACIÓN DE STOCK ---
+        conn.execute("BEGIN TRANSACTION")
+
+        if id_cliente is not None:
+            existe_cli = cursor.execute(
+                "SELECT id FROM clientes WHERE id = ?",
+                (id_cliente,)
+            ).fetchone()
+
+            if not existe_cli:
+                conn.rollback()
+                return False, "❌ Cliente no encontrado en base de datos"
+
         for item_id, cant in consumos.items():
 
+            if cant <= 0:
+                conn.rollback()
+                return False, f"⚠️ Cantidad inválida para el insumo {item_id}"
+
             stock_actual = cursor.execute(
-                "SELECT cantidad FROM inventario WHERE id = ?",
+                "SELECT cantidad, item FROM inventario WHERE id = ?",
                 (item_id,)
             ).fetchone()
 
             if not stock_actual:
+                conn.rollback()
                 return False, f"❌ Insumo con ID {item_id} no existe"
 
-            if cant > stock_actual[0]:
-                return False, f"⚠️ Stock insuficiente para ID {item_id}"
+            cantidad_disponible, nombre_item = stock_actual
 
-        # --- 2. DESCONTAR INVENTARIO ---
+            if cant > cantidad_disponible:
+                conn.rollback()
+                return False, f"⚠️ Stock insuficiente para: {nombre_item}"
+
         for item_id, cant in consumos.items():
 
             cursor.execute("""
@@ -2722,14 +2970,12 @@ def registrar_venta_global(
                 WHERE id = ?
             """, (cant, item_id))
 
-            # Registrar movimiento
             cursor.execute("""
                 INSERT INTO inventario_movs
                 (item_id, tipo, cantidad, motivo)
                 VALUES (?, 'SALIDA', ?, ?)
             """, (item_id, cant, f"Venta: {detalle}"))
 
-        # --- 3. REGISTRAR VENTA ---
         cursor.execute("""
             INSERT INTO ventas
             (cliente_id, cliente, detalle, monto_total, metodo)
@@ -2738,20 +2984,25 @@ def registrar_venta_global(
             id_cliente,
             nombre_cliente,
             detalle,
-            monto_usd,
+            float(monto_usd),
             metodo
         ))
 
         conn.commit()
         conn.close()
 
-        # Actualizar datos en memoria
         cargar_datos()
 
         return True, "✅ Venta procesada correctamente"
 
     except Exception as e:
-        return False, f"❌ Error interno: {str(e)}"
+        try:
+            conn.rollback()
+        except:
+            pass
+
+        return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
