@@ -11,319 +11,87 @@ import time
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
 
-
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
     """Conexión principal a la base de datos del Imperio."""
     return sqlite3.connect('imperio_v2.db', check_same_thread=False)
 
-
-# --- 3. INICIALIZACIÓN COMPLETA DEL SISTEMA (VERSIÓN UNIFICADA Y CORREGIDA) ---
+# --- 3. INICIALIZACIÓN DEL SISTEMA ---
 def inicializar_sistema():
-    """Crea todas las tablas y configura parámetros iniciales del sistema."""
-
     with conectar() as conn:
         c = conn.cursor()
-
         tablas = [
-            """
-            CREATE TABLE IF NOT EXISTS clientes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT,
-                whatsapp TEXT
-            )
-            """,
-
-            """
-            CREATE TABLE IF NOT EXISTS inventario (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item TEXT UNIQUE,
-                cantidad REAL,
-                unidad TEXT,
-                precio_usd REAL,
-                minimo REAL DEFAULT 5.0
-            )
-            """,
-
-            """
-            CREATE TABLE IF NOT EXISTS configuracion (
-                parametro TEXT PRIMARY KEY,
-                valor REAL
-            )
-            """,
-
-            """
-            CREATE TABLE IF NOT EXISTS usuarios (
-                username TEXT PRIMARY KEY,
-                password TEXT,
-                rol TEXT,
-                nombre TEXT
-            )
-            """,
-
-            """
-            CREATE TABLE IF NOT EXISTS ventas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cliente_id INTEGER,
-                cliente TEXT,
-                detalle TEXT,
-                monto_total REAL,
-                metodo TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
-
-            """
-            CREATE TABLE IF NOT EXISTS gastos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                descripcion TEXT,
-                monto REAL,
-                categoria TEXT,
-                metodo TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
-
-            """
-            CREATE TABLE IF NOT EXISTS activos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                equipo TEXT,
-                categoria TEXT,
-                inversion REAL,
-                unidad TEXT,
-                desgaste REAL
-            )
-            """,
-
-            """
-            CREATE TABLE IF NOT EXISTS inventario_movs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_id INTEGER,
-                tipo TEXT,
-                cantidad REAL,
-                motivo TEXT,
-                usuario TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
-
-            """
-            CREATE TABLE IF NOT EXISTS historial_precios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_id INTEGER,
-                precio_usd REAL,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            """
+            "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
+            "CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)",
+            "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
+            "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
+            "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, cliente TEXT, detalle TEXT, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)"
         ]
-
-        for tabla in tablas:
+        for tabla in tablas: 
             c.execute(tabla)
-
-        # Asegurar columnas cliente y detalle por si la tabla ya existía
-        try:
-            c.execute("ALTER TABLE ventas ADD COLUMN cliente TEXT")
-        except:
-            pass
-
-        try:
-            c.execute("ALTER TABLE ventas ADD COLUMN detalle TEXT")
-        except:
-            pass
-
-        # Usuario Maestro
-        c.execute("""
-            INSERT OR IGNORE INTO usuarios
-            VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')
-        """)
-
-        # Parámetros iniciales del sistema
+        
+        c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
+        
         config_init = [
-            ('tasa_bcv', 36.50),
-            ('tasa_binance', 38.00),
-            ('costo_tinta_ml', 0.10),
-            ('iva_perc', 16.0),
-            ('igtf_perc', 3.0),
-            ('banco_perc', 0.5),
-            ('delivery_predet', 0.0)
+            ('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('costo_tinta_ml', 0.10), 
+            ('iva_perc', 16.0), ('igtf_perc', 3.0), ('banco_perc', 0.5)
         ]
-
-        for p, v in config_init:
-            c.execute(
-                "INSERT OR IGNORE INTO configuracion VALUES (?,?)",
-                (p, v)
-            )
-
+        for p, v in config_init: 
+            c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
         conn.commit()
 
-
-# --- 4. CARGA DE DATOS ROBUSTA ---
+# --- 4. CARGA DE DATOS ---
 def cargar_datos():
-    """Carga segura de todas las tablas al session_state."""
-
     with conectar() as conn:
-
-        # Inventario
         try:
             st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
-        except:
-            st.session_state.df_inv = pd.DataFrame()
-
-        # Clientes
-        try:
             st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-        except:
-            st.session_state.df_cli = pd.DataFrame()
-
-        # Configuración
-        try:
             conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
-
             for _, row in conf_df.iterrows():
                 st.session_state[row['parametro']] = float(row['valor'])
-        except:
+        except: 
             pass
 
-
-def cargar_datos_seguros():
-    """Recarga datos y muestra confirmación visual."""
-    cargar_datos()
-    st.toast("🔄 Imperio Sincronizado", icon="⚛️")
-
-
-# --- 5. UTILIDADES DE INVENTARIO ---
-def obtener_tintas_disponibles():
-    """Filtra el inventario para obtener solo consumibles de impresión (ml)."""
-
-    df = st.session_state.get('df_inv', pd.DataFrame())
-
-    if not df.empty:
-        return df[df['unidad'].str.contains('ml', case=False, na=False)]
-
-    return pd.DataFrame()
-
-
-# --- 6. PROCESAMIENTO DE VENTA (BASE ACTUAL) ---
-def procesar_venta_grafica_completa(id_cliente, monto, metodo, consumos_dict):
-    """
-    Registra venta y descuenta stock.
-    """
-
-    try:
-        with conectar() as conn:
-            cursor = conn.cursor()
-
-            # Registrar Venta
-            cursor.execute(
-                """
-                INSERT INTO ventas (cliente_id, monto_total, metodo)
-                VALUES (?, ?, ?)
-                """,
-                (id_cliente, monto, metodo)
-            )
-
-            # Descuento de Inventario
-            for id_insumo, cantidad in consumos_dict.items():
-                if cantidad > 0:
-                    cursor.execute(
-                        """
-                        UPDATE inventario
-                        SET cantidad = cantidad - ?
-                        WHERE id = ?
-                        """,
-                        (cantidad, id_insumo)
-                    )
-
-            conn.commit()
-
-        cargar_datos_seguros()
-        return True, "✅ Venta y Stock procesados."
-
-    except Exception as e:
-        return False, f"❌ Error: {str(e)}"
-
-
-# --- 7. LOGIN ---
-def login():
-    st.title("⚛️ Acceso al Imperio Atómico")
-
-    with st.container(border=True):
-        u = st.text_input("Usuario")
-        p = st.text_input("Contraseña", type="password")
-
-        if st.button("Entrar al Sistema", use_container_width=True):
-
-            with conectar() as conn:
-                res = conn.execute(
-                    """
-                    SELECT rol, nombre
-                    FROM usuarios
-                    WHERE username=? AND password=?
-                    """,
-                    (u, p)
-                ).fetchone()
-
-            if res:
-                st.session_state.autenticado = True
-                st.session_state.rol = "Admin" if u == 'jefa' else res[0]
-                st.session_state.usuario_nombre = res[1]
-
-                cargar_datos()
-                st.rerun()
-            else:
-                st.error("Acceso denegado")
-
-
-# --- 8. CONTROL DE FLUJO PRINCIPAL ---
+# --- 5. LOGICA DE ACCESO ---
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
     inicializar_sistema()
+
+def login():
+    st.title("⚛️ Acceso al Imperio Atómico")
+    with st.container(border=True):
+        u = st.text_input("Usuario")
+        p = st.text_input("Contraseña", type="password")
+        if st.button("Entrar", use_container_width=True):
+            with conectar() as conn:
+                res = conn.execute("SELECT rol, nombre FROM usuarios WHERE username=? AND password=?", (u, p)).fetchone()
+            if res:
+                st.session_state.autenticado, st.session_state.rol, st.session_state.usuario_nombre = True, res[0], res[1]
+                cargar_datos()
+                st.rerun()
+            else: 
+                st.error("Acceso denegado")
 
 if not st.session_state.autenticado:
     login()
     st.stop()
 
-if 'df_inv' not in st.session_state:
-    cargar_datos()
-
-
-# Variables globales
+# --- 6. SIDEBAR Y VARIABLES ---
+cargar_datos()
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "Produccion")
 
-
-# --- 9. SIDEBAR ---
 with st.sidebar:
-
     st.header(f"👋 {st.session_state.usuario_nombre}")
-
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
-
-    opciones = [
-        "📦 Inventario",
-        "🛒 Venta Directa",
-        "🛠️ Otros Procesos",
-        "🎨 Análisis CMYK",
-        "📝 Cotizaciones",
-        "💰 Ventas",
-        "👥 Clientes",
-        "📊 Dashboard",
-        "📉 Gastos",
-        "🏗️ Activos",
-        "🏁 Cierre de Caja",
-        "📊 Auditoría y Métricas",
-        "⚙️ Configuración"
-    ]
-
-    menu = st.radio("Secciones del Imperio:", opciones)
-
-    st.divider()
-
+    menu = st.radio("Secciones:", ["📊 Dashboard", "🛒 Venta Directa", "📦 Inventario", "📊 Auditoría", "⚙️ Configuración"])
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state.clear()
         st.rerun()
-
+        
 # --- MÓDULO DE INVENTARIO REINGENIERIZADO Y PROFESIONAL ---
 if menu == "📦 Inventario":
     st.title("📦 Centro de Control de Suministros")
@@ -3140,6 +2908,7 @@ def registrar_venta_global(
 
     except Exception as e:
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
