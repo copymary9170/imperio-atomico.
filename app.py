@@ -282,7 +282,7 @@ with st.sidebar:
 # ===========================================================
 # 📦 MÓDULO DE INVENTARIO – ESTRUCTURA CORREGIDA
 # ===========================================================
-    elif menu == "📦 Inventario":
+elif menu == "📦 Inventario":
 
     st.title("📦 Centro de Control de Suministros")
 
@@ -3130,6 +3130,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
