@@ -20,27 +20,96 @@ def conectar():
 def inicializar_sistema():
     with conectar() as conn:
         c = conn.cursor()
+
         tablas = [
+
+            # CLIENTES
             "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
-            "CREATE TABLE IF NOT EXISTS inventario (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, precio_usd REAL, minimo REAL DEFAULT 5.0)",
+
+            # INVENTARIO (MEJORADO)
+            """CREATE TABLE IF NOT EXISTS inventario (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item TEXT UNIQUE,
+                cantidad REAL,
+                unidad TEXT,
+                precio_usd REAL,
+                minimo REAL DEFAULT 5.0,
+                ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            # CONFIGURACION
             "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
+
+            # USUARIOS
             "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
+
+            # VENTAS
             "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, cliente TEXT, detalle TEXT, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+
+            # GASTOS
             "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
-            "CREATE TABLE IF NOT EXISTS inventario_movs (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)"
+
+            # MOVIMIENTOS DE INVENTARIO (MEJORADO)
+            """CREATE TABLE IF NOT EXISTS inventario_movs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item TEXT,
+                tipo TEXT,
+                cantidad REAL,
+                motivo TEXT,
+                usuario TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            # PROVEEDORES
+            """CREATE TABLE IF NOT EXISTS proveedores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT UNIQUE,
+                telefono TEXT,
+                rif TEXT,
+                contacto TEXT,
+                observaciones TEXT,
+                fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            # HISTORIAL DE COMPRAS
+            """CREATE TABLE IF NOT EXISTS historial_compras (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item TEXT,
+                proveedor_id INTEGER,
+                cantidad REAL,
+                unidad TEXT,
+                costo_total_usd REAL,
+                costo_unit_usd REAL,
+                impuestos REAL,
+                delivery REAL,
+                tasa_usada REAL,
+                moneda_pago TEXT,
+                usuario TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"""
         ]
+
         for tabla in tablas:
             c.execute(tabla)
 
+        # USUARIO ADMIN POR DEFECTO
         c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
 
+        # CONFIGURACIÓN INICIAL
         config_init = [
-            ('tasa_bcv', 36.50), ('tasa_binance', 38.00), ('costo_tinta_ml', 0.10),
-            ('iva_perc', 16.0), ('igtf_perc', 3.0), ('banco_perc', 0.5)
+            ('tasa_bcv', 36.50),
+            ('tasa_binance', 38.00),
+            ('costo_tinta_ml', 0.10),
+            ('iva_perc', 16.0),
+            ('igtf_perc', 3.0),
+            ('banco_perc', 0.5)
         ]
+
         for p, v in config_init:
             c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
+
         conn.commit()
+
 
 # --- 4. CARGA DE DATOS ---
 def cargar_datos():
@@ -132,281 +201,41 @@ if menu == "📦 Inventario":
     df_inv = st.session_state.get('df_inv', pd.DataFrame())
     t_ref = st.session_state.get('tasa_bcv', 36.5)
     t_bin = st.session_state.get('tasa_binance', 38.0)
+    usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
 
     # =======================================================
-    # 1. DASHBOARD DE INDICADORES
+    # 1️⃣ DASHBOARD EJECUTIVO
     # =======================================================
     if not df_inv.empty:
+
         with st.container(border=True):
 
-            c_val, c_alert, c_salud = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
 
-            v_inv = (df_inv['cantidad'] * df_inv['precio_usd']).sum()
+            capital_total = (df_inv["cantidad"] * df_inv["precio_usd"]).sum()
+            items_criticos = df_inv[df_inv["cantidad"] <= df_inv["minimo"]]
+            total_items = len(df_inv)
 
-            c_val.metric(
-                "Capital en Stock",
-                f"$ {v_inv:,.2f}",
-                help=f"Bs {v_inv * t_ref:,.2f}"
-            )
+            salud = ((total_items - len(items_criticos)) / total_items) * 100 if total_items > 0 else 0
 
-            crit_df = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
-
-            c_alert.metric(
-                "Items Críticos",
-                f"{len(crit_df)}",
-                delta=f"{len(crit_df)} Reabastecer" if len(crit_df) > 0 else "OK",
-                delta_color="inverse"
-            )
-
-            salud = ((len(df_inv) - len(crit_df)) / len(df_inv)) * 100 if len(df_inv) > 0 else 0
-
-            c_salud.write(f"**Salud del Almacén: {salud:.0f}%**")
-            c_salud.progress(salud / 100)
+            c1.metric("💰 Capital en Inventario", f"${capital_total:,.2f}")
+            c2.metric("📦 Total Ítems", total_items)
+            c3.metric("🚨 Stock Bajo", len(items_criticos),
+                      delta="Revisar" if len(items_criticos) > 0 else "OK",
+                      delta_color="inverse")
+            c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
 
     # =======================================================
-    # 2. PANEL PRINCIPAL DE OPERACIONES
+    # 2️⃣ PANEL DE OPERACIONES
     # =======================================================
     tabs = st.tabs([
         "📋 Existencias",
         "📥 Registrar Compra",
+        "📊 Historial Compras",
         "👤 Proveedores",
-        "🧾 Historial Compras",
-        "🧮 Calculadora",
-        "📊 Reportes",
-        "🚨 Alertas",
         "🔧 Ajustes"
     ])
 
-    # =======================================================
-    # TAB 1 – EXISTENCIAS
-    # =======================================================
-    with tabs[0]:
-
-        if df_inv.empty:
-            st.info("Inventario vacío.")
-        else:
-
-            c1, c2, c3 = st.columns([2, 1, 1])
-
-            busq = c1.text_input("🔍 Filtro rápido")
-            moneda_v = c2.selectbox("Mostrar en:", ["USD ($)", "BCV (Bs)", "Binance (Bs)"])
-
-            t_v = t_ref if "BCV" in moneda_v else (t_bin if "Binance" in moneda_v else 1.0)
-
-            df_v = df_inv.copy()
-
-            if busq:
-                df_v = df_v[df_v['item'].str.contains(busq, case=False)]
-
-            if c3.checkbox("🚨 Ver solo stock bajo"):
-                df_v = df_v[df_v['cantidad'] <= df_v['minimo']]
-
-            df_v['Costo Unit.'] = df_v['precio_usd'] * t_v
-            df_v['Total'] = df_v['cantidad'] * df_v['Costo Unit.']
-
-            st.dataframe(df_v, use_container_width=True, hide_index=True)
-
-    # =======================================================
-    # TAB 2 – REGISTRO DE COMPRA (CON HISTORIAL)
-    # =======================================================
-    with tabs[1]:
-
-        st.subheader("📥 Entrada de Mercancía")
-
-        nombre_c = st.text_input("Nombre del Material").strip().upper()
-
-        with st.form("form_compra_atoma", clear_on_submit=True):
-
-            f1, f2, f3 = st.columns(3)
-
-            monto_neto = f1.number_input("Monto Factura", min_value=0.0)
-            mon_pago = f2.selectbox("Moneda", ["USD $", "Bs (BCV)", "Bs (Binance)"])
-            cant_recibida = f3.number_input("Cantidad Comprada", min_value=0.001)
-
-            st.markdown("⚖️ Impuestos y Comisiones")
-
-            v_iva = st.session_state.get('iva_perc', 16.0)
-            v_igtf = st.session_state.get('igtf_perc', 3.0)
-            v_ban = st.session_state.get('banco_perc', 0.5)
-
-            i1, i2, i3 = st.columns(3)
-
-            usa_iva = i1.checkbox(f"IVA (+{v_iva}%)")
-            usa_igtf = i2.checkbox(f"IGTF (+{v_igtf}%)")
-            usa_ban = i3.checkbox(f"Banco (+{v_ban}%)")
-
-            delivery = st.number_input("Pasajes / Delivery ($)", value=0.0)
-
-            proveedor = st.text_input("Proveedor (opcional)")
-
-            if st.form_submit_button("💾 GUARDAR COMPRA"):
-
-                t_p = t_ref if "BCV" in mon_pago else (t_bin if "Binance" in mon_pago else 1.0)
-
-                p_i = 0
-                if usa_iva: p_i += v_iva
-                if usa_igtf: p_i += v_igtf
-                if usa_ban: p_i += v_ban
-
-                costo_usd_total = (monto_neto / t_p) * (1 + (p_i / 100)) + delivery
-
-                costo_u = costo_usd_total / cant_recibida
-
-                with conectar() as conn:
-                    cur = conn.cursor()
-
-                    cur.execute("""
-                        INSERT INTO inventario
-                        (item, cantidad, unidad, precio_usd)
-                        VALUES (?, ?, ?, ?)
-                        ON CONFLICT(item) DO UPDATE SET
-                        cantidad = cantidad + ?
-                    """, (nombre_c, cant_recibida, "Unidad", costo_u, cant_recibida))
-
-                    cur.execute("""
-                        CREATE TABLE IF NOT EXISTS historial_compras (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            item TEXT,
-                            cantidad REAL,
-                            costo_total REAL,
-                            costo_unit REAL,
-                            proveedor TEXT,
-                            moneda TEXT,
-                            impuestos REAL,
-                            delivery REAL,
-                            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-                        )
-                    """)
-
-                    cur.execute("""
-                        INSERT INTO historial_compras
-                        (item, cantidad, costo_total, costo_unit, proveedor, moneda, impuestos, delivery)
-                        VALUES (?,?,?,?,?,?,?,?)
-                    """, (
-                        nombre_c,
-                        cant_recibida,
-                        costo_usd_total,
-                        costo_u,
-                        proveedor,
-                        mon_pago,
-                        p_i,
-                        delivery
-                    ))
-
-                    conn.commit()
-
-                cargar_datos()
-                st.success("Compra registrada con historial.")
-                st.rerun()
-
-    # =======================================================
-    # TAB 3 – PROVEEDORES
-    # =======================================================
-    with tabs[2]:
-
-        st.subheader("👤 Proveedores")
-
-        with conectar() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS proveedores (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nombre TEXT,
-                    telefono TEXT,
-                    email TEXT
-                )
-            """)
-            df_p = pd.read_sql("SELECT * FROM proveedores", conn)
-
-        with st.form("prov"):
-            n = st.text_input("Nombre")
-            t = st.text_input("Teléfono")
-            e = st.text_input("Email")
-
-            if st.form_submit_button("Guardar"):
-                with conectar() as conn:
-                    conn.execute("INSERT INTO proveedores VALUES (NULL,?,?,?)", (n,t,e))
-                    conn.commit()
-                st.rerun()
-
-        st.dataframe(df_p, use_container_width=True)
-
-    # =======================================================
-    # TAB 4 – HISTORIAL
-    # =======================================================
-    with tabs[3]:
-
-        st.subheader("🧾 Historial de Compras")
-
-        with conectar() as conn:
-            df_h = pd.read_sql("SELECT * FROM historial_compras ORDER BY fecha DESC", conn)
-
-        st.dataframe(df_h, use_container_width=True)
-
-    # =======================================================
-    # TAB 5 – CALCULADORA
-    # =======================================================
-    with tabs[4]:
-
-        st.subheader("🧮 Calculadora de Costos")
-
-        if not df_inv.empty:
-            item_sel = st.selectbox("Insumo", df_inv['item'].tolist())
-            uso = st.number_input("Cantidad", min_value=0.0)
-
-            if st.button("Calcular"):
-                dato = df_inv[df_inv['item']==item_sel].iloc[0]
-                st.metric("Costo", f"$ {uso * dato['precio_usd']:.2f}")
-
-    # =======================================================
-    # TAB 6 – REPORTES
-    # =======================================================
-    with tabs[5]:
-
-        st.subheader("📊 Reportes de Compras")
-
-        with conectar() as conn:
-            df_r = pd.read_sql("SELECT * FROM historial_compras", conn)
-
-        if not df_r.empty:
-            st.metric("Total invertido", f"$ {df_r['costo_total'].sum():,.2f}")
-            st.bar_chart(df_r.groupby('item')['cantidad'].sum())
-
-    # =======================================================
-    # TAB 7 – ALERTAS
-    # =======================================================
-    with tabs[6]:
-
-        st.subheader("🚨 Alertas")
-
-        crit = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
-
-        if crit.empty:
-            st.success("Todo en orden")
-        else:
-            for _, r in crit.iterrows():
-                st.error(f"{r['item']} bajo: {r['cantidad']}")
-
-    # =======================================================
-    # TAB 8 – AJUSTES
-    # =======================================================
-    with tabs[7]:
-
-        if not df_inv.empty:
-
-            it = st.selectbox("Insumo", df_inv['item'])
-            cr = st.number_input("Cantidad real")
-
-            if st.button("Actualizar"):
-                with conectar() as conn:
-                    conn.execute("UPDATE inventario SET cantidad=? WHERE item=?", (cr,it))
-                    conn.commit()
-
-                cargar_datos()
-                st.rerun()
-
-# ----- FIN DEL MÓDULO DE INVENTARIO -----
-
-# ----- FIN DEL MÓDULO DE INVENTARIO -----
 
 
 elif menu == "⚙️ Configuración":
@@ -2971,6 +2800,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
