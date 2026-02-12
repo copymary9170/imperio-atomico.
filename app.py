@@ -3288,3 +3288,4 @@ def registrar_venta_global(
 
 
 
+
