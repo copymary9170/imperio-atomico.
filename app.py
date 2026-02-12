@@ -2704,7 +2704,7 @@ if menu == "🛒 Venta Directa":
                 st.error(f"Error registrando venta: {e}")
 
 
-        # ===========================================================
+       # ===========================================================
 # 🛒 MÓDULO DE VENTA DIRECTA - INTEGRADO CON NÚCLEO GLOBAL
 # ===========================================================
 if menu == "🛒 Venta Directa":
@@ -2731,7 +2731,8 @@ if menu == "🛒 Venta Directa":
 
         prod_sel = c1.selectbox(
             "📦 Seleccionar Producto:",
-            disponibles['item'].tolist()
+            disponibles['item'].tolist(),
+            key="venta_directa_producto"
         )
 
         datos = disponibles[disponibles['item'] == prod_sel].iloc[0]
@@ -2758,7 +2759,8 @@ if menu == "🛒 Venta Directa":
 
             cliente_nombre = st.selectbox(
                 "Cliente:",
-                opciones_cli.keys()
+                opciones_cli.keys(),
+                key="venta_directa_cliente"
             )
 
             id_cliente = opciones_cli[cliente_nombre]
@@ -2773,10 +2775,15 @@ if menu == "🛒 Venta Directa":
             f"Cantidad ({unidad})",
             min_value=0.0,
             max_value=stock_actual,
-            step=1.0
+            step=1.0,
+            key="venta_directa_cantidad"
         )
 
-        margen = c2.number_input("Margen %", value=30.0)
+        margen = c2.number_input(
+            "Margen %",
+            value=30.0,
+            key="venta_directa_margen"
+        )
 
         metodo = c3.selectbox(
             "Método de Pago",
@@ -2787,14 +2794,20 @@ if menu == "🛒 Venta Directa":
                 "Zelle",
                 "Binance",
                 "Pendiente"
-            ]
+            ],
+            key="venta_directa_metodo"
         )
 
-        usa_desc = st.checkbox("Aplicar descuento cliente fiel")
+        usa_desc = st.checkbox(
+            "Aplicar descuento cliente fiel",
+            key="venta_directa_usa_descuento"
+        )
+
         desc = st.number_input(
             "Descuento %",
             value=5.0 if usa_desc else 0.0,
-            disabled=not usa_desc
+            disabled=not usa_desc,
+            key="venta_directa_descuento"
         )
 
         # Impuestos
@@ -2802,8 +2815,16 @@ if menu == "🛒 Venta Directa":
 
         i1, i2 = st.columns(2)
 
-        usa_iva = i1.checkbox("Aplicar IVA")
-        usa_banco = i2.checkbox("Comisión bancaria", value=True)
+        usa_iva = i1.checkbox(
+            "Aplicar IVA",
+            key="venta_directa_iva"
+        )
+
+        usa_banco = i2.checkbox(
+            "Comisión bancaria",
+            value=True,
+            key="venta_directa_banco"
+        )
 
         # ---- CÁLCULOS ----
         costo_material = cantidad * precio_base
@@ -3002,6 +3023,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
