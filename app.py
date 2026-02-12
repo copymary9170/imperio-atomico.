@@ -309,7 +309,7 @@ if menu == "📦 Inventario":
 
             c1.metric("💰 Capital en Inventario", f"${capital_total:,.2f}")
             c2.metric("📦 Total Ítems", total_items)
-            c3.metric("🚨 Stock Bajo", len(items_criticos))
+           c3.metric("🚨 Stock Bajo", len(items_criticos), delta="Revisar" if len(items_criticos) > 0 else "OK", delta_color="inverse")
             c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
 
     # =======================================================
@@ -324,18 +324,16 @@ if menu == "📦 Inventario":
     ])
 
     # =======================================================
-    # 📋 TAB 1 — EXISTENCIAS (SOLO VISUALIZACIÓN)
+    # 📋 TAB 1 — EXISTENCIAS
     # =======================================================
     with tabs[0]:
 
         if df_inv.empty:
             st.info("Inventario vacío.")
         else:
-
             col1, col2, col3 = st.columns([2, 1, 1])
-
             filtro = col1.text_input("🔍 Buscar insumo")
-            moneda_vista = col2.selectbox("Moneda", ["USD ($)", "BCV (Bs)", "Binance (Bs)"])
+            moneda_vista = col2.selectbox("Moneda", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="inv_moneda_vista")
             solo_bajo = col3.checkbox("🚨 Solo stock bajo")
 
             tasa_vista = 1.0
@@ -359,22 +357,43 @@ if menu == "📦 Inventario":
             df_v["Costo Unitario"] = df_v["precio_usd"] * tasa_vista
             df_v["Valor Total"] = df_v["cantidad"] * df_v["Costo Unitario"]
 
+
+            def resaltar_critico(row):
+                if row["cantidad"] <= row["minimo"]:
+                    return ['background-color: rgba(255,0,0,0.15)'] * len(row)
+                return [''] * len(row)
+          
             st.dataframe(
-                df_v,
+               df_v.style.apply(resaltar_critico, axis=1),
+                column_config={
+                    "item": "Insumo",
+                    "cantidad": "Stock",
+                    "unidad": "Unidad",
+                    "Costo Unitario": st.column_config.NumberColumn(
+                        f"Costo ({simbolo})", format="%.4f"
+                    ),
+                    "Valor Total": st.column_config.NumberColumn(
+                        f"Valor Total ({simbolo})", format="%.2f"
+                    ),
+                    "minimo": "Mínimo",
+                    "precio_usd": None,
+                    "id": None,
+                    "ultima_actualizacion": None
+                },
                 use_container_width=True,
                 hide_index=True
             )
 
-        # --- Gestión básica ---
         st.divider()
-        st.subheader("🛠 Gestión de Insumo")
+        st.subheader("🛠 Gestión de Insumo Existente")
 
         if not df_inv.empty:
 
             insumo_sel = st.selectbox("Seleccionar Insumo", df_inv["item"].tolist())
-            nuevo_min = st.number_input("Nuevo Stock Mínimo", min_value=0.0)
+            colA, colB = st.columns(2)
+            nuevo_min = colA.number_input("Nuevo Stock Mínimo", min_value=0.0)
 
-            if st.button("Actualizar Mínimo"):
+            if colA.button("Actualizar Mínimo"):
                 with conectar() as conn:
                     conn.execute(
                         "UPDATE inventario SET minimo=? WHERE item=?",
@@ -384,15 +403,46 @@ if menu == "📦 Inventario":
                 cargar_datos()
                 st.success("Stock mínimo actualizado.")
                 st.rerun()
+            if colB.button("🗑 Eliminar Insumo"):
+                with conectar() as conn:
+                    existe_historial = conn.execute(
+                        "SELECT COUNT(*) FROM historial_compras WHERE item=?",
+                        (insumo_sel,)
+                    ).fetchone()[0]
+                    if existe_historial > 0:
+                        st.error("No se puede eliminar: el insumo tiene historial de compras.")
+                    else:
+                        st.session_state.confirmar_borrado = True
+
+            if st.session_state.get("confirmar_borrado", False):
+                st.warning(f"⚠ Confirmar eliminación de '{insumo_sel}'")
+                colC, colD = st.columns(2)
+
+                if colC.button("✅ Confirmar"):
+                    with conectar() as conn:
+                        conn.execute(
+                            "DELETE FROM inventario WHERE item=?",
+                            (insumo_sel,)
+                        )
+                        conn.commit()
+                    st.session_state.confirmar_borrado = False
+                    cargar_datos()
+                    st.success("Insumo eliminado.")
+                    st.rerun()
+
+                if colD.button("❌ Cancelar"):
+                    st.session_state.confirmar_borrado = False
 
     # =======================================================
-    # 📥 TAB 2 — REGISTRAR COMPRA (TRANSACCIONAL)
+    # 📥 TAB 2 — REGISTRAR COMPRA
     # =======================================================
     with tabs[1]:
 
         st.subheader("📥 Registrar Nueva Compra")
 
-        nombre_c = st.text_input("Nombre del Insumo")
+        col_base1, col_base2 = st.columns(2)
+        nombre_c = col_base1.text_input("Nombre del Insumo")
+        proveedor = col_base2.text_input("Proveedor")
         minimo_stock = st.number_input("Stock mínimo", min_value=0.0)
 
         # ------------------------------
@@ -407,37 +457,52 @@ if menu == "📦 Inventario":
         unidad_final = "Unidad"
 
         if tipo_unidad == "Área (cm²)":
-            ancho = st.number_input("Ancho (cm)", min_value=0.1)
-            alto = st.number_input("Alto (cm)", min_value=0.1)
-            cantidad_envases = st.number_input("Cantidad de Pliegos", min_value=0.001)
+            c1, c2, c3 = st.columns(3)
+            ancho = c1.number_input("Ancho (cm)", min_value=0.1)
+            alto = c2.number_input("Alto (cm)", min_value=0.1)
+            cantidad_envases = c3.number_input("Cantidad de Pliegos", min_value=0.001)
             stock_real = ancho * alto * cantidad_envases
             unidad_final = "cm2"
 
         elif tipo_unidad == "Líquido (ml)":
-            ml_por_envase = st.number_input("ml por Envase", min_value=1.0)
-            cantidad_envases = st.number_input("Cantidad de Envases", min_value=0.001)
+            c1, c2 = st.columns(2)
+            ml_por_envase = c1.number_input("ml por Envase", min_value=1.0)
+            cantidad_envases = c2.number_input("Cantidad de Envases", min_value=0.001)
             stock_real = ml_por_envase * cantidad_envases
             unidad_final = "ml"
 
         elif tipo_unidad == "Peso (gr)":
-            gr_por_envase = st.number_input("gramos por Envase", min_value=1.0)
-            cantidad_envases = st.number_input("Cantidad de Envases", min_value=0.001)
+            c1, c2 = st.columns(2)
+            gr_por_envase = c1.number_input("gramos por Envase", min_value=1.0)
+            cantidad_envases = c2.number_input("Cantidad de Envases", min_value=0.001)
             stock_real = gr_por_envase * cantidad_envases
             unidad_final = "gr"
 
         else:
-            stock_real = st.number_input("Cantidad Comprada", min_value=0.001)
+            cantidad_envases = st.number_input("Cantidad Comprada", min_value=0.001)
+            stock_real = cantidad_envases
             unidad_final = "Unidad"
 
         # ------------------------------
         # DATOS FINANCIEROS
         # ------------------------------
-        monto_factura = st.number_input("Monto Factura", min_value=0.0)
-        moneda_pago = st.selectbox("Moneda", ["USD $", "Bs (BCV)", "Bs (Binance)"])
-        delivery = st.number_input("Delivery ($)", value=0.0)
+        col4, col5 = st.columns(2)
+        monto_factura = col4.number_input("Monto Factura", min_value=0.0)
+        moneda_pago = col5.selectbox(
+            "Moneda",
+            ["USD $", "Bs (BCV)", "Bs (Binance)"],
+            key="inv_moneda_pago"
+        )
+
+        col6, col7, col8 = st.columns(3)
+        iva_activo = col6.checkbox(f"IVA (+{st.session_state.get('iva_perc',16)}%)")
+        igtf_activo = col7.checkbox(f"IGTF (+{st.session_state.get('igtf_perc',3)}%)")
+        banco_activo = col8.checkbox(f"Banco (+{st.session_state.get('banco_perc',0.5)}%)")
+
+        delivery = st.number_input("Gastos Logística / Delivery ($)", value=0.0)
 
         # ------------------------------
-        # GUARDAR
+        # BOTÓN GUARDAR
         # ------------------------------
         if st.button("💾 Guardar Compra", use_container_width=True):
 
@@ -449,17 +514,38 @@ if menu == "📦 Inventario":
                 st.error("Cantidad inválida.")
                 st.stop()
 
-            tasa_usada = 1.0
             if "BCV" in moneda_pago:
                 tasa_usada = t_ref
             elif "Binance" in moneda_pago:
                 tasa_usada = t_bin
 
-            costo_total_usd = (monto_factura / tasa_usada) + delivery
+            else:
+                tasa_usada = 1.0
+
+            porc_impuestos = 0
+            if iva_activo:
+                porc_impuestos += st.session_state.get("iva_perc", 16)
+            if igtf_activo:
+                porc_impuestos += st.session_state.get("igtf_perc", 3)
+            if banco_activo:
+                porc_impuestos += st.session_state.get("banco_perc", 0.5)
+
+            costo_total_usd = ((monto_factura / tasa_usada) * (1 + (porc_impuestos / 100))) + delivery
             costo_unitario = costo_total_usd / stock_real
 
             with conectar() as conn:
                 cur = conn.cursor()
+
+
+                proveedor_id = None
+                if proveedor:
+                    cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
+                    prov = cur.fetchone()
+                    if not prov:
+                        cur.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor,))
+                        proveedor_id = cur.lastrowid
+                    else:
+                        proveedor_id = prov[0]
 
                 old = cur.execute(
                     "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
@@ -496,10 +582,52 @@ if menu == "📦 Inventario":
                     minimo_stock
                 ))
 
+                 cur.execute("""
+                    INSERT INTO historial_compras
+                    (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    nombre_c,
+                    proveedor_id,
+                    stock_real,
+                    unidad_final,
+                    costo_total_usd,
+                    costo_unitario,
+                    porc_impuestos,
+                    delivery,
+                    tasa_usada,
+                    moneda_pago,
+                    usuario_actual
+                ))
+
+                item_id_row = cur.execute(
+                    "SELECT id FROM inventario WHERE item = ?",
+                    (nombre_c,)
+                ).fetchone()
+
+                if item_id_row:
+                    cur.execute("""
+                        INSERT INTO inventario_movs
+                        (item_id, tipo, cantidad, motivo, usuario)
+                        VALUES (?,?,?,?,?)
+                    """, (
+                        item_id_row[0],
+                        "ENTRADA",
+                        stock_real,
+                        "Compra registrada",
+                        usuario_actual
+                    ))
+
                 conn.commit()
 
             cargar_datos()
             st.success("Compra registrada correctamente.")
+            st.success("Compra registrada correctamente con unidad dinámica.")
+
+                conn.commit()
+
+            cargar_datos()
+            st.success("Compra registrada correctamente con unidad dinámica.")
             st.rerun()
 
 
@@ -3130,6 +3258,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
