@@ -301,23 +301,67 @@ if menu == "📦 Inventario":
                 hide_index=True
             )
 
-    # =======================================================
-    # 📥 TAB 2 — REGISTRAR COMPRA
+        # =======================================================
+    # 📥 TAB 2 — REGISTRAR COMPRA (CON UNIDADES DINÁMICAS)
     # =======================================================
     with tabs[1]:
 
         st.subheader("📥 Registro Profesional de Compra")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns([2, 1, 1])
 
         nombre_c = col1.text_input("Nombre del Insumo").strip().upper()
         proveedor = col2.text_input("Proveedor (opcional)").strip()
+        minimo_stock = col3.number_input("Stock Mínimo", value=5.0)
 
-        col3, col4, col5 = st.columns(3)
+        # ------------------------------
+        # TIPO DE UNIDAD
+        # ------------------------------
+        tipo_unidad = st.selectbox(
+            "Tipo de Unidad",
+            ["Unidad", "Área (cm²)", "Líquido (ml)", "Peso (gr)"]
+        )
 
-        monto_factura = col3.number_input("Monto Factura", min_value=0.0)
-        moneda_pago = col4.selectbox("Moneda", ["USD $", "Bs (BCV)", "Bs (Binance)"])
-        cantidad_recibida = col5.number_input("Cantidad Recibida", min_value=0.001)
+        stock_real = 0
+        unidad_final = "Unidad"
+
+        # Área
+        if tipo_unidad == "Área (cm²)":
+            c1, c2, c3 = st.columns(3)
+            ancho = c1.number_input("Ancho (cm)", min_value=0.1)
+            alto = c2.number_input("Alto (cm)", min_value=0.1)
+            cantidad_envases = c3.number_input("Cantidad de Pliegos", min_value=0.001)
+            stock_real = ancho * alto * cantidad_envases
+            unidad_final = "cm2"
+
+        # Líquido
+        elif tipo_unidad == "Líquido (ml)":
+            c1, c2 = st.columns(2)
+            ml_por_envase = c1.number_input("ml por Envase", min_value=1.0)
+            cantidad_envases = c2.number_input("Cantidad de Envases", min_value=0.001)
+            stock_real = ml_por_envase * cantidad_envases
+            unidad_final = "ml"
+
+        # Peso
+        elif tipo_unidad == "Peso (gr)":
+            c1, c2 = st.columns(2)
+            gr_por_envase = c1.number_input("gramos por Envase", min_value=1.0)
+            cantidad_envases = c2.number_input("Cantidad de Envases", min_value=0.001)
+            stock_real = gr_por_envase * cantidad_envases
+            unidad_final = "gr"
+
+        # Unidad simple
+        else:
+            cantidad_envases = st.number_input("Cantidad Comprada", min_value=0.001)
+            stock_real = cantidad_envases
+            unidad_final = "Unidad"
+
+        # ------------------------------
+        # DATOS FINANCIEROS
+        # ------------------------------
+        col4, col5 = st.columns(2)
+        monto_factura = col4.number_input("Monto Factura", min_value=0.0)
+        moneda_pago = col5.selectbox("Moneda", ["USD $", "Bs (BCV)", "Bs (Binance)"])
 
         col6, col7, col8 = st.columns(3)
 
@@ -327,17 +371,20 @@ if menu == "📦 Inventario":
 
         delivery = st.number_input("Gastos Logística / Delivery ($)", value=0.0)
 
+        # ------------------------------
+        # BOTÓN GUARDAR
+        # ------------------------------
         if st.button("💾 Guardar Compra", use_container_width=True):
 
             if not nombre_c:
                 st.error("Debe indicar nombre del insumo.")
                 st.stop()
 
-            if cantidad_recibida <= 0:
+            if stock_real <= 0:
                 st.error("Cantidad inválida.")
                 st.stop()
 
-            # --- Selección de tasa ---
+            # Tasa
             if "BCV" in moneda_pago:
                 tasa_usada = t_ref
             elif "Binance" in moneda_pago:
@@ -345,7 +392,7 @@ if menu == "📦 Inventario":
             else:
                 tasa_usada = 1.0
 
-            # --- Cálculo impuestos ---
+            # Impuestos
             porc_impuestos = 0
             if iva_activo:
                 porc_impuestos += st.session_state.get("iva_perc", 16)
@@ -355,13 +402,12 @@ if menu == "📦 Inventario":
                 porc_impuestos += st.session_state.get("banco_perc", 0.5)
 
             costo_total_usd = (monto_factura / tasa_usada) * (1 + (porc_impuestos / 100)) + delivery
-            costo_unitario = costo_total_usd / cantidad_recibida
+            costo_unitario = costo_total_usd / stock_real
 
-            # --- Conexión DB ---
             with conectar() as conn:
                 cur = conn.cursor()
 
-                # Buscar proveedor
+                # Proveedor
                 proveedor_id = None
                 if proveedor:
                     cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
@@ -372,40 +418,40 @@ if menu == "📦 Inventario":
                     else:
                         proveedor_id = prov[0]
 
-                # Buscar inventario existente
                 old = cur.execute(
                     "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
                     (nombre_c,)
                 ).fetchone()
 
                 if old:
-                    nueva_cant = old[0] + cantidad_recibida
+                    nueva_cant = old[0] + stock_real
                     precio_ponderado = (
-                        (old[0] * old[1] + cantidad_recibida * costo_unitario)
+                        (old[0] * old[1] + stock_real * costo_unitario)
                         / nueva_cant
                     )
                 else:
-                    nueva_cant = cantidad_recibida
+                    nueva_cant = stock_real
                     precio_ponderado = costo_unitario
 
-                # Actualizar inventario
                 cur.execute("""
-                    INSERT INTO inventario (item, cantidad, unidad, precio_usd, ultima_actualizacion)
-                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo, ultima_actualizacion)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(item) DO UPDATE SET
                         cantidad = ?,
                         precio_usd = ?,
+                        minimo = ?,
                         ultima_actualizacion = CURRENT_TIMESTAMP
                 """, (
                     nombre_c,
                     nueva_cant,
-                    "Unidad",
+                    unidad_final,
                     precio_ponderado,
+                    minimo_stock,
                     nueva_cant,
-                    precio_ponderado
+                    precio_ponderado,
+                    minimo_stock
                 ))
 
-                # Registrar historial
                 cur.execute("""
                     INSERT INTO historial_compras
                     (item, proveedor_id, cantidad, unidad,
@@ -416,8 +462,8 @@ if menu == "📦 Inventario":
                 """, (
                     nombre_c,
                     proveedor_id,
-                    cantidad_recibida,
-                    "Unidad",
+                    stock_real,
+                    unidad_final,
                     costo_total_usd,
                     costo_unitario,
                     porc_impuestos,
@@ -427,7 +473,6 @@ if menu == "📦 Inventario":
                     usuario_actual
                 ))
 
-                # Registrar movimiento
                 cur.execute("""
                     INSERT INTO inventario_movs
                     (item, tipo, cantidad, motivo, usuario)
@@ -435,7 +480,7 @@ if menu == "📦 Inventario":
                 """, (
                     nombre_c,
                     "ENTRADA",
-                    cantidad_recibida,
+                    stock_real,
                     "Compra registrada",
                     usuario_actual
                 ))
@@ -443,7 +488,7 @@ if menu == "📦 Inventario":
                 conn.commit()
 
             cargar_datos()
-            st.success("Compra registrada correctamente.")
+            st.success("Compra registrada correctamente con unidad dinámica.")
             st.rerun()
 
 
@@ -3009,6 +3054,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
