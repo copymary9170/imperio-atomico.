@@ -236,6 +236,70 @@ if menu == "📦 Inventario":
         "🔧 Ajustes"
     ])
 
+    # =======================================================
+    # 📋 TAB 1 — EXISTENCIAS
+    # =======================================================
+    with tabs[0]:
+
+        if df_inv.empty:
+            st.info("Inventario vacío.")
+        else:
+
+            col1, col2, col3 = st.columns([2, 1, 1])
+
+            filtro = col1.text_input("🔍 Buscar insumo")
+            moneda_vista = col2.selectbox("Moneda", ["USD ($)", "BCV (Bs)", "Binance (Bs)"])
+            solo_bajo = col3.checkbox("🚨 Solo stock bajo")
+
+            # Selección de tasa
+            tasa_vista = 1.0
+            simbolo = "$"
+
+            if "BCV" in moneda_vista:
+                tasa_vista = t_ref
+                simbolo = "Bs"
+            elif "Binance" in moneda_vista:
+                tasa_vista = t_bin
+                simbolo = "Bs"
+
+            df_v = df_inv.copy()
+
+            if filtro:
+                df_v = df_v[df_v["item"].str.contains(filtro, case=False)]
+
+            if solo_bajo:
+                df_v = df_v[df_v["cantidad"] <= df_v["minimo"]]
+
+            df_v["Costo Unitario"] = df_v["precio_usd"] * tasa_vista
+            df_v["Valor Total"] = df_v["cantidad"] * df_v["Costo Unitario"]
+
+            def resaltar_critico(row):
+                if row["cantidad"] <= row["minimo"]:
+                    return ['background-color: rgba(255,0,0,0.15)'] * len(row)
+                return [''] * len(row)
+
+            st.dataframe(
+                df_v.style.apply(resaltar_critico, axis=1),
+                column_config={
+                    "item": "Insumo",
+                    "cantidad": "Stock",
+                    "unidad": "Unidad",
+                    "Costo Unitario": st.column_config.NumberColumn(
+                        f"Costo ({simbolo})",
+                        format="%.4f"
+                    ),
+                    "Valor Total": st.column_config.NumberColumn(
+                        f"Valor Total ({simbolo})",
+                        format="%.2f"
+                    ),
+                    "minimo": "Mínimo",
+                    "precio_usd": None,
+                    "id": None,
+                    "ultima_actualizacion": None
+                },
+                use_container_width=True,
+                hide_index=True
+            )
 
 
 elif menu == "⚙️ Configuración":
@@ -2800,6 +2864,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
