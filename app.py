@@ -7,6 +7,10 @@ import plotly.express as px
 from PIL import Image
 from datetime import datetime, date, timedelta
 import time
+import os
+import hashlib
+import hmac
+import secrets
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -14,7 +18,40 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
     """Conexión principal a la base de datos del Imperio."""
-    return sqlite3.connect('imperio_v2.db', check_same_thread=False)
+    conn = sqlite3.connect('imperio_v2.db', check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
+    salt = salt or secrets.token_hex(16)
+    iterations = 120_000
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), iterations).hex()
+    return f"pbkdf2_sha256${iterations}${salt}${digest}"
+
+
+def verify_password(password: str, password_hash: str | None) -> bool:
+    if not password_hash:
+        return False
+    try:
+        algorithm, iterations, salt, digest = password_hash.split('$', 3)
+        if algorithm != 'pbkdf2_sha256':
+            return False
+        test_digest = hashlib.pbkdf2_hmac(
+            'sha256',
+            password.encode('utf-8'),
+            salt.encode('utf-8'),
+            int(iterations)
+        ).hex()
+        return hmac.compare_digest(test_digest, digest)
+    except (ValueError, TypeError):
+        return False
+
+
+def obtener_password_admin_inicial() -> str:
+    """Obtiene contraseña inicial desde entorno para evitar hardcode total en el código."""
+    return os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
 def inicializar_sistema():
@@ -41,7 +78,7 @@ def inicializar_sistema():
             "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
 
             # USUARIOS
-            "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, rol TEXT, nombre TEXT)",
+            "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, password_hash TEXT, rol TEXT, nombre TEXT)",
 
             # VENTAS
             "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, cliente TEXT, detalle TEXT, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
@@ -52,12 +89,13 @@ def inicializar_sistema():
             # MOVIMIENTOS DE INVENTARIO (MEJORADO)
             """CREATE TABLE IF NOT EXISTS inventario_movs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item TEXT,
+                item_id INTEGER,
                 tipo TEXT,
                 cantidad REAL,
                 motivo TEXT,
                 usuario TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(item_id) REFERENCES inventario(id)
             )""",
 
             # PROVEEDORES
@@ -92,8 +130,44 @@ def inicializar_sistema():
         for tabla in tablas:
             c.execute(tabla)
 
+        # MIGRACIONES LIGERAS
+        columnas_usuarios = {row[1] for row in c.execute("PRAGMA table_info(usuarios)").fetchall()}
+        if 'password_hash' not in columnas_usuarios:
+            c.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT")
+
+        columnas_movs = {row[1] for row in c.execute("PRAGMA table_info(inventario_movs)").fetchall()}
+        if 'item_id' not in columnas_movs:
+            c.execute("ALTER TABLE inventario_movs ADD COLUMN item_id INTEGER")
+        if 'item' in columnas_movs:
+            c.execute(
+                """
+                UPDATE inventario_movs
+                SET item_id = (
+                    SELECT i.id FROM inventario i WHERE i.item = inventario_movs.item LIMIT 1
+                )
+                WHERE item_id IS NULL
+                """
+            )
+
+        c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
+
         # USUARIO ADMIN POR DEFECTO
-        c.execute("INSERT OR IGNORE INTO usuarios VALUES ('jefa', 'atomica2026', 'Admin', 'Dueña del Imperio')")
+        admin_password = obtener_password_admin_inicial()
+        c.execute(
+            """
+            INSERT OR IGNORE INTO usuarios (username, password, password_hash, rol, nombre)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ('jefa', '', hash_password(admin_password), 'Admin', 'Dueña del Imperio')
+        )
+        c.execute(
+            """
+            UPDATE usuarios
+            SET password_hash = ?, password = ''
+            WHERE username = 'jefa' AND (password_hash IS NULL OR password_hash = '')
+            """,
+            (hash_password(admin_password),)
+        )
 
         # CONFIGURACIÓN INICIAL
         config_init = [
@@ -120,8 +194,8 @@ def cargar_datos():
             conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
             for _, row in conf_df.iterrows():
                 st.session_state[row['parametro']] = float(row['valor'])
-        except:
-            pass
+        except (sqlite3.DatabaseError, ValueError, KeyError) as e:
+            st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")
 
 # Alias de compatibilidad para módulos que lo usan
 def cargar_datos_seguros():
@@ -140,13 +214,28 @@ def login():
         if st.button("Entrar", use_container_width=True):
             with conectar() as conn:
                 res = conn.execute(
-                    "SELECT rol, nombre FROM usuarios WHERE username=? AND password=?",
-                    (u, p)
+                    "SELECT username, rol, nombre, password, password_hash FROM usuarios WHERE username=?",
+                    (u,)
                 ).fetchone()
+
+            acceso_ok = False
             if res:
+                username, rol, nombre, password_plain, password_hash = res
+                if verify_password(p, password_hash):
+                    acceso_ok = True
+                elif password_plain and hmac.compare_digest(password_plain, p):
+                    acceso_ok = True
+                    with conectar() as conn:
+                        conn.execute(
+                            "UPDATE usuarios SET password_hash=?, password='' WHERE username=?",
+                            (hash_password(p), username)
+                        )
+                        conn.commit()
+
+            if acceso_ok:
                 st.session_state.autenticado = True
-                st.session_state.rol = res[0]
-                st.session_state.usuario_nombre = res[1]
+                st.session_state.rol = rol
+                st.session_state.usuario_nombre = nombre
                 cargar_datos()
                 st.rerun()
             else:
@@ -495,17 +584,23 @@ if menu == "📦 Inventario":
                     usuario_actual
                 ))
 
-                cur.execute("""
-                    INSERT INTO inventario_movs
-                    (item, tipo, cantidad, motivo, usuario)
-                    VALUES (?,?,?,?,?)
-                """, (
-                    nombre_c,
-                    "ENTRADA",
-                    stock_real,
-                    "Compra registrada",
-                    usuario_actual
-                ))
+                item_id_row = cur.execute(
+                    "SELECT id FROM inventario WHERE item = ?",
+                    (nombre_c,)
+                ).fetchone()
+
+                if item_id_row:
+                    cur.execute("""
+                        INSERT INTO inventario_movs
+                        (item_id, tipo, cantidad, motivo, usuario)
+                        VALUES (?,?,?,?,?)
+                    """, (
+                        item_id_row[0],
+                        "ENTRADA",
+                        stock_real,
+                        "Compra registrada",
+                        usuario_actual
+                    ))
 
                 conn.commit()
 
