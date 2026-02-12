@@ -2704,7 +2704,7 @@ if menu == "🛒 Venta Directa":
                 st.error(f"Error registrando venta: {e}")
 
 
-       # ===========================================================
+      # ===========================================================
 # 🛒 MÓDULO DE VENTA DIRECTA - INTEGRADO CON NÚCLEO GLOBAL
 # ===========================================================
 if menu == "🛒 Venta Directa":
@@ -2746,7 +2746,7 @@ if menu == "🛒 Venta Directa":
         c2.metric("Stock Disponible", f"{stock_actual:.2f} {unidad}")
 
     # --- FORMULARIO DE VENTA ---
-    with st.form("form_venta_directa", clear_on_submit=True):
+    with st.form("form_venta_directa_modulo", clear_on_submit=True):
 
         st.subheader("Datos de la Venta")
 
@@ -2798,16 +2798,12 @@ if menu == "🛒 Venta Directa":
             key="venta_directa_metodo"
         )
 
-        usa_desc = st.checkbox(
-            "Aplicar descuento cliente fiel",
-            key="venta_directa_usa_descuento"
-        )
-
+        usa_desc = st.checkbox("Aplicar descuento cliente fiel", key="venta_directa_check_desc")
         desc = st.number_input(
             "Descuento %",
             value=5.0 if usa_desc else 0.0,
             disabled=not usa_desc,
-            key="venta_directa_descuento"
+            key="venta_directa_desc"
         )
 
         # Impuestos
@@ -2815,16 +2811,8 @@ if menu == "🛒 Venta Directa":
 
         i1, i2 = st.columns(2)
 
-        usa_iva = i1.checkbox(
-            "Aplicar IVA",
-            key="venta_directa_iva"
-        )
-
-        usa_banco = i2.checkbox(
-            "Comisión bancaria",
-            value=True,
-            key="venta_directa_banco"
-        )
+        usa_iva = i1.checkbox("Aplicar IVA", key="venta_directa_iva")
+        usa_banco = i2.checkbox("Comisión bancaria", value=True, key="venta_directa_banco")
 
         # ---- CÁLCULOS ----
         costo_material = cantidad * precio_base
@@ -2854,6 +2842,68 @@ if menu == "🛒 Venta Directa":
 
         if total_bs:
             st.info(f"Equivalente: Bs {total_bs:,.2f}")
+
+        # =====================================================
+        # 🔐 AQUÍ ENTRA EL NÚCLEO CENTRAL DEL IMPERIO
+        # =====================================================
+        if st.form_submit_button("🚀 PROCESAR VENTA"):
+
+            if cantidad <= 0:
+                st.error("Cantidad inválida")
+                st.stop()
+
+            consumos = {
+                id_producto: cantidad
+            }
+
+            exito, mensaje = registrar_venta_global(
+                id_cliente=id_cliente,
+                nombre_cliente=cliente_nombre,
+                detalle=f"{cantidad} {unidad} de {prod_sel}",
+                monto_usd=total_usd,
+                metodo=metodo,
+                consumos=consumos
+            )
+
+            if exito:
+                st.success(mensaje)
+
+                if stock_actual - cantidad <= minimo:
+                    st.warning("⚠️ Producto quedó en nivel crítico")
+
+                st.session_state.ultimo_ticket = {
+                    "cliente": cliente_nombre,
+                    "detalle": f"{cantidad} {unidad} de {prod_sel}",
+                    "total": total_usd,
+                    "metodo": metodo
+                }
+
+                st.rerun()
+            else:
+                st.error(mensaje)
+
+    # --- TICKET ---
+    if 'ultimo_ticket' in st.session_state:
+
+        st.divider()
+
+        t = st.session_state.ultimo_ticket
+
+        with st.expander("📄 Recibo de Venta", expanded=True):
+
+            st.code(
+f"""
+CLIENTE: {t['cliente']}
+DETALLE: {t['detalle']}
+TOTAL: $ {t['total']:.2f}
+MÉTODO: {t['metodo']}
+"""
+            )
+
+            if st.button("Cerrar Ticket", key="cerrar_ticket_venta_directa"):
+                del st.session_state.ultimo_ticket
+                st.rerun()
+
 
         # =====================================================
         # 🔐 AQUÍ ENTRA EL NÚCLEO CENTRAL DEL IMPERIO
@@ -3023,6 +3073,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
