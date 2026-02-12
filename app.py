@@ -491,7 +491,71 @@ if menu == "📦 Inventario":
             st.success("Compra registrada correctamente con unidad dinámica.")
             st.rerun()
 
+    # =======================================================
+    # 📊 TAB 3 — HISTORIAL DE COMPRAS
+    # =======================================================
+    with tabs[2]:
 
+        st.subheader("📊 Historial Profesional de Compras")
+
+        with conectar() as conn:
+            df_hist = pd.read_sql("""
+                SELECT 
+                    h.fecha,
+                    h.item,
+                    h.cantidad,
+                    h.unidad,
+                    h.costo_total_usd,
+                    h.costo_unit_usd,
+                    h.impuestos,
+                    h.delivery,
+                    h.moneda_pago,
+                    p.nombre as proveedor
+                FROM historial_compras h
+                LEFT JOIN proveedores p ON h.proveedor_id = p.id
+                ORDER BY h.fecha DESC
+            """, conn)
+
+        if df_hist.empty:
+            st.info("No hay compras registradas.")
+        else:
+
+            col1, col2 = st.columns(2)
+
+            filtro_item = col1.text_input("🔍 Filtrar por Insumo")
+            filtro_proveedor = col2.text_input("👤 Filtrar por Proveedor")
+
+            df_v = df_hist.copy()
+
+            if filtro_item:
+                df_v = df_v[df_v["item"].str.contains(filtro_item, case=False)]
+
+            if filtro_proveedor:
+                df_v = df_v[df_v["proveedor"].fillna("").str.contains(filtro_proveedor, case=False)]
+
+            total_compras = df_v["costo_total_usd"].sum()
+
+            st.metric("💰 Total Comprado (USD)", f"${total_compras:,.2f}")
+
+            st.dataframe(
+                df_v,
+                column_config={
+                    "fecha": "Fecha",
+                    "item": "Insumo",
+                    "cantidad": "Cantidad",
+                    "unidad": "Unidad",
+                    "costo_total_usd": st.column_config.NumberColumn("Costo Total ($)", format="%.2f"),
+                    "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.4f"),
+                    "impuestos": "Impuestos %",
+                    "delivery": "Delivery $",
+                    "moneda_pago": "Moneda",
+                    "proveedor": "Proveedor"
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+
+ # --- configuracion --- #
 elif menu == "⚙️ Configuración":
 
     # --- SEGURIDAD DE ACCESO ---
@@ -3054,6 +3118,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
