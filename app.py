@@ -302,7 +302,8 @@ if menu == "📦 Inventario":
             )
 
             # =======================================================
-    # 📥 TAB 2 — REGISTRAR COMPRA (VERSIÓN BLINDADA)
+    # 📥 TA    # =======================================================
+    # 📥 TAB 2 — REGISTRAR COMPRA (VERSIÓN BLINDADA FINAL)
     # =======================================================
     with tabs[1]:
 
@@ -316,6 +317,9 @@ if menu == "📦 Inventario":
             proveedor = col2.text_input("Proveedor (opcional)").strip()
             minimo_stock = col3.number_input("Stock Mínimo", value=5.0)
 
+            # ------------------------------
+            # TIPO DE UNIDAD
+            # ------------------------------
             tipo_unidad = st.selectbox(
                 "Tipo de Unidad",
                 ["Unidad", "Área (cm²)", "Líquido (ml)", "Peso (gr)"]
@@ -351,6 +355,13 @@ if menu == "📦 Inventario":
                 stock_real = cantidad_envases
                 unidad_final = "Unidad"
 
+            # 👁 PREVISUALIZACIÓN
+            if stock_real > 0:
+                st.info(f"📦 Stock Real Calculado: {stock_real:,.2f} {unidad_final}")
+
+            # ------------------------------
+            # DATOS FINANCIEROS
+            # ------------------------------
             col4, col5 = st.columns(2)
             monto_factura = col4.number_input("Monto Factura", min_value=0.0)
             moneda_pago = col5.selectbox("Moneda", ["USD $", "Bs (BCV)", "Bs (Binance)"])
@@ -375,6 +386,7 @@ if menu == "📦 Inventario":
                     st.error("Cantidad inválida.")
                     st.stop()
 
+                # Tasa
                 if "BCV" in moneda_pago:
                     tasa_usada = t_ref
                 elif "Binance" in moneda_pago:
@@ -382,6 +394,7 @@ if menu == "📦 Inventario":
                 else:
                     tasa_usada = 1.0
 
+                # Impuestos
                 porc_impuestos = 0
                 if iva_activo:
                     porc_impuestos += st.session_state.get("iva_perc", 16)
@@ -396,6 +409,7 @@ if menu == "📦 Inventario":
                 with conectar() as conn:
                     cur = conn.cursor()
 
+                    # Proveedor
                     proveedor_id = None
                     if proveedor:
                         cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
@@ -478,6 +492,7 @@ if menu == "📦 Inventario":
                 cargar_datos()
                 st.success("Compra registrada correctamente.")
                 st.rerun()
+
 
         # =======================================================
         # GESTIÓN DE INSUMO EXISTENTE (BLINDADA)
@@ -3166,6 +3181,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
