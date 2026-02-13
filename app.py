@@ -1263,7 +1263,7 @@ elif menu == "👥 Clientes":
     try:
         with conectar() as conn:
             df_clientes = pd.read_sql("SELECT * FROM clientes", conn)
-            df_ventas = pd.read_sql("SELECT cliente_id, cliente, monto_total, metodo FROM ventas", conn)
+            df_ventas = pd.read_sql("SELECT cliente_id, cliente, monto_total, metodo, fecha FROM ventas", conn)
     except Exception as e:
         st.error(f"Error al cargar datos: {e}")
         st.stop()
@@ -1388,13 +1388,20 @@ elif menu == "👥 Clientes":
             compras['metodo'].str.contains("Pendiente|Deuda", case=False, na=False)
         ]['monto_total'].sum() if not compras.empty else 0
 
+        ultima_compra = None
+        if not compras.empty and 'fecha' in compras.columns:
+            fechas_validas = pd.to_datetime(compras['fecha'], errors='coerce').dropna()
+            if not fechas_validas.empty:
+                ultima_compra = fechas_validas.max().strftime('%Y-%m-%d')
+
         resumen.append({
             "id": cli['id'],
             "nombre": cli['nombre'],
             "whatsapp": cli['whatsapp'],
             "total_comprado": total_comprado,
             "deudas": deudas,
-            "operaciones": len(compras)
+            "operaciones": len(compras),
+            "ultima_compra": ultima_compra or "Sin compras"
         })
 
     df_resumen = pd.DataFrame(resumen)
@@ -1414,23 +1421,41 @@ elif menu == "👥 Clientes":
 
         st.subheader("📊 Resumen Comercial")
 
-        m1, m2, m3 = st.columns(3)
+        ticket_promedio = (df_resumen['total_comprado'].sum() / df_resumen['operaciones'].sum()) if df_resumen['operaciones'].sum() > 0 else 0
+        mayor_deudor = df_resumen.sort_values('deudas', ascending=False).iloc[0]
+
+        m1, m2, m3, m4 = st.columns(4)
 
         m1.metric("Clientes Totales", len(df_resumen))
         m2.metric("Ventas Totales", f"$ {df_resumen['total_comprado'].sum():,.2f}")
         m3.metric("Cuentas por Cobrar", f"$ {df_resumen['deudas'].sum():,.2f}")
+        m4.metric("Ticket Promedio", f"$ {ticket_promedio:,.2f}")
+
+        st.caption(f"Mayor deudor actual: {mayor_deudor['nombre']} (${mayor_deudor['deudas']:,.2f})")
 
         st.divider()
 
-        st.subheader("🏆 Top Clientes")
+        ctop, cgraf = st.columns([1, 2])
+        with ctop:
+            st.subheader("🏆 Top Clientes")
+            top = df_resumen.sort_values("total_comprado", ascending=False).head(5)
+            st.dataframe(
+                top[['nombre', 'total_comprado', 'operaciones']],
+                column_config={
+                    'nombre': 'Cliente',
+                    'total_comprado': st.column_config.NumberColumn('Comprado ($)', format='%.2f'),
+                    'operaciones': 'Operaciones'
+                },
+                use_container_width=True,
+                hide_index=True
+            )
 
-        top = df_resumen.sort_values("total_comprado", ascending=False).head(5)
-
-        st.dataframe(
-            top[['nombre', 'total_comprado', 'operaciones']],
-            use_container_width=True,
-            hide_index=True
-        )
+        with cgraf:
+            st.subheader("📈 Facturación por cliente")
+            top10 = df_resumen.sort_values("total_comprado", ascending=False).head(10)
+            fig_top = px.bar(top10, x='nombre', y='total_comprado')
+            fig_top.update_layout(xaxis_title='Cliente', yaxis_title='Comprado ($)')
+            st.plotly_chart(fig_top, use_container_width=True)
 
         st.divider()
 
@@ -1448,52 +1473,45 @@ elif menu == "👥 Clientes":
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-        # --- VISUALIZACIÓN DETALLADA ---
-        for _, row in df_resumen.iterrows():
+        st.dataframe(
+            df_resumen.sort_values(['deudas', 'total_comprado'], ascending=[False, False]),
+            column_config={
+                'id': None,
+                'nombre': 'Cliente',
+                'whatsapp': 'WhatsApp',
+                'total_comprado': st.column_config.NumberColumn('Total Comprado ($)', format='%.2f'),
+                'deudas': st.column_config.NumberColumn('Deudas ($)', format='%.2f'),
+                'operaciones': 'Operaciones',
+                'ultima_compra': 'Última compra'
+            },
+            use_container_width=True,
+            hide_index=True
+        )
 
-            with st.container(border=True):
+        with st.expander("⚙️ Acciones rápidas por cliente"):
+            cliente_accion = st.selectbox("Selecciona cliente", df_resumen['nombre'].tolist(), key='cli_accion')
+            cli_row = df_resumen[df_resumen['nombre'] == cliente_accion].iloc[0]
+            a1, a2 = st.columns(2)
+            if cli_row['whatsapp']:
+                wa_num = str(cli_row['whatsapp'])
+                if not wa_num.startswith('58'):
+                    wa_num = '58' + wa_num.lstrip('0')
+                a1.link_button("💬 Abrir chat WhatsApp", f"https://wa.me/{wa_num}")
+            else:
+                a1.info("Cliente sin número de WhatsApp")
 
-                c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 1, 1])
-
-                c1.write(f"**{row['nombre']}**")
-                c2.write(f"📞 {row['whatsapp'] or 'Sin número'}")
-                c3.write(f"💵 Compras: ${row['total_comprado']:.2f}")
-
-                if row['deudas'] > 0:
-                    c4.error(f"Debe: ${row['deudas']:.2f}")
-                else:
-                    c4.success("Al día")
-
-                if row['whatsapp']:
-
-                    wa_num = row['whatsapp']
-                    if not wa_num.startswith('58'):
-                        wa_num = '58' + wa_num.lstrip('0')
-
-                    link_wa = f"https://wa.me/{wa_num}"
-                    c5.link_button("💬 Chat", link_wa)
-
-                with st.expander("⚙️ Acciones"):
-
-                    if row['operaciones'] > 0:
-                        st.warning("Este cliente tiene ventas registradas y no puede ser eliminado.")
+            if a2.button("🗑 Eliminar cliente", type='secondary'):
+                with conectar() as conn:
+                    tiene_ventas = conn.execute("SELECT COUNT(*) FROM ventas WHERE cliente_id = ?", (int(cli_row['id']),)).fetchone()[0]
+                    if tiene_ventas > 0:
+                        st.error("No se puede eliminar: el cliente tiene ventas asociadas.")
                     else:
-                        if st.button(f"🗑️ Eliminar {row['nombre']}", key=f"del_{row['id']}"):
+                        conn.execute("DELETE FROM clientes WHERE id = ?", (int(cli_row['id']),))
+                        conn.commit()
+                        st.success("Cliente eliminado correctamente.")
+                        cargar_datos()
+                        st.rerun()
 
-                            try:
-                                with conectar() as conn:
-                                    conn.execute(
-                                        "DELETE FROM clientes WHERE id = ?",
-                                        (int(row['id']),)
-                                    )
-                                    conn.commit()
-
-                                st.warning("Cliente eliminado.")
-                                cargar_datos()
-                                st.rerun()
-
-                            except Exception as e:
-                                st.error(f"No se pudo eliminar: {e}")
 
     else:
         st.info("No hay clientes que coincidan con los filtros.")
@@ -3645,6 +3663,18 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
