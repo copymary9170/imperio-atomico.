@@ -72,6 +72,7 @@ def inicializar_sistema():
                 precio_usd REAL,
                 minimo REAL DEFAULT 5.0,
                 area_por_pliego_cm2 REAL,
+                activo INTEGER DEFAULT 1,
                 ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
             )""",
 
@@ -166,6 +167,9 @@ def inicializar_sistema():
             c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
         if 'area_por_pliego_cm2' not in columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN area_por_pliego_cm2 REAL")
+        if 'activo' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN activo INTEGER DEFAULT 1")
+        c.execute("UPDATE inventario SET activo = 1 WHERE activo IS NULL")
 
         c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
 
@@ -221,7 +225,7 @@ def inicializar_sistema():
 def cargar_datos():
     with conectar() as conn:
         try:
-            st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
+            st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario WHERE COALESCE(activo,1)=1", conn)
             st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
             conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
             for _, row in conf_df.iterrows():
@@ -500,6 +504,7 @@ elif menu == "📦 Inventario":
                     "area_por_pliego_cm2": st.column_config.NumberColumn("cm²/pliego", format="%.2f"),
                     "precio_usd": None,
                     "id": None,
+                    "activo": None,
                     "ultima_actualizacion": None
                 },
                 use_container_width=True,
@@ -537,7 +542,7 @@ elif menu == "📦 Inventario":
                     pliegos = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
                     with conectar() as conn:
                         conn.execute(
-                            "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=? WHERE item=?",
+                            "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE item=?",
                             (pliegos, cm2_por_hoja, insumo_sel)
                         )
                         conn.commit()
@@ -551,7 +556,14 @@ elif menu == "📦 Inventario":
                         (insumo_sel,)
                     ).fetchone()[0]
                     if existe_historial > 0:
-                        st.error("No se puede eliminar: el insumo tiene historial de compras.")
+                        conn.execute(
+                            "UPDATE inventario SET activo=0, cantidad=0 WHERE item=?",
+                            (insumo_sel,)
+                        )
+                        conn.commit()
+                        st.success("Insumo archivado (tiene historial y no se elimina físicamente).")
+                        cargar_datos()
+                        st.rerun()
                     else:
                         st.session_state.confirmar_borrado = True
 
@@ -746,7 +758,7 @@ elif menu == "📦 Inventario":
                     cur.execute(
                         """
                         UPDATE inventario
-                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, area_por_pliego_cm2=?, ultima_actualizacion=CURRENT_TIMESTAMP
+                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, area_por_pliego_cm2=?, activo=1, ultima_actualizacion=CURRENT_TIMESTAMP
                         WHERE item=?
                         """,
                         (nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, nombre_c)
@@ -755,10 +767,10 @@ elif menu == "📦 Inventario":
                     cur.execute(
                         """
                         INSERT INTO inventario
-                        (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, area_por_pliego_cm2, ultima_actualizacion)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, area_por_pliego_cm2, activo, ultima_actualizacion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                         """,
-                        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val)
+                        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, 1)
                     )
 
                 cur.execute("""
@@ -3946,6 +3958,5 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
-
 
 
