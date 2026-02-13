@@ -307,9 +307,97 @@ with st.sidebar:
 
         
 # ===========================================================
+# 📊 DASHBOARD GENERAL
+# ===========================================================
+if menu == "📊 Dashboard":
+
+    st.title("📊 Dashboard Ejecutivo")
+    st.caption("Resumen general del negocio: ventas, gastos, clientes e inventario.")
+
+    with conectar() as conn:
+        try:
+            df_ventas = pd.read_sql("SELECT fecha, monto_total FROM ventas", conn)
+        except Exception:
+            df_ventas = pd.DataFrame(columns=["fecha", "monto_total"])
+
+        try:
+            df_gastos = pd.read_sql("SELECT fecha, monto FROM gastos", conn)
+        except Exception:
+            df_gastos = pd.DataFrame(columns=["fecha", "monto"])
+
+        try:
+            total_clientes = conn.execute("SELECT COUNT(*) FROM clientes").fetchone()[0]
+        except Exception:
+            total_clientes = 0
+
+        try:
+            df_inv_dash = pd.read_sql("SELECT cantidad, precio_usd, minimo FROM inventario", conn)
+        except Exception:
+            df_inv_dash = pd.DataFrame(columns=["cantidad", "precio_usd", "minimo"])
+
+    ventas_total = float(df_ventas["monto_total"].sum()) if not df_ventas.empty else 0.0
+    gastos_total = float(df_gastos["monto"].sum()) if not df_gastos.empty else 0.0
+    utilidad = ventas_total - gastos_total
+
+    capital_inv = 0.0
+    stock_bajo = 0
+    if not df_inv_dash.empty:
+        capital_inv = float((df_inv_dash["cantidad"] * df_inv_dash["precio_usd"]).sum())
+        stock_bajo = int((df_inv_dash["cantidad"] <= df_inv_dash["minimo"]).sum())
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("💰 Ventas Acumuladas", f"${ventas_total:,.2f}")
+    c2.metric("💸 Gastos Acumulados", f"${gastos_total:,.2f}")
+    c3.metric("📈 Resultado Neto", f"${utilidad:,.2f}")
+    c4.metric("👥 Clientes", total_clientes)
+    c5.metric("🚨 Ítems en Mínimo", stock_bajo)
+
+    st.divider()
+
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        st.subheader("📆 Ventas por día")
+        if df_ventas.empty:
+            st.info("No hay ventas registradas.")
+        else:
+            dfv = df_ventas.copy()
+            dfv["fecha"] = pd.to_datetime(dfv["fecha"], errors="coerce")
+            dfv = dfv.dropna(subset=["fecha"])
+            if dfv.empty:
+                st.info("No hay fechas válidas de ventas para graficar.")
+            else:
+                dfv["dia"] = dfv["fecha"].dt.date.astype(str)
+                resumen_v = dfv.groupby("dia", as_index=False)["monto_total"].sum()
+                fig_v = px.line(resumen_v, x="dia", y="monto_total", markers=True)
+                fig_v.update_layout(xaxis_title="Día", yaxis_title="Monto ($)")
+                st.plotly_chart(fig_v, use_container_width=True)
+
+    with col_b:
+        st.subheader("📉 Gastos por día")
+        if df_gastos.empty:
+            st.info("No hay gastos registrados.")
+        else:
+            dfg = df_gastos.copy()
+            dfg["fecha"] = pd.to_datetime(dfg["fecha"], errors="coerce")
+            dfg = dfg.dropna(subset=["fecha"])
+            if dfg.empty:
+                st.info("No hay fechas válidas de gastos para graficar.")
+            else:
+                dfg["dia"] = dfg["fecha"].dt.date.astype(str)
+                resumen_g = dfg.groupby("dia", as_index=False)["monto"].sum()
+                fig_g = px.bar(resumen_g, x="dia", y="monto")
+                fig_g.update_layout(xaxis_title="Día", yaxis_title="Monto ($)")
+                st.plotly_chart(fig_g, use_container_width=True)
+
+    st.divider()
+    st.subheader("📦 Estado del Inventario")
+    st.metric("💼 Capital inmovilizado en inventario", f"${capital_inv:,.2f}")
+
+# ===========================================================
 # 📦 MÓDULO DE INVENTARIO – ESTRUCTURA CORREGIDA
 # ===========================================================
-if menu == "📦 Inventario":
+elif menu == "📦 Inventario":
 
     st.title("📦 Centro de Control de Suministros")
 
@@ -3557,6 +3645,8 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
 
 
 
