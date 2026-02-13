@@ -712,14 +712,50 @@ if menu == "📦 Inventario":
         st.subheader("👤 Directorio de Proveedores")
 
         with conectar() as conn:
-            df_prov = pd.read_sql(
+            try:
+                columnas_proveedores = {
+                    row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
+                }
+                if not columnas_proveedores:
+                    conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS proveedores (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            nombre TEXT UNIQUE,
+                            telefono TEXT,
+                            rif TEXT,
+                            contacto TEXT,
+                            observaciones TEXT,
+                            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+                    conn.commit()
+                    columnas_proveedores = {
+                        row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
+                    }
+
+                def sel_col(nombre_columna):
+                    return nombre_columna if nombre_columna in columnas_proveedores else f"NULL AS {nombre_columna}"
+
+                query_proveedores = f"""
+                    SELECT
+                        {sel_col('id')},
+                        {sel_col('nombre')},
+                        {sel_col('telefono')},
+                        {sel_col('rif')},
+                        {sel_col('contacto')},
+                        {sel_col('observaciones')},
+                        {sel_col('fecha_creacion')}
+                    FROM proveedores
+                    ORDER BY nombre ASC
                 """
-                SELECT id, nombre, telefono, rif, contacto, observaciones, fecha_creacion
-                FROM proveedores
-                ORDER BY nombre ASC
-                """,
-                conn
-            )
+                df_prov = pd.read_sql(query_proveedores, conn)
+            except (sqlite3.DatabaseError, pd.errors.DatabaseError) as e:
+                st.error(f"No se pudo cargar la tabla de proveedores: {e}")
+                df_prov = pd.DataFrame(columns=[
+                    'id', 'nombre', 'telefono', 'rif', 'contacto', 'observaciones', 'fecha_creacion'
+                ])
 
         if df_prov.empty:
             st.info("No hay proveedores registrados todavía.")
@@ -3455,16 +3491,6 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
-
-
-
-
-
-
-
-
-
-
 
 
 
