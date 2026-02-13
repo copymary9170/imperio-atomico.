@@ -71,6 +71,7 @@ def inicializar_sistema():
                 unidad TEXT,
                 precio_usd REAL,
                 minimo REAL DEFAULT 5.0,
+                area_por_pliego_cm2 REAL,
                 ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
             )""",
 
@@ -163,6 +164,8 @@ def inicializar_sistema():
             c.execute("UPDATE inventario SET ultima_actualizacion = CURRENT_TIMESTAMP WHERE ultima_actualizacion IS NULL")
         if 'imprimible_cmyk' not in columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
+        if 'area_por_pliego_cm2' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN area_por_pliego_cm2 REAL")
 
         c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
 
@@ -494,6 +497,7 @@ elif menu == "📦 Inventario":
                     ),
                     "minimo": "Mínimo",
                     "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión en Análisis CMYK"),
+                    "area_por_pliego_cm2": st.column_config.NumberColumn("cm²/pliego", format="%.2f"),
                     "precio_usd": None,
                     "id": None,
                     "ultima_actualizacion": None
@@ -526,16 +530,18 @@ elif menu == "📦 Inventario":
 
             # Conversión para inventarios viejos cargados como cm2
             if str(fila_sel.get('unidad', '')).lower() == 'cm2':
-                cm2_por_hoja = colC.number_input("cm² por hoja", min_value=1.0, value=100.0)
-                if colC.button("🔄 Convertir stock cm2 → hojas"):
-                    hojas = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
+                st.warning("Este insumo aún está en cm². Conviene convertirlo a pliegos para control real de stock.")
+                ref_default = float(fila_sel.get('area_por_pliego_cm2') or fila_sel.get('cantidad', 1) or 1)
+                cm2_por_hoja = colC.number_input("cm² por pliego", min_value=1.0, value=ref_default)
+                if colC.button("🔄 Convertir stock cm2 → pliegos"):
+                    pliegos = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
                     with conectar() as conn:
                         conn.execute(
-                            "UPDATE inventario SET cantidad=?, unidad='hojas' WHERE item=?",
-                            (hojas, insumo_sel)
+                            "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=? WHERE item=?",
+                            (pliegos, cm2_por_hoja, insumo_sel)
                         )
                         conn.commit()
-                    st.success(f"Convertido a {hojas:.3f} hojas.")
+                    st.success(f"Convertido a {pliegos:.3f} pliegos.")
                     cargar_datos()
                     st.rerun()
             if colB.button("🗑 Eliminar Insumo"):
@@ -615,6 +621,7 @@ elif menu == "📦 Inventario":
 
         stock_real = 0
         unidad_final = "Unidad"
+        area_por_pliego_val = None
 
         if tipo_unidad == "Área (cm²)":
             c1, c2, c3 = st.columns(3)
@@ -627,7 +634,8 @@ elif menu == "📦 Inventario":
             area_por_pliego = ancho * alto
             area_total_ref = area_por_pliego * cantidad_envases
             stock_real = cantidad_envases
-            unidad_final = "hojas"
+            unidad_final = "pliegos"
+            area_por_pliego_val = area_por_pliego
 
             st.caption(
                 f"Referencia técnica: {area_por_pliego:,.2f} cm² por pliego | "
@@ -738,19 +746,19 @@ elif menu == "📦 Inventario":
                     cur.execute(
                         """
                         UPDATE inventario
-                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, ultima_actualizacion=CURRENT_TIMESTAMP
+                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, area_por_pliego_cm2=?, ultima_actualizacion=CURRENT_TIMESTAMP
                         WHERE item=?
                         """,
-                        (nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, nombre_c)
+                        (nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, nombre_c)
                     )
                 else:
                     cur.execute(
                         """
                         INSERT INTO inventario
-                        (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, ultima_actualizacion)
-                        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, area_por_pliego_cm2, ultima_actualizacion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                         """,
-                        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0)
+                        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val)
                     )
 
                 cur.execute("""
@@ -3938,3 +3946,6 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
+
