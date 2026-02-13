@@ -202,7 +202,8 @@ def inicializar_sistema():
             ('costo_tinta_ml', 0.10),
             ('iva_perc', 16.0),
             ('igtf_perc', 3.0),
-            ('banco_perc', 0.5)
+            ('banco_perc', 0.5),
+            ('costo_tinta_auto', 1.0)
         ]
 
         for p, v in config_init:
@@ -988,6 +989,24 @@ elif menu == "⚙️ Configuración":
         except Exception:
             return default
 
+    costo_tinta_detectado = None
+    try:
+        with conectar() as conn:
+            df_tintas_cfg = pd.read_sql(
+                """
+                SELECT item, precio_usd
+                FROM inventario
+                WHERE item LIKE '%tinta%' AND precio_usd IS NOT NULL
+                """,
+                conn
+            )
+        if not df_tintas_cfg.empty:
+            df_tintas_cfg = df_tintas_cfg[df_tintas_cfg['precio_usd'] > 0]
+            if not df_tintas_cfg.empty:
+                costo_tinta_detectado = float(df_tintas_cfg['precio_usd'].mean())
+    except Exception:
+        costo_tinta_detectado = None
+
     with st.form("config_general"):
 
         st.subheader("💵 Tasas de Cambio (Actualización Diaria)")
@@ -1011,12 +1030,25 @@ elif menu == "⚙️ Configuración":
 
         st.subheader("🎨 Costos Operativos Base")
 
-        costo_tinta = st.number_input(
-            "Costo de Tinta por ml ($)",
-            value=get_conf('costo_tinta_ml', 0.10),
-            format="%.4f",
-            step=0.0001
+        costo_tinta_auto = st.checkbox(
+            "Calcular costo de tinta automáticamente desde Inventario",
+            value=bool(get_conf('costo_tinta_auto', 1.0))
         )
+
+        if costo_tinta_auto:
+            if costo_tinta_detectado is not None:
+                costo_tinta = float(costo_tinta_detectado)
+                st.success(f"💧 Costo detectado desde inventario: ${costo_tinta:.4f}/ml")
+            else:
+                costo_tinta = float(get_conf('costo_tinta_ml', 0.10))
+                st.warning("No se detectaron tintas válidas en inventario; se mantendrá el último costo guardado.")
+        else:
+            costo_tinta = st.number_input(
+                "Costo de Tinta por ml ($)",
+                value=get_conf('costo_tinta_ml', 0.10),
+                format="%.4f",
+                step=0.0001
+            )
 
         st.divider()
 
@@ -1052,6 +1084,7 @@ elif menu == "⚙️ Configuración":
                 ('tasa_bcv', nueva_bcv),
                 ('tasa_binance', nueva_bin),
                 ('costo_tinta_ml', costo_tinta),
+                ('costo_tinta_auto', 1.0 if costo_tinta_auto else 0.0),
                 ('iva_perc', n_iva),
                 ('igtf_perc', n_igtf),
                 ('banco_perc', n_banco)
@@ -1099,6 +1132,7 @@ elif menu == "⚙️ Configuración":
                 st.session_state.tasa_bcv = nueva_bcv
                 st.session_state.tasa_binance = nueva_bin
                 st.session_state.costo_tinta_ml = costo_tinta
+                st.session_state.costo_tinta_auto = 1.0 if costo_tinta_auto else 0.0
                 st.session_state.iva_perc = n_iva
                 st.session_state.igtf_perc = n_igtf
                 st.session_state.banco_perc = n_banco
@@ -3523,20 +3557,6 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
