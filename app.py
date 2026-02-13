@@ -466,9 +466,29 @@ if menu == "📦 Inventario":
 
         st.subheader("📥 Registrar Nueva Compra")
 
+        with conectar() as conn:
+            try:
+                proveedores_existentes = pd.read_sql(
+                    "SELECT nombre FROM proveedores ORDER BY nombre ASC",
+                    conn
+                )["nombre"].dropna().astype(str).tolist()
+            except (sqlite3.DatabaseError, pd.errors.DatabaseError):
+                proveedores_existentes = []
+
         col_base1, col_base2 = st.columns(2)
         nombre_c = col_base1.text_input("Nombre del Insumo")
-        proveedor = col_base2.text_input("Proveedor")
+        proveedor_sel = col_base2.selectbox(
+            "Proveedor",
+            ["(Sin proveedor)", "➕ Nuevo proveedor"] + proveedores_existentes,
+            key="inv_proveedor_compra"
+        )
+
+        proveedor = ""
+        if proveedor_sel == "➕ Nuevo proveedor":
+            proveedor = st.text_input("Nombre del nuevo proveedor", key="inv_proveedor_nuevo")
+        elif proveedor_sel != "(Sin proveedor)":
+            proveedor = proveedor_sel
+
         minimo_stock = st.number_input("Stock mínimo", min_value=0.0)
 
         # ------------------------------
@@ -3503,6 +3523,14 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
+
+
+
+
+
+
 
 
 
