@@ -1682,10 +1682,16 @@ elif menu == "🎨 Análisis CMYK":
             accept_multiple_files=True
         )
 
+    if not archivos_multiples and 'cmyk_analisis_cache' in st.session_state:
+        st.session_state.pop('cmyk_analisis_cache', None)
+
     # --- PROCESAMIENTO ---
     if archivos_multiples:
 
-        import fitz
+        try:
+            import fitz  # PyMuPDF (opcional para PDF)
+        except ModuleNotFoundError:
+            fitz = None
 
         resultados = []
         totales_lote_cmyk = {'C': 0.0, 'M': 0.0, 'Y': 0.0, 'K': 0.0}
@@ -1700,6 +1706,13 @@ elif menu == "🎨 Análisis CMYK":
                     bytes_data = arc.read()
 
                     if arc.name.lower().endswith('.pdf'):
+
+                        if fitz is None:
+                            st.error(
+                                f"No se puede analizar '{arc.name}' porque falta PyMuPDF (fitz). "
+                                "Carga imágenes (PNG/JPG) o instala la dependencia para PDF."
+                            )
+                            continue
 
                         doc = fitz.open(stream=bytes_data, filetype="pdf")
 
@@ -1831,6 +1844,86 @@ elif menu == "🎨 Análisis CMYK":
                 mime="text/csv"
             )
 
+            # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
+            st.subheader("🧾 Simulación automática por Papel y Calidad")
+            # Papeles desde inventario (precio_usd) con fallback por defecto
+            perfiles_papel = {}
+            try:
+                papeles_inv = df_tintas_db[
+                    df_tintas_db['item'].fillna('').str.contains(
+                        'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
+                        case=False,
+                        na=False
+                    )
+                ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
+
+                for _, row_p in papeles_inv.iterrows():
+                    nombre_p = str(row_p['item']).strip()
+                    precio_p = float(row_p['precio_usd'])
+                    if precio_p > 0:
+                        perfiles_papel[nombre_p] = precio_p
+            except Exception:
+                perfiles_papel = {}
+
+            if not perfiles_papel:
+                perfiles_papel = {
+                    "Bond 75g": 0.03,
+                    "Bond 90g": 0.05,
+                    "Fotográfico Brillante": 0.22,
+                    "Fotográfico Mate": 0.20,
+                    "Cartulina": 0.12,
+                    "Adhesivo": 0.16
+                }
+                st.info("No se detectaron papeles en inventario; se usan costos base por defecto.")
+            else:
+                st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
+            perfiles_calidad = {
+                "Borrador": {"ink_mult": 0.82, "wear_mult": 0.90},
+                "Normal": {"ink_mult": 1.00, "wear_mult": 1.00},
+                "Alta": {"ink_mult": 1.18, "wear_mult": 1.10},
+                "Foto": {"ink_mult": 1.32, "wear_mult": 1.15}
+            }
+
+            total_ml_lote = float(sum(totales_lote_cmyk.values()))
+            costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
+            costo_desgaste_base = float(costo_desgaste) * float(total_pags)
+
+            simulaciones = []
+            for papel, costo_hoja in perfiles_papel.items():
+                for calidad, cfg_q in perfiles_calidad.items():
+                    costo_tinta_q = costo_tinta_base * cfg_q['ink_mult']
+                    costo_desgaste_q = costo_desgaste_base * cfg_q['wear_mult']
+                    costo_papel_q = float(total_pags) * costo_hoja
+                    total_q = costo_tinta_q + costo_desgaste_q + costo_papel_q
+                    simulaciones.append({
+                        "Papel": papel,
+                        "Calidad": calidad,
+                        "Páginas": total_pags,
+                        "Tinta ($)": round(costo_tinta_q, 2),
+                        "Desgaste ($)": round(costo_desgaste_q, 2),
+                        "Papel ($)": round(costo_papel_q, 2),
+                        "Total ($)": round(total_q, 2),
+                        "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
+                    })
+
+            df_sim = pd.DataFrame(simulaciones).sort_values('Total ($)')
+            st.dataframe(df_sim, use_container_width=True, hide_index=True)
+            fig_sim = px.bar(df_sim.head(12), x='Papel', y='Total ($)', color='Calidad', barmode='group', title='Comparativo de costos (top 12 más económicos)')
+            st.plotly_chart(fig_sim, use_container_width=True)
+
+            mejor = df_sim.iloc[0]
+            st.success(
+                f"Mejor costo automático: {mejor['Papel']} | {mejor['Calidad']} → ${mejor['Total ($)']:.2f} "
+                f"(${mejor['Costo por pág ($)']:.4f}/pág)"
+            )
+
+            st.session_state['cmyk_analisis_cache'] = {
+                'resultados': resultados,
+                'simulaciones': simulaciones,
+                'impresora': impresora_sel,
+                'paginas': total_pags
+            }
+
             # --- VERIFICAR INVENTARIO ---
             if not df_tintas_db.empty:
 
@@ -1878,7 +1971,7 @@ elif menu == "🎨 Análisis CMYK":
                 # Guardamos información completa para el cotizador
                 st.session_state['datos_pre_cotizacion'] = {
                     'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
-                    'costo_base': float(total_usd_lote),
+                    'costo_base': float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote),
                     'unidades': total_pags,
 
                     # Desglose de consumo real
@@ -3801,6 +3894,15 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
+
+
+
+
+
+
+
 
 
 
