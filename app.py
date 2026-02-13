@@ -1941,12 +1941,13 @@ elif menu == "🎨 Análisis CMYK":
                     'C': ['cian', 'cyan'],
                     'M': ['magenta'],
                     'Y': ['amarillo', 'yellow'],
-                    'K': ['negro', 'black']
+                    # K = Negro. Incluye variantes reales de inventario: negro/negra/black/k
+                    'K': ['negro', 'negra', 'black', ' k ']
                 }
 
                 for color, ml in totales_lote_cmyk.items():
                     aliases = alias_colores.get(color, [])
-                    stock = stock_base[stock_base['item'].fillna('').str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
+                    stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
 
                     if not stock.empty:
                         disponible = stock['cantidad'].sum()
@@ -3894,15 +3895,4 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
-
-
-
-
-
-
-
-
-
-
-
 
