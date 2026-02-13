@@ -499,7 +499,9 @@ if menu == "📦 Inventario":
         igtf_activo = col7.checkbox(f"IGTF (+{st.session_state.get('igtf_perc',3)}%)")
         banco_activo = col8.checkbox(f"Banco (+{st.session_state.get('banco_perc',0.5)}%)")
 
-        delivery = st.number_input("Gastos Logística / Delivery ($)", value=0.0)
+        st.caption(f"Sugerencia de impuesto total para compras: {st.session_state.get('inv_impuesto_default', 16.0):.2f}%")
+
+        delivery = st.number_input("Gastos Logística / Delivery ($)", value=float(st.session_state.get("inv_delivery_default", 0.0)))
 
         # ------------------------------
         # BOTÓN GUARDAR
@@ -688,6 +690,194 @@ if menu == "📦 Inventario":
                 use_container_width=True,
                 hide_index=True
             )
+
+    # =======================================================
+    # 👤 TAB 4 — PROVEEDORES
+    # =======================================================
+    with tabs[3]:
+
+        st.subheader("👤 Directorio de Proveedores")
+
+        with conectar() as conn:
+            df_prov = pd.read_sql(
+                """
+                SELECT id, nombre, telefono, rif, contacto, observaciones, fecha_creacion
+                FROM proveedores
+                ORDER BY nombre ASC
+                """,
+                conn
+            )
+
+        if df_prov.empty:
+            st.info("No hay proveedores registrados todavía.")
+        else:
+            filtro_proveedor = st.text_input("🔍 Buscar proveedor")
+            df_prov_view = df_prov.copy()
+
+            if filtro_proveedor:
+                mask_nombre = df_prov_view["nombre"].fillna("").str.contains(filtro_proveedor, case=False)
+                mask_contacto = df_prov_view["contacto"].fillna("").str.contains(filtro_proveedor, case=False)
+                mask_rif = df_prov_view["rif"].fillna("").str.contains(filtro_proveedor, case=False)
+                df_prov_view = df_prov_view[mask_nombre | mask_contacto | mask_rif]
+
+            st.dataframe(
+                df_prov_view,
+                column_config={
+                    "id": None,
+                    "nombre": "Proveedor",
+                    "telefono": "Teléfono",
+                    "rif": "RIF",
+                    "contacto": "Contacto",
+                    "observaciones": "Observaciones",
+                    "fecha_creacion": "Creado"
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+
+        st.divider()
+        st.subheader("➕ Registrar / Editar proveedor")
+
+        nombre_edit = st.selectbox(
+            "Proveedor a editar",
+            ["Nuevo proveedor"] + (df_prov["nombre"].tolist() if not df_prov.empty else []),
+            key="inv_proveedor_selector"
+        )
+
+        prov_actual = None
+        if nombre_edit != "Nuevo proveedor" and not df_prov.empty:
+            prov_actual = df_prov[df_prov["nombre"] == nombre_edit].iloc[0]
+
+        with st.form("form_proveedor"):
+            c1, c2 = st.columns(2)
+            nombre_prov = c1.text_input("Nombre", value="" if prov_actual is None else str(prov_actual["nombre"] or ""))
+            telefono_prov = c2.text_input("Teléfono", value="" if prov_actual is None else str(prov_actual["telefono"] or ""))
+            c3, c4 = st.columns(2)
+            rif_prov = c3.text_input("RIF", value="" if prov_actual is None else str(prov_actual["rif"] or ""))
+            contacto_prov = c4.text_input("Persona de contacto", value="" if prov_actual is None else str(prov_actual["contacto"] or ""))
+            observaciones_prov = st.text_area("Observaciones", value="" if prov_actual is None else str(prov_actual["observaciones"] or ""))
+
+            guardar_proveedor = st.form_submit_button("💾 Guardar proveedor", use_container_width=True)
+
+        if guardar_proveedor:
+            if not nombre_prov.strip():
+                st.error("El nombre del proveedor es obligatorio.")
+            else:
+                try:
+                    with conectar() as conn:
+                        if prov_actual is None:
+                            conn.execute(
+                                """
+                                INSERT INTO proveedores (nombre, telefono, rif, contacto, observaciones)
+                                VALUES (?, ?, ?, ?, ?)
+                                """,
+                                (nombre_prov.strip(), telefono_prov.strip(), rif_prov.strip(), contacto_prov.strip(), observaciones_prov.strip())
+                            )
+                        else:
+                            conn.execute(
+                                """
+                                UPDATE proveedores
+                                SET nombre=?, telefono=?, rif=?, contacto=?, observaciones=?
+                                WHERE id=?
+                                """,
+                                (
+                                    nombre_prov.strip(),
+                                    telefono_prov.strip(),
+                                    rif_prov.strip(),
+                                    contacto_prov.strip(),
+                                    observaciones_prov.strip(),
+                                    int(prov_actual["id"])
+                                )
+                            )
+                        conn.commit()
+                    st.success("Proveedor guardado correctamente.")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error("Ya existe un proveedor con ese nombre.")
+
+        if prov_actual is not None:
+            if st.button("🗑 Eliminar proveedor seleccionado", type="secondary"):
+                with conectar() as conn:
+                    compras = conn.execute(
+                        "SELECT COUNT(*) FROM historial_compras WHERE proveedor_id=?",
+                        (int(prov_actual["id"]),)
+                    ).fetchone()[0]
+
+                    if compras > 0:
+                        st.error("No se puede eliminar: el proveedor tiene compras asociadas.")
+                    else:
+                        conn.execute("DELETE FROM proveedores WHERE id=?", (int(prov_actual["id"]),))
+                        conn.commit()
+                        st.success("Proveedor eliminado.")
+                        st.rerun()
+
+    # =======================================================
+    # 🔧 TAB 5 — AJUSTES
+    # =======================================================
+    with tabs[4]:
+
+        st.subheader("🔧 Ajustes del módulo de inventario")
+        st.caption("Estos parámetros precargan valores al registrar compras y ayudan al control de inventario.")
+
+        with conectar() as conn:
+            cfg_inv = pd.read_sql(
+                """
+                SELECT parametro, valor
+                FROM configuracion
+                WHERE parametro IN ('inv_alerta_dias', 'inv_impuesto_default', 'inv_delivery_default')
+                """,
+                conn
+            )
+
+        cfg_map = {row["parametro"]: float(row["valor"]) for _, row in cfg_inv.iterrows()}
+
+        with st.form("form_ajustes_inventario"):
+            alerta_dias = st.number_input(
+                "Días para alerta de reposición",
+                min_value=1,
+                max_value=120,
+                value=int(cfg_map.get("inv_alerta_dias", 14)),
+                help="Referencia para revisar proveedores y planificar compras preventivas."
+            )
+            impuesto_default = st.number_input(
+                "Impuesto por defecto en compras (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(cfg_map.get("inv_impuesto_default", 16.0)),
+                format="%.2f"
+            )
+            delivery_default = st.number_input(
+                "Delivery por defecto por compra ($)",
+                min_value=0.0,
+                value=float(cfg_map.get("inv_delivery_default", 0.0)),
+                format="%.2f"
+            )
+
+            guardar_ajustes = st.form_submit_button("💾 Guardar ajustes", use_container_width=True)
+
+        if guardar_ajustes:
+            with conectar() as conn:
+                ajustes = [
+                    ("inv_alerta_dias", float(alerta_dias)),
+                    ("inv_impuesto_default", float(impuesto_default)),
+                    ("inv_delivery_default", float(delivery_default))
+                ]
+                for parametro, valor in ajustes:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES (?, ?)",
+                        (parametro, valor)
+                    )
+                conn.commit()
+
+            st.session_state["inv_alerta_dias"] = float(alerta_dias)
+            st.session_state["inv_impuesto_default"] = float(impuesto_default)
+            st.session_state["inv_delivery_default"] = float(delivery_default)
+            st.success("Ajustes de inventario actualizados.")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("⏱️ Alerta reposición", f"{int(cfg_map.get('inv_alerta_dias', 14))} días")
+        c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
+        c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
  # --- configuracion --- #
 elif menu == "⚙️ Configuración":
@@ -3252,31 +3442,6 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
