@@ -161,6 +161,8 @@ def inicializar_sistema():
         if 'ultima_actualizacion' not in columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN ultima_actualizacion DATETIME")
             c.execute("UPDATE inventario SET ultima_actualizacion = CURRENT_TIMESTAMP WHERE ultima_actualizacion IS NULL")
+        if 'imprimible_cmyk' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
 
         c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
 
@@ -491,6 +493,7 @@ elif menu == "📦 Inventario":
                         f"Valor Total ({simbolo})", format="%.2f"
                     ),
                     "minimo": "Mínimo",
+                    "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión en Análisis CMYK"),
                     "precio_usd": None,
                     "id": None,
                     "ultima_actualizacion": None
@@ -505,14 +508,16 @@ elif menu == "📦 Inventario":
         if not df_inv.empty:
 
             insumo_sel = st.selectbox("Seleccionar Insumo", df_inv["item"].tolist())
-            colA, colB = st.columns(2)
-            nuevo_min = colA.number_input("Nuevo Stock Mínimo", min_value=0.0)
+            fila_sel = df_inv[df_inv["item"] == insumo_sel].iloc[0]
+            colA, colB, colC = st.columns(3)
+            nuevo_min = colA.number_input("Nuevo Stock Mínimo", min_value=0.0, value=float(fila_sel.get('minimo', 0)))
+            flag_cmyk = colB.checkbox("Visible en CMYK", value=bool(fila_sel.get('imprimible_cmyk', 0)))
 
             if colA.button("Actualizar Mínimo"):
                 with conectar() as conn:
                     conn.execute(
-                        "UPDATE inventario SET minimo=? WHERE item=?",
-                        (nuevo_min, insumo_sel)
+                        "UPDATE inventario SET minimo=?, imprimible_cmyk=? WHERE item=?",
+                        (nuevo_min, 1 if flag_cmyk else 0, insumo_sel)
                     )
                     conn.commit()
                 cargar_datos()
@@ -579,6 +584,11 @@ elif menu == "📦 Inventario":
             proveedor = proveedor_sel
 
         minimo_stock = st.number_input("Stock mínimo", min_value=0.0)
+        imprimible_cmyk = st.checkbox(
+            "✅ Se puede imprimir (mostrar en módulo CMYK)",
+            value=False,
+            help="Marca solo los insumos que sí participan en impresión (tintas, acetato imprimible, papeles de impresión)."
+        )
 
         # ------------------------------
         # TIPO DE UNIDAD
@@ -703,19 +713,19 @@ elif menu == "📦 Inventario":
                     cur.execute(
                         """
                         UPDATE inventario
-                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, ultima_actualizacion=CURRENT_TIMESTAMP
+                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, ultima_actualizacion=CURRENT_TIMESTAMP
                         WHERE item=?
                         """,
-                        (nueva_cant, unidad_final, precio_ponderado, minimo_stock, nombre_c)
+                        (nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, nombre_c)
                     )
                 else:
                     cur.execute(
                         """
                         INSERT INTO inventario
-                        (item, cantidad, unidad, precio_usd, minimo, ultima_actualizacion)
-                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, ultima_actualizacion)
+                        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                         """,
-                        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock)
+                        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0)
                     )
 
                 cur.execute("""
@@ -1534,6 +1544,10 @@ elif menu == "🎨 Análisis CMYK":
             df_tintas_db = pd.read_sql_query(
                 "SELECT * FROM inventario", conn
             )
+            if 'imprimible_cmyk' in df_tintas_db.columns:
+                df_impresion_db = df_tintas_db[df_tintas_db['imprimible_cmyk'].fillna(0) == 1].copy()
+            else:
+                df_impresion_db = df_tintas_db.copy()
             try:
                 df_activos_cmyk = pd.read_sql_query(
                     "SELECT equipo, categoria, unidad FROM activos", conn
@@ -1579,9 +1593,9 @@ elif menu == "🎨 Análisis CMYK":
                 impresoras_disponibles.append(nombre_limpio)
 
     # 2) Fallback: equipos con palabra impresora en inventario
-    if not df_tintas_db.empty:
-        posibles = df_tintas_db[
-            df_tintas_db['item'].str.contains("impresora", case=False, na=False)
+    if not df_impresion_db.empty:
+        posibles = df_impresion_db[
+            df_impresion_db['item'].str.contains("impresora", case=False, na=False)
         ]['item'].tolist()
 
         for p in posibles:
@@ -1636,9 +1650,9 @@ elif menu == "🎨 Análisis CMYK":
 
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
 
-        if not df_tintas_db.empty:
-            mask = df_tintas_db['item'].str.contains("tinta", case=False, na=False)
-            tintas = df_tintas_db[mask]
+        if not df_impresion_db.empty:
+            mask = df_impresion_db['item'].str.contains("tinta", case=False, na=False)
+            tintas = df_impresion_db[mask]
 
             if usar_stock_por_impresora and not tintas.empty:
                 tintas_imp = tintas[tintas['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
@@ -1849,8 +1863,8 @@ elif menu == "🎨 Análisis CMYK":
             # Papeles desde inventario (precio_usd) con fallback por defecto
             perfiles_papel = {}
             try:
-                papeles_inv = df_tintas_db[
-                    df_tintas_db['item'].fillna('').str.contains(
+                papeles_inv = df_impresion_db[
+                    df_impresion_db['item'].fillna('').str.contains(
                         'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
                         case=False,
                         na=False
@@ -1925,13 +1939,13 @@ elif menu == "🎨 Análisis CMYK":
             }
 
             # --- VERIFICAR INVENTARIO ---
-            if not df_tintas_db.empty:
+            if not df_impresion_db.empty:
 
                 st.subheader("📦 Verificación de Inventario")
 
                 alertas = []
 
-                stock_base = df_tintas_db[df_tintas_db['item'].str.contains('tinta', case=False, na=False)].copy()
+                stock_base = df_impresion_db[df_impresion_db['item'].str.contains('tinta', case=False, na=False)].copy()
                 if usar_stock_por_impresora:
                     stock_imp = stock_base[stock_base['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
                     if not stock_imp.empty:
