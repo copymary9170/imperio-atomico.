@@ -149,6 +149,19 @@ def inicializar_sistema():
                 """
             )
 
+        columnas_inventario = {row[1] for row in c.execute("PRAGMA table_info(inventario)").fetchall()}
+        if 'cantidad' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN cantidad REAL DEFAULT 0")
+        if 'unidad' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN unidad TEXT DEFAULT 'Unidad'")
+        if 'precio_usd' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN precio_usd REAL DEFAULT 0")
+        if 'minimo' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN minimo REAL DEFAULT 5.0")
+        if 'ultima_actualizacion' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN ultima_actualizacion DATETIME")
+            c.execute("UPDATE inventario SET ultima_actualizacion = CURRENT_TIMESTAMP WHERE ultima_actualizacion IS NULL")
+
         c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
 
         columnas_proveedores = {row[1] for row in c.execute("PRAGMA table_info(proveedores)").fetchall()}
@@ -577,25 +590,24 @@ if menu == "📦 Inventario":
                     nueva_cant = stock_real
                     precio_ponderado = costo_unitario
 
-                cur.execute("""
-                    INSERT INTO inventario
-                    (item, cantidad, unidad, precio_usd, minimo, ultima_actualizacion)
-                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(item) DO UPDATE SET
-                        cantidad=?,
-                        precio_usd=?,
-                        minimo=?,
-                        ultima_actualizacion=CURRENT_TIMESTAMP
-                """, (
-                    nombre_c,
-                    nueva_cant,
-                    unidad_final,
-                    precio_ponderado,
-                    minimo_stock,
-                    nueva_cant,
-                    precio_ponderado,
-                    minimo_stock
-                ))
+                if old:
+                    cur.execute(
+                        """
+                        UPDATE inventario
+                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, ultima_actualizacion=CURRENT_TIMESTAMP
+                        WHERE item=?
+                        """,
+                        (nueva_cant, unidad_final, precio_ponderado, minimo_stock, nombre_c)
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO inventario
+                        (item, cantidad, unidad, precio_usd, minimo, ultima_actualizacion)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock)
+                    )
 
                 cur.execute("""
                     INSERT INTO historial_compras
@@ -3491,6 +3503,12 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
+
+
+
+
 
 
 
