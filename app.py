@@ -151,6 +151,19 @@ def inicializar_sistema():
 
         c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
 
+        columnas_proveedores = {row[1] for row in c.execute("PRAGMA table_info(proveedores)").fetchall()}
+        if "telefono" not in columnas_proveedores:
+            c.execute("ALTER TABLE proveedores ADD COLUMN telefono TEXT")
+        if "rif" not in columnas_proveedores:
+            c.execute("ALTER TABLE proveedores ADD COLUMN rif TEXT")
+        if "contacto" not in columnas_proveedores:
+            c.execute("ALTER TABLE proveedores ADD COLUMN contacto TEXT")
+        if "observaciones" not in columnas_proveedores:
+            c.execute("ALTER TABLE proveedores ADD COLUMN observaciones TEXT")
+        if "fecha_creacion" not in columnas_proveedores:
+            c.execute("ALTER TABLE proveedores ADD COLUMN fecha_creacion TEXT")
+            c.execute("UPDATE proveedores SET fecha_creacion = CURRENT_TIMESTAMP WHERE fecha_creacion IS NULL")
+
         # USUARIO ADMIN POR DEFECTO
         admin_password = obtener_password_admin_inicial()
         c.execute(
@@ -3442,15 +3455,3 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
-
-
-
-
-
-
-
-
-
-
-
-
