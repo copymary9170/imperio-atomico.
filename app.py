@@ -1567,8 +1567,10 @@ elif menu == "🎨 Análisis CMYK":
     if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty:
         act = df_activos_cmyk.copy()
         mask_maquinaria = act['unidad'].fillna('').str.contains('Maquinaria', case=False, na=False)
-        mask_tinta = act['categoria'].fillna('').str.contains('Tinta', case=False, na=False)
-        posibles_activos = act[mask_maquinaria & mask_tinta]['equipo'].dropna().astype(str).tolist()
+        # Acepta tanto categoría Tinta como Impresión/Impresora para compatibilidad
+        mask_categoria_imp = act['categoria'].fillna('').str.contains('Tinta|Impres', case=False, na=False)
+        mask_equipo_imp = act['equipo'].fillna('').str.contains('Impres', case=False, na=False)
+        posibles_activos = act[mask_maquinaria & (mask_categoria_imp | mask_equipo_imp)]['equipo'].dropna().astype(str).tolist()
         for eq in posibles_activos:
             nombre_limpio = eq
             if '] ' in nombre_limpio:
@@ -1979,7 +1981,7 @@ elif menu == "🏗️ Activos":
 
             categoria_especifica = col_m3.selectbox(
                 "Categoría",
-                ["Corte", "Impresión", "Calor", "Mobiliario", "Mantenimiento"]
+                ["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"]
             )
 
             if st.form_submit_button("🚀 Guardar Activo"):
@@ -2042,7 +2044,7 @@ elif menu == "🏗️ Activos":
                 nueva_vida = c2.number_input("Vida útil", value=1000)
                 nueva_cat = c3.selectbox(
                     "Categoría",
-                    ["Corte", "Impresión", "Calor", "Mobiliario", "Mantenimiento"],
+                    ["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"],
                     index=0
                 )
 
@@ -3799,4 +3801,6 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
 
