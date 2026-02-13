@@ -225,7 +225,12 @@ def inicializar_sistema():
 def cargar_datos():
     with conectar() as conn:
         try:
-            st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario WHERE COALESCE(activo,1)=1", conn)
+            columnas_inventario = {row[1] for row in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+            query_inv = "SELECT * FROM inventario"
+            if 'activo' in columnas_inventario:
+                query_inv += " WHERE COALESCE(activo,1)=1"
+
+            st.session_state.df_inv = pd.read_sql(query_inv, conn)
             st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
             conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
             for _, row in conf_df.iterrows():
@@ -3958,5 +3963,6 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
