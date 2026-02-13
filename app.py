@@ -1,16 +1,16 @@
-import streamlit as st
-import pandas as pd
-import sqlite3
-import numpy as np
-import io
-import plotly.express as px
-from PIL import Image
-from datetime import datetime, date, timedelta
-import time
-import os
-import hashlib
-import hmac
-import secrets
+importar streamlit como st
+importar pandas como pd
+importar sqlite3
+importar numpy como np
+importar io
+importar plotly.express como px
+desde PIL importar imagen
+desde datetime importar datetime, fecha, timedelta
+tiempo de importación
+importar sistema operativo
+importar hashlib
+importar hmac
+secretos de importación
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -18,187 +18,187 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
     """Conexión principal a la base de datos del Imperio."""
-    conn = sqlite3.connect('imperio_v2.db', check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    conn = sqlite3.connect('imperio_v2.db', comprobar_el_mismo_hilo=Falso)
+    conn.execute("PRAGMA claves_foráneas = ON")
+    conexión de retorno
 
 
-def hash_password(password: str, salt: str | None = None) -> str:
+def hash_password(contraseña: str, salt: str | Ninguno = Ninguno) -> str:
     """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
-    salt = salt or secrets.token_hex(16)
-    iterations = 120_000
-    digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), iterations).hex()
-    return f"pbkdf2_sha256${iterations}${salt}${digest}"
+    sal = sal o secretos.token_hex(16)
+    iteraciones = 120_000
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), iteraciones).hex()
+    devolver f"pbkdf2_sha256${iteraciones}${sal}${digesto}"
 
 
-def verify_password(password: str, password_hash: str | None) -> bool:
-    if not password_hash:
-        return False
-    try:
-        algorithm, iterations, salt, digest = password_hash.split('$', 3)
-        if algorithm != 'pbkdf2_sha256':
-            return False
-        test_digest = hashlib.pbkdf2_hmac(
+def verificar_contraseña(contraseña: str, hash_contraseña: str | Ninguno) -> bool:
+    si no es password_hash:
+        devuelve Falso
+    intentar:
+        algoritmo, iteraciones, sal, resumen = password_hash.split('$', 3)
+        si algoritmo != 'pbkdf2_sha256':
+            devuelve Falso
+        resumen_de_prueba = hashlib.pbkdf2_hmac(
             'sha256',
-            password.encode('utf-8'),
-            salt.encode('utf-8'),
-            int(iterations)
-        ).hex()
-        return hmac.compare_digest(test_digest, digest)
-    except (ValueError, TypeError):
-        return False
+            contraseña.encode('utf-8'),
+            sal.encode('utf-8'),
+            int(iteraciones)
+        ).maleficio()
+        devolver hmac.compare_digest(test_digest, digest)
+    excepto (ValueError, TypeError):
+        devuelve Falso
 
 
-def obtener_password_admin_inicial() -> str:
-    """Obtiene contraseña inicial desde entorno para evitar hardcode total en el código."""
-    return os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
+def obtener_contraseña_admin_inicial() -> str:
+    """Obtiene la contraseña inicial desde el entorno para evitar el código total en el código."""
+    devolver os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
 def inicializar_sistema():
-    with conectar() as conn:
-        c = conn.cursor()
+    con conectar() como conexión:
+        c = conexión.cursor()
 
         tablas = [
 
             # CLIENTES
-            "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
+            "CREAR TABLA SI NO EXISTE clientes (id ENTERO CLAVE PRIMARIA AUTOINCREMENT, nombre TEXTO, whatsapp TEXTO)",
 
             # INVENTARIO (MEJORADO)
-            """CREATE TABLE IF NOT EXISTS inventario (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item TEXT UNIQUE,
+            """CREAR TABLA SI NO EXISTE inventario (
+                id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                artículo TEXTO ÚNICO,
                 cantidad REAL,
-                unidad TEXT,
+                unidad TEXTO,
                 precio_usd REAL,
-                minimo REAL DEFAULT 5.0,
+                minimo REAL PREDETERMINADO 5.0,
                 ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
             )""",
 
-            # CONFIGURACION
-            "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
+            # CONFIGURACIÓN
+            "CREAR TABLA SI NO EXISTE configuración (parámetro TEXTO CLAVE PRIMARIA, valor REAL)",
 
             # USUARIOS
-            "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, password_hash TEXT, rol TEXT, nombre TEXT)",
+            "CREAR TABLA SI NO EXISTE usuarios (nombre de usuario TEXTO CLAVE PRINCIPAL, contraseña TEXTO, hash_de_contraseña TEXTO, rol TEXTO, nombre TEXTO)",
 
             # VENTAS
-            "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, cliente TEXT, detalle TEXT, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+            "CREAR TABLA SI NO EXISTE ventas (id ENTERO CLAVE PRINCIPAL AUTOINCREMENT, cliente_id ENTERO, cliente TEXTO, detalle TEXTO, monto_total REAL, método TEXTO, fecha FECHA Y HORA PREDETERMINADA ESTAMPA_DE_TIEMPO_ACTUAL)",
 
-            # GASTOS
-            "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+            #GASTOS
+            "CREAR TABLA SI NO EXISTE gastos (id INTEGER CLAVE PRINCIPAL AUTOINCREMENT, descripción TEXTO, monto REAL, categoría TEXTO, método TEXTO, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
 
             # MOVIMIENTOS DE INVENTARIO (MEJORADO)
-            """CREATE TABLE IF NOT EXISTS inventario_movs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_id INTEGER,
-                tipo TEXT,
+            """CREAR TABLA SI NO EXISTE inventario_movs (
+                id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                item_id ENTERO,
+                tipo TEXTO,
                 cantidad REAL,
-                motivo TEXT,
-                usuario TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(item_id) REFERENCES inventario(id)
+                motivo TEXTO,
+                usuario TEXTO,
+                fecha FECHA Y HORA PREDETERMINADA MARCA_DE_TIEMPO_ACTUAL,
+                CLAVE EXTERNA(item_id) REFERENCIAS inventario(id)
             )""",
 
             # PROVEEDORES
-            """CREATE TABLE IF NOT EXISTS proveedores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT UNIQUE,
-                telefono TEXT,
-                rif TEXT,
-                contacto TEXT,
-                observaciones TEXT,
+            """CREAR TABLA SI NO EXISTE proveedores (
+                id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                nombre TEXTO ÚNICO,
+                teléfono TEXTO,
+                TEXTO rif,
+                contacto TEXTO,
+                observaciones TEXTO,
                 fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
             )""",
 
             # HISTORIAL DE COMPRAS
-            """CREATE TABLE IF NOT EXISTS historial_compras (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item TEXT,
-                proveedor_id INTEGER,
+            """CREAR TABLA SI NO EXISTE historial_compras (
+                id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                artículo TEXTO,
+                proveedor_id ENTERO,
                 cantidad REAL,
-                unidad TEXT,
+                unidad TEXTO,
                 costo_total_usd REAL,
-                costo_unit_usd REAL,
-                impuestos REAL,
-                delivery REAL,
+                costo_unidad_usd REAL,
+                impuestos REALES,
+                entrega REAL,
                 tasa_usada REAL,
-                moneda_pago TEXT,
-                usuario TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                moneda_pago TEXTO,
+                usuario TEXTO,
+                fecha FECHA Y HORA PREDETERMINADA MARCA DE TIEMPO ACTUAL
             )"""
         ]
 
-        for tabla in tablas:
+        para tabla en tablas:
             c.execute(tabla)
 
         # MIGRACIONES LIGERAS
-        columnas_usuarios = {row[1] for row in c.execute("PRAGMA table_info(usuarios)").fetchall()}
-        if 'password_hash' not in columnas_usuarios:
+        columnas_usuarios = {fila[1] para fila en c.execute("PRAGMA table_info(usuarios)").fetchall()}
+        si 'password_hash' no está en columnas_usuarios:
             c.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT")
 
-        columnas_movs = {row[1] for row in c.execute("PRAGMA table_info(inventario_movs)").fetchall()}
-        if 'item_id' not in columnas_movs:
-            c.execute("ALTER TABLE inventario_movs ADD COLUMN item_id INTEGER")
-        if 'item' in columnas_movs:
-            c.execute(
+        columnas_movs = {fila[1] para la fila en c.execute("PRAGMA table_info(inventario_movs)").fetchall()}
+        si 'item_id' no está en columnas_movs:
+            c.execute("ALTER TABLE inventario_movs AGREGAR COLUMNA item_id ENTERO")
+        si 'item' en columnas_movs:
+            c.ejecutar(
                 """
-                UPDATE inventario_movs
-                SET item_id = (
-                    SELECT i.id FROM inventario i WHERE i.item = inventario_movs.item LIMIT 1
+                ACTUALIZAR inventario_movs
+                ESTABLECER item_id = (
+                    SELECCIONAR i.id DE inventario i DONDE i.item = inventario_movs.item LÍMITE 1
                 )
-                WHERE item_id IS NULL
+                DONDE item_id ES NULO
                 """
             )
 
-        columnas_inventario = {row[1] for row in c.execute("PRAGMA table_info(inventario)").fetchall()}
-        if 'cantidad' not in columnas_inventario:
+        columnas_inventario = {fila[1] para fila en c.execute("PRAGMA table_info(inventario)").fetchall()}
+        si 'cantidad' no está en columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN cantidad REAL DEFAULT 0")
-        if 'unidad' not in columnas_inventario:
+        si 'unidad' no está en columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN unidad TEXT DEFAULT 'Unidad'")
-        if 'precio_usd' not in columnas_inventario:
+        si 'precio_usd' no está en columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN precio_usd REAL DEFAULT 0")
-        if 'minimo' not in columnas_inventario:
+        si 'minimo' no está en columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN minimo REAL DEFAULT 5.0")
-        if 'ultima_actualizacion' not in columnas_inventario:
+        si 'ultima_actualizacion' no está en columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN ultima_actualizacion DATETIME")
-            c.execute("UPDATE inventario SET ultima_actualizacion = CURRENT_TIMESTAMP WHERE ultima_actualizacion IS NULL")
-        if 'imprimible_cmyk' not in columnas_inventario:
+            c.execute("ACTUALIZAR inventario SET ultima_actualizacion = CURRENT_TIMESTAMP WHERE ultima_actualizacion IS NULL")
+        si 'imprimible_cmyk' no está en columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
 
-        c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
+        c.execute("CREAR ÍNDICE SI NO EXISTE idx_inventario_movs_item_id EN inventario_movs(item_id)")
 
         columnas_proveedores = {row[1] for row in c.execute("PRAGMA table_info(proveedores)").fetchall()}
-        if "telefono" not in columnas_proveedores:
+        si "telefono" no está en columnas_proveedores:
             c.execute("ALTER TABLE proveedores ADD COLUMN telefono TEXT")
-        if "rif" not in columnas_proveedores:
+        si "rif" no está en columnas_proveedores:
             c.execute("ALTER TABLE proveedores ADD COLUMN rif TEXT")
-        if "contacto" not in columnas_proveedores:
+        si "contacto" no está en columnas_proveedores:
             c.execute("ALTER TABLE proveedores ADD COLUMN contacto TEXT")
-        if "observaciones" not in columnas_proveedores:
+        si "observaciones" no está en columnas_proveedores:
             c.execute("ALTER TABLE proveedores ADD COLUMN observaciones TEXT")
-        if "fecha_creacion" not in columnas_proveedores:
+        si "fecha_creacion" no está en columnas_proveedores:
             c.execute("ALTER TABLE proveedores ADD COLUMN fecha_creacion TEXT")
             c.execute("UPDATE proveedores SET fecha_creacion = CURRENT_TIMESTAMP WHERE fecha_creacion IS NULL")
 
         # USUARIO ADMIN POR DEFECTO
-        admin_password = obtener_password_admin_inicial()
-        c.execute(
+        admin_password = obtener_contraseña_admin_inicial()
+        c.ejecutar(
             """
-            INSERT OR IGNORE INTO usuarios (username, password, password_hash, rol, nombre)
-            VALUES (?, ?, ?, ?, ?)
+            INSERTAR O IGNORAR EN usuarios (nombre de usuario, contraseña, hash de contraseña, rol, nombre)
+            VALORES (?, ?, ?, ?, ?)
             """,
             ('jefa', '', hash_password(admin_password), 'Admin', 'Dueña del Imperio')
         )
-        c.execute(
+        c.ejecutar(
             """
-            UPDATE usuarios
-            SET password_hash = ?, password = ''
-            WHERE username = 'jefa' AND (password_hash IS NULL OR password_hash = '')
+            ACTUALIZAR usuarios
+            ESTABLECER password_hash = ?, contraseña = ''
+            DONDE nombre_usuario = 'jefa' Y (password_hash ES NULO O password_hash = '')
             """,
-            (hash_password(admin_password),)
+            (hash_contraseña(contraseña_de_administrador),)
         )
 
         # CONFIGURACIÓN INICIAL
-        config_init = [
+        configuración_init = [
             ('tasa_bcv', 36.50),
             ('tasa_binance', 38.00),
             ('costo_tinta_ml', 0.10),
@@ -208,86 +208,86 @@ def inicializar_sistema():
             ('costo_tinta_auto', 1.0)
         ]
 
-        for p, v in config_init:
-            c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
+        para p, v en config_init:
+            c.execute("INSERTAR O IGNORAR EN LOS VALORES de configuración (?,?)", (p, v))
 
-        conn.commit()
+        conexión.commit()
 
 
 # --- 4. CARGA DE DATOS ---
 def cargar_datos():
-    with conectar() as conn:
-        try:
+    con conectar() como conexión:
+        intentar:
             st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
             st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
             conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
-            for _, row in conf_df.iterrows():
-                st.session_state[row['parametro']] = float(row['valor'])
-        except (sqlite3.DatabaseError, ValueError, KeyError) as e:
+            para _, fila en conf_df.iterrows():
+                st.session_state[fila['parámetro']] = float(fila['valor'])
+        excepto (sqlite3.DatabaseError, ValueError, KeyError) como e:
             st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")
 
-# Alias de compatibilidad para módulos que lo usan
+# Alias ​​de compatibilidad para módulos que lo usan
 def cargar_datos_seguros():
     cargar_datos()
 
-# --- 5. LOGICA DE ACCESO ---
-if 'autenticado' not in st.session_state:
-    st.session_state.autenticado = False
+# --- 5. LÓGICA DE ACCESO ---
+si 'autenticado' no está en st.session_state:
+    st.session_state.autenticado = Falso
     inicializar_sistema()
 
-def login():
+definición de inicio de sesión():
     st.title("⚛️ Acceso al Imperio Atómico")
-    with st.container(border=True):
+    con st.container(border=True):
         u = st.text_input("Usuario")
-        p = st.text_input("Contraseña", type="password")
-        if st.button("Entrar", use_container_width=True):
-            with conectar() as conn:
+        p = st.text_input("Contraseña", tipo="contraseña")
+        si st.button("Entrar", use_container_width=True):
+            con conectar() como conexión:
                 res = conn.execute(
-                    "SELECT username, rol, nombre, password, password_hash FROM usuarios WHERE username=?",
+                    "SELECT nombredeusuario, rol, nombre, contraseña, hash_de_contraseña FROM usuarios WHERE nombredeusuario=?",
                     (u,)
                 ).fetchone()
 
-            acceso_ok = False
-            if res:
-                username, rol, nombre, password_plain, password_hash = res
-                if verify_password(p, password_hash):
-                    acceso_ok = True
-                elif password_plain and hmac.compare_digest(password_plain, p):
-                    acceso_ok = True
-                    with conectar() as conn:
+            acceso_ok = Falso
+            si res:
+                nombre de usuario, rol, nombre, contraseña simple, contraseña hash = res
+                si verificar_contraseña(p, hash_contraseña):
+                    acceso_ok = Verdadero
+                elif password_plain y hmac.compare_digest(password_plain, p):
+                    acceso_ok = Verdadero
+                    con conectar() como conexión:
                         conn.execute(
-                            "UPDATE usuarios SET password_hash=?, password='' WHERE username=?",
-                            (hash_password(p), username)
+                            "ACTUALIZAR usuarios ESTABLECER contraseña_hash=?, contraseña='' DONDE nombre_usuario=?",
+                            (hash_password(p), nombre de usuario)
                         )
-                        conn.commit()
+                        conexión.commit()
 
-            if acceso_ok:
-                st.session_state.autenticado = True
+            si acceso_ok:
+                st.session_state.autenticado = Verdadero
                 st.session_state.rol = rol
                 st.session_state.usuario_nombre = nombre
                 cargar_datos()
                 st.rerun()
-            else:
+            demás:
                 st.error("Acceso denegado")
 
-if not st.session_state.autenticado:
-    login()
+si no es st.session_state.autenticado:
+    acceso()
     st.stop()
 
-# --- 6. SIDEBAR Y VARIABLES ---
+# --- 6. VARIABLES DE LA BARRA LATERAL Y ---
 cargar_datos()
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
-ROL = st.session_state.get('rol', "Produccion")
+ROL = st.session_state.get('rol', "Producción")
 
-with st.sidebar:
+con st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
 
-    menu = st.radio(
+    menú = st.radio(
         "Secciones:",
         [
-            "📊 Dashboard",
+            "📊 Panel de control",
             "🛒 Venta Directa",
             "📦 Inventario",
             "👥 Clientes",
@@ -309,41 +309,41 @@ with st.sidebar:
 
         
 # ===========================================================
-# 📊 DASHBOARD GENERAL
+# 📊 TABLERO GENERAL
 # ===========================================================
-if menu == "📊 Dashboard":
+si el menú == "📊 Tablero":
 
-    st.title("📊 Dashboard Ejecutivo")
+    st.title("📊 Panel Ejecutivo")
     st.caption("Resumen general del negocio: ventas, gastos, clientes e inventario.")
 
-    with conectar() as conn:
-        try:
+    con conectar() como conexión:
+        intentar:
             df_ventas = pd.read_sql("SELECT fecha, monto_total FROM ventas", conn)
-        except Exception:
-            df_ventas = pd.DataFrame(columns=["fecha", "monto_total"])
+        excepto Excepción:
+            df_ventas = pd.DataFrame(columnas=["fecha", "monto_total"])
 
-        try:
+        intentar:
             df_gastos = pd.read_sql("SELECT fecha, monto FROM gastos", conn)
-        except Exception:
-            df_gastos = pd.DataFrame(columns=["fecha", "monto"])
+        excepto Excepción:
+            df_gastos = pd.DataFrame(columnas=["fecha", "monto"])
 
-        try:
+        intentar:
             total_clientes = conn.execute("SELECT COUNT(*) FROM clientes").fetchone()[0]
-        except Exception:
+        excepto Excepción:
             total_clientes = 0
 
-        try:
+        intentar:
             df_inv_dash = pd.read_sql("SELECT cantidad, precio_usd, minimo FROM inventario", conn)
-        except Exception:
+        excepto Excepción:
             df_inv_dash = pd.DataFrame(columns=["cantidad", "precio_usd", "minimo"])
 
-    ventas_total = float(df_ventas["monto_total"].sum()) if not df_ventas.empty else 0.0
-    gastos_total = float(df_gastos["monto"].sum()) if not df_gastos.empty else 0.0
+    ventas_total = float(df_ventas["monto_total"].sum()) si no df_ventas.empty sino 0.0
+    gastos_total = float(df_gastos["monto"].sum()) si no df_gastos.empty si no 0.0
     utilidad = ventas_total - gastos_total
 
     capital_inv = 0.0
     stock_bajo = 0
-    if not df_inv_dash.empty:
+    si no es df_inv_dash.empty:
         capital_inv = float((df_inv_dash["cantidad"] * df_inv_dash["precio_usd"]).sum())
         stock_bajo = int((df_inv_dash["cantidad"] <= df_inv_dash["minimo"]).sum())
 
@@ -358,34 +358,34 @@ if menu == "📊 Dashboard":
 
     col_a, col_b = st.columns(2)
 
-    with col_a:
+    con col_a:
         st.subheader("📆 Ventas por día")
-        if df_ventas.empty:
+        si df_ventas.empty:
             st.info("No hay ventas registradas.")
-        else:
+        demás:
             dfv = df_ventas.copy()
-            dfv["fecha"] = pd.to_datetime(dfv["fecha"], errors="coerce")
-            dfv = dfv.dropna(subset=["fecha"])
-            if dfv.empty:
+            dfv["fecha"] = pd.to_datetime(dfv["fecha"], errores="coaccionar")
+            dfv = dfv.dropna(subconjunto=["fecha"])
+            si dfv.vacío:
                 st.info("No hay fechas válidas de ventas para graficar.")
-            else:
-                dfv["dia"] = dfv["fecha"].dt.date.astype(str)
+            demás:
+                dfv["día"] = dfv["fecha"].dt.date.astype(str)
                 resumen_v = dfv.groupby("dia", as_index=False)["monto_total"].sum()
-                fig_v = px.line(resumen_v, x="dia", y="monto_total", markers=True)
+                fig_v = px.line(resumen_v, x="dia", y="monto_total", marcadores=Verdadero)
                 fig_v.update_layout(xaxis_title="Día", yaxis_title="Monto ($)")
                 st.plotly_chart(fig_v, use_container_width=True)
 
-    with col_b:
+    con col_b:
         st.subheader("📉 Gastos por día")
-        if df_gastos.empty:
+        si df_gastos.empty:
             st.info("No hay gastos registrados.")
-        else:
-            dfg = df_gastos.copy()
+        demás:
+            dfg = df_gastos.copia()
             dfg["fecha"] = pd.to_datetime(dfg["fecha"], errors="coerce")
-            dfg = dfg.dropna(subset=["fecha"])
-            if dfg.empty:
+            dfg = dfg.dropna(subconjunto=["fecha"])
+            si dfg.vacío:
                 st.info("No hay fechas válidas de gastos para graficar.")
-            else:
+            demás:
                 dfg["dia"] = dfg["fecha"].dt.date.astype(str)
                 resumen_g = dfg.groupby("dia", as_index=False)["monto"].sum()
                 fig_g = px.bar(resumen_g, x="dia", y="monto")
@@ -399,7 +399,7 @@ if menu == "📊 Dashboard":
 # ===========================================================
 # 📦 MÓDULO DE INVENTARIO – ESTRUCTURA CORREGIDA
 # ===========================================================
-elif menu == "📦 Inventario":
+menú elif == "📦 Inventario":
 
     st.title("📦 Centro de Control de Suministros")
 
@@ -410,163 +410,178 @@ elif menu == "📦 Inventario":
     usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
 
     # =======================================================
-    # 1️⃣ DASHBOARD EJECUTIVO
+    # 1️⃣ TABLERO EJECUTIVO
     # =======================================================
-    if not df_inv.empty:
+    si no df_inv.empty:
 
-        with st.container(border=True):
+        con st.container(border=True):
 
             c1, c2, c3, c4 = st.columns(4)
 
             capital_total = (df_inv["cantidad"] * df_inv["precio_usd"]).sum()
             items_criticos = df_inv[df_inv["cantidad"] <= df_inv["minimo"]]
-            total_items = len(df_inv)
+            total_de_artículos = len(df_inv)
 
-            salud = ((total_items - len(items_criticos)) / total_items) * 100 if total_items > 0 else 0
+            salud = ((total_items - len(items_criticos)) / total_items) * 100 si total_items > 0 de lo contrario 0
 
             c1.metric("💰 Capital en Inventario", f"${capital_total:,.2f}")
-            c2.metric("📦 Total Ítems", total_items)
+            c2.metric("📦 Total de elementos", total_elementos)
             c3.metric("🚨 Stock Bajo", len(items_criticos), delta="Revisar" if len(items_criticos) > 0 else "OK", delta_color="inverse")
             c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
 
     # =======================================================
-    # 2️⃣ TABS
+    # 2️⃣ PESTAÑAS
     # =======================================================
-    tabs = st.tabs([
+    pestañas = st.tabs([
         "📋 Existencias",
         "📥 Registrar Compra",
-        "📊 Historial Compras",
+        "📊 Compras históricas",
         "👤 Proveedores",
         "🔧 Ajustes"
     ])
 
     # =======================================================
-    # 📋 TAB 1 — EXISTENCIAS
+    # 📋 PESTAÑA 1 — EXISTENCIAS
     # =======================================================
-    with tabs[0]:
+    con pestañas[0]:
 
-        if df_inv.empty:
+        si df_inv.empty:
             st.info("Inventario vacío.")
-        else:
+        demás:
             col1, col2, col3 = st.columns([2, 1, 1])
             filtro = col1.text_input("🔍 Buscar insumo")
             moneda_vista = col2.selectbox("Moneda", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="inv_moneda_vista")
             solo_bajo = col3.checkbox("🚨 Solo stock bajo")
 
             tasa_vista = 1.0
-            simbolo = "$"
+            símbolo = "$"
 
-            if "BCV" in moneda_vista:
+            si "BCV" en moneda_vista:
                 tasa_vista = t_ref
-                simbolo = "Bs"
-            elif "Binance" in moneda_vista:
+                símbolo = "Bs"
+            elif "Binance" en moneda_vista:
                 tasa_vista = t_bin
-                simbolo = "Bs"
+                símbolo = "Bs"
 
-            df_v = df_inv.copy()
+            df_v = df_inv.copiar()
 
-            if filtro:
+            si filtro:
                 df_v = df_v[df_v["item"].str.contains(filtro, case=False)]
 
-            if solo_bajo:
+            si solo_bajo:
                 df_v = df_v[df_v["cantidad"] <= df_v["minimo"]]
 
             df_v["Costo Unitario"] = df_v["precio_usd"] * tasa_vista
             df_v["Valor Total"] = df_v["cantidad"] * df_v["Costo Unitario"]
 
 
-            def resaltar_critico(row):
-                if row["cantidad"] <= row["minimo"]:
-                    return ['background-color: rgba(255,0,0,0.15)'] * len(row)
-                return [''] * len(row)
+            def resaltar_critico(fila):
+                if fila["cantidad"] <= fila["minimo"]:
+                    devolver ['color de fondo: rgba(255,0,0,0.15)'] * len(fila)
+                devolver [''] * len(fila)
           
             st.dataframe(
-               df_v.style.apply(resaltar_critico, axis=1),
-                column_config={
+               df_v.style.apply(resaltar_critico, eje=1),
+                configuración_de_columna={
                     "item": "Insumo",
                     "cantidad": "Stock",
                     "unidad": "Unidad",
                     "Costo Unitario": st.column_config.NumberColumn(
-                        f"Costo ({simbolo})", format="%.4f"
+                        f"Costo ({simbolo})", formato="%.4f"
                     ),
-                    "Valor Total": st.column_config.NumberColumn(
-                        f"Valor Total ({simbolo})", format="%.2f"
+                    "Valor total": st.column_config.NumberColumn(
+                        f"Valor Total ({simbolo})", formato="%.2f"
                     ),
                     "minimo": "Mínimo",
                     "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión en Análisis CMYK"),
-                    "precio_usd": None,
-                    "id": None,
-                    "ultima_actualizacion": None
+                    "precio_usd": Ninguno,
+                    "id": Ninguno,
+                    "ultima_actualizacion": Ninguna
                 },
-                use_container_width=True,
-                hide_index=True
+                use_container_width=Verdadero,
+                hide_index=Verdadero
             )
 
         st.divider()
         st.subheader("🛠 Gestión de Insumo Existente")
 
-        if not df_inv.empty:
+        si no df_inv.empty:
 
             insumo_sel = st.selectbox("Seleccionar Insumo", df_inv["item"].tolist())
             fila_sel = df_inv[df_inv["item"] == insumo_sel].iloc[0]
-            colA, colB, colC = st.columns(3)
+            colA, colB, colC = st.columnas(3)
             nuevo_min = colA.number_input("Nuevo Stock Mínimo", min_value=0.0, value=float(fila_sel.get('minimo', 0)))
-            flag_cmyk = colB.checkbox("Visible en CMYK", value=bool(fila_sel.get('imprimible_cmyk', 0)))
+            flag_cmyk = colB.checkbox("Visible en CMYK", valor=bool(fila_sel.get('imprimible_cmyk', 0)))
 
             if colA.button("Actualizar Mínimo"):
-                with conectar() as conn:
+                con conectar() como conexión:
                     conn.execute(
-                        "UPDATE inventario SET minimo=?, imprimible_cmyk=? WHERE item=?",
-                        (nuevo_min, 1 if flag_cmyk else 0, insumo_sel)
+                        "ACTUALIZAR inventario SET minimo=?, imprimible_cmyk=? ¿DONDE elemento=?",
+                        (nuevo_min, 1 si flag_cmyk sino 0, insumo_sel)
                     )
-                    conn.commit()
+                    conexión.commit()
                 cargar_datos()
                 st.success("Stock mínimo actualizado.")
                 st.rerun()
+
+            # Conversión para inventarios viejos cargados como cm2
+            if str(fila_sel.get('unidad', '')).lower() == 'cm2':
+                cm2_por_hoja = colC.number_input("cm² por hoja", valor_min=1.0, valor=100.0)
+                if colC.button("🔄 Convertir stock cm2 → hojas"):
+                    hojas = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
+                    con conectar() como conexión:
+                        conn.execute(
+                            "ACTUALIZAR inventario SET cantidad=?, unidad='hojas' WHERE item=?",
+                            (hojas, insumo_sel)
+                        )
+                        conexión.commit()
+                    st.success(f"Convertido a {hojas:.3f} hojas.")
+                    cargar_datos()
+                    st.rerun()
             if colB.button("🗑 Eliminar Insumo"):
-                with conectar() as conn:
+                con conectar() como conexión:
                     existe_historial = conn.execute(
-                        "SELECT COUNT(*) FROM historial_compras WHERE item=?",
+                        "SELECCIONAR CONTEO(*) DE historial_compras DONDE articulo=?",
                         (insumo_sel,)
                     ).fetchone()[0]
-                    if existe_historial > 0:
+                    si existe_historial > 0:
                         st.error("No se puede eliminar: el insumo tiene historial de compras.")
-                    else:
-                        st.session_state.confirmar_borrado = True
+                    demás:
+                        st.session_state.confirmar_borrado = Verdadero
 
-            if st.session_state.get("confirmar_borrado", False):
+            si st.session_state.get("confirmar_borrado", Falso):
                 st.warning(f"⚠ Confirmar eliminación de '{insumo_sel}'")
                 colC, colD = st.columns(2)
 
                 if colC.button("✅ Confirmar"):
-                    with conectar() as conn:
+                    con conectar() como conexión:
                         conn.execute(
-                            "DELETE FROM inventario WHERE item=?",
+                            "ELIMINAR DEL inventario DONDE artículo=?",
                             (insumo_sel,)
                         )
-                        conn.commit()
-                    st.session_state.confirmar_borrado = False
+                        conexión.commit()
+                    st.session_state.confirmar_borrado = Falso
                     cargar_datos()
                     st.success("Insumo eliminado.")
                     st.rerun()
 
-                if colD.button("❌ Cancelar"):
-                    st.session_state.confirmar_borrado = False
+                si colD.button("❌ Cancelar"):
+                    st.session_state.confirmar_borrado = Falso
 
     # =======================================================
-    # 📥 TAB 2 — REGISTRAR COMPRA
+    # 📥 PESTAÑA 2 — COMPRA DE REGISTRO
     # =======================================================
-    with tabs[1]:
+    con pestañas[1]:
 
-        st.subheader("📥 Registrar Nueva Compra")
+        st.subheader("📥 Registrador Nueva Compra")
 
-        with conectar() as conn:
-            try:
+        con conectar() como conexión:
+            intentar:
                 proveedores_existentes = pd.read_sql(
-                    "SELECT nombre FROM proveedores ORDER BY nombre ASC",
-                    conn
+                    "SELECCIONAR nombre DE proveedores ORDENAR POR nombre ASC",
+                    conexión
                 )["nombre"].dropna().astype(str).tolist()
-            except (sqlite3.DatabaseError, pd.errors.DatabaseError):
+            excepto (sqlite3.DatabaseError, pd.errors.DatabaseError):
                 proveedores_existentes = []
 
         col_base1, col_base2 = st.columns(2)
@@ -574,7 +589,7 @@ elif menu == "📦 Inventario":
         proveedor_sel = col_base2.selectbox(
             "Proveedor",
             ["(Sin proveedor)", "➕ Nuevo proveedor"] + proveedores_existentes,
-            key="inv_proveedor_compra"
+            clave="inv_proveedor_compra"
         )
 
         proveedor = ""
@@ -584,10 +599,10 @@ elif menu == "📦 Inventario":
             proveedor = proveedor_sel
 
         minimo_stock = st.number_input("Stock mínimo", min_value=0.0)
-        imprimible_cmyk = st.checkbox(
+        imprimible_cmyk = st.casilla(
             "✅ Se puede imprimir (mostrar en módulo CMYK)",
-            value=False,
-            help="Marca solo los insumos que sí participan en impresión (tintas, acetato imprimible, papeles de impresión)."
+            valor=Falso,
+            help="Marca solo los insumos que sí participan en impresión (tintas, acetato imprimible, papeles de impresión)".
         )
 
         # ------------------------------
@@ -603,11 +618,21 @@ elif menu == "📦 Inventario":
 
         if tipo_unidad == "Área (cm²)":
             c1, c2, c3 = st.columns(3)
-            ancho = c1.number_input("Ancho (cm)", min_value=0.1)
-            alto = c2.number_input("Alto (cm)", min_value=0.1)
+            ancho = c1.number_input("Ancho (cm)", valor_mín=0.1)
+            alto = c2.number_input("Alto (cm)", valor_mín=0.1)
             cantidad_envases = c3.number_input("Cantidad de Pliegos", min_value=0.001)
-            stock_real = ancho * alto * cantidad_envases
-            unidad_final = "cm2"
+
+            # Inventario se controla por unidades físicas (hojas/pliegos),
+            # no por área total acumulada. El área queda como referencia técnica.
+            area_por_pliego = ancho * alto
+            area_total_ref = area_por_pliego * cantidad_envases
+            stock_real = cantidad_envases
+            unidad_final = "hojas"
+
+            st.caption(
+                f"Referencia técnica: {area_por_pliego:,.2f} cm² por pliego | "
+                f"Área total cargada: {area_total_ref:,.2f} cm²"
+            )
 
         elif tipo_unidad == "Líquido (ml)":
             c1, c2 = st.columns(2)
@@ -623,7 +648,7 @@ elif menu == "📦 Inventario":
             stock_real = gr_por_envase * cantidad_envases
             unidad_final = "gr"
 
-        else:
+        demás:
             cantidad_envases = st.number_input("Cantidad Comprada", min_value=0.001)
             stock_real = cantidad_envases
             unidad_final = "Unidad"
@@ -636,7 +661,7 @@ elif menu == "📦 Inventario":
         moneda_pago = col5.selectbox(
             "Moneda",
             ["USD $", "Bs (BCV)", "Bs (Binance)"],
-            key="inv_moneda_pago"
+            clave="inv_moneda_pago"
         )
 
         col6, col7, col8 = st.columns(3)
@@ -646,92 +671,92 @@ elif menu == "📦 Inventario":
 
         st.caption(f"Sugerencia de impuesto total para compras: {st.session_state.get('inv_impuesto_default', 16.0):.2f}%")
 
-        delivery = st.number_input("Gastos Logística / Delivery ($)", value=float(st.session_state.get("inv_delivery_default", 0.0)))
+        entrega = st.number_input("Gastos Logística / Entrega ($)", valor=float(st.session_state.get("inv_delivery_default", 0.0)))
 
         # ------------------------------
         # BOTÓN GUARDAR
         # ------------------------------
-        if st.button("💾 Guardar Compra", use_container_width=True):
+        si st.button("💾 Guardar Compra", use_container_width=True):
 
-            if not nombre_c:
-                st.error("Debe indicar nombre del insumo.")
+            si no nombre_c:
+                st.error("Debe indicar el nombre del insumo.")
                 st.stop()
 
-            if stock_real <= 0:
+            si stock_real <= 0:
                 st.error("Cantidad inválida.")
                 st.stop()
 
-            if "BCV" in moneda_pago:
+            si "BCV" en moneda_pago:
                 tasa_usada = t_ref
-            elif "Binance" in moneda_pago:
+            elif "Binance" en moneda_pago:
                 tasa_usada = t_bin
 
-            else:
+            demás:
                 tasa_usada = 1.0
 
             porc_impuestos = 0
-            if iva_activo:
+            si iva_activo:
                 porc_impuestos += st.session_state.get("iva_perc", 16)
-            if igtf_activo:
+            si igtf_activo:
                 porc_impuestos += st.session_state.get("igtf_perc", 3)
-            if banco_activo:
+            si banco_activo:
                 porc_impuestos += st.session_state.get("banco_perc", 0.5)
 
-            costo_total_usd = ((monto_factura / tasa_usada) * (1 + (porc_impuestos / 100))) + delivery
+            costo_total_usd = ((monto_factura / tasa_usada) * (1 + (porc_impuestos / 100))) + entrega
             costo_unitario = costo_total_usd / stock_real
 
-            with conectar() as conn:
+            con conectar() como conexión:
                 cur = conn.cursor()
 
 
-                proveedor_id = None
-                if proveedor:
+                proveedor_id = Ninguno
+                si proveedor:
                     cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
                     prov = cur.fetchone()
-                    if not prov:
+                    si no se prueba:
                         cur.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor,))
                         proveedor_id = cur.lastrowid
-                    else:
+                    demás:
                         proveedor_id = prov[0]
 
-                old = cur.execute(
+                viejo = cur.execute(
                     "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
                     (nombre_c,)
                 ).fetchone()
 
-                if old:
-                    nueva_cant = old[0] + stock_real
+                si es viejo:
+                    nueva_cant = antiguo[0] + stock_real
                     precio_ponderado = (
-                        (old[0] * old[1] + stock_real * costo_unitario)
+                        (antiguo[0] * antiguo[1] + stock_real * costo_unitario)
                         / nueva_cant
                     )
-                else:
+                demás:
                     nueva_cant = stock_real
                     precio_ponderado = costo_unitario
 
-                if old:
-                    cur.execute(
+                si es viejo:
+                    cur.ejecutar(
                         """
-                        UPDATE inventario
+                        ACTUALIZAR inventario
                         SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, ultima_actualizacion=CURRENT_TIMESTAMP
-                        WHERE item=?
+                        ¿DONDE artículo=?
                         """,
                         (nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, nombre_c)
                     )
-                else:
-                    cur.execute(
+                demás:
+                    cur.ejecutar(
                         """
-                        INSERT INTO inventario
+                        INSERTAR EN inventario
                         (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, ultima_actualizacion)
-                        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        VALORES (?, ?, ?, ?, ?, ?, MARCA_DE_TIEMPO_ACTUAL)
                         """,
                         (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0)
                     )
 
                 cur.execute("""
-                    INSERT INTO historial_compras
-                    (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    INSERTAR EN historial_compras
+                    (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, entrega, tasa_usada, moneda_pago, usuario)
+                    VALORES (?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     nombre_c,
                     proveedor_id,
@@ -740,22 +765,22 @@ elif menu == "📦 Inventario":
                     costo_total_usd,
                     costo_unitario,
                     porc_impuestos,
-                    delivery,
+                    entrega,
                     tasa_usada,
                     moneda_pago,
                     usuario_actual
                 ))
 
                 item_id_row = cur.execute(
-                    "SELECT id FROM inventario WHERE item = ?",
+                    "SELECCIONAR id DE inventario DONDE artículo = ?",
                     (nombre_c,)
                 ).fetchone()
 
-                if item_id_row:
+                si item_id_row:
                     cur.execute("""
-                        INSERT INTO inventario_movs
+                        INSERTAR EN inventario_movs
                         (item_id, tipo, cantidad, motivo, usuario)
-                        VALUES (?,?,?,?,?)
+                        VALORES (?,?,?,?,?)
                     """, (
                         item_id_row[0],
                         "ENTRADA",
@@ -764,7 +789,7 @@ elif menu == "📦 Inventario":
                         usuario_actual
                     ))
 
-                conn.commit()
+                conexión.commit()
 
             cargar_datos()
             st.success("Compra registrada correctamente.")
@@ -772,45 +797,45 @@ elif menu == "📦 Inventario":
 
 
     # =======================================================
-    # 📊 TAB 3 — HISTORIAL DE COMPRAS
+    # 📊 PESTAÑA 3 — HISTORIAL DE COMPRAS
     # =======================================================
-    with tabs[2]:
+    con pestañas[2]:
 
         st.subheader("📊 Historial Profesional de Compras")
 
-        with conectar() as conn:
+        con conectar() como conexión:
             df_hist = pd.read_sql("""
-                SELECT 
+                SELECCIONAR 
                     h.fecha,
                     h.item,
                     h.cantidad,
                     h.unidad,
                     h.costo_total_usd,
-                    h.costo_unit_usd,
+                    h.costo_unidad_usd,
                     h.impuestos,
-                    h.delivery,
+                    h.entrega,
                     h.moneda_pago,
-                    p.nombre as proveedor
-                FROM historial_compras h
+                    p.nombre como proveedor
+                DESDE historial_compras h
                 LEFT JOIN proveedores p ON h.proveedor_id = p.id
-                ORDER BY h.fecha DESC
-            """, conn)
+                ORDENAR POR h.fecha DESC
+            """, conexión)
 
-        if df_hist.empty:
+        si df_hist.empty:
             st.info("No hay compras registradas.")
-        else:
+        demás:
 
             col1, col2 = st.columns(2)
 
             filtro_item = col1.text_input("🔍 Filtrar por Insumo")
             filtro_proveedor = col2.text_input("👤 Filtrar por Proveedor")
 
-            df_v = df_hist.copy()
+            df_v = df_hist.copiar()
 
-            if filtro_item:
+            si filtro_item:
                 df_v = df_v[df_v["item"].str.contains(filtro_item, case=False)]
 
-            if filtro_proveedor:
+            si filtro_proveedor:
                 df_v = df_v[df_v["proveedor"].fillna("").str.contains(filtro_proveedor, case=False)]
 
             total_compras = df_v["costo_total_usd"].sum()
@@ -819,35 +844,35 @@ elif menu == "📦 Inventario":
 
             st.dataframe(
                 df_v,
-                column_config={
+                configuración_de_columna={
                     "fecha": "Fecha",
                     "item": "Insumo",
                     "cantidad": "Cantidad",
                     "unidad": "Unidad",
-                    "costo_total_usd": st.column_config.NumberColumn("Costo Total ($)", format="%.2f"),
-                    "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.4f"),
+                    "costo_total_usd": st.column_config.NumberColumn("Costo total ($)", formato="%.2f"),
+                    "costo_unit_usd": st.column_config.NumberColumn("Costo Unidad ($)", formato="%.4f"),
                     "impuestos": "Impuestos %",
-                    "delivery": "Delivery $",
+                    "entrega": "Entrega $",
                     "moneda_pago": "Moneda",
                     "proveedor": "Proveedor"
                 },
-                use_container_width=True,
-                hide_index=True
+                use_container_width=Verdadero,
+                hide_index=Verdadero
             )
 
     # =======================================================
-    # 👤 TAB 4 — PROVEEDORES
+    # 👤 PESTAÑA 4 — PROVEEDORES
     # =======================================================
-    with tabs[3]:
+    con pestañas[3]:
 
         st.subheader("👤 Directorio de Proveedores")
 
-        with conectar() as conn:
-            try:
+        con conectar() como conexión:
+            intentar:
                 columnas_proveedores = {
-                    row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
+                    fila[1] para fila en conn.execute("PRAGMA table_info(proveedores)").fetchall()
                 }
-                if not columnas_proveedores:
+                si no columnas_proveedores:
                     conn.execute(
                         """
                         CREATE TABLE IF NOT EXISTS proveedores (
@@ -953,101 +978,101 @@ elif menu == "📦 Inventario":
                                 """,
                                 (nombre_prov.strip(), telefono_prov.strip(), rif_prov.strip(), contacto_prov.strip(), observaciones_prov.strip())
                             )
-                        else:
+                        demás:
                             conn.execute(
                                 """
-                                UPDATE proveedores
+                                ACTUALIZACIÓN proveedores
                                 SET nombre=?, telefono=?, rif=?, contacto=?, observaciones=?
-                                WHERE id=?
+                                ¿DONDE id=?
                                 """,
                                 (
                                     nombre_prov.strip(),
-                                    telefono_prov.strip(),
+                                    teléfono_prov.strip(),
                                     rif_prov.strip(),
                                     contacto_prov.strip(),
                                     observaciones_prov.strip(),
                                     int(prov_actual["id"])
                                 )
                             )
-                        conn.commit()
+                        conexión.commit()
                     st.success("Proveedor guardado correctamente.")
                     st.rerun()
-                except sqlite3.IntegrityError:
+                excepto sqlite3.IntegrityError:
                     st.error("Ya existe un proveedor con ese nombre.")
 
-        if prov_actual is not None:
-            if st.button("🗑 Eliminar proveedor seleccionado", type="secondary"):
-                with conectar() as conn:
+        si prov_actual no es Ninguno:
+            if st.button("🗑 Eliminar proveedor seleccionado", type="secundario"):
+                con conectar() como conexión:
                     compras = conn.execute(
-                        "SELECT COUNT(*) FROM historial_compras WHERE proveedor_id=?",
+                        "SELECCIONAR CUENTA(*) DE historial_compras DONDE proveedor_id=?",
                         (int(prov_actual["id"]),)
                     ).fetchone()[0]
 
-                    if compras > 0:
+                    si compras > 0:
                         st.error("No se puede eliminar: el proveedor tiene compras asociadas.")
-                    else:
-                        conn.execute("DELETE FROM proveedores WHERE id=?", (int(prov_actual["id"]),))
-                        conn.commit()
+                    demás:
+                        conn.execute("ELIMINAR DE proveedores DONDE id=?", (int(prov_actual["id"]),))
+                        conexión.commit()
                         st.success("Proveedor eliminado.")
                         st.rerun()
 
     # =======================================================
-    # 🔧 TAB 5 — AJUSTES
+    # 🔧 PESTAÑA 5 — AJUSTES
     # =======================================================
-    with tabs[4]:
+    con pestañas[4]:
 
         st.subheader("🔧 Ajustes del módulo de inventario")
-        st.caption("Estos parámetros precargan valores al registrar compras y ayudan al control de inventario.")
+        st.caption("Estos parámetros precargan valores al registrador de compras y ayudan al control de inventario.")
 
-        with conectar() as conn:
+        con conectar() como conexión:
             cfg_inv = pd.read_sql(
                 """
-                SELECT parametro, valor
-                FROM configuracion
-                WHERE parametro IN ('inv_alerta_dias', 'inv_impuesto_default', 'inv_delivery_default')
+                SELECT parámetro, valor
+                DESDE configuracion
+                DONDE parámetro IN ('inv_alerta_dias', 'inv_impuesto_default', 'inv_delivery_default')
                 """,
-                conn
+                conexión
             )
 
-        cfg_map = {row["parametro"]: float(row["valor"]) for _, row in cfg_inv.iterrows()}
+        cfg_map = {row["parámetro"]: float(row["valor"]) for _, row in cfg_inv.iterrows()}
 
-        with st.form("form_ajustes_inventario"):
+        con st.form("form_ajustes_inventario"):
             alerta_dias = st.number_input(
                 "Días para alerta de reposición",
-                min_value=1,
-                max_value=120,
-                value=int(cfg_map.get("inv_alerta_dias", 14)),
+                valor mínimo=1,
+                valor máximo=120,
+                valor=int(cfg_map.get("inv_alerta_dias", 14)),
                 help="Referencia para revisar proveedores y planificar compras preventivas."
             )
             impuesto_default = st.number_input(
                 "Impuesto por defecto en compras (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=float(cfg_map.get("inv_impuesto_default", 16.0)),
-                format="%.2f"
+                valor mínimo=0.0,
+                valor máximo=100.0,
+                valor=flotante(cfg_map.get("inv_impuesto_default", 16.0)),
+                formato="%.2f"
             )
-            delivery_default = st.number_input(
-                "Delivery por defecto por compra ($)",
-                min_value=0.0,
-                value=float(cfg_map.get("inv_delivery_default", 0.0)),
-                format="%.2f"
+            entrega_predeterminada = st.number_input(
+                "Entrega por defecto por compra ($)",
+                valor mínimo=0.0,
+                valor=flotante(cfg_map.get("inv_delivery_default", 0.0)),
+                formato="%.2f"
             )
 
             guardar_ajustes = st.form_submit_button("💾 Guardar ajustes", use_container_width=True)
 
-        if guardar_ajustes:
-            with conectar() as conn:
+        si guardar_ajustes:
+            con conectar() como conexión:
                 ajustes = [
-                    ("inv_alerta_dias", float(alerta_dias)),
+                    ("inv_alerta_dias", flotante(alerta_dias)),
                     ("inv_impuesto_default", float(impuesto_default)),
-                    ("inv_delivery_default", float(delivery_default))
+                    ("inv_entrega_predeterminado", float(entrega_predeterminado))
                 ]
-                for parametro, valor in ajustes:
+                para parámetro, valor en ajustes:
                     conn.execute(
-                        "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES (?, ?)",
-                        (parametro, valor)
+                        "INSERTAR O REEMPLAZAR EN configuración (parámetro, valor) VALORES (?, ?)",
+                        (parámetro, valor)
                     )
-                conn.commit()
+                conexión.commit()
 
             st.session_state["inv_alerta_dias"] = float(alerta_dias)
             st.session_state["inv_impuesto_default"] = float(impuesto_default)
@@ -1056,71 +1081,71 @@ elif menu == "📦 Inventario":
 
         c1, c2, c3 = st.columns(3)
         c1.metric("⏱️ Alerta reposición", f"{int(cfg_map.get('inv_alerta_dias', 14))} días")
-        c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
-        c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
+        c2.metric("🛡️ Impuesto impuesto", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
+        c3.metric("🚚 Entrega sugerida", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
- # --- configuracion --- #
-elif menu == "⚙️ Configuración":
+# --- configuración --- #
+menú elif == "⚙️ Configuración":
 
     # --- SEGURIDAD DE ACCESO ---
-    if ROL not in ["Admin", "Administracion"]:
+    si ROL no está en ["Admin", "Administracion"]:
         st.error("🚫 Acceso Denegado. Solo la Jefa o Administración pueden cambiar tasas y costos.")
         st.stop()
 
     st.title("⚙️ Configuración del Sistema")
-    st.info("💡 Estos valores afectan globalmente a cotizaciones, inventario y reportes financieros.")
+    st.info("💡 Estos efectos valores globalmente a cotizaciones, inventario y reportes financieros.")
 
     usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
 
     # --- CARGA SEGURA DE CONFIGURACIÓN ---
-    try:
-        with conectar() as conn:
+    intentar:
+        con conectar() como conexión:
             conf_df = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
-    except Exception as e:
+    excepto Excepción como e:
         st.error(f"Error al cargar configuración: {e}")
         st.stop()
 
     # Función auxiliar para obtener valores seguros
-    def get_conf(key, default):
-        try:
-            return float(conf_df.loc[key, 'valor'])
-        except Exception:
-            return default
+    def get_conf(clave, predeterminado):
+        intentar:
+            devuelve float(conf_df.loc[clave, 'valor'])
+        excepto Excepción:
+            devolver el valor predeterminado
 
-    costo_tinta_detectado = None
-    try:
-        with conectar() as conn:
+    costo_tinta_detectado = Ninguno
+    intentar:
+        con conectar() como conexión:
             df_tintas_cfg = pd.read_sql(
                 """
-                SELECT item, precio_usd
-                FROM inventario
-                WHERE item LIKE '%tinta%' AND precio_usd IS NOT NULL
+                SELECCIONAR artículo, precio_usd
+                DESDE inventario
+                DONDE el artículo COMO '%tinta%' Y precio_usd NO ES NULO
                 """,
-                conn
+                conexión
             )
-        if not df_tintas_cfg.empty:
+        si no df_tintas_cfg.empty:
             df_tintas_cfg = df_tintas_cfg[df_tintas_cfg['precio_usd'] > 0]
-            if not df_tintas_cfg.empty:
+            si no df_tintas_cfg.empty:
                 costo_tinta_detectado = float(df_tintas_cfg['precio_usd'].mean())
-    except Exception:
-        costo_tinta_detectado = None
+    excepto Excepción:
+        costo_tinta_detectado = Ninguno
 
-    with st.form("config_general"):
+    con st.form("config_general"):
 
         st.subheader("💵 Tasas de Cambio (Actualización Diaria)")
         c1, c2 = st.columns(2)
 
-        nueva_bcv = c1.number_input(
+        nueva_bcv = c1.número_entrada(
             "Tasa BCV (Bs/$)",
-            value=get_conf('tasa_bcv', 36.5),
-            format="%.2f",
+            valor=get_conf('tasa_bcv', 36.5),
+            formato="%.2f",
             help="Usada para pagos en bolívares de cuentas nacionales."
         )
 
-        nueva_bin = c2.number_input(
-            "Tasa Binance (Bs/$)",
-            value=get_conf('tasa_binance', 38.0),
-            format="%.2f",
+        nueva_bin = c2.número_entrada(
+            "Taza Binance (Bs/$)",
+            valor=get_conf('tasa_binance', 38.0),
+            formato="%.2f",
             help="Usada para pagos mediante USDT o mercado paralelo."
         )
 
@@ -1128,24 +1153,24 @@ elif menu == "⚙️ Configuración":
 
         st.subheader("🎨 Costos Operativos Base")
 
-        costo_tinta_auto = st.checkbox(
+        costo_tinta_auto = st.casilla(
             "Calcular costo de tinta automáticamente desde Inventario",
-            value=bool(get_conf('costo_tinta_auto', 1.0))
+            valor=bool(get_conf('costo_tinta_auto', 1.0))
         )
 
-        if costo_tinta_auto:
-            if costo_tinta_detectado is not None:
+        si costo_tinta_auto:
+            si costo_tinta_detectado no es Ninguno:
                 costo_tinta = float(costo_tinta_detectado)
                 st.success(f"💧 Costo detectado desde inventario: ${costo_tinta:.4f}/ml")
-            else:
+            demás:
                 costo_tinta = float(get_conf('costo_tinta_ml', 0.10))
                 st.warning("No se detectaron tintas válidas en inventario; se mantendrá el último costo guardado.")
-        else:
-            costo_tinta = st.number_input(
+        demás:
+            costo_tinta = st.número_entrada(
                 "Costo de Tinta por ml ($)",
-                value=get_conf('costo_tinta_ml', 0.10),
-                format="%.4f",
-                step=0.0001
+                valor=get_conf('costo_tinta_ml', 0.10),
+                formato="%.4f",
+                paso=0.0001
             )
 
         st.divider()
@@ -1155,22 +1180,22 @@ elif menu == "⚙️ Configuración":
 
         c3, c4, c5 = st.columns(3)
 
-        n_iva = c3.number_input(
+        n_iva = c3.número_entrada(
             "IVA (%)",
-            value=get_conf('iva_perc', 16.0),
-            format="%.2f"
+            valor=get_conf('iva_perc', 16.0),
+            formato="%.2f"
         )
 
-        n_igtf = c4.number_input(
+        n_igtf = c4.número_entrada(
             "IGTF (%)",
-            value=get_conf('igtf_perc', 3.0),
-            format="%.2f"
+            valor=get_conf('igtf_perc', 3.0),
+            formato="%.2f"
         )
 
-        n_banco = c5.number_input(
+        n_banco = c5.número_entrada(
             "Comisión Bancaria (%)",
-            value=get_conf('banco_perc', 0.5),
-            format="%.3f"
+            valor=get_conf('banco_perc', 0.5),
+            formato="%.3f"
         )
 
         st.divider()
@@ -1178,103 +1203,103 @@ elif menu == "⚙️ Configuración":
         # --- GUARDADO CON HISTORIAL ---
         if st.form_submit_button("💾 GUARDAR CAMBIOS ATÓMICOS", use_container_width=True):
 
-            actualizaciones = [
+            Actualizaciones = [
                 ('tasa_bcv', nueva_bcv),
                 ('tasa_binance', nueva_bin),
                 ('costo_tinta_ml', costo_tinta),
-                ('costo_tinta_auto', 1.0 if costo_tinta_auto else 0.0),
+                ('costo_tinta_auto', 1.0 si costo_tinta_auto otro 0.0),
                 ('iva_perc', n_iva),
                 ('igtf_perc', n_igtf),
                 ('banco_perc', n_banco)
             ]
 
-            try:
-                with conectar() as conn:
+            intentar:
+                con conectar() como conexión:
                     cur = conn.cursor()
 
                     # Crear tabla de historial si no existe
                     cur.execute("""
-                        CREATE TABLE IF NOT EXISTS historial_config (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            parametro TEXT,
+                        CREAR TABLA SI NO EXISTE historial_config (
+                            id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                            parámetro TEXTO,
                             valor_anterior REAL,
                             valor_nuevo REAL,
-                            usuario TEXT,
-                            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                            usuario TEXTO,
+                            fecha FECHA Y HORA PREDETERMINADA MARCA DE TIEMPO ACTUAL
                         )
                     """)
 
-                    # Guardar cambios y registrar historial
-                    for param, val in actualizaciones:
+                    # Guardar cambios y registrador histórico
+                    para param, val en actualizaciones:
 
-                        try:
+                        intentar:
                             val_anterior = float(conf_df.loc[param, 'valor'])
-                        except Exception:
-                            val_anterior = None
+                        excepto Excepción:
+                            val_anterior = Ninguno
 
-                        cur.execute(
-                            "UPDATE configuracion SET valor = ? WHERE parametro = ?",
-                            (val, param)
+                        cur.ejecutar(
+                            "ACTUALIZAR configuracion SET valor = ? DONDE parametro = ?",
+                            (valor, parámetro)
                         )
 
-                        if val_anterior != val:
+                        si val_anterior != val:
                             cur.execute("""
-                                INSERT INTO historial_config
-                                (parametro, valor_anterior, valor_nuevo, usuario)
-                                VALUES (?,?,?,?)
+                                INSERTAR EN historial_config
+                                (parámetro, valor_anterior, valor_nuevo, usuario)
+                                VALORES (?,?,?,?)
                             """, (param, val_anterior, val, usuario_actual))
 
-                    conn.commit()
+                    conexión.commit()
 
                 # Actualización inmediata en memoria
                 st.session_state.tasa_bcv = nueva_bcv
                 st.session_state.tasa_binance = nueva_bin
                 st.session_state.costo_tinta_ml = costo_tinta
-                st.session_state.costo_tinta_auto = 1.0 if costo_tinta_auto else 0.0
+                st.session_state.costo_tinta_auto = 1.0 si costo_tinta_auto otro 0.0
                 st.session_state.iva_perc = n_iva
                 st.session_state.igtf_perc = n_igtf
                 st.session_state.banco_perc = n_banco
 
                 st.success("✅ ¡Configuración actualizada y registrada en historial!")
-                st.balloons()
+                globos de San Valentín()
                 st.rerun()
 
-            except Exception as e:
+            excepto Excepción como e:
                 st.error(f"❌ Error al guardar: {e}")
 
     # --- VISUALIZAR HISTORIAL DE CAMBIOS ---
-    with st.expander("📜 Ver Historial de Cambios"):
+    con st.expander("📜 Ver Historial de Cambios"):
 
-        try:
-            with conectar() as conn:
+        intentar:
+            con conectar() como conexión:
                 df_hist = pd.read_sql("""
-                    SELECT fecha, parametro, valor_anterior, valor_nuevo, usuario
-                    FROM historial_config
-                    ORDER BY fecha DESC
-                    LIMIT 50
-                """, conn)
+                    SELECCIONAR fecha, parámetro, valor_anterior, valor_nuevo, usuario
+                    DESDE historial_config
+                    ORDENAR POR fecha DESC
+                    LÍMITE 50
+                """, conexión)
 
-            if not df_hist.empty:
+            si no df_hist.empty:
                 st.dataframe(df_hist, use_container_width=True)
-            else:
+            demás:
                 st.info("Aún no hay cambios registrados.")
 
-        except Exception:
+        excepto Excepción:
             st.info("Historial aún no disponible.")
 
 
 # --- 8. MÓDULO PROFESIONAL DE CLIENTES (VERSIÓN 2.0 MEJORADA) ---
-elif menu == "👥 Clientes":
+menú elif == "👥 Clientes":
 
     st.title("👥 Gestión Integral de Clientes")
     st.caption("Directorio inteligente con análisis comercial y control de deudas")
 
     # --- CARGA SEGURA DE DATOS ---
-    try:
-        with conectar() as conn:
+    intentar:
+        con conectar() como conexión:
             df_clientes = pd.read_sql("SELECT * FROM clientes", conn)
             df_ventas = pd.read_sql("SELECT cliente_id, cliente, monto_total, metodo, fecha FROM ventas", conn)
-    except Exception as e:
+    excepto Excepción como e:
         st.error(f"Error al cargar datos: {e}")
         st.stop()
 
@@ -1289,60 +1314,60 @@ elif menu == "👥 Clientes":
     filtro_deudores = col_b2.checkbox("Solo con deudas")
 
     # --- FORMULARIO DE REGISTRO Y EDICIÓN ---
-    with st.expander("➕ Registrar / Editar Cliente"):
+    con st.expander("➕ Registrar / Editar Cliente"):
 
         modo = st.radio("Acción:", ["Registrar Nuevo", "Editar Existente"], horizontal=True)
 
-        if modo == "Registrar Nuevo":
+        si modo == "Registrar Nuevo":
 
-            with st.form("form_nuevo_cliente"):
+            con st.form("form_nuevo_cliente"):
 
                 col1, col2 = st.columns(2)
 
                 nombre_cli = col1.text_input("Nombre del Cliente o Negocio").strip()
                 whatsapp_cli = col2.text_input("WhatsApp").strip()
 
-                if st.form_submit_button("✅ Guardar Cliente"):
+                si st.form_submit_button("✅ Guardar Cliente"):
 
-                    if not nombre_cli:
+                    si no nombre_cli:
                         st.error("⚠️ El nombre es obligatorio.")
                         st.stop()
 
                     wa_limpio = "".join(filter(str.isdigit, whatsapp_cli))
 
-                    if whatsapp_cli and len(wa_limpio) < 10:
+                    si whatsapp_cli y len(wa_limpio) < 10:
                         st.error("⚠️ Número de WhatsApp inválido.")
                         st.stop()
 
-                    try:
-                        with conectar() as conn:
+                    intentar:
+                        con conectar() como conexión:
 
                             existe = conn.execute(
                                 "SELECT COUNT(*) FROM clientes WHERE lower(nombre) = ?",
                                 (nombre_cli.lower(),)
                             ).fetchone()[0]
 
-                            if existe:
+                            si existe:
                                 st.error("⚠️ Ya existe un cliente con ese nombre.")
-                            else:
+                            demás:
                                 conn.execute(
-                                    "INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)",
+                                    "INSERTAR EN clientes (nombre, whatsapp) VALORES (?,?)",
                                     (nombre_cli, wa_limpio)
                                 )
-                                conn.commit()
+                                conexión.commit()
 
                                 st.success(f"✅ Cliente '{nombre_cli}' registrado correctamente.")
                                 cargar_datos()
                                 st.rerun()
 
-                    except Exception as e:
+                    excepto Excepción como e:
                         st.error(f"Error al guardar: {e}")
 
-        else:
+        demás:
             # --- EDICIÓN DE CLIENTE ---
-            if df_clientes.empty:
+            si df_clientes.empty:
                 st.info("No hay clientes para editar.")
-            else:
+            demás:
                 cliente_sel = st.selectbox(
                     "Seleccionar Cliente:",
                     df_clientes['nombre'].tolist()
@@ -1350,180 +1375,180 @@ elif menu == "👥 Clientes":
 
                 datos = df_clientes[df_clientes['nombre'] == cliente_sel].iloc[0]
 
-                with st.form("form_editar_cliente"):
+                con st.form("form_editar_cliente"):
 
                     col1, col2 = st.columns(2)
 
-                    nuevo_nombre = col1.text_input("Nombre", value=datos['nombre'])
-                    nuevo_wa = col2.text_input("WhatsApp", value=datos['whatsapp'])
+                    nuevo_nombre = col1.text_input("Nombre", valor=datos['nombre'])
+                    nuevo_wa = col2.text_input("WhatsApp", valor=datos['whatsapp'])
 
-                    if st.form_submit_button("💾 Actualizar Cliente"):
+                    si st.form_submit_button("💾 Actualizar Cliente"):
 
-                        wa_limpio = "".join(filter(str.isdigit, nuevo_wa))
+                        wa_limpio = "".join(filtro(str.isdigit, nuevo_wa))
 
-                        try:
-                            with conectar() as conn:
+                        intentar:
+                            con conectar() como conexión:
                                 conn.execute("""
-                                    UPDATE clientes
-                                    SET nombre = ?, whatsapp = ?
-                                    WHERE id = ?
+                                    ACTUALIZACIÓN clientes
+                                    ESTABLECER nombre = ?, whatsapp = ?
+                                    DONDE id = ?
                                 """, (nuevo_nombre, wa_limpio, int(datos['id'])))
 
-                                conn.commit()
+                                conexión.commit()
 
                             st.success("✅ Cliente actualizado.")
                             cargar_datos()
                             st.rerun()
 
-                        except Exception as e:
+                        excepto Excepción como e:
                             st.error(f"Error al actualizar: {e}")
 
     st.divider()
 
     # --- ANÁLISIS COMERCIAL ---
-    if df_clientes.empty:
+    si df_clientes.empty:
         st.info("No hay clientes para analizar.")
-    else:
+    demás:
         st.write("Módulo de análisis comercial activo.")
 
     resumen = []
 
-    for _, cli in df_clientes.iterrows():
+    para _, cli en df_clientes.iterrows():
 
         compras = df_ventas[df_ventas['cliente_id'] == cli['id']]
 
-        total_comprado = compras['monto_total'].sum() if not compras.empty else 0
+        total_comprado = compras['monto_total'].sum() si no compras.empty else 0
 
         deudas = compras[
             compras['metodo'].str.contains("Pendiente|Deuda", case=False, na=False)
-        ]['monto_total'].sum() if not compras.empty else 0
+        ]['monto_total'].sum() si no compras.empty de lo contrario 0
 
-        ultima_compra = None
-        if not compras.empty and 'fecha' in compras.columns:
-            fechas_validas = pd.to_datetime(compras['fecha'], errors='coerce').dropna()
-            if not fechas_validas.empty:
+        ultima_compra = Ninguno
+        si no compras.empty y 'fecha' en compras.columns:
+            fechas_validas = pd.to_datetime(compras['fecha'], errores='coerce').dropna()
+            si no fechas_validas.empty:
                 ultima_compra = fechas_validas.max().strftime('%Y-%m-%d')
 
         resumen.append({
             "id": cli['id'],
             "nombre": cli['nombre'],
-            "whatsapp": cli['whatsapp'],
+            "Whatsapp": cli['Whatsapp'],
             "total_comprado": total_comprado,
             "deudas": deudas,
             "operaciones": len(compras),
-            "ultima_compra": ultima_compra or "Sin compras"
+            "ultima_compra": ultima_compra o "Sin compras"
         })
 
     df_resumen = pd.DataFrame(resumen)
 
     # --- FILTROS ---
-    if busqueda:
+    si buscada:
         df_resumen = df_resumen[
             df_resumen['nombre'].str.contains(busqueda, case=False, na=False) |
             df_resumen['whatsapp'].str.contains(busqueda, case=False, na=False)
         ]
 
-    if filtro_deudores:
+    si filtro_deudores:
         df_resumen = df_resumen[df_resumen['deudas'] > 0]
 
     # --- DASHBOARD DE CLIENTES ---
-    if not df_resumen.empty:
+    si no df_resumen.empty:
 
         st.subheader("📊 Resumen Comercial")
 
         ticket_promedio = (df_resumen['total_comprado'].sum() / df_resumen['operaciones'].sum()) if df_resumen['operaciones'].sum() > 0 else 0
-        mayor_deudor = df_resumen.sort_values('deudas', ascending=False).iloc[0]
+        mayor_deudor = df_resumen.sort_values('deudas', ascendente=False).iloc[0]
 
         m1, m2, m3, m4 = st.columns(4)
 
         m1.metric("Clientes Totales", len(df_resumen))
         m2.metric("Ventas Totales", f"$ {df_resumen['total_comprado'].sum():,.2f}")
         m3.metric("Cuentas por Cobrar", f"$ {df_resumen['deudas'].sum():,.2f}")
-        m4.metric("Ticket Promedio", f"$ {ticket_promedio:,.2f}")
+        m4.metric("Boleto Promedio", f"$ {boleto_promedio:,.2f}")
 
-        st.caption(f"Mayor deudor actual: {mayor_deudor['nombre']} (${mayor_deudor['deudas']:,.2f})")
+        st.caption(f"Alcalde deudor actual: {mayor_deudor['nombre']} (${mayor_deudor['deudas']:,.2f})")
 
         st.divider()
 
         ctop, cgraf = st.columns([1, 2])
-        with ctop:
-            st.subheader("🏆 Top Clientes")
-            top = df_resumen.sort_values("total_comprado", ascending=False).head(5)
+        con ctop:
+            st.subheader("🏆 Principales clientes")
+            top = df_resumen.sort_values("total_comprado", ascendente=Falso).head(5)
             st.dataframe(
                 top[['nombre', 'total_comprado', 'operaciones']],
-                column_config={
+                configuración_de_columna={
                     'nombre': 'Cliente',
                     'total_comprado': st.column_config.NumberColumn('Comprado ($)', format='%.2f'),
                     'operaciones': 'Operaciones'
                 },
-                use_container_width=True,
-                hide_index=True
+                use_container_width=Verdadero,
+                hide_index=Verdadero
             )
 
-        with cgraf:
+        con cgraf:
             st.subheader("📈 Facturación por cliente")
-            top10 = df_resumen.sort_values("total_comprado", ascending=False).head(10)
+            top10 = df_resumen.sort_values("total_comprado", ascendente=Falso).head(10)
             fig_top = px.bar(top10, x='nombre', y='total_comprado')
             fig_top.update_layout(xaxis_title='Cliente', yaxis_title='Comprado ($)')
-            st.plotly_chart(fig_top, use_container_width=True)
+            st.plotly_chart(fig_top, usar_ancho_del_contenedor=Verdadero)
 
         st.divider()
 
         st.subheader(f"📋 Directorio ({len(df_resumen)} clientes)")
 
         # --- EXPORTACIÓN ---
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_resumen.to_excel(writer, index=False, sheet_name='Clientes')
+        búfer = io.BytesIO()
+        con pd.ExcelWriter(buffer, engine='xlsxwriter') como escritor:
+            df_resumen.to_excel(escritor, índice=False, nombre_hoja='Clientes')
 
-        st.download_button(
+        botón_descargar(
             "📥 Descargar Lista de Clientes (Excel)",
-            data=buffer.getvalue(),
+            datos=buffer.getvalue(),
             file_name="clientes_imperio.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="aplicación/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
         st.dataframe(
             df_resumen.sort_values(['deudas', 'total_comprado'], ascending=[False, False]),
-            column_config={
-                'id': None,
+            configuración_de_columna={
+                'id': Ninguno,
                 'nombre': 'Cliente',
-                'whatsapp': 'WhatsApp',
+                'WhatsApp': 'WhatsApp',
                 'total_comprado': st.column_config.NumberColumn('Total Comprado ($)', format='%.2f'),
-                'deudas': st.column_config.NumberColumn('Deudas ($)', format='%.2f'),
+                'deudas': st.column_config.NumberColumn('Deudas ($)', formato='%.2f'),
                 'operaciones': 'Operaciones',
                 'ultima_compra': 'Última compra'
             },
-            use_container_width=True,
-            hide_index=True
+            use_container_width=Verdadero,
+            hide_index=Verdadero
         )
 
         with st.expander("⚙️ Acciones rápidas por cliente"):
             cliente_accion = st.selectbox("Selecciona cliente", df_resumen['nombre'].tolist(), key='cli_accion')
             cli_row = df_resumen[df_resumen['nombre'] == cliente_accion].iloc[0]
             a1, a2 = st.columns(2)
-            if cli_row['whatsapp']:
+            si cli_row['whatsapp']:
                 wa_num = str(cli_row['whatsapp'])
-                if not wa_num.startswith('58'):
+                si no wa_num.startswith('58'):
                     wa_num = '58' + wa_num.lstrip('0')
-                a1.link_button("💬 Abrir chat WhatsApp", f"https://wa.me/{wa_num}")
-            else:
+                a1.link_button("💬 Abrir chat de WhatsApp", f"https://wa.me/{wa_num}")
+            demás:
                 a1.info("Cliente sin número de WhatsApp")
 
             if a2.button("🗑 Eliminar cliente", type='secondary'):
-                with conectar() as conn:
+                con conectar() como conexión:
                     tiene_ventas = conn.execute("SELECT COUNT(*) FROM ventas WHERE cliente_id = ?", (int(cli_row['id']),)).fetchone()[0]
-                    if tiene_ventas > 0:
+                    si tiene_ventas > 0:
                         st.error("No se puede eliminar: el cliente tiene ventas asociadas.")
-                    else:
-                        conn.execute("DELETE FROM clientes WHERE id = ?", (int(cli_row['id']),))
-                        conn.commit()
+                    demás:
+                        conn.execute("ELIMINAR DE clientes DONDE id = ?", (int(cli_row['id']),))
+                        conexión.commit()
                         st.success("Cliente eliminado correctamente.")
                         cargar_datos()
                         st.rerun()
 
 
-    else:
+    demás:
         st.info("No hay clientes que coincidan con los filtros.")
 
 
@@ -1532,136 +1557,136 @@ elif menu == "👥 Clientes":
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
 # ===========================================================
-elif menu == "🎨 Análisis CMYK":
+menú elif == "🎨 Análisis CMYK":
 
     st.title("🎨 Analizador Profesional de Cobertura CMYK")
 
     # --- CARGA SEGURA DE DATOS ---
-    try:
-        with conectar() as conn:
+    intentar:
+        con conectar() como conexión:
 
             # Usamos el inventario como fuente de tintas
             df_tintas_db = pd.read_sql_query(
-                "SELECT * FROM inventario", conn
+                "SELECT * FROM inventario", conexión
             )
-            if 'imprimible_cmyk' in df_tintas_db.columns:
+            si 'imprimible_cmyk' en df_tintas_db.columns:
                 df_impresion_db = df_tintas_db[df_tintas_db['imprimible_cmyk'].fillna(0) == 1].copy()
-            else:
+            demás:
                 df_impresion_db = df_tintas_db.copy()
-            try:
+            intentar:
                 df_activos_cmyk = pd.read_sql_query(
-                    "SELECT equipo, categoria, unidad FROM activos", conn
+                    "SELECT equipo, categoria, unidad FROM activos", conexión
                 )
-            except Exception:
+            excepto Excepción:
                 df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad'])
 
             # Tabla histórica
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS historial_cmyk (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    impresora TEXT,
-                    paginas INTEGER,
+                CREAR TABLA SI NO EXISTE historial_cmyk (
+                    id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                    impresora TEXTO,
+                    paginas ENTERO,
                     costo REAL,
-                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                    fecha FECHA Y HORA PREDETERMINADA MARCA DE TIEMPO ACTUAL
                 )
             """)
             df_hist_cmyk = pd.read_sql(
                 "SELECT fecha, impresora, paginas, costo FROM historial_cmyk ORDER BY fecha DESC LIMIT 100",
-                conn
+                conexión
             )
 
-    except Exception as e:
-        st.error(f"Error cargando datos: {e}")
+    excepto Excepción como e:
+        st.error(f"Error al cargar datos: {e}")
         st.stop()
 
     # --- LISTA DE IMPRESORAS DISPONIBLES ---
     impresoras_disponibles = []
 
     # 1) Prioridad: Activos en Maquinaria categoría Tinta (como indicaste)
-    if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty:
-        act = df_activos_cmyk.copy()
+    si 'df_activos_cmyk' está en locals() y no en df_activos_cmyk.empty:
+        acto = df_activos_cmyk.copy()
         mask_maquinaria = act['unidad'].fillna('').str.contains('Maquinaria', case=False, na=False)
-        # Acepta tanto categoría Tinta como Impresión/Impresora para compatibilidad
+        # Acepta tanta categoría Tinta como Impresión/Impresora para compatibilidad
         mask_categoria_imp = act['categoria'].fillna('').str.contains('Tinta|Impres', case=False, na=False)
         mask_equipo_imp = act['equipo'].fillna('').str.contains('Impres', case=False, na=False)
         posibles_activos = act[mask_maquinaria & (mask_categoria_imp | mask_equipo_imp)]['equipo'].dropna().astype(str).tolist()
-        for eq in posibles_activos:
+        para eq en posibles_activos:
             nombre_limpio = eq
-            if '] ' in nombre_limpio:
+            si '] ' en nombre_limpio:
                 nombre_limpio = nombre_limpio.split('] ', 1)[1]
-            if nombre_limpio not in impresoras_disponibles:
+            si nombre_limpio no está en impresoras_disponibles:
                 impresoras_disponibles.append(nombre_limpio)
 
-    # 2) Fallback: equipos con palabra impresora en inventario
-    if not df_impresion_db.empty:
+    # 2) Respaldo: equipos con palabra impresora en inventario
+    si no df_impresion_db.empty:
         posibles = df_impresion_db[
             df_impresion_db['item'].str.contains("impresora", case=False, na=False)
-        ]['item'].tolist()
+        ]['elemento'].tolist()
 
-        for p in posibles:
-            if p not in impresoras_disponibles:
+        para p en posibles:
+            si p no está en impresoras_disponibles:
                 impresoras_disponibles.append(p)
 
-    # 3) Último fallback por defecto
-    if not impresoras_disponibles:
+    # 3) Último respaldo por defecto
+    si no impresoras_disponibles:
         impresoras_disponibles = ["Impresora Principal", "Impresora Secundaria"]
 
     # --- VALIDACIÓN ---
-    if not impresoras_disponibles:
+    si no impresoras_disponibles:
         st.warning("⚠️ No hay impresoras registradas en el sistema.")
         st.stop()
 
     # --- SELECCIÓN DE IMPRESORA Y ARCHIVOS ---
-    c_printer, c_file = st.columns([1, 2])
+    c_impresora, c_archivo = st.columns([1, 2])
 
-    with c_printer:
+    con c_printer:
 
         impresora_sel = st.selectbox("🖨️ Equipo de Impresión", impresoras_disponibles)
 
         impresora_aliases = [impresora_sel.lower().strip()]
-        if ' ' in impresora_aliases[0]:
-            impresora_aliases.extend([x for x in impresora_aliases[0].split(' ') if len(x) > 2])
+        si ' ' en impresora_aliases[0]:
+            impresora_aliases.extend([x para x en impresora_aliases[0].split(' ') si len(x) > 2])
 
         usar_stock_por_impresora = st.checkbox(
             "Usar tintas del inventario solo de esta impresora",
-            value=True,
+            valor=Verdadero,
             help="Actívalo si registras tintas separadas por impresora en inventario."
         )
         auto_negro_inteligente = st.checkbox(
             "Conteo automático inteligente de negro (sombras y mezclas)",
-            value=True,
+            valor=Verdadero,
             help="Detecta zonas oscuras y mezclas ricas para sumar consumo real de tinta negra (K)."
         )
 
         costo_desgaste = st.number_input(
             "Costo desgaste por página ($)",
-            min_value=0.0,
-            value=0.02,
-            step=0.005,
-            format="%.3f"
+            valor mínimo=0.0,
+            valor=0.02,
+            paso=0,005,
+            formato="%.3f"
         )
         ml_base_pagina = st.number_input(
             "Consumo base por página a cobertura 100% (ml)",
-            min_value=0.01,
-            value=0.15,
-            step=0.01,
-            format="%.3f"
+            valor mínimo=0,01,
+            valor=0,15,
+            paso=0,01,
+            formato="%.3f"
         )
 
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
 
-        if not df_impresion_db.empty:
-            mask = df_impresion_db['item'].str.contains("tinta", case=False, na=False)
-            tintas = df_impresion_db[mask]
+        si no df_impresion_db.empty:
+            máscara = df_impresion_db['item'].str.contains("tinta", case=False, na=False)
+            tintas = df_impresion_db[máscara]
 
-            if usar_stock_por_impresora and not tintas.empty:
+            si usar_stock_por_impresora y no tintas.empty:
                 tintas_imp = tintas[tintas['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
-                if not tintas_imp.empty:
+                si no tintas_imp.empty:
                     tintas = tintas_imp
-                else:
+                demás:
                     st.info("No se encontraron tintas asociadas a esta impresora; se usará promedio global de tintas.")
 
-            if not tintas.empty:
+            si no tintas.vacío:
                 precio_tinta_ml = tintas['precio_usd'].mean()
                 st.success(f"💧 Precio de tinta detectado: ${precio_tinta_ml:.4f}/ml")
 
@@ -1670,17 +1695,17 @@ elif menu == "🎨 Análisis CMYK":
         factor = st.slider(
             "Factor General de Consumo",
             1.0, 3.0, 1.5, 0.1,
-            help="Ajuste global según rendimiento real de la impresora"
+            help="Ajuste global según el rendimiento real de la impresora"
         )
 
         factor_k = 0.8
         refuerzo_negro = 0.06
-        if auto_negro_inteligente:
+        si auto_negro_inteligente:
             st.success("🧠 Modo automático de negro activo: se detectan sombras y mezclas con negro en cada página.")
-        else:
+        demás:
             factor_k = st.slider(
                 "Factor Especial para Negro (K)",
-                0.5, 1.2, 0.8, 0.05,
+                0,5, 1,2, 0,8, 0,05,
                 help="Modo manual: ajusta consumo base del negro."
             )
             refuerzo_negro = st.slider(
@@ -1689,23 +1714,23 @@ elif menu == "🎨 Análisis CMYK":
                 help="Modo manual: simula uso extra de K en sombras."
             )
 
-    with c_file:
+    con c_file:
         archivos_multiples = st.file_uploader(
             "Carga tus diseños",
-            type=['pdf', 'png', 'jpg', 'jpeg'],
-            accept_multiple_files=True
+            tipo=['pdf', 'png', 'jpg', 'jpeg'],
+            aceptar_múltiples_archivos=Verdadero
         )
 
-    if not archivos_multiples and 'cmyk_analisis_cache' in st.session_state:
-        st.session_state.pop('cmyk_analisis_cache', None)
+    si no archivos_multiples y 'cmyk_analisis_cache' en st.session_state:
+        st.session_state.pop('cmyk_analisis_cache', Ninguno)
 
     # --- PROCESAMIENTO ---
-    if archivos_multiples:
+    si archivos_multiples:
 
-        try:
-            import fitz  # PyMuPDF (opcional para PDF)
-        except ModuleNotFoundError:
-            fitz = None
+        intentar:
+            importar fitz # PyMuPDF (opcional para PDF)
+        excepto ModuleNotFoundError:
+            fitz = Ninguno
 
         resultados = []
         totales_lote_cmyk = {'C': 0.0, 'M': 0.0, 'Y': 0.0, 'K': 0.0}
@@ -1713,43 +1738,43 @@ elif menu == "🎨 Análisis CMYK":
 
         with st.spinner('🚀 Analizando cobertura real...'):
 
-            for arc in archivos_multiples:
+            para arco en archivos_multiples:
 
-                try:
+                intentar:
                     paginas_items = []
-                    bytes_data = arc.read()
+                    bytes_datos = arc.read()
 
-                    if arc.name.lower().endswith('.pdf'):
+                    si arc.name.lower().termina con('.pdf'):
 
-                        if fitz is None:
+                        Si fitz es Ninguno:
                             st.error(
                                 f"No se puede analizar '{arc.name}' porque falta PyMuPDF (fitz). "
-                                "Carga imágenes (PNG/JPG) o instala la dependencia para PDF."
+                                "Carga imágenes (PNG/JPG) o instala la dependencia para PDF".
                             )
-                            continue
+                            continuar
 
-                        doc = fitz.open(stream=bytes_data, filetype="pdf")
+                        doc = fitz.open(stream=bytes_data, tipo de archivo="pdf")
 
-                        for i in range(len(doc)):
-                            page = doc.load_page(i)
+                        para i en rango(len(doc)):
+                            página = doc.load_page(i)
 
-                            pix = page.get_pixmap(colorspace=fitz.csCMYK, dpi=150)
+                            pix = página.get_pixmap(colorspace=fitz.csCMYK, ppp=150)
 
-                            img = Image.frombytes(
+                            img = Imagen.frombytes(
                                 "CMYK",
-                                [pix.width, pix.height],
-                                pix.samples
+                                [pix.ancho, pix.alto],
+                                muestras de píxeles
                             )
 
                             paginas_items.append((f"{arc.name} (P{i+1})", img))
 
                         doc.close()
 
-                    else:
-                        img = Image.open(io.BytesIO(bytes_data)).convert('CMYK')
-                        paginas_items.append((arc.name, img))
+                    demás:
+                        img = Imagen.open(io.BytesIO(bytes_data)).convert('CMYK')
+                        paginas_items.append((arc.nombre, img))
 
-                    for nombre, img_obj in paginas_items:
+                    para nombre, img_obj en paginas_items:
 
                         total_pags += 1
                         arr = np.array(img_obj)
@@ -1769,26 +1794,26 @@ elif menu == "🎨 Análisis CMYK":
                         ml_y = y_media * ml_base_pagina * factor
 
                         ml_k_base = k_media * ml_base_pagina * factor * factor_k
-                        k_extra_ml = 0.0
+                        k_ml_extra = 0.0
 
-                        if auto_negro_inteligente:
+                        si auto_negro_inteligente:
                             cobertura_cmy = (c_chan + m_chan + y_chan) / 3.0
-                            neutral_mask = (
-                                (np.abs(c_chan - m_chan) < 0.08)
+                            máscara neutral = (
+                                (np.abs(c_chan - m_chan) < 0,08)
                                 & (np.abs(m_chan - y_chan) < 0.08)
                             )
-                            shadow_mask = (k_chan > 0.45) | (cobertura_cmy > 0.60)
-                            rich_black_mask = shadow_mask & (cobertura_cmy > 0.35)
+                            máscara_sombra = (k_chan > 0,45) | (cobertura_cmy > 0,60)
+                            máscara_negra_rica = máscara_sombra & (cobertura_cmy > 0.35)
 
-                            ratio_extra = (
-                                float(np.mean(shadow_mask)) * 0.12
-                                + float(np.mean(neutral_mask)) * 0.10
-                                + float(np.mean(rich_black_mask)) * 0.18
+                            proporción_extra = (
+                                float(np.mean(máscara_de_sombra)) * 0.12
+                                + float(np.mean(máscara_neutral)) * 0.10
+                                + float(np.mean(máscara_negra_rica)) * 0.18
                             )
                             k_extra_ml = ml_base_pagina * factor * ratio_extra
-                        else:
-                            promedio_color = (c_media + m_media + y_media) / 3
-                            if promedio_color > 0.55:
+                        demás:
+                            color_promedio = (c_media + m_media + y_media) / 3
+                            si promedio_color > 0.55:
                                 k_extra_ml = promedio_color * refuerzo_negro * factor
 
                         ml_k = ml_k_base + k_extra_ml
@@ -1803,20 +1828,20 @@ elif menu == "🎨 Análisis CMYK":
 
                         resultados.append({
                             "Archivo": nombre,
-                            "C (ml)": round(ml_c, 4),
-                            "M (ml)": round(ml_m, 4),
+                            "C (ml)": redondear(ml_c, 4),
+                            "M (ml)": redondo(ml_m, 4),
                             "Y (ml)": round(ml_y, 4),
-                            "K (ml)": round(ml_k, 4),
-                            "K extra auto (ml)": round(k_extra_ml, 4),
+                            "K (ml)": redondear(ml_k, 4),
+                            "K extra automático (ml)": round(k_extra_ml, 4),
                             "Total ml": round(consumo_total_f, 4),
                             "Costo $": round(costo_f, 4)
                         })
 
-                except Exception as e:
-                    st.error(f"Error analizando {arc.name}: {e}")
+                excepto Excepción como e:
+                    st.error(f"Error al analizar {arc.name}: {e}")
 
         # --- RESULTADOS ---
-        if resultados:
+        si resultados:
 
             st.subheader("📋 Desglose por Archivo")
             st.dataframe(pd.DataFrame(resultados), use_container_width=True)
@@ -1832,13 +1857,13 @@ elif menu == "🎨 Análisis CMYK":
 
             st.divider()
 
-            total_usd_lote = sum(r['Costo $'] for r in resultados)
+            total_usd_lote = suma(r['Costo $'] para r en resultados)
 
-            costo_promedio_pagina = (total_usd_lote / total_pags) if total_pags > 0 else 0
+            costo_promedio_pagina = (total_usd_lote / total_pags) si total_pags > 0 sino 0
             st.metric(
                 "💰 Costo Total Estimado de Producción",
-                f"$ {total_usd_lote:.2f}",
-                delta=f"$ {costo_promedio_pagina:.4f} por pág"
+                f"$ {lote_total_usd:.2f}",
+                delta=f"$ {costo_promedio_pagina:.4f} por página"
             )
 
             df_totales = pd.DataFrame([
@@ -1847,64 +1872,64 @@ elif menu == "🎨 Análisis CMYK":
                 {"Color": "Y", "ml": totales_lote_cmyk['Y']},
                 {"Color": "K", "ml": totales_lote_cmyk['K']}
             ])
-            fig_cmyk = px.pie(df_totales, names='Color', values='ml', title='Distribución de consumo CMYK')
+            fig_cmyk = px.pie(df_totales, nombres='Color', valores='ml', title='Distribución de consumo CMYK')
             st.plotly_chart(fig_cmyk, use_container_width=True)
 
             df_resultados = pd.DataFrame(resultados)
-            st.download_button(
-                "📥 Descargar desglose CMYK (CSV)",
-                data=df_resultados.to_csv(index=False).encode('utf-8'),
-                file_name="analisis_cmyk.csv",
-                mime="text/csv"
+            botón_descargar(
+                "📥Descargar desglose CMYK (CSV)",
+                datos=df_resultados.to_csv(index=False).encode('utf-8'),
+                nombre_de_archivo="analisis_cmyk.csv",
+                mime="texto/csv"
             )
 
             # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
             st.subheader("🧾 Simulación automática por Papel y Calidad")
             # Papeles desde inventario (precio_usd) con fallback por defecto
             perfiles_papel = {}
-            try:
+            intentar:
                 papeles_inv = df_impresion_db[
                     df_impresion_db['item'].fillna('').str.contains(
                         'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
-                        case=False,
-                        na=False
+                        caso=Falso,
+                        na=Falso
                     )
                 ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
 
-                for _, row_p in papeles_inv.iterrows():
-                    nombre_p = str(row_p['item']).strip()
+                para _, fila_p en papeles_inv.iterrows():
+                    nombre_p = str(fila_p['elemento']).strip()
                     precio_p = float(row_p['precio_usd'])
-                    if precio_p > 0:
+                    si precio_p > 0:
                         perfiles_papel[nombre_p] = precio_p
-            except Exception:
+            excepto Excepción:
                 perfiles_papel = {}
 
-            if not perfiles_papel:
+            si no perfiles_papel:
                 perfiles_papel = {
-                    "Bond 75g": 0.03,
-                    "Bond 90g": 0.05,
-                    "Fotográfico Brillante": 0.22,
+                    "Bond 75g": 0,03,
+                    "Bond 90g": 0,05,
+                    "Fotográfico Brillante": 0,22,
                     "Fotográfico Mate": 0.20,
-                    "Cartulina": 0.12,
-                    "Adhesivo": 0.16
+                    "Cartulina": 0,12,
+                    "Adhesivo": 0,16
                 }
                 st.info("No se detectaron papeles en inventario; se usan costos base por defecto.")
-            else:
+            demás:
                 st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
             perfiles_calidad = {
                 "Borrador": {"ink_mult": 0.82, "wear_mult": 0.90},
-                "Normal": {"ink_mult": 1.00, "wear_mult": 1.00},
+                "Normal": {"multiplicación de tinta": 1.00, "multiplicación de desgaste": 1.00},
                 "Alta": {"ink_mult": 1.18, "wear_mult": 1.10},
-                "Foto": {"ink_mult": 1.32, "wear_mult": 1.15}
+                "Foto": {"multiplicación de tinta": 1.32, "multiplicación de ropa": 1.15}
             }
 
-            total_ml_lote = float(sum(totales_lote_cmyk.values()))
+            total_ml_lote = float(suma(totales_lote_cmyk.values()))
             costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
             costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
             simulaciones = []
-            for papel, costo_hoja in perfiles_papel.items():
-                for calidad, cfg_q in perfiles_calidad.items():
+            para papel, costo_hoja en perfiles_papel.items():
+                para calidad, cfg_q en perfiles_calidad.items():
                     costo_tinta_q = costo_tinta_base * cfg_q['ink_mult']
                     costo_desgaste_q = costo_desgaste_base * cfg_q['wear_mult']
                     costo_papel_q = float(total_pags) * costo_hoja
@@ -1913,80 +1938,80 @@ elif menu == "🎨 Análisis CMYK":
                         "Papel": papel,
                         "Calidad": calidad,
                         "Páginas": total_pags,
-                        "Tinta ($)": round(costo_tinta_q, 2),
+                        "Tinta ($)": ronda(costo_tinta_q, 2),
                         "Desgaste ($)": round(costo_desgaste_q, 2),
-                        "Papel ($)": round(costo_papel_q, 2),
+                        "Papel ($)": redondo(costo_papel_q, 2),
                         "Total ($)": round(total_q, 2),
-                        "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
+                        "Costo por página ($)": round(total_q / total_pags, 4) if total_pags else 0
                     })
 
             df_sim = pd.DataFrame(simulaciones).sort_values('Total ($)')
-            st.dataframe(df_sim, use_container_width=True, hide_index=True)
+            st.dataframe(df_sim, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
             fig_sim = px.bar(df_sim.head(12), x='Papel', y='Total ($)', color='Calidad', barmode='group', title='Comparativo de costos (top 12 más económicos)')
-            st.plotly_chart(fig_sim, use_container_width=True)
+            st.plotly_chart(fig_sim, usar_ancho_del_contenedor=Verdadero)
 
             mejor = df_sim.iloc[0]
-            st.success(
+            st.éxito(
                 f"Mejor costo automático: {mejor['Papel']} | {mejor['Calidad']} → ${mejor['Total ($)']:.2f} "
-                f"(${mejor['Costo por pág ($)']:.4f}/pág)"
+                f"(${mejor['Costo por página ($)']:.4f}/pág)"
             )
 
             st.session_state['cmyk_analisis_cache'] = {
                 'resultados': resultados,
                 'simulaciones': simulaciones,
                 'impresora': impresora_sel,
-                'paginas': total_pags
+                'páginas': total_pags
             }
 
             # --- VERIFICAR INVENTARIO ---
-            if not df_impresion_db.empty:
+            si no df_impresion_db.empty:
 
                 st.subheader("📦 Verificación de Inventario")
 
                 alertas = []
 
                 stock_base = df_impresion_db[df_impresion_db['item'].str.contains('tinta', case=False, na=False)].copy()
-                if usar_stock_por_impresora:
+                si usar_stock_por_impresora:
                     stock_imp = stock_base[stock_base['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
-                    if not stock_imp.empty:
-                        stock_base = stock_imp
+                    si no stock_imp.empty:
+                        base_de_stock = imp_de_stock
 
                 alias_colores = {
-                    'C': ['cian', 'cyan'],
+                    'C': ['cian', 'cian'],
                     'M': ['magenta'],
                     'Y': ['amarillo', 'yellow'],
-                    # K = Negro. Incluye variantes reales de inventario: negro/negra/black/k
-                    'K': ['negro', 'negra', 'black', ' k ']
+                    #K=Negro. Incluye variantes reales de inventario: negro/negro/black/k
+                    'K': ['negro', 'negra', 'black', 'k']
                 }
 
-                for color, ml in totales_lote_cmyk.items():
-                    aliases = alias_colores.get(color, [])
-                    stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
+                para color, ml en totales_lote_cmyk.items():
+                    alias = alias_colores.get(color, [])
+                    stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if alias else pd.DataFrame()
 
-                    if not stock.empty:
+                    si no está en stock.vacío:
                         disponible = stock['cantidad'].sum()
 
-                        if disponible < ml:
+                        si disponible < ml:
                             alertas.append(
                                 f"⚠️ Falta tinta {color}: necesitas {ml:.2f} ml y hay {disponible:.2f} ml"
                             )
-                    else:
+                    demás:
                         alertas.append(f"⚠️ No se encontró tinta {color} asociada en inventario para validar stock.")
 
-                if alertas:
-                    for a in alertas:
+                si alertas:
+                    para una en alertas:
                         st.error(a)
-                else:
-                    st.success("✅ Hay suficiente tinta para producir")
+                demás:
+                    st.success("Hay suficiente tinta para producir")
 
 
                        # --- ENVÍO A COTIZACIÓN ---
             if st.button("📝 ENVIAR A COTIZACIÓN", use_container_width=True):
 
                 # Guardamos información completa para el cotizador
-                st.session_state['datos_pre_cotizacion'] = {
+                st.session_state['datos_pre_cotización'] = {
                     'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
-                    'costo_base': float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote),
+                    'costo_base': float(df_sim.iloc[0]['Total ($)']) si no df_sim.empty de lo contrario float(total_usd_lote),
                     'unidades': total_pags,
 
                     # Desglose de consumo real
@@ -2004,15 +2029,15 @@ elif menu == "🎨 Análisis CMYK":
                     'detalle_archivos': resultados
                 }
 
-                try:
-                    with conectar() as conn:
+                intentar:
+                    con conectar() como conexión:
                         conn.execute("""
-                            INSERT INTO historial_cmyk
+                            INSERTAR EN historial_cmyk
                             (impresora, paginas, costo)
-                            VALUES (?,?,?)
+                            VALORES (?,?,?)
                         """, (impresora_sel, total_pags, total_usd_lote))
-                        conn.commit()
-                except Exception as e:
+                        conexión.commit()
+                excepto Excepción como e:
                     st.warning(f"No se pudo guardar en historial: {e}")
 
                 st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
@@ -2023,68 +2048,68 @@ elif menu == "🎨 Análisis CMYK":
 
     st.divider()
     st.subheader("🕘 Historial reciente CMYK")
-    if df_hist_cmyk.empty:
+    si df_hist_cmyk.empty:
         st.info("Aún no hay análisis guardados en el historial.")
-    else:
+    demás:
         df_hist_view = df_hist_cmyk.copy()
         df_hist_view['fecha'] = pd.to_datetime(df_hist_view['fecha'], errors='coerce')
-        st.dataframe(df_hist_view, use_container_width=True, hide_index=True)
+        st.dataframe(df_hist_view, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
 
         hist_ordenado = df_hist_view.dropna(subset=['fecha']).copy()
-        if not hist_ordenado.empty:
+        si no hist_ordenado.empty:
             hist_ordenado['dia'] = hist_ordenado['fecha'].dt.date.astype(str)
             hist_dia = hist_ordenado.groupby('dia', as_index=False)['costo'].sum()
-            fig_hist = px.line(hist_dia, x='dia', y='costo', markers=True, title='Costo CMYK por día (historial)')
+            fig_hist = px.line(hist_dia, x='dia', y='costo', marcadores=True, title='Costo CMYK por día (historial)')
             fig_hist.update_layout(xaxis_title='Día', yaxis_title='Costo ($)')
             st.plotly_chart(fig_hist, use_container_width=True)
 
 
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
-elif menu == "🏗️ Activos":
+menú elif == "🏗️ Activos":
 
-    if ROL != "Admin":
+    si ROL != "Admin":
         st.error("🚫 Acceso Denegado. Solo Administración puede gestionar activos.")
         st.stop()
 
     st.title("🏗️ Gestión Integral de Activos")
 
     # --- CARGA SEGURA DE DATOS ---
-    try:
-        with conectar() as conn:
+    intentar:
+        con conectar() como conexión:
             df = pd.read_sql_query("SELECT * FROM activos", conn)
 
             # Crear tabla de historial si no existe
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS activos_historial (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    activo TEXT,
-                    accion TEXT,
-                    detalle TEXT,
+                CREAR TABLA SI NO EXISTE activos_historial (
+                    id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                    activo TEXTO,
+                    acción TEXTO,
+                    detalle TEXTO,
                     costo REAL,
-                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                    fecha FECHA Y HORA PREDETERMINADA MARCA DE TIEMPO ACTUAL
                 )
             """)
-    except Exception as e:
+    excepto Excepción como e:
         st.error(f"Error al cargar activos: {e}")
         st.stop()
 
     # --- REGISTRO DE NUEVO ACTIVO ---
-    with st.expander("➕ Registrar Nuevo Activo"):
+    con st.expander("➕ Registrador Nuevo Activo"):
 
-        with st.form("form_activos_pro"):
+        con st.form("form_activos_pro"):
 
             c1, c2 = st.columns(2)
 
             nombre_eq = c1.text_input("Nombre del Activo")
             tipo_seccion = c2.selectbox("Tipo de Activo", [
                 "Maquinaria (Equipos Grandes)",
-                "Herramienta Manual (Uso diario)",
+                "Manual Herramienta (Uso diario)",
                 "Repuesto Crítico (Stock de seguridad)"
             ])
 
             col_m1, col_m2, col_m3 = st.columns(3)
 
-            monto_inv = col_m1.number_input("Inversión ($)", min_value=0.0)
+            monto_inv = col_m1.number_input("Inversión ($)", valor_mínimo=0.0)
             vida_util = col_m2.number_input("Vida Útil (Usos)", min_value=1, value=1000)
 
             categoria_especifica = col_m3.selectbox(
@@ -2094,92 +2119,92 @@ elif menu == "🏗️ Activos":
 
             if st.form_submit_button("🚀 Guardar Activo"):
 
-                if not nombre_eq:
+                si no nombre_eq:
                     st.error("Debe indicar un nombre.")
                     st.stop()
 
-                if monto_inv <= 0:
+                si monto_inv <= 0:
                     st.error("La inversión debe ser mayor a cero.")
                     st.stop()
 
                 desgaste_u = monto_inv / vida_util
 
-                try:
-                    with conectar() as conn:
+                intentar:
+                    con conectar() como conexión:
                         conn.execute("""
-                            INSERT INTO activos 
-                            (equipo, categoria, inversion, unidad, desgaste) 
-                            VALUES (?,?,?,?,?)
+                            INSERTAR EN activos 
+                            (equipo, categoría, inversión, unidad, desgaste) 
+                            VALORES (?,?,?,?,?)
                         """, (
                             f"[{tipo_seccion[:3].upper()}] {nombre_eq}",
-                            categoria_especifica,
+                            categoría_especifica,
                             monto_inv,
                             tipo_seccion,
                             desgaste_u
                         ))
 
                         conn.execute("""
-                            INSERT INTO activos_historial 
-                            (activo, accion, detalle, costo)
-                            VALUES (?,?,?,?)
+                            INSERTAR EN activos_historial 
+                            (activo, acción, detalle, costo)
+                            VALORES (?,?,?,?)
                         """, (nombre_eq, "CREACIÓN", "Registro inicial", monto_inv))
 
-                        conn.commit()
+                        conexión.commit()
 
                     st.success("✅ Activo registrado correctamente.")
                     st.rerun()
 
-                except Exception as e:
+                excepto Excepción como e:
                     st.error(f"Error al registrar: {e}")
 
     st.divider()
 
     # --- EDICIÓN DE ACTIVOS ---
-    with st.expander("✏️ Editar Activo Existente"):
+    con st.expander("✏️ Editar Activo Existente"):
 
-        if df.empty:
+        si df.vacío:
             st.info("No hay activos para editar.")
-        else:
+        demás:
             activo_sel = st.selectbox("Seleccionar activo:", df['equipo'].tolist())
 
             datos = df[df['equipo'] == activo_sel].iloc[0]
 
-            with st.form("editar_activo"):
+            con st.form("editar_activo"):
 
                 c1, c2, c3 = st.columns(3)
 
-                nueva_inv = c1.number_input("Inversión ($)", value=float(datos['inversion']))
-                nueva_vida = c2.number_input("Vida útil", value=1000)
+                nueva_inv = c1.number_input("Inversión ($)", valor=float(datos['inversión']))
+                nueva_vida = c2.number_input("Vida útil", valor=1000)
                 nueva_cat = c3.selectbox(
                     "Categoría",
                     ["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"],
-                    index=0
+                    índice=0
                 )
 
-                if st.form_submit_button("💾 Guardar Cambios"):
+                si st.form_submit_button("💾 Guardar cambios"):
 
                     nuevo_desgaste = nueva_inv / nueva_vida
 
-                    try:
-                        with conectar() as conn:
+                    intentar:
+                        con conectar() como conexión:
                             conn.execute("""
-                                UPDATE activos
-                                SET inversion = ?, categoria = ?, desgaste = ?
-                                WHERE id = ?
+                                ACTUALIZAR activos
+                                SET inversión = ?, categoria = ?, desgaste = ?
+                                DONDE id = ?
                             """, (nueva_inv, nueva_cat, nuevo_desgaste, int(datos['id'])))
 
                             conn.execute("""
-                                INSERT INTO activos_historial 
-                                (activo, accion, detalle, costo)
-                                VALUES (?,?,?,?)
+                                INSERTAR EN activos_historial 
+                                (activo, acción, detalle, costo)
+                                VALORES (?,?,?,?)
                             """, (activo_sel, "EDICIÓN", "Actualización de valores", nueva_inv))
 
-                            conn.commit()
+                            conexión.commit()
 
                         st.success("Activo actualizado.")
                         st.rerun()
 
-                    except Exception as e:
+                    excepto Excepción como e:
                         st.error(f"Error al actualizar: {e}")
 
     st.divider()
@@ -2190,63 +2215,63 @@ elif menu == "🏗️ Activos":
         "🛠️ Herramientas",
         "🔄 Repuestos",
         "📊 Resumen Global",
-        "📜 Historial"
+        "📜 Histórico"
     ])
 
-    if not df.empty:
+    si no df.empty:
 
-        with t1:
+        con t1:
             st.subheader("Equipos y Maquinaria")
             df_maq = df[df['unidad'].str.contains("Maquinaria")]
-            st.dataframe(df_maq, use_container_width=True, hide_index=True)
+            st.dataframe(df_maq, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
 
-        with t2:
+        con t2:
             st.subheader("Herramientas Manuales")
             df_her = df[df['unidad'].str.contains("Herramienta")]
-            st.dataframe(df_her, use_container_width=True, hide_index=True)
+            st.dataframe(df_her, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
 
-        with t3:
+        con t3:
             st.subheader("Repuestos Críticos")
             df_rep = df[df['unidad'].str.contains("Repuesto")]
-            st.dataframe(df_rep, use_container_width=True, hide_index=True)
+            st.dataframe(df_rep, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
 
-        with t4:
+        con t4:
             c_inv, c_des, c_prom = st.columns(3)
 
             c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
             c_des.metric("Activos Registrados", len(df))
 
-            promedio = df['desgaste'].mean() if not df.empty else 0
+            promedio = df['desgaste'].mean() si no df.empty si no 0
             c_prom.metric("Desgaste Promedio por Uso", f"$ {promedio:.4f}")
 
             fig = px.bar(
                 df,
                 x='equipo',
-                y='inversion',
-                color='categoria',
+                y='inversión',
+                color='categoría',
                 title="Distribución de Inversión por Activo"
             )
             st.plotly_chart(fig, use_container_width=True)
 
-        with t5:
+        con t5:
             st.subheader("Historial de Movimientos de Activos")
 
-            try:
-                with conectar() as conn:
+            intentar:
+                con conectar() como conexión:
                     df_hist = pd.read_sql_query(
-                        "SELECT activo, accion, detalle, costo, fecha FROM activos_historial ORDER BY fecha DESC",
-                        conn
+                        "SELECT activo, acción, detalle, costo, fecha FROM activos_historial ORDER BY fecha DESC",
+                        conexión
                     )
 
-                if not df_hist.empty:
-                    st.dataframe(df_hist, use_container_width=True, hide_index=True)
-                else:
+                si no df_hist.empty:
+                    st.dataframe(df_hist, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
+                demás:
                     st.info("No hay movimientos registrados aún.")
 
-            except Exception as e:
-                st.error(f"Error cargando historial: {e}")
+            excepto Excepción como e:
+                st.error(f"Error al cargar historial: {e}")
 
-    else:
+    demás:
         st.info("No hay activos registrados todavía.")
 
 
@@ -2259,52 +2284,52 @@ elif menu == "🛠️ Otros Procesos":
     st.info("Cálculo de costos de procesos que no usan tinta: corte, laminado, planchado, etc.")
 
     # --- CARGA SEGURA DE EQUIPOS ---
-    try:
-        with conectar() as conn:
+    intentar:
+        con conectar() como conexión:
             df_act_db = pd.read_sql_query(
                 "SELECT equipo, categoria, unidad, desgaste FROM activos", conn
             )
 
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS historial_procesos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    equipo TEXT,
+                CREAR TABLA SI NO EXISTE historial_procesos (
+                    id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                    equipo TEXTO,
                     cantidad REAL,
                     costo REAL,
-                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                    fecha FECHA Y HORA PREDETERMINADA MARCA DE TIEMPO ACTUAL
                 )
             """)
 
-    except Exception as e:
-        st.error(f"Error cargando activos: {e}")
+    excepto Excepción como e:
+        st.error(f"Error al cargar activos: {e}")
         st.stop()
 
     # Filtrar solo equipos que NO gastan tinta
     otros_equipos = df_act_db[
         df_act_db['categoria'] != "Impresora (Gasta Tinta)"
-    ].to_dict('records')
+    ].to_dict('registros')
 
-    if not otros_equipos:
+    si no otros_equipos:
         st.warning("⚠️ No hay equipos registrados para procesos especiales.")
         st.stop()
 
-    nombres_eq = [e['equipo'] for e in otros_equipos]
+    nombres_eq = [e['equipo'] for e en otros_equipos]
 
-    if "lista_procesos" not in st.session_state:
+    si "lista_procesos" no está en st.session_state:
         st.session_state.lista_procesos = []
 
-    with st.container(border=True):
+    con st.container(border=True):
 
         c1, c2 = st.columns(2)
 
         eq_sel = c1.selectbox("Selecciona el Proceso/Equipo:", nombres_eq)
 
-        datos_eq = next(e for e in otros_equipos if e['equipo'] == eq_sel)
+        datos_eq = next(e para e en otros_equipos si e['equipo'] == eq_sel)
 
         cantidad = c2.number_input(
             f"Cantidad de {datos_eq['unidad']}:",
-            min_value=1.0,
-            value=1.0
+            valor mínimo=1.0,
+            valor=1.0
         )
 
         # Conversión segura del desgaste
@@ -2326,93 +2351,93 @@ elif menu == "🛠️ Otros Procesos":
             st.toast("Proceso añadido")
 
     # --- RESUMEN DE PROCESOS EN SESIÓN ---
-    if st.session_state.lista_procesos:
+    si st.session_state.lista_procesos:
 
         st.subheader("📋 Procesos Acumulados")
 
         df_proc = pd.DataFrame(st.session_state.lista_procesos)
-        st.dataframe(df_proc, use_container_width=True, hide_index=True)
+        st.dataframe(df_proc, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
 
         total = df_proc["costo"].sum()
-        st.metric("Total Procesos", f"$ {total:.2f}")
+        st.metric("Total de procesos", f"$ {total:.2f}")
 
         col1, col2 = st.columns(2)
 
-        with col1:
+        con col1:
             if st.button("📝 Enviar a Cotización", use_container_width=True):
 
-                st.session_state['datos_pre_cotizacion'] = {
+                st.session_state['datos_pre_cotización'] = {
                     'trabajo': " + ".join(df_proc["equipo"].tolist()),
                     'costo_base': float(total),
                     'unidades': 1,
-                    'es_proceso_extra': True
+                    'es_proceso_extra': Verdadero
                 }
 
                 st.success("Enviado a cotización")
                 st.session_state.lista_procesos = []
                 st.rerun()
 
-        with col2:
-            if st.button("🧹 Limpiar", use_container_width=True):
+        con col2:
+            si st.button("🧹 Limpiar", use_container_width=True):
                 st.session_state.lista_procesos = []
                 st.rerun()
 
-    # --- HISTORIAL ---
-    with st.expander("📜 Historial de Procesos"):
+    # --- HISTÓRICO ---
+    con st.expander("📜 Historial de Procesos"):
 
-        try:
-            with conectar() as conn:
+        intentar:
+            con conectar() como conexión:
                 df_hist = pd.read_sql_query(
-                    "SELECT * FROM historial_procesos ORDER BY fecha DESC",
-                    conn
+                    "SELECCIONAR * DE historial_procesos ORDENAR POR fecha DESC",
+                    conexión
                 )
 
-            if not df_hist.empty:
+            si no df_hist.empty:
                 st.dataframe(df_hist, use_container_width=True)
-            else:
+            demás:
                 st.info("Sin registros aún.")
 
-        except Exception as e:
+        excepto Excepción como e:
             st.info("Historial no disponible.")
 
 
 # ===========================================================
 # 12. MÓDULO PROFESIONAL DE VENTAS (VERSIÓN 2.0)
 # ===========================================================
-elif menu == "💰 Ventas":
+menú elif == "💰 Ventas":
 
     st.title("💰 Gestión Profesional de Ventas")
 
-    tab1, tab2, tab3 = st.tabs([
+    pestaña1, pestaña2, pestaña3 = st.tabs([
         "📝 Registrar Venta",
-        "📜 Historial",
+        "📜 Histórico",
         "📊 Resumen"
     ])
 
     # -----------------------------------
     # REGISTRO DE VENTA
     # -----------------------------------
-    with tab1:
+    con pestaña1:
 
         df_cli = st.session_state.get("df_cli", pd.DataFrame())
 
-        if df_cli.empty:
+        si df_cli.empty:
             st.warning("⚠️ Registra clientes primero.")
             st.stop()
 
-        with st.form("venta_manual", clear_on_submit=True):
+        con st.form("venta_manual", clear_on_submit=True):
 
             st.subheader("Datos de la Venta")
 
             opciones_cli = {
-                row['nombre']: row['id']
-                for _, row in df_cli.iterrows()
+                fila['nombre']: fila['id']
+                para _, fila en df_cli.iterrows()
             }
 
             c1, c2 = st.columns(2)
 
             cliente_nombre = c1.selectbox(
-                "Cliente:", list(opciones_cli.keys())
+                "Cliente:", lista(opciones_cli.keys())
             )
 
             detalle_v = c2.text_input(
@@ -2422,40 +2447,40 @@ elif menu == "💰 Ventas":
 
             c3, c4, c5 = st.columns(3)
 
-            monto_venta = c3.number_input(
+            monto_venta = c3.número_entrada(
                 "Monto ($):",
-                min_value=0.01,
-                format="%.2f"
+                valor mínimo=0,01,
+                formato="%.2f"
             )
 
-            metodo_pago = c4.selectbox(
+            método_pago = c4.selectbox(
                 "Método:",
                 ["Efectivo ($)", "Pago Móvil (BCV)",
                  "Zelle", "Binance (USDT)",
                  "Transferencia (Bs)", "Pendiente"]
             )
 
-            tasa_uso = t_bcv if "BCV" in metodo_pago else (
-                t_bin if "Binance" in metodo_pago else 1.0
+            tasa_uso = t_bcv si "BCV" en metodo_pago else (
+                t_bin si "Binance" en metodo_pago de lo contrario 1.0
             )
 
             monto_bs = monto_venta * tasa_uso
 
-            c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
+            c5.metric("Bs equivalentes", f"{monto_bs:,.2f}")
 
             if st.form_submit_button("🚀 Registrar Venta"):
 
-                if not detalle_v.strip():
+                si no detalle_v.strip():
                     st.error("Debes indicar el detalle de la venta.")
                     st.stop()
 
-                try:
-                    with conectar() as conn:
+                intentar:
+                    con conectar() como conexión:
 
                         conn.execute("""
-                            CREATE TABLE IF NOT EXISTS ventas_extra (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                venta_id INTEGER,
+                            CREAR TABLA SI NO EXISTE ventas_extra (
+                                id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                                venta_id ENTERO,
                                 tasa REAL,
                                 monto_bs REAL
                             )
@@ -2464,75 +2489,75 @@ elif menu == "💰 Ventas":
                         cur = conn.cursor()
 
                         cur.execute("""
-                            INSERT INTO ventas 
+                            INSERTAR EN ventas 
                             (cliente_id, cliente, detalle, monto_total, metodo)
-                            VALUES (?, ?, ?, ?, ?)
+                            VALORES (?, ?, ?, ?, ?)
                         """, (
-                            opciones_cli[cliente_nombre],
+                            opciones_cli[nombre_del_cliente],
                             cliente_nombre,
                             detalle_v.strip(),
                             float(monto_venta),
-                            metodo_pago
+                            método_pago
                         ))
 
                         venta_id = cur.lastrowid
 
                         cur.execute("""
-                            INSERT INTO ventas_extra
+                            INSERTAR EN ventas_extra
                             (venta_id, tasa, monto_bs)
-                            VALUES (?, ?, ?)
+                            VALORES (?, ?, ?)
                         """, (
                             venta_id,
-                            float(tasa_uso),
-                            float(monto_bs)
+                            flotar(tasa_uso),
+                            flotador(monto_bs)
                         ))
 
-                        conn.commit()
+                        conexión.commit()
 
                     st.success("Venta registrada correctamente")
-                    st.balloons()
+                    globos de San Valentín()
                     st.rerun()
 
-                except Exception as e:
+                excepto Excepción como e:
                     st.error(f"Error: {e}")
 
     # -----------------------------------
-    # HISTORIAL
+    # HISTÓRICO
     # -----------------------------------
-    with tab2:
+    con tab2:
 
         st.subheader("Historial de Ventas")
 
-        try:
-            with conectar() as conn:
+        intentar:
+            con conectar() como conexión:
                 df_historial = pd.read_sql_query("""
-                    SELECT 
+                    SELECCIONAR 
                         v.id,
                         v.fecha,
                         v.cliente,
                         v.detalle,
-                        v.monto_total as total,
-                        v.metodo,
+                        v.monto_total como total,
+                        v.método,
                         e.tasa,
                         e.monto_bs
-                    FROM ventas v
-                    LEFT JOIN ventas_extra e ON v.id = e.venta_id
-                    ORDER BY v.fecha DESC
-                """, conn)
-        except Exception as e:
-            st.error(f"Error cargando historial: {e}")
+                    DESDE ventas v
+                    IZQUIERDA UNIRSE ventas_extra e ON v.id = e.venta_id
+                    ORDENAR POR v.fecha DESC
+                """, conexión)
+        excepto Excepción como e:
+            st.error(f"Error al cargar historial: {e}")
             st.stop()
 
-        if df_historial.empty:
+        si df_historial.empty:
             st.info("No hay ventas aún.")
             st.stop()
 
         c1, c2 = st.columns(2)
 
-        desde = c1.date_input("Desde", date.today() - timedelta(days=30))
-        hasta = c2.date_input("Hasta", date.today())
+        desde = c1.date_input("Desde", fecha.hoy() - timedelta(dias=30))
+        hasta = c2.date_input("Hasta", fecha.hoy())
 
-        df_historial['fecha'] = pd.to_datetime(df_historial['fecha'], errors='coerce')
+        df_historial['fecha'] = pd.to_datetime(df_historial['fecha'], errores='coaccionar')
 
         df_fil = df_historial[
             (df_historial['fecha'].dt.date >= desde) &
@@ -2541,7 +2566,7 @@ elif menu == "💰 Ventas":
 
         busc = st.text_input("Buscar por cliente o detalle:")
 
-        if busc:
+        si busc:
             df_fil = df_fil[
                 df_fil['cliente'].str.contains(busc, case=False, na=False) |
                 df_fil['detalle'].str.contains(busc, case=False, na=False)
@@ -2556,55 +2581,55 @@ elif menu == "💰 Ventas":
 
         pendientes = df_fil[df_fil['metodo'] == "Pendiente"]
 
-        for _, row in pendientes.iterrows():
+        para _, fila en pendientes.iterrows():
 
-            with st.container(border=True):
+            con st.container(border=True):
 
-                st.write(f"**{row['cliente']}** – ${row['total']:.2f}")
+                st.write(f"**{fila['cliente']}** – ${fila['total']:.2f}")
 
                 if st.button(f"Marcar como pagada #{row['id']}"):
 
-                    try:
-                        with conectar() as conn:
+                    intentar:
+                        con conectar() como conexión:
                             conn.execute("""
-                                UPDATE ventas
-                                SET metodo = 'Pagado'
-                                WHERE id = ?
-                            """, (int(row['id']),))
-                            conn.commit()
+                                ACTUALIZACIÓN ventas
+                                SET método = 'Pagado'
+                                DONDE id = ?
+                            """, (int(fila['id']),))
+                            conexión.commit()
 
                         st.success("Actualizado")
                         st.rerun()
 
-                    except Exception as e:
+                    excepto Excepción como e:
                         st.error(str(e))
 
         # --- EXPORTACIÓN ---
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_fil.to_excel(writer, index=False, sheet_name='Ventas')
+        búfer = io.BytesIO()
+        con pd.ExcelWriter(buffer, engine='xlsxwriter') como escritor:
+            df_fil.to_excel(escritor, índice=Falso, nombre_hoja='Ventas')
 
-        st.download_button(
+        botón_descargar(
             "📥 Exportar Excel",
             buffer.getvalue(),
-            "historial_ventas.xlsx"
+            "ventas históricas.xlsx"
         )
 
     # -----------------------------------
     # RESUMEN
     # -----------------------------------
-    with tab3:
+    con tab3:
 
         st.subheader("Resumen Comercial")
 
-        try:
-            with conectar() as conn:
+        intentar:
+            con conectar() como conexión:
                 df_v = pd.read_sql("SELECT * FROM ventas", conn)
-        except:
+        excepto:
             st.info("Sin datos")
             st.stop()
 
-        if df_v.empty:
+        si df_v.empty:
             st.info("No hay ventas registradas.")
             st.stop()
 
@@ -2616,15 +2641,15 @@ elif menu == "💰 Ventas":
 
         pendientes = df_v[
             df_v['metodo'].str.contains("Pendiente", case=False, na=False)
-        ]['monto_total'].sum()
+        ]['monto_total'].suma()
 
         c2.metric("Por Cobrar", f"$ {pendientes:.2f}")
 
-        top = df_v.groupby('cliente')['monto_total'].sum().reset_index()
+        arriba = df_v.groupby('cliente')['monto_total'].sum().reset_index()
 
         mejor = top.sort_values("monto_total", ascending=False).head(1)
 
-        if not mejor.empty:
+        si no mejor.vacío:
             c3.metric("Mejor Cliente", mejor.iloc[0]['cliente'])
 
         st.subheader("Ventas por Cliente")
@@ -2634,35 +2659,35 @@ elif menu == "💰 Ventas":
 # ===========================================================
 # 12. MÓDULO PROFESIONAL DE GASTOS (VERSIÓN 2.1 MEJORADA)
 # ===========================================================
-elif menu == "📉 Gastos":
+elif menú == "📉 Gastos":
 
     st.title("📉 Control Integral de Gastos")
     st.info("Registro, análisis y control de egresos del negocio")
 
     # Solo administración puede registrar gastos
-    if ROL not in ["Admin", "Administracion"]:
+    si ROL no está en ["Admin", "Administracion"]:
         st.error("🚫 Solo Administración puede gestionar gastos.")
         st.stop()
 
-    tab1, tab2, tab3 = st.tabs([
-        "📝 Registrar Gasto",
-        "📜 Historial",
+    pestaña1, pestaña2, pestaña3 = st.tabs([
+        "📝 Registrador Gasto",
+        "📜 Histórico",
         "📊 Resumen"
     ])
 
     # -----------------------------------
     # REGISTRO DE GASTOS
     # -----------------------------------
-    with tab1:
+    con pestaña1:
 
-        with st.form("form_gastos_pro", clear_on_submit=True):
+        con st.form("form_gastos_pro", clear_on_submit=True):
 
             col_d, col_c = st.columns([2, 1])
 
-            desc = col_d.text_input(
+            desc = col_d.texto_entrada(
                 "Descripción del Gasto",
                 placeholder="Ej: Pago de luz, resma de papel, repuesto..."
-            ).strip()
+            ).banda()
 
             categoria = col_c.selectbox("Categoría:", [
                 "Materia Prima",
@@ -2676,10 +2701,10 @@ elif menu == "📉 Gastos":
 
             c1, c2, c3 = st.columns(3)
 
-            monto_gasto = c1.number_input(
+            monto_gasto = c1.número_entrada(
                 "Monto en Dólares ($):",
-                min_value=0.01,
-                format="%.2f"
+                valor mínimo=0,01,
+                formato="%.2f"
             )
 
             metodo_pago = c2.selectbox("Método de Pago:", [
@@ -2687,104 +2712,104 @@ elif menu == "📉 Gastos":
                 "Pago Móvil (BCV)",
                 "Zelle",
                 "Binance (USDT)",
-                "Transferencia (Bs)"
+                Transferencia (Bs)
             ])
 
-            tasa_ref = t_bcv if "BCV" in metodo_pago or "Bs" in metodo_pago else (
-                t_bin if "Binance" in metodo_pago else 1.0
+            tasa_ref = t_bcv si "BCV" en metodo_pago o "Bs" en metodo_pago else (
+                t_bin si "Binance" en metodo_pago de lo contrario 1.0
             )
 
             monto_bs = monto_gasto * tasa_ref
 
-            c3.metric("Equivalente Bs", f"{monto_bs:,.2f}")
+            c3.metric("Bs equivalentes", f"{monto_bs:,.2f}")
 
             st.divider()
 
-            if st.form_submit_button("📉 REGISTRAR EGRESO"):
+            si st.form_submit_button("📉 REGISTRADOR EGRESO"):
 
-                if not desc:
+                si no desc:
                     st.error("⚠️ La descripción es obligatoria.")
                     st.stop()
 
-                try:
-                    with conectar() as conn:
+                intentar:
+                    con conectar() como conexión:
 
                         conn.execute("""
-                            CREATE TABLE IF NOT EXISTS gastos_extra (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                gasto_id INTEGER,
+                            CREAR TABLA SI NO EXISTE gastos_extra (
+                                id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                                gasto_id ENTERO,
                                 tasa REAL,
                                 monto_bs REAL,
-                                usuario TEXT
+                                usuario TEXTO
                             )
                         """)
 
                         cur = conn.cursor()
 
                         cur.execute("""
-                            INSERT INTO gastos 
+                            INSERTAR EN gastos 
                             (descripcion, monto, categoria, metodo) 
-                            VALUES (?, ?, ?, ?)
+                            VALORES (?, ?, ?, ?)
                         """, (desc, float(monto_gasto), categoria, metodo_pago))
 
                         gasto_id = cur.lastrowid
 
                         cur.execute("""
-                            INSERT INTO gastos_extra
+                            INSERTAR EN gastos_extra
                             (gasto_id, tasa, monto_bs, usuario)
-                            VALUES (?, ?, ?, ?)
+                            VALORES (?, ?, ?, ?)
                         """, (
                             gasto_id,
-                            float(tasa_ref),
-                            float(monto_bs),
+                            flotar(tasa_ref),
+                            flotar(monto_bs),
                             st.session_state.get("usuario_nombre", "Sistema")
                         ))
 
-                        conn.commit()
+                        conexión.commit()
 
                     st.success("📉 Gasto registrado correctamente.")
-                    st.balloons()
+                    globos de San Valentín()
                     st.rerun()
 
-                except Exception as e:
+                excepto Excepción como e:
                     st.error(f"❌ Error al guardar el gasto: {e}")
 
     # -----------------------------------
-    # HISTORIAL DE GASTOS
+    # HISTÓRICO DE GASTOS
     # -----------------------------------
-    with tab2:
+    con tab2:
 
-        st.subheader("📋 Historial de Gastos")
+        st.subheader("📋 Historia de Gastos")
 
-        try:
-            with conectar() as conn:
+        intentar:
+            con conectar() como conexión:
                 df_g = pd.read_sql_query("""
-                    SELECT 
+                    SELECCIONAR 
                         g.id,
                         g.fecha,
                         g.descripcion,
-                        g.categoria,
+                        g.categoría,
                         g.monto,
                         g.metodo,
                         e.tasa,
                         e.monto_bs,
-                        e.usuario
-                    FROM gastos g
-                    LEFT JOIN gastos_extra e ON g.id = e.gasto_id
-                    ORDER BY g.fecha DESC
-                """, conn)
-        except Exception as e:
-            st.error(f"Error cargando historial: {e}")
+                        usuario electrónico
+                    DE gastos g
+                    IZQUIERDA UNIRSE gastos_extra e ON g.id = e.gasto_id
+                    ORDENAR POR g.fecha DESC
+                """, conexión)
+        excepto Excepción como e:
+            st.error(f"Error al cargar historial: {e}")
             st.stop()
 
-        if df_g.empty:
+        si df_g.empty:
             st.info("No hay gastos registrados aún.")
             st.stop()
 
         c1, c2 = st.columns(2)
 
-        desde = c1.date_input("Desde", date.today() - timedelta(days=30))
-        hasta = c2.date_input("Hasta", date.today())
+        desde = c1.date_input("Desde", fecha.hoy() - timedelta(dias=30))
+        hasta = c2.date_input("Hasta", fecha.hoy())
 
         df_g['fecha'] = pd.to_datetime(df_g['fecha'], errors='coerce')
 
@@ -2795,7 +2820,7 @@ elif menu == "📉 Gastos":
 
         busc = st.text_input("Buscar por descripción:")
 
-        if busc:
+        si busc:
             df_fil = df_fil[
                 df_fil['descripcion'].str.contains(busc, case=False, na=False)
             ]
@@ -2814,84 +2839,84 @@ elif menu == "📉 Gastos":
 
         datos = df_fil[df_fil['descripcion'] == gasto_sel].iloc[0]
 
-        with st.expander("✏️ Editar Gasto"):
+        con st.expander("✏️ Editar Gasto"):
 
-            nuevo_monto = st.number_input(
+            nuevo_monto = st.número_entrada(
                 "Monto $",
-                value=float(datos['monto']),
-                format="%.2f"
+                valor=float(datos['monto']),
+                formato="%.2f"
             )
 
             if st.button("💾 Guardar Cambios"):
 
-                try:
-                    with conectar() as conn:
+                intentar:
+                    con conectar() como conexión:
                         conn.execute("""
-                            UPDATE gastos
+                            ACTUALIZACIÓN gastos
                             SET monto = ?
-                            WHERE id = ?
+                            DONDE id = ?
                         """, (float(nuevo_monto), int(datos['id'])))
-                        conn.commit()
+                        conexión.commit()
 
                     st.success("Actualizado correctamente")
                     st.rerun()
 
-                except Exception as e:
+                excepto Excepción como e:
                     st.error(str(e))
 
-        with st.expander("🗑️ Eliminar Gasto"):
+        con st.expander("🗑️ Eliminar Gasto"):
 
-            confirmar = st.checkbox("Confirmo que deseo eliminar este gasto")
+            confirmar = st.checkbox("Confirma que deseo eliminar este gasto")
 
             if st.button("Eliminar definitivamente"):
 
-                if not confirmar:
+                si no confirmar:
                     st.warning("Debes confirmar para eliminar")
-                else:
-                    try:
-                        with conectar() as conn:
+                demás:
+                    intentar:
+                        con conectar() como conexión:
                             conn.execute(
-                                "DELETE FROM gastos WHERE id = ?",
+                                "ELIMINAR DE gastos DONDE id = ?",
                                 (int(datos['id']),)
                             )
-                            conn.commit()
+                            conexión.commit()
 
                         st.warning("Gasto eliminado")
                         st.rerun()
 
-                    except Exception as e:
+                    excepto Excepción como e:
                         st.error(str(e))
 
         # --- EXPORTACIÓN ---
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_fil.to_excel(writer, index=False, sheet_name='Gastos')
+        búfer = io.BytesIO()
+        con pd.ExcelWriter(buffer, engine='xlsxwriter') como escritor:
+            df_fil.to_excel(escritor, índice=Falso, nombre_hoja='Gastos')
 
-        st.download_button(
+        botón_descargar(
             "📥 Exportar Excel",
             buffer.getvalue(),
-            "historial_gastos.xlsx"
+            "gastos_históricos.xlsx"
         )
 
     # -----------------------------------
     # RESUMEN
     # -----------------------------------
-    with tab3:
+    con tab3:
 
         st.subheader("📊 Resumen de Egresos")
 
-        try:
-            with conectar() as conn:
-                df = pd.read_sql("SELECT * FROM gastos", conn)
-        except:
+        intentar:
+            con conectar() como conexión:
+                df = pd.read_sql("SELECT * FROM gastos", conexión)
+        excepto:
             st.info("Sin datos")
             st.stop()
 
-        if df.empty:
+        si df.vacío:
             st.info("No hay gastos para analizar.")
             st.stop()
 
-        total = df['monto'].sum()
+        total = df['monto'].suma()
 
         c1, c2 = st.columns(2)
 
@@ -2899,7 +2924,7 @@ elif menu == "📉 Gastos":
 
         por_cat = df.groupby('categoria')['monto'].sum()
 
-        categoria_top = por_cat.idxmax() if not por_cat.empty else "N/A"
+        categoria_top = por_cat.idxmax() si no es por_cat.empty de lo contrario "N/A"
 
         c2.metric("Categoría Principal", categoria_top)
 
@@ -2915,7 +2940,7 @@ elif menu == "🏁 Cierre de Caja":
     st.title("🏁 Cierre de Caja y Arqueo Diario")
 
     # --- SEGURIDAD ---
-    if ROL not in ["Admin", "Administracion"]:
+    si ROL no está en ["Admin", "Administracion"]:
         st.error("🚫 Solo Administración puede realizar cierres.")
         st.stop()
 
@@ -2923,53 +2948,53 @@ elif menu == "🏁 Cierre de Caja":
     fecha_cierre = st.date_input("Seleccionar fecha:", datetime.now())
     fecha_str = fecha_cierre.strftime('%Y-%m-%d')
 
-    try:
-        with conectar() as conn:
+    intentar:
+        con conectar() como conexión:
 
             # Asegurar tabla de cierres
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS cierres_caja (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    fecha TEXT UNIQUE,
-                    ingresos REAL,
-                    egresos REAL,
+                CREAR TABLA SI NO EXISTE cierres_caja (
+                    id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                    fecha TEXTO ÚNICO,
+                    ingresos REALES,
+                    egresos REALES,
                     neto REAL,
-                    usuario TEXT,
-                    creado DATETIME DEFAULT CURRENT_TIMESTAMP
+                    usuario TEXTO,
+                    creado FECHA Y HORA PREDETERMINADA MARCA DE TIEMPO ACTUAL
                 )
             """)
 
             df_v = pd.read_sql(
-                "SELECT * FROM ventas WHERE date(fecha) = ?",
-                conn,
-                params=(fecha_str,)
+                "SELECT * FROM ventas WHERE fecha(fecha) = ?",
+                conexión,
+                parámetros=(fecha_str,)
             )
 
             df_g = pd.read_sql(
-                "SELECT * FROM gastos WHERE date(fecha) = ?",
-                conn,
-                params=(fecha_str,)
+                "SELECT * FROM gastos WHERE fecha(fecha) = ?",
+                conexión,
+                parámetros=(fecha_str,)
             )
 
-    except Exception as e:
-        st.error(f"Error cargando datos: {e}")
+    excepto Excepción como e:
+        st.error(f"Error al cargar datos: {e}")
         st.stop()
 
-    # Asegurar que existan columnas esperadas
-    if not df_v.empty and 'metodo' not in df_v.columns:
+    # Asegurar que existen columnas esperadas
+    si no está df_v.empty y 'metodo' no está en df_v.columns:
         df_v['metodo'] = ""
 
     # --- SEPARAR COBRADO Y PENDIENTE ---
-    if not df_v.empty:
+    si no df_v.empty:
         cobradas = df_v[~df_v['metodo'].str.contains("Pendiente", case=False, na=False)]
         pendientes = df_v[df_v['metodo'].str.contains("Pendiente", case=False, na=False)]
-    else:
-        cobradas = pd.DataFrame(columns=df_v.columns)
-        pendientes = pd.DataFrame(columns=df_v.columns)
+    demás:
+        cobradas = pd.DataFrame(columnas=df_v.columnas)
+        pendientes = pd.DataFrame(columnas=df_v.columnas)
 
-    t_ventas_cobradas = float(cobradas['monto_total'].sum()) if not cobradas.empty else 0.0
-    t_pendientes = float(pendientes['monto_total'].sum()) if not pendientes.empty else 0.0
-    t_gastos = float(df_g['monto'].sum()) if not df_g.empty else 0.0
+    t_ventas_cobradas = float(cobradas['monto_total'].sum()) si no cobradas.empty else 0.0
+    t_pendientes = float(pendientes['monto_total'].sum()) si no pendientes.empty else 0.0
+    t_gastos = float(df_g['monto'].sum()) si no df_g.empty de lo contrario 0.0
 
     balance_dia = t_ventas_cobradas - t_gastos
 
@@ -2986,100 +3011,100 @@ elif menu == "🏁 Cierre de Caja":
     # --- DESGLOSE POR MÉTODO ---
     col_v, col_g = st.columns(2)
 
-    with col_v:
+    con col_v:
         st.subheader("💰 Ingresos por Método")
 
-        if not cobradas.empty:
+        si no cobradas.vacio:
             resumen_v = cobradas.groupby('metodo')['monto_total'].sum()
-            for metodo, monto in resumen_v.items():
-                st.write(f"✅ **{metodo}:** ${float(monto):,.2f}")
-        else:
+            para el método, monto en resumen_v.items():
+                st.write(f"✅ **{método}:** ${float(monto):,.2f}")
+        demás:
             st.info("No hubo ingresos cobrados.")
 
-    with col_g:
-        st.subheader("💸 Egresos por Método")
+    con col_g:
+        st.subheader("💸 Salidas por Método")
 
-        if not df_g.empty:
+        si no df_g.empty:
             resumen_g = df_g.groupby('metodo')['monto'].sum()
-            for metodo, monto in resumen_g.items():
-                st.write(f"❌ **{metodo}:** ${float(monto):,.2f}")
-        else:
+            para el método, monto en resumen_g.items():
+                st.write(f"❌ **{método}:** ${float(monto):,.2f}")
+        demás:
             st.info("No hubo gastos.")
 
     st.divider()
 
     # --- DETALLES ---
-    with st.expander("📝 Ver detalle completo"):
+    con st.expander("📝 Ver detalle completo"):
 
         st.write("### Ventas Cobradas")
-        if not cobradas.empty:
-            st.dataframe(cobradas, use_container_width=True, hide_index=True)
-        else:
+        si no cobradas.vacio:
+            st.dataframe(cobradas, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
+        demás:
             st.info("Sin ventas cobradas")
 
         st.write("### Ventas Pendientes")
-        if not pendientes.empty:
-            st.dataframe(pendientes, use_container_width=True, hide_index=True)
-        else:
+        si no pendientes.vacío:
+            st.dataframe(pendientes, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
+        demás:
             st.info("Sin ventas pendientes")
 
         st.write("### Gastos")
-        if not df_g.empty:
-            st.dataframe(df_g, use_container_width=True, hide_index=True)
-        else:
+        si no df_g.empty:
+            st.dataframe(df_g, ancho_del_contenedor_de_uso=Verdadero, índice_oculto=Verdadero)
+        demás:
             st.info("Sin gastos registrados")
 
     # --- GUARDAR CIERRE ---
     if st.button("💾 Guardar Cierre del Día"):
 
-        try:
-            with conectar() as conn:
+        intentar:
+            con conectar() como conexión:
                 conn.execute("""
-                    INSERT OR REPLACE INTO cierres_caja
+                    INSERTAR O SUSTITUIR EN cierres_caja
                     (fecha, ingresos, egresos, neto, usuario)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALORES (?, ?, ?, ?, ?)
                 """, (
                     fecha_str,
                     float(t_ventas_cobradas),
-                    float(t_gastos),
+                    flotador(t_gastos),
                     float(balance_dia),
                     st.session_state.get("usuario_nombre", "Sistema")
                 ))
-                conn.commit()
+                conexión.commit()
 
             st.success("✅ Cierre registrado correctamente")
 
-        except Exception as e:
+        excepto Excepción como e:
             st.error(f"Error guardando cierre: {e}")
 
     # --- HISTORIAL DE CIERRES ---
     st.divider()
     st.subheader("📜 Historial de Cierres")
 
-    try:
-        with conectar() as conn:
+    intentar:
+        con conectar() como conexión:
             df_cierres = pd.read_sql(
-                "SELECT * FROM cierres_caja ORDER BY fecha DESC",
-                conn
+                "SELECCIONAR * DESDE cierres_caja ORDEN POR fecha DESC",
+                conexión
             )
 
-        if not df_cierres.empty:
+        si no df_cierres.empty:
             st.dataframe(df_cierres, use_container_width=True)
 
             # Exportación
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df_cierres.to_excel(writer, index=False, sheet_name='Cierres')
+            búfer = io.BytesIO()
+            con pd.ExcelWriter(buffer, engine='xlsxwriter') como escritor:
+                df_cierres.to_excel(escritor, índice=Falso, nombre_hoja='Cierres')
 
-            st.download_button(
+            botón_descargar(
                 "📥 Descargar Historial de Cierres",
                 buffer.getvalue(),
                 "cierres_caja.xlsx"
             )
-        else:
+        demás:
             st.info("Aún no hay cierres guardados.")
 
-    except Exception as e:
+    excepto Excepción como e:
         st.info("No hay historial disponible.")
 
 
@@ -3092,47 +3117,47 @@ elif menu == "📊 Auditoría y Métricas":
     st.title("📊 Auditoría Integral del Negocio")
     st.caption("Control total de insumos, producción y finanzas")
 
-    try:
-        with conectar() as conn:
+    intentar:
+        con conectar() como conexión:
 
             # Verificamos si existe la tabla de movimientos
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS inventario_movs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    item_id INTEGER,
-                    tipo TEXT,
+                CREAR TABLA SI NO EXISTE inventario_movs (
+                    id ENTERO CLAVE PRIMARIA AUTOINCREMENTO,
+                    item_id ENTERO,
+                    tipo TEXTO,
                     cantidad REAL,
-                    motivo TEXT,
-                    usuario TEXT,
-                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                    motivo TEXTO,
+                    usuario TEXTO,
+                    fecha FECHA Y HORA PREDETERMINADA MARCA DE TIEMPO ACTUAL
                 )
             """)
 
             df_movs = pd.read_sql_query("""
-                SELECT 
+                SELECCIONAR 
                     m.fecha,
-                    i.item as Material,
-                    m.tipo as Operacion,
-                    m.cantidad as Cantidad,
+                    i.item como Material,
+                    m.tipo como Operación,
+                    m.cantidad como Cantidad,
                     i.unidad,
                     m.motivo
-                FROM inventario_movs m
-                JOIN inventario i ON m.item_id = i.id
-                ORDER BY m.fecha DESC
-            """, conn)
+                DESDE inventario_movs m
+                UNIRSE al inventario i EN m.item_id = i.id
+                ORDENAR POR m.fecha DESC
+            """, conexión)
 
             df_ventas = pd.read_sql("SELECT * FROM ventas", conn)
-            df_gastos = pd.read_sql("SELECT * FROM gastos", conn)
+            df_gastos = pd.read_sql("SELECT * FROM gastos", conexión)
 
-    except Exception as e:
-        st.error(f"Error cargando datos: {e}")
+    excepto Excepción como e:
+        st.error(f"Error al cargar datos: {e}")
         st.stop()
 
     # Asegurar columnas necesarias
-    if not df_ventas.empty and 'metodo' not in df_ventas.columns:
+    si no está df_ventas.empty y 'metodo' no está en df_ventas.columns:
         df_ventas['metodo'] = ""
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    pestaña1, pestaña2, pestaña3, pestaña4 = st.tabs([
         "💰 Finanzas",
         "📦 Insumos",
         "📈 Gráficos",
@@ -3140,32 +3165,32 @@ elif menu == "📊 Auditoría y Métricas":
     ])
 
     # ---------------------------------------
-    # TAB FINANZAS
+    # PESTAÑA FINANZAS
     # ---------------------------------------
-    with tab1:
+    con pestaña1:
 
         st.subheader("Resumen Financiero")
 
-        total_ventas = float(df_ventas['monto_total'].sum()) if not df_ventas.empty else 0.0
-        total_gastos = float(df_gastos['monto'].sum()) if not df_gastos.empty else 0.0
+        total_ventas = float(df_ventas['monto_total'].sum()) si no df_ventas.empty else 0.0
+        total_gastos = float(df_gastos['monto'].sum()) si no df_gastos.empty de lo contrario 0.0
 
         # Solo comisiones en métodos bancarios
-        if not df_ventas.empty:
+        si no df_ventas.empty:
             ventas_bancarias = df_ventas[
                 df_ventas['metodo'].str.contains("Pago|Transferencia", case=False, na=False)
             ]
-        else:
+        demás:
             ventas_bancarias = pd.DataFrame()
 
         banco_perc = st.session_state.get('banco_perc', 0.5)
 
-        comision_est = float(ventas_bancarias['monto_total'].sum() * (banco_perc / 100)) if not ventas_bancarias.empty else 0.0
+        comision_est = float(ventas_bancarias['monto_total'].sum() * (banco_perc / 100)) si no ventas_bancarias.empty else 0.0
 
         deudas = float(
             df_ventas[
                 df_ventas['metodo'].str.contains("Pendiente", case=False, na=False)
-            ]['monto_total'].sum()
-        ) if not df_ventas.empty else 0.0
+            ]['monto_total'].suma()
+        ) si no df_ventas.empty de lo contrario 0.0
 
         c1, c2, c3, c4 = st.columns(4)
 
@@ -3179,79 +3204,79 @@ elif menu == "📊 Auditoría y Métricas":
         st.metric("Utilidad Real Estimada", f"$ {utilidad:,.2f}")
 
     # ---------------------------------------
-    # TAB INSUMOS
+    # PESTAÑA INSUMOS
     # ---------------------------------------
-    with tab2:
+    con tab2:
 
         st.subheader("Bitácora de Movimientos de Inventario")
 
-        if df_movs.empty:
+        si df_movs.empty:
             st.info("Aún no hay movimientos registrados.")
-        else:
-            st.dataframe(df_movs, use_container_width=True)
+        demás:
+            st.dataframe(df_movs, usar_ancho_del_contenedor=Verdadero)
 
             # Exportación
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df_movs.to_excel(writer, index=False, sheet_name='Movimientos')
+            búfer = io.BytesIO()
+            con pd.ExcelWriter(buffer, engine='xlsxwriter') como escritor:
+                df_movs.to_excel(escritor, índice=False, nombre_hoja='Movimientos')
 
-            st.download_button(
+            botón_descargar(
                 "📥 Descargar Movimientos (Excel)",
                 buffer.getvalue(),
                 "auditoria_movimientos.xlsx"
             )
 
     # ---------------------------------------
-    # TAB GRÁFICOS
+    # PESTAÑAS GRÁFICAS
     # ---------------------------------------
-    with tab3:
+    con tab3:
 
         st.subheader("Consumo de Insumos")
 
-        if not df_movs.empty:
+        si no df_movs.empty:
 
             salidas = df_movs[df_movs['Operacion'] == 'SALIDA']
 
-            if not salidas.empty:
+            si no salidas.vacío:
 
                 resumen = salidas.groupby("Material")["Cantidad"].sum()
 
                 st.bar_chart(resumen)
 
-                top = resumen.sort_values(ascending=False).head(1)
+                superior = resumen.sort_values(ascendente=Falso).head(1)
 
-                if not top.empty:
+                si no está en la parte superior vacía:
                     st.metric(
                         "Material más usado",
-                        top.index[0],
-                        f"{top.values[0]:.2f}"
+                        índice superior[0],
+                        f"{valores superiores[0]:.2f}"
                     )
-            else:
+            demás:
                 st.info("No hay salidas registradas aún.")
-        else:
+        demás:
             st.info("No hay datos para graficar.")
 
     # ---------------------------------------
-    # TAB ALERTAS
+    # PESTAÑA ALERTAS
     # ---------------------------------------
-    with tab4:
+    con tab4:
 
         st.subheader("Control de Stock")
 
         df_inv = st.session_state.get('df_inv', pd.DataFrame())
 
-        if df_inv.empty:
+        si df_inv.empty:
             st.warning("Inventario vacío.")
-        else:
+        demás:
             criticos = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
 
-            if criticos.empty:
+            si criticos.vacío:
                 st.success("Niveles de inventario óptimos")
-            else:
+            demás:
                 st.error(f"⚠️ Hay {len(criticos)} productos en nivel crítico")
 
-                for _, r in criticos.iterrows():
-                    st.warning(
+                para _, r en criticos.iterrows():
+                    st.advertencia(
                         f"**{r['item']}** bajo: {r['cantidad']} {r['unidad']} "
                         f"(mín: {r['minimo']})"
                     )
@@ -3283,25 +3308,25 @@ elif menu == "📝 Cotizaciones":
     # ---- CLIENTE ----
     df_cli = st.session_state.get('df_cli', pd.DataFrame())
 
-    if df_cli.empty:
+    si df_cli.empty:
         st.warning("Registra clientes primero.")
         st.stop()
 
-    opciones = {r['nombre']: r['id'] for _, r in df_cli.iterrows()}
+    opciones = {r['nombre']: r['id'] para _, r en df_cli.iterrows()}
 
     cliente_sel = st.selectbox("Cliente:", opciones.keys())
     id_cliente = opciones[cliente_sel]
 
-    unidades = st.number_input(
+    unidades = st.numero_entrada(
         "Cantidad",
-        min_value=1,
-        value=int(datos_pre['unidades'])
+        valor mínimo=1,
+        valor=int(datos_pre['unidades'])
     )
 
     # ---- COSTOS ----
-    costo_unit = st.number_input(
+    costo_unidad = st.numero_entrada(
         "Costo unitario base ($)",
-        value=float(datos_pre['costo_base'] / unidades if unidades else 0)
+        valor=float(datos_pre['costo_base'] / unidades if unidades else 0)
     )
 
     margen = st.slider("Margen %", 10, 300, 100)
@@ -3314,26 +3339,26 @@ elif menu == "📝 Cotizaciones":
     # ---- CONSUMOS ----
     consumos_reales = {}
 
-    if usa_tinta:
+    si usa_tinta:
 
         df_tintas = obtener_tintas_disponibles()
 
-        if df_tintas.empty:
+        si df_tintas.empty:
             st.error("No hay tintas registradas en inventario.")
             st.stop()
 
         opciones_tinta = {
             f"{r['item']} ({r['cantidad']} ml)": r['id']
-            for _, r in df_tintas.iterrows()
+            para _, r en df_tintas.iterrows()
         }
 
         st.subheader("Asignación de Tintas a Descontar")
 
-        for color in ['C', 'M', 'Y', 'K']:
-            sel = st.selectbox(f"Tinta {color}", opciones_tinta.keys(), key=color)
+        para color en ['C', 'M', 'Y', 'K']:
+            sel = st.selectbox(f"Tinta {color}", opciones_tinta.keys(), clave=color)
             consumos_reales[opciones_tinta[sel]] = datos_pre[color] * unidades
 
-    metodo_pago = st.selectbox(
+    método_pago = st.selectbox(
         "Método de Pago",
         ["Efectivo", "Zelle", "Pago Móvil", "Transferencia", "Pendiente"]
     )
@@ -3341,33 +3366,33 @@ elif menu == "📝 Cotizaciones":
     # =====================================================
     # 🔐 INTEGRACIÓN CON NÚCLEO CENTRAL
     # =====================================================
-    if st.button("CONFIRMAR VENTA"):
+    if st.boton("CONFIRMAR VENTA"):
 
         descr = datos_pre['trabajo']
 
-        try:
+        intentar:
             exito, msg = registrar_venta_global(
                 id_cliente=id_cliente,
                 nombre_cliente=cliente_sel,
                 detalle=descr,
                 monto_usd=precio_final,
-                metodo=metodo_pago,
+                método=metodo_pago,
                 consumos=consumos_reales
             )
 
-            if exito:
+            si exito:
                 st.success(msg)
 
                 # Limpiamos datos temporales de cotización
-                st.session_state.pop('datos_pre_cotizacion', None)
+                st.session_state.pop('datos_pre_cotizacion', Ninguno)
 
                 cargar_datos()
                 st.rerun()
 
-            else:
+            demás:
                 st.error(msg)
 
-        except Exception as e:
+        excepto Excepción como e:
             st.error(f"Error procesando venta: {e}")
 
 
@@ -3375,25 +3400,25 @@ elif menu == "📝 Cotizaciones":
 # ===========================================================
 # 🛒 MÓDULO DE VENTA DIRECTA - INTEGRADO CON NÚCLEO GLOBAL
 # ===========================================================
-if menu == "🛒 Venta Directa":
+if menú == "🛒 Venta Directa":
 
     st.title("🛒 Venta Rápida de Materiales")
 
     df_inv = st.session_state.get('df_inv', pd.DataFrame())
     df_cli = st.session_state.get('df_cli', pd.DataFrame())
 
-    if df_inv.empty:
+    si df_inv.empty:
         st.warning("No hay inventario cargado.")
         st.stop()
 
     disponibles = df_inv[df_inv['cantidad'] > 0]
 
-    if disponibles.empty:
-        st.warning("⚠️ No hay productos con stock disponible.")
+    si está disponible.vacío:
+        st.warning("⚠️ No hay productos en stock disponibles.")
         st.stop()
 
     # --- SELECCIÓN DE PRODUCTO ---
-    with st.container(border=True):
+    con st.container(border=True):
 
         c1, c2 = st.columns([2, 1])
 
@@ -3413,40 +3438,40 @@ if menu == "🛒 Venta Directa":
         c2.metric("Stock Disponible", f"{stock_actual:.2f} {unidad}")
 
     # --- FORMULARIO DE VENTA ---
-    with st.form("form_venta_directa", clear_on_submit=True):
+    con st.form("form_venta_directa", clear_on_submit=True):
 
         st.subheader("Datos de la Venta")
 
         # Cliente integrado
-        if not df_cli.empty:
+        si no es df_cli.empty:
             opciones_cli = {
-                row['nombre']: row['id']
-                for _, row in df_cli.iterrows()
+                fila['nombre']: fila['id']
+                para _, fila en df_cli.iterrows()
             }
 
             cliente_nombre = st.selectbox(
                 "Cliente:",
-                list(opciones_cli.keys())
+                lista(opciones_cli.keys())
             )
 
             id_cliente = opciones_cli[cliente_nombre]
-        else:
+        demás:
             cliente_nombre = "Consumidor Final"
-            id_cliente = None
+            id_cliente = Ninguno
             st.info("Venta sin cliente registrado")
 
         c1, c2, c3 = st.columns(3)
 
         cantidad = c1.number_input(
             f"Cantidad ({unidad})",
-            min_value=0.0,
-            max_value=stock_actual,
-            step=1.0
+            valor mínimo=0.0,
+            valor_máximo=stock_real,
+            paso=1.0
         )
 
-        margen = c2.number_input("Margen %", value=30.0, format="%.2f")
+        margen = c2.number_input("Margen %", valor=30.0, formato="%.2f")
 
-        metodo = c3.selectbox(
+        método = c3.selectbox(
             "Método de Pago",
             [
                 "Efectivo $",
@@ -3459,11 +3484,11 @@ if menu == "🛒 Venta Directa":
         )
 
         usa_desc = st.checkbox("Aplicar descuento cliente fiel")
-        desc = st.number_input(
+        desc = st.numero_entrada(
             "Descuento %",
-            value=5.0 if usa_desc else 0.0,
-            disabled=not usa_desc,
-            format="%.2f"
+            valor=5.0 si usa_desc de lo contrario 0.0,
+            deshabilitado=no usa_desc,
+            formato="%.2f"
         )
 
         # Impuestos
@@ -3472,7 +3497,7 @@ if menu == "🛒 Venta Directa":
         i1, i2 = st.columns(2)
 
         usa_iva = i1.checkbox("Aplicar IVA")
-        usa_banco = i2.checkbox("Comisión bancaria", value=True)
+        usa_banco = i2.checkbox("Comisión bancaria", valor=True)
 
         # ---- CÁLCULOS ----
         costo_material = cantidad * precio_base
@@ -3481,10 +3506,10 @@ if menu == "🛒 Venta Directa":
 
         impuestos = 0.0
 
-        if usa_iva:
+        si usa_iva:
             impuestos += float(st.session_state.get('iva_perc', 16))
 
-        if usa_banco and metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
+        if usa_banco y método en ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
             impuestos += float(st.session_state.get('banco_perc', 0.5))
 
         total_usd = con_desc * (1 + impuestos / 100)
@@ -3492,83 +3517,83 @@ if menu == "🛒 Venta Directa":
         # Conversión a Bs SOLO si aplica
         total_bs = 0.0
 
-        if metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
+        si metodo en ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
             total_bs = total_usd * float(st.session_state.get('tasa_bcv', 1.0))
 
-        elif metodo == "Binance":
+        elif método == "Binance":
             total_bs = total_usd * float(st.session_state.get('tasa_binance', 1.0))
 
         st.divider()
 
         st.metric("Total a Cobrar", f"$ {total_usd:.2f}")
 
-        if total_bs > 0:
+        si total_bs > 0:
             st.info(f"Equivalente: Bs {total_bs:,.2f}")
 
         # ---- VALIDACIONES FINALES ----
         if st.form_submit_button("🧾 Confirmar Venta"):
 
-            if cantidad <= 0:
+            si cantidad <= 0:
                 st.error("⚠️ Debe vender al menos una unidad.")
                 st.stop()
 
-            if cantidad > stock_actual:
+            si cantidad > stock_actual:
                 st.error("⚠️ No puedes vender más de lo que hay en inventario.")
                 st.stop()
 
             # Preparar consumo para el núcleo
             consumos = {id_producto: cantidad}
 
-            try:
+            intentar:
                 exito, mensaje = registrar_venta_global(
                     id_cliente=id_cliente,
                     nombre_cliente=cliente_nombre,
                     detalle=f"Venta directa de {prod_sel}",
                     monto_usd=float(total_usd),
-                    metodo=metodo,
+                    método=metodo,
                     consumos=consumos
                 )
 
-                if exito:
+                si exito:
                     st.success(mensaje)
                     cargar_datos()
                     st.rerun()
-                else:
+                demás:
                     st.error(mensaje)
 
-            except Exception as e:
-                st.error(f"Error registrando venta: {e}")
+            excepto Excepción como e:
+                st.error(f"Error al registrar la venta: {e}")
 
 
       # ===========================================================
 # 🛒 MÓDULO DE VENTA DIRECTA - INTEGRADO CON NÚCLEO GLOBAL
 # ===========================================================
-if menu == "🛒 Venta Directa":
+if menú == "🛒 Venta Directa":
 
     st.title("🛒 Venta Rápida de Materiales")
 
     df_inv = st.session_state.get('df_inv', pd.DataFrame())
     df_cli = st.session_state.get('df_cli', pd.DataFrame())
 
-    if df_inv.empty:
+    si df_inv.empty:
         st.warning("No hay inventario cargado.")
         st.stop()
 
     disponibles = df_inv[df_inv['cantidad'] > 0]
 
-    if disponibles.empty:
-        st.warning("⚠️ No hay productos con stock disponible.")
+    si está disponible.vacío:
+        st.warning("⚠️ No hay productos en stock disponibles.")
         st.stop()
 
     # --- SELECCIÓN DE PRODUCTO ---
-    with st.container(border=True):
+    con st.container(border=True):
 
         c1, c2 = st.columns([2, 1])
 
         prod_sel = c1.selectbox(
             "📦 Seleccionar Producto:",
             disponibles['item'].tolist(),
-            key="venta_directa_producto"
+            clave="venta_directa_producto"
         )
 
         datos = disponibles[disponibles['item'] == prod_sel].iloc[0]
@@ -3582,46 +3607,46 @@ if menu == "🛒 Venta Directa":
         c2.metric("Stock Disponible", f"{stock_actual:.2f} {unidad}")
 
     # --- FORMULARIO DE VENTA ---
-    with st.form("form_venta_directa_modulo", clear_on_submit=True):
+    con st.form("form_venta_directa_modulo", clear_on_submit=True):
 
         st.subheader("Datos de la Venta")
 
         # Cliente integrado
-        if not df_cli.empty:
+        si no es df_cli.empty:
             opciones_cli = {
-                row['nombre']: row['id']
-                for _, row in df_cli.iterrows()
+                fila['nombre']: fila['id']
+                para _, fila en df_cli.iterrows()
             }
 
             cliente_nombre = st.selectbox(
                 "Cliente:",
                 opciones_cli.keys(),
-                key="venta_directa_cliente"
+                clave="venta_directa_cliente"
             )
 
             id_cliente = opciones_cli[cliente_nombre]
-        else:
+        demás:
             cliente_nombre = "Consumidor Final"
-            id_cliente = None
+            id_cliente = Ninguno
             st.info("Venta sin cliente registrado")
 
         c1, c2, c3 = st.columns(3)
 
         cantidad = c1.number_input(
             f"Cantidad ({unidad})",
-            min_value=0.0,
-            max_value=stock_actual,
-            step=1.0,
+            valor mínimo=0.0,
+            valor_máximo=stock_real,
+            paso=1.0,
             key="venta_directa_cantidad"
         )
 
-        margen = c2.number_input(
+        margen = c2.número_entrada(
             "Margen %",
-            value=30.0,
-            key="venta_directa_margen"
+            valor=30.0,
+            clave="venta_directa_margen"
         )
 
-        metodo = c3.selectbox(
+        método = c3.selectbox(
             "Método de Pago",
             [
                 "Efectivo $",
@@ -3631,15 +3656,15 @@ if menu == "🛒 Venta Directa":
                 "Binance",
                 "Pendiente"
             ],
-            key="venta_directa_metodo"
+            clave="venta_directa_método"
         )
 
         usa_desc = st.checkbox("Aplicar descuento cliente fiel", key="venta_directa_check_desc")
-        desc = st.number_input(
+        desc = st.numero_entrada(
             "Descuento %",
-            value=5.0 if usa_desc else 0.0,
-            disabled=not usa_desc,
-            key="venta_directa_desc"
+            valor=5.0 si usa_desc de lo contrario 0.0,
+            deshabilitado=no usa_desc,
+            clave="venta_directa_desc"
         )
 
         # Impuestos
@@ -3648,7 +3673,7 @@ if menu == "🛒 Venta Directa":
         i1, i2 = st.columns(2)
 
         usa_iva = i1.checkbox("Aplicar IVA", key="venta_directa_iva")
-        usa_banco = i2.checkbox("Comisión bancaria", value=True, key="venta_directa_banco")
+        usa_banco = i2.checkbox("Comisión bancaria", valor=True, key="venta_directa_banco")
 
         # ---- CÁLCULOS ----
         costo_material = cantidad * precio_base
@@ -3657,34 +3682,34 @@ if menu == "🛒 Venta Directa":
 
         impuestos = 0
 
-        if usa_iva:
+        si usa_iva:
             impuestos += st.session_state.get('iva_perc', 16)
 
-        if usa_banco and metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
+        if usa_banco y método en ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
             impuestos += st.session_state.get('banco_perc', 0.5)
 
         total_usd = con_desc * (1 + impuestos / 100)
 
-        if metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
+        si metodo en ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
             total_bs = total_usd * t_bcv
-        elif metodo == "Binance":
+        elif método == "Binance":
             total_bs = total_usd * t_bin
-        else:
+        demás:
             total_bs = 0
 
         st.divider()
 
         st.metric("Total a Cobrar", f"$ {total_usd:.2f}")
 
-        if total_bs:
+        si total_bs:
             st.info(f"Equivalente: Bs {total_bs:,.2f}")
 
         # =====================================================
         # 🔐 AQUÍ ENTRA EL NÚCLEO CENTRAL DEL IMPERIO
         # =====================================================
-        if st.form_submit_button("🚀 PROCESAR VENTA"):
+        si st.form_submit_button("🚀 PROCESAR VENTA"):
 
-            if cantidad <= 0:
+            si cantidad <= 0:
                 st.error("Cantidad inválida")
                 st.stop()
 
@@ -3697,11 +3722,11 @@ if menu == "🛒 Venta Directa":
                 nombre_cliente=cliente_nombre,
                 detalle=f"{cantidad} {unidad} de {prod_sel}",
                 monto_usd=total_usd,
-                metodo=metodo,
+                método=metodo,
                 consumos=consumos
             )
 
-            if exito:
+            si exito:
                 st.success(mensaje)
 
                 if stock_actual - cantidad <= minimo:
@@ -3711,24 +3736,24 @@ if menu == "🛒 Venta Directa":
                     "cliente": cliente_nombre,
                     "detalle": f"{cantidad} {unidad} de {prod_sel}",
                     "total": total_usd,
-                    "metodo": metodo
+                    "método": método
                 }
 
                 st.rerun()
-            else:
+            demás:
                 st.error(mensaje)
 
-    # --- TICKET ---
-    if 'ultimo_ticket' in st.session_state:
+    # --- BOLETO ---
+    si 'ultimo_ticket' en st.session_state:
 
         st.divider()
 
         t = st.session_state.ultimo_ticket
 
-        with st.expander("📄 Recibo de Venta", expanded=True):
+        con st.expander("📄 Recibo de Venta", expandido=True):
 
-            st.code(
-f"""
+            st.código(
+F"""
 CLIENTE: {t['cliente']}
 DETALLE: {t['detalle']}
 TOTAL: $ {t['total']:.2f}
@@ -3744,13 +3769,13 @@ MÉTODO: {t['metodo']}
         # =====================================================
         # 🔐 AQUÍ ENTRA EL NÚCLEO CENTRAL DEL IMPERIO
         # =====================================================
-        if st.form_submit_button("🚀 PROCESAR VENTA"):
+        si st.form_submit_button("🚀 PROCESAR VENTA"):
 
-            if cantidad <= 0:
+            si cantidad <= 0:
                 st.error("⚠️ Debes vender al menos una unidad.")
                 st.stop()
 
-            if cantidad > stock_actual:
+            si cantidad > stock_actual:
                 st.error("⚠️ No puedes vender más de lo que hay en inventario.")
                 st.stop()
 
@@ -3763,11 +3788,11 @@ MÉTODO: {t['metodo']}
                 nombre_cliente=cliente_nombre,
                 detalle=f"{cantidad} {unidad} de {prod_sel}",
                 monto_usd=total_usd,
-                metodo=metodo,
+                método=metodo,
                 consumos=consumos
             )
 
-            if exito:
+            si exito:
                 st.success(mensaje)
 
                 if stock_actual - cantidad <= minimo:
@@ -3777,24 +3802,24 @@ MÉTODO: {t['metodo']}
                     "cliente": cliente_nombre,
                     "detalle": f"{cantidad} {unidad} de {prod_sel}",
                     "total": total_usd,
-                    "metodo": metodo
+                    "método": método
                 }
 
                 st.rerun()
-            else:
+            demás:
                 st.error(mensaje)
 
-    # --- TICKET ---
-    if 'ultimo_ticket' in st.session_state:
+    # --- BOLETO ---
+    si 'ultimo_ticket' en st.session_state:
 
         st.divider()
 
         t = st.session_state.ultimo_ticket
 
-        with st.expander("📄 Recibo de Venta", expanded=True):
+        con st.expander("📄 Recibo de Venta", expandido=True):
 
-            st.code(
-f"""
+            st.código(
+F"""
 CLIENTE: {t['cliente']}
 DETALLE: {t['detalle']}
 TOTAL: $ {t['total']:.2f}
@@ -3802,7 +3827,7 @@ MÉTODO: {t['metodo']}
 """
             )
 
-            if st.button("Cerrar Ticket"):
+            si st.button("Cerrar Ticket"):
                 del st.session_state.ultimo_ticket
                 st.rerun()
 
@@ -3812,101 +3837,103 @@ MÉTODO: {t['metodo']}
 # ===========================================================
 
 def registrar_venta_global(
-    id_cliente=None,
+    id_cliente=Ninguno,
     nombre_cliente="Consumidor Final",
     detalle="Venta general",
     monto_usd=0.0,
-    metodo="Efectivo $",
-    consumos=None
+    método="Efectivo $",
+    consumos=Ninguno
 ):
     """
     FUNCIÓN MAESTRA DEL IMPERIO – VERSIÓN SEGURA Y TRANSACCIONAL
     """
 
-    if consumos is None:
+    Si consumos es Ninguno:
         consumos = {}
 
-    if monto_usd <= 0:
+    si monto_usd <= 0:
         return False, "⚠️ El monto de la venta debe ser mayor a 0"
 
-    if not detalle:
+    si no detalle:
         return False, "⚠️ El detalle de la venta no puede estar vacío"
 
-    try:
+    intentar:
         conn = conectar()
         cursor = conn.cursor()
 
-        conn.execute("BEGIN TRANSACTION")
+        conn.execute("INICIAR TRANSACCIÓN")
 
-        if id_cliente is not None:
+        si id_cliente no es Ninguno:
             existe_cli = cursor.execute(
-                "SELECT id FROM clientes WHERE id = ?",
+                "SELECCIONAR id DE clientes DONDE id = ?",
                 (id_cliente,)
             ).fetchone()
 
-            if not existe_cli:
-                conn.rollback()
+            si no existe_cli:
+                conexión.rollback()
                 return False, "❌ Cliente no encontrado en base de datos"
 
-        for item_id, cant in consumos.items():
+        para item_id, no puede en consumos.items():
 
-            if cant <= 0:
-                conn.rollback()
+            si no puede <= 0:
+                conexión.rollback()
                 return False, f"⚠️ Cantidad inválida para el insumo {item_id}"
 
             stock_actual = cursor.execute(
                 "SELECT cantidad, item FROM inventario WHERE id = ?",
-                (item_id,)
+                (id del artículo,)
             ).fetchone()
 
-            if not stock_actual:
-                conn.rollback()
+            si no stock_actual:
+                conexión.rollback()
                 return False, f"❌ Insumo con ID {item_id} no existe"
 
             cantidad_disponible, nombre_item = stock_actual
 
-            if cant > cantidad_disponible:
-                conn.rollback()
+            si no puedo > cantidad_disponible:
+                conexión.rollback()
                 return False, f"⚠️ Stock insuficiente para: {nombre_item}"
 
-        for item_id, cant in consumos.items():
+        para item_id, no puede en consumos.items():
 
             cursor.execute("""
-                UPDATE inventario
+                ACTUALIZAR inventario
                 SET cantidad = cantidad - ?
-                WHERE id = ?
-            """, (cant, item_id))
+                DONDE id = ?
+            """, (cant, id_del_artículo))
 
             cursor.execute("""
-                INSERT INTO inventario_movs
+                INSERTAR EN inventario_movs
                 (item_id, tipo, cantidad, motivo)
-                VALUES (?, 'SALIDA', ?, ?)
+                VALORES (?, 'SALIDA', ?, ?)
             """, (item_id, cant, f"Venta: {detalle}"))
 
         cursor.execute("""
-            INSERT INTO ventas
+            INSERTAR EN ventas
             (cliente_id, cliente, detalle, monto_total, metodo)
-            VALUES (?, ?, ?, ?, ?)
+            VALORES (?, ?, ?, ?, ?)
         """, (
             id_cliente,
             nombre_cliente,
             detalle,
-            float(monto_usd),
-            metodo
+            flotador(monto_usd),
+            método
         ))
 
-        conn.commit()
-        conn.close()
+        conexión.commit()
+        conexión.close()
 
         cargar_datos()
 
-        return True, "✅ Venta procesada correctamente"
+        return Verdadero, "✅ Venta procesada correctamente"
 
-    except Exception as e:
-        try:
-            conn.rollback()
-        except:
-            pass
+    excepto Excepción como e:
+        intentar:
+            conexión.rollback()
+        excepto:
+            aprobar
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
 
