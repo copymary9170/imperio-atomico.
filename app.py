@@ -1534,6 +1534,12 @@ elif menu == "🎨 Análisis CMYK":
             df_tintas_db = pd.read_sql_query(
                 "SELECT * FROM inventario", conn
             )
+            try:
+                df_activos_cmyk = pd.read_sql_query(
+                    "SELECT equipo, categoria, unidad FROM activos", conn
+                )
+            except Exception:
+                df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad'])
 
             # Tabla histórica
             conn.execute("""
@@ -1555,12 +1561,22 @@ elif menu == "🎨 Análisis CMYK":
         st.stop()
 
     # --- LISTA DE IMPRESORAS DISPONIBLES ---
-    impresoras_disponibles = [
-        "Impresora Principal",
-        "Impresora Secundaria"
-    ]
+    impresoras_disponibles = []
 
-    # Si hay equipos registrados en inventario que parezcan impresoras, los agregamos
+    # 1) Prioridad: Activos en Maquinaria categoría Tinta (como indicaste)
+    if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty:
+        act = df_activos_cmyk.copy()
+        mask_maquinaria = act['unidad'].fillna('').str.contains('Maquinaria', case=False, na=False)
+        mask_tinta = act['categoria'].fillna('').str.contains('Tinta', case=False, na=False)
+        posibles_activos = act[mask_maquinaria & mask_tinta]['equipo'].dropna().astype(str).tolist()
+        for eq in posibles_activos:
+            nombre_limpio = eq
+            if '] ' in nombre_limpio:
+                nombre_limpio = nombre_limpio.split('] ', 1)[1]
+            if nombre_limpio not in impresoras_disponibles:
+                impresoras_disponibles.append(nombre_limpio)
+
+    # 2) Fallback: equipos con palabra impresora en inventario
     if not df_tintas_db.empty:
         posibles = df_tintas_db[
             df_tintas_db['item'].str.contains("impresora", case=False, na=False)
@@ -1569,6 +1585,10 @@ elif menu == "🎨 Análisis CMYK":
         for p in posibles:
             if p not in impresoras_disponibles:
                 impresoras_disponibles.append(p)
+
+    # 3) Último fallback por defecto
+    if not impresoras_disponibles:
+        impresoras_disponibles = ["Impresora Principal", "Impresora Secundaria"]
 
     # --- VALIDACIÓN ---
     if not impresoras_disponibles:
@@ -1581,6 +1601,11 @@ elif menu == "🎨 Análisis CMYK":
     with c_printer:
 
         impresora_sel = st.selectbox("🖨️ Equipo de Impresión", impresoras_disponibles)
+
+        impresora_aliases = [impresora_sel.lower().strip()]
+        if ' ' in impresora_aliases[0]:
+            impresora_aliases.extend([x for x in impresora_aliases[0].split(' ') if len(x) > 2])
+
         usar_stock_por_impresora = st.checkbox(
             "Usar tintas del inventario solo de esta impresora",
             value=True,
@@ -1614,7 +1639,7 @@ elif menu == "🎨 Análisis CMYK":
             tintas = df_tintas_db[mask]
 
             if usar_stock_por_impresora and not tintas.empty:
-                tintas_imp = tintas[tintas['item'].str.contains(impresora_sel, case=False, na=False)]
+                tintas_imp = tintas[tintas['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
                 if not tintas_imp.empty:
                     tintas = tintas_imp
                 else:
@@ -1813,7 +1838,7 @@ elif menu == "🎨 Análisis CMYK":
 
                 stock_base = df_tintas_db[df_tintas_db['item'].str.contains('tinta', case=False, na=False)].copy()
                 if usar_stock_por_impresora:
-                    stock_imp = stock_base[stock_base['item'].str.contains(impresora_sel, case=False, na=False)]
+                    stock_imp = stock_base[stock_base['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
                     if not stock_imp.empty:
                         stock_base = stock_imp
 
@@ -3774,14 +3799,4 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
-
-
-
-
-
-
-
-
-
-
 
