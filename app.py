@@ -831,6 +831,7 @@ elif menu == "📦 Inventario":
         with conectar() as conn:
             df_hist = pd.read_sql("""
                 SELECT 
+                    h.id as compra_id,
                     h.fecha,
                     h.item,
                     h.cantidad,
@@ -870,6 +871,7 @@ elif menu == "📦 Inventario":
             st.dataframe(
                 df_v,
                 column_config={
+                    "compra_id": None,
                     "fecha": "Fecha",
                     "item": "Insumo",
                     "cantidad": "Cantidad",
@@ -884,6 +886,47 @@ elif menu == "📦 Inventario":
                 use_container_width=True,
                 hide_index=True
             )
+
+            st.divider()
+            st.subheader("🧹 Corregir historial de compras")
+            opciones_compra = {
+                f"#{int(r.compra_id)} | {r.fecha} | {r.item} | {r.cantidad} {r.unidad} | ${r.costo_total_usd:.2f}": int(r.compra_id)
+                for r in df_hist.itertuples(index=False)
+            }
+            compra_sel_label = st.selectbox("Selecciona la compra a corregir", list(opciones_compra.keys()))
+            compra_sel_id = opciones_compra[compra_sel_label]
+            compra_row = df_hist[df_hist["compra_id"] == compra_sel_id].iloc[0]
+            st.caption("Si eliminas la compra, el sistema descuenta esa cantidad del inventario del insumo asociado.")
+
+            if st.button("🗑 Eliminar compra seleccionada", type="secondary"):
+                with conectar() as conn:
+                    cur = conn.cursor()
+                    actual_row = cur.execute(
+                        "SELECT id, cantidad FROM inventario WHERE item=?",
+                        (str(compra_row["item"]),)
+                    ).fetchone()
+
+                    if actual_row:
+                        item_id, cantidad_actual = actual_row
+                        nueva_cant = max(0.0, float(cantidad_actual or 0) - float(compra_row["cantidad"]))
+                        cur.execute(
+                            "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
+                            (nueva_cant, int(item_id))
+                        )
+                        cur.execute(
+                            """
+                            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+                            VALUES (?, 'SALIDA', ?, 'Corrección: eliminación de compra', ?)
+                            """,
+                            (int(item_id), float(compra_row["cantidad"]), usuario_actual)
+                        )
+
+                    cur.execute("DELETE FROM historial_compras WHERE id=?", (int(compra_sel_id),))
+                    conn.commit()
+
+                st.success("Compra eliminada y stock ajustado correctamente.")
+                cargar_datos()
+                st.rerun()
 
     # =======================================================
     # 👤 TAB 4 — PROVEEDORES
@@ -3963,6 +4006,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
