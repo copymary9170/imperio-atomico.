@@ -127,6 +127,18 @@ def inicializar_sistema():
                 usuario TEXT,
                 fecha DATETIME DEFAULT CURRENT_TIMESTAMP
             )"""
+
+            # NÓMINA Y COMISIONES
+"""
+CREATE TABLE IF NOT EXISTS nomina_movs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    venta_id INTEGER,
+    colaborador TEXT,
+    porcentaje REAL,
+    monto REAL,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""",
         ]
 
         for tabla in tablas:
@@ -3790,6 +3802,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
