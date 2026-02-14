@@ -928,6 +928,51 @@ elif menu == "📦 Inventario":
                 cargar_datos()
                 st.rerun()
 
+            st.divider()
+            st.subheader("🧽 Limpiar historial por insumo")
+            df_hist_aux = df_hist.copy()
+            df_hist_aux["item_norm"] = df_hist_aux["item"].fillna("").str.strip().str.lower()
+            items_disponibles = sorted([i for i in df_hist_aux["item_norm"].unique().tolist() if i])
+
+            if items_disponibles:
+                item_norm_sel = st.selectbox("Insumo a limpiar del historial", items_disponibles, key="hist_item_norm")
+                filas_item = df_hist_aux[df_hist_aux["item_norm"] == item_norm_sel]
+                st.caption(f"Se eliminarán {len(filas_item)} compras del historial para ese insumo.")
+
+                confirmar_limpieza = st.checkbox("Confirmo que deseo borrar ese historial por error de carga", key="hist_confirma_limpieza")
+                if st.button("🗑 Borrar historial del insumo seleccionado", type="secondary", disabled=not confirmar_limpieza):
+                    with conectar() as conn:
+                        cur = conn.cursor()
+
+                        for _, row in filas_item.iterrows():
+                            actual_row = cur.execute(
+                                "SELECT id, cantidad FROM inventario WHERE lower(trim(item))=?",
+                                (str(row["item_norm"]),)
+                            ).fetchone()
+
+                            if actual_row:
+                                item_id, cantidad_actual = actual_row
+                                nueva_cant = max(0.0, float(cantidad_actual or 0) - float(row["cantidad"]))
+                                cur.execute(
+                                    "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
+                                    (nueva_cant, int(item_id))
+                                )
+                                cur.execute(
+                                    """
+                                    INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+                                    VALUES (?, 'SALIDA', ?, 'Corrección masiva: limpieza historial por insumo', ?)
+                                    """,
+                                    (int(item_id), float(row["cantidad"]), usuario_actual)
+                                )
+
+                        ids_borrar = [int(x) for x in filas_item["compra_id"].tolist()]
+                        cur.executemany("DELETE FROM historial_compras WHERE id=?", [(i,) for i in ids_borrar])
+                        conn.commit()
+
+                    st.success(f"Se borró el historial de '{item_norm_sel}' y se ajustó el stock donde correspondía.")
+                    cargar_datos()
+                    st.rerun()
+
     # =======================================================
     # 👤 TAB 4 — PROVEEDORES
     # =======================================================
@@ -4006,6 +4051,14 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+
+
+
+
+
+
+
 
 
 
