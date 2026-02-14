@@ -173,6 +173,10 @@ def inicializar_sistema():
 
         c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
 
+        columnas_ventas = {row[1] for row in c.execute("PRAGMA table_info(ventas)").fetchall()}
+        if 'usuario' not in columnas_ventas:
+            c.execute("ALTER TABLE ventas ADD COLUMN usuario TEXT")
+
         columnas_proveedores = {row[1] for row in c.execute("PRAGMA table_info(proveedores)").fetchall()}
         if "telefono" not in columnas_proveedores:
             c.execute("ALTER TABLE proveedores ADD COLUMN telefono TEXT")
@@ -3494,7 +3498,8 @@ elif menu == "📝 Cotizaciones":
                 detalle=descr,
                 monto_usd=precio_final,
                 metodo=metodo_pago,
-                consumos=consumos_reales
+                consumos=consumos_reales,
+                usuario=st.session_state.get("usuario_nombre", "Sistema")
             )
 
             if exito:
@@ -3523,6 +3528,7 @@ if menu == "🛒 Venta Directa":
 
     df_inv = st.session_state.get('df_inv', pd.DataFrame())
     df_cli = st.session_state.get('df_cli', pd.DataFrame())
+    usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
 
     if df_inv.empty:
         st.warning("No hay inventario cargado.")
@@ -3534,179 +3540,8 @@ if menu == "🛒 Venta Directa":
         st.warning("⚠️ No hay productos con stock disponible.")
         st.stop()
 
-    # --- SELECCIÓN DE PRODUCTO ---
     with st.container(border=True):
-
         c1, c2 = st.columns([2, 1])
-
-        prod_sel = c1.selectbox(
-            "📦 Seleccionar Producto:",
-            disponibles['item'].tolist()
-        )
-
-        datos = disponibles[disponibles['item'] == prod_sel].iloc[0]
-
-        id_producto = int(datos['id'])
-        stock_actual = float(datos['cantidad'])
-        precio_base = float(datos['precio_usd'])
-        unidad = datos['unidad']
-        minimo = float(datos['minimo'])
-
-        c2.metric("Stock Disponible", f"{stock_actual:.2f} {unidad}")
-
-    # --- FORMULARIO DE VENTA ---
-    with st.form("form_venta_directa", clear_on_submit=True):
-
-        st.subheader("Datos de la Venta")
-
-        # Cliente integrado
-        if not df_cli.empty:
-            opciones_cli = {
-                row['nombre']: row['id']
-                for _, row in df_cli.iterrows()
-            }
-
-            cliente_nombre = st.selectbox(
-                "Cliente:",
-                list(opciones_cli.keys())
-            )
-
-            id_cliente = opciones_cli[cliente_nombre]
-        else:
-            cliente_nombre = "Consumidor Final"
-            id_cliente = None
-            st.info("Venta sin cliente registrado")
-
-        c1, c2, c3 = st.columns(3)
-
-        cantidad = c1.number_input(
-            f"Cantidad ({unidad})",
-            min_value=0.0,
-            max_value=stock_actual,
-            step=1.0
-        )
-
-        margen = c2.number_input("Margen %", value=30.0, format="%.2f")
-
-        metodo = c3.selectbox(
-            "Método de Pago",
-            [
-                "Efectivo $",
-                "Pago Móvil (BCV)",
-                "Transferencia (Bs)",
-                "Zelle",
-                "Binance",
-                "Pendiente"
-            ]
-        )
-
-        usa_desc = st.checkbox("Aplicar descuento cliente fiel")
-        desc = st.number_input(
-            "Descuento %",
-            value=5.0 if usa_desc else 0.0,
-            disabled=not usa_desc,
-            format="%.2f"
-        )
-
-        # Impuestos
-        st.write("Impuestos aplicables:")
-
-        i1, i2 = st.columns(2)
-
-        usa_iva = i1.checkbox("Aplicar IVA")
-        usa_banco = i2.checkbox("Comisión bancaria", value=True)
-
-        # ---- CÁLCULOS ----
-        costo_material = cantidad * precio_base
-        con_margen = costo_material * (1 + margen / 100)
-        con_desc = con_margen * (1 - desc / 100)
-
-        impuestos = 0.0
-
-        if usa_iva:
-            impuestos += float(st.session_state.get('iva_perc', 16))
-
-        if usa_banco and metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
-            impuestos += float(st.session_state.get('banco_perc', 0.5))
-
-        total_usd = con_desc * (1 + impuestos / 100)
-
-        # Conversión a Bs SOLO si aplica
-        total_bs = 0.0
-
-        if metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
-            total_bs = total_usd * float(st.session_state.get('tasa_bcv', 1.0))
-
-        elif metodo == "Binance":
-            total_bs = total_usd * float(st.session_state.get('tasa_binance', 1.0))
-
-        st.divider()
-
-        st.metric("Total a Cobrar", f"$ {total_usd:.2f}")
-
-        if total_bs > 0:
-            st.info(f"Equivalente: Bs {total_bs:,.2f}")
-
-        # ---- VALIDACIONES FINALES ----
-        if st.form_submit_button("🧾 Confirmar Venta"):
-
-            if cantidad <= 0:
-                st.error("⚠️ Debe vender al menos una unidad.")
-                st.stop()
-
-            if cantidad > stock_actual:
-                st.error("⚠️ No puedes vender más de lo que hay en inventario.")
-                st.stop()
-
-            # Preparar consumo para el núcleo
-            consumos = {id_producto: cantidad}
-
-            try:
-                exito, mensaje = registrar_venta_global(
-                    id_cliente=id_cliente,
-                    nombre_cliente=cliente_nombre,
-                    detalle=f"Venta directa de {prod_sel}",
-                    monto_usd=float(total_usd),
-                    metodo=metodo,
-                    consumos=consumos
-                )
-
-                if exito:
-                    st.success(mensaje)
-                    cargar_datos()
-                    st.rerun()
-                else:
-                    st.error(mensaje)
-
-            except Exception as e:
-                st.error(f"Error registrando venta: {e}")
-
-
-      # ===========================================================
-# 🛒 MÓDULO DE VENTA DIRECTA - INTEGRADO CON NÚCLEO GLOBAL
-# ===========================================================
-if menu == "🛒 Venta Directa":
-
-    st.title("🛒 Venta Rápida de Materiales")
-
-    df_inv = st.session_state.get('df_inv', pd.DataFrame())
-    df_cli = st.session_state.get('df_cli', pd.DataFrame())
-
-    if df_inv.empty:
-        st.warning("No hay inventario cargado.")
-        st.stop()
-
-    disponibles = df_inv[df_inv['cantidad'] > 0]
-
-    if disponibles.empty:
-        st.warning("⚠️ No hay productos con stock disponible.")
-        st.stop()
-
-    # --- SELECCIÓN DE PRODUCTO ---
-    with st.container(border=True):
-
-        c1, c2 = st.columns([2, 1])
-
         prod_sel = c1.selectbox(
             "📦 Seleccionar Producto:",
             disponibles['item'].tolist(),
@@ -3714,33 +3549,24 @@ if menu == "🛒 Venta Directa":
         )
 
         datos = disponibles[disponibles['item'] == prod_sel].iloc[0]
-
-        id_producto = datos['id']
+        id_producto = int(datos['id'])
         stock_actual = float(datos['cantidad'])
         precio_base = float(datos['precio_usd'])
-        unidad = datos['unidad']
+        unidad = str(datos['unidad'])
         minimo = float(datos['minimo'])
 
         c2.metric("Stock Disponible", f"{stock_actual:.2f} {unidad}")
 
-    # --- FORMULARIO DE VENTA ---
     with st.form("form_venta_directa_modulo", clear_on_submit=True):
-
         st.subheader("Datos de la Venta")
 
-        # Cliente integrado
         if not df_cli.empty:
-            opciones_cli = {
-                row['nombre']: row['id']
-                for _, row in df_cli.iterrows()
-            }
-
+            opciones_cli = {row['nombre']: row['id'] for _, row in df_cli.iterrows()}
             cliente_nombre = st.selectbox(
                 "Cliente:",
-                opciones_cli.keys(),
+                list(opciones_cli.keys()),
                 key="venta_directa_cliente"
             )
-
             id_cliente = opciones_cli[cliente_nombre]
         else:
             cliente_nombre = "Consumidor Final"
@@ -3757,22 +3583,11 @@ if menu == "🛒 Venta Directa":
             key="venta_directa_cantidad"
         )
 
-        margen = c2.number_input(
-            "Margen %",
-            value=30.0,
-            key="venta_directa_margen"
-        )
+        margen = c2.number_input("Margen %", value=30.0, key="venta_directa_margen")
 
         metodo = c3.selectbox(
             "Método de Pago",
-            [
-                "Efectivo $",
-                "Pago Móvil (BCV)",
-                "Transferencia (Bs)",
-                "Zelle",
-                "Binance",
-                "Pendiente"
-            ],
+            ["Efectivo $", "Pago Móvil (BCV)", "Transferencia (Bs)", "Zelle", "Binance", "Pendiente"],
             key="venta_directa_metodo"
         )
 
@@ -3784,167 +3599,85 @@ if menu == "🛒 Venta Directa":
             key="venta_directa_desc"
         )
 
-        # Impuestos
         st.write("Impuestos aplicables:")
-
         i1, i2 = st.columns(2)
-
         usa_iva = i1.checkbox("Aplicar IVA", key="venta_directa_iva")
         usa_banco = i2.checkbox("Comisión bancaria", value=True, key="venta_directa_banco")
 
-        # ---- CÁLCULOS ----
         costo_material = cantidad * precio_base
         con_margen = costo_material * (1 + margen / 100)
         con_desc = con_margen * (1 - desc / 100)
 
-        impuestos = 0
-
+        impuestos = 0.0
         if usa_iva:
-            impuestos += st.session_state.get('iva_perc', 16)
-
+            impuestos += float(st.session_state.get('iva_perc', 16))
         if usa_banco and metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
-            impuestos += st.session_state.get('banco_perc', 0.5)
+            impuestos += float(st.session_state.get('banco_perc', 0.5))
 
         total_usd = con_desc * (1 + impuestos / 100)
 
+        total_bs = 0.0
         if metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
-            total_bs = total_usd * t_bcv
+            total_bs = total_usd * float(st.session_state.get('tasa_bcv', 1.0))
         elif metodo == "Binance":
-            total_bs = total_usd * t_bin
-        else:
-            total_bs = 0
+            total_bs = total_usd * float(st.session_state.get('tasa_binance', 1.0))
 
         st.divider()
-
         st.metric("Total a Cobrar", f"$ {total_usd:.2f}")
-
-        if total_bs:
+        if total_bs > 0:
             st.info(f"Equivalente: Bs {total_bs:,.2f}")
 
-        # =====================================================
-        # 🔐 AQUÍ ENTRA EL NÚCLEO CENTRAL DEL IMPERIO
-        # =====================================================
-        if st.form_submit_button("🚀 PROCESAR VENTA"):
+        submit_venta = st.form_submit_button("🚀 PROCESAR VENTA")
 
-            if cantidad <= 0:
-                st.error("Cantidad inválida")
-                st.stop()
+    if submit_venta:
+        if cantidad <= 0:
+            st.error("⚠️ Debes vender al menos una unidad.")
+            st.stop()
 
-            consumos = {
-                id_producto: cantidad
+        if cantidad > stock_actual:
+            st.error("⚠️ No puedes vender más de lo que hay en inventario.")
+            st.stop()
+
+        consumos = {id_producto: cantidad}
+
+        exito, mensaje = registrar_venta_global(
+            id_cliente=id_cliente,
+            nombre_cliente=cliente_nombre,
+            detalle=f"{cantidad} {unidad} de {prod_sel}",
+            monto_usd=float(total_usd),
+            metodo=metodo,
+            consumos=consumos,
+            usuario=usuario_actual
+        )
+
+        if exito:
+            st.success(mensaje)
+            if stock_actual - cantidad <= minimo:
+                st.warning("⚠️ Producto quedó en nivel crítico")
+
+            st.session_state.ultimo_ticket = {
+                "cliente": cliente_nombre,
+                "detalle": f"{cantidad} {unidad} de {prod_sel}",
+                "total": total_usd,
+                "metodo": metodo,
+                "usuario": usuario_actual
             }
+            st.rerun()
+        else:
+            st.error(mensaje)
 
-            exito, mensaje = registrar_venta_global(
-                id_cliente=id_cliente,
-                nombre_cliente=cliente_nombre,
-                detalle=f"{cantidad} {unidad} de {prod_sel}",
-                monto_usd=total_usd,
-                metodo=metodo,
-                consumos=consumos
-            )
-
-            if exito:
-                st.success(mensaje)
-
-                if stock_actual - cantidad <= minimo:
-                    st.warning("⚠️ Producto quedó en nivel crítico")
-
-                st.session_state.ultimo_ticket = {
-                    "cliente": cliente_nombre,
-                    "detalle": f"{cantidad} {unidad} de {prod_sel}",
-                    "total": total_usd,
-                    "metodo": metodo
-                }
-
-                st.rerun()
-            else:
-                st.error(mensaje)
-
-    # --- TICKET ---
     if 'ultimo_ticket' in st.session_state:
-
         st.divider()
-
         t = st.session_state.ultimo_ticket
-
         with st.expander("📄 Recibo de Venta", expanded=True):
-
-            st.code(
-f"""
+            st.code(f"""
 CLIENTE: {t['cliente']}
 DETALLE: {t['detalle']}
 TOTAL: $ {t['total']:.2f}
 MÉTODO: {t['metodo']}
-"""
-            )
-
+USUARIO: {t.get('usuario', 'N/D')}
+""")
             if st.button("Cerrar Ticket", key="cerrar_ticket_venta_directa"):
-                del st.session_state.ultimo_ticket
-                st.rerun()
-
-
-        # =====================================================
-        # 🔐 AQUÍ ENTRA EL NÚCLEO CENTRAL DEL IMPERIO
-        # =====================================================
-        if st.form_submit_button("🚀 PROCESAR VENTA"):
-
-            if cantidad <= 0:
-                st.error("⚠️ Debes vender al menos una unidad.")
-                st.stop()
-
-            if cantidad > stock_actual:
-                st.error("⚠️ No puedes vender más de lo que hay en inventario.")
-                st.stop()
-
-            consumos = {
-                id_producto: cantidad
-            }
-
-            exito, mensaje = registrar_venta_global(
-                id_cliente=id_cliente,
-                nombre_cliente=cliente_nombre,
-                detalle=f"{cantidad} {unidad} de {prod_sel}",
-                monto_usd=total_usd,
-                metodo=metodo,
-                consumos=consumos
-            )
-
-            if exito:
-                st.success(mensaje)
-
-                if stock_actual - cantidad <= minimo:
-                    st.warning("⚠️ Producto quedó en nivel crítico")
-
-                st.session_state.ultimo_ticket = {
-                    "cliente": cliente_nombre,
-                    "detalle": f"{cantidad} {unidad} de {prod_sel}",
-                    "total": total_usd,
-                    "metodo": metodo
-                }
-
-                st.rerun()
-            else:
-                st.error(mensaje)
-
-    # --- TICKET ---
-    if 'ultimo_ticket' in st.session_state:
-
-        st.divider()
-
-        t = st.session_state.ultimo_ticket
-
-        with st.expander("📄 Recibo de Venta", expanded=True):
-
-            st.code(
-f"""
-CLIENTE: {t['cliente']}
-DETALLE: {t['detalle']}
-TOTAL: $ {t['total']:.2f}
-MÉTODO: {t['metodo']}
-"""
-            )
-
-            if st.button("Cerrar Ticket"):
                 del st.session_state.ultimo_ticket
                 st.rerun()
 
@@ -3959,7 +3692,8 @@ def registrar_venta_global(
     detalle="Venta general",
     monto_usd=0.0,
     metodo="Efectivo $",
-    consumos=None
+    consumos=None,
+    usuario=None
 ):
     """
     FUNCIÓN MAESTRA DEL IMPERIO – VERSIÓN SEGURA Y TRANSACCIONAL
@@ -3974,6 +3708,10 @@ def registrar_venta_global(
     if not detalle:
         return False, "⚠️ El detalle de la venta no puede estar vacío"
 
+    if not usuario:
+        usuario = st.session_state.get("usuario_nombre", "Sistema")
+
+    conn = None
     try:
         conn = conectar()
         cursor = conn.cursor()
@@ -4021,20 +3759,21 @@ def registrar_venta_global(
 
             cursor.execute("""
                 INSERT INTO inventario_movs
-                (item_id, tipo, cantidad, motivo)
-                VALUES (?, 'SALIDA', ?, ?)
-            """, (item_id, cant, f"Venta: {detalle}"))
+                (item_id, tipo, cantidad, motivo, usuario)
+                VALUES (?, 'SALIDA', ?, ?, ?)
+            """, (item_id, cant, f"Venta: {detalle}", usuario))
 
         cursor.execute("""
             INSERT INTO ventas
-            (cliente_id, cliente, detalle, monto_total, metodo)
-            VALUES (?, ?, ?, ?, ?)
+            (cliente_id, cliente, detalle, monto_total, metodo, usuario)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, (
             id_cliente,
             nombre_cliente,
             detalle,
             float(monto_usd),
-            metodo
+            metodo,
+            usuario
         ))
 
         conn.commit()
