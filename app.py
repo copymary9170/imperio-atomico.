@@ -126,7 +126,7 @@ def inicializar_sistema():
                 moneda_pago TEXT,
                 usuario TEXT,
                 fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-            )"""
+            )""",
 
             # NÓMINA Y COMISIONES
 """
@@ -3802,6 +3802,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
