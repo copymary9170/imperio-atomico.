@@ -970,6 +970,17 @@ elif menu == "⚙️ Configuración":
 # 📊 RESUMEN COSTOS (Dentro de Configuración)
 # ===========================================================
 
+# 🔹 CARGAR COSTOS DESDE LA BASE DE DATOS
+with conectar() as conn:
+
+    df_costos = pd.read_sql(
+        "SELECT * FROM costos_operativos",
+        conn
+    )
+
+
+# 🔹 MOSTRAR RESUMEN
+
 if not df_costos.empty:
 
     total = df_costos["monto_mensual"].sum()
@@ -994,8 +1005,6 @@ else:
 
 
 st.divider()
-
-
 # ===========================================================
 # 🧹 OPCIONES DEL SISTEMA
 # ===========================================================
@@ -1938,6 +1947,7 @@ def registrar_venta_global(id_cliente=None, nombre_cliente="Consumidor Final", d
         return False, f"Error: {str(e)}"
     finally:
         if conn: conn.close()
+
 
 
 
