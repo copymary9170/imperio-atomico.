@@ -16,42 +16,61 @@ import secrets
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
 
 # --- 2. MOTOR DE BASE DE DATOS ---
+
 def conectar():
-"""Conexión principal a la base de datos del Imperio."""
-conn = sqlite3.connect('imperio_v2.db', check_same_thread=False)
-conn.execute("PRAGMA foreign_keys = ON")
-return conn
+    """Conexión principal a la base de datos del Imperio."""
+    conn = sqlite3.connect('imperio_v2.db', check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
-"""Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
-salt = salt or secrets.token_hex(16)
-iterations = 120_000
-digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), iterations).hex()
-return f"pbkdf2_sha256${iterations}${salt}${digest}"
+    """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
+
+    salt = salt or secrets.token_hex(16)
+
+    iterations = 120_000
+
+    digest = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt.encode('utf-8'),
+        iterations
+    ).hex()
+
+    return f"pbkdf2_sha256${iterations}${salt}${digest}"
 
 
 def verify_password(password: str, password_hash: str | None) -> bool:
-if not password_hash:
-return False
-try:
-algorithm, iterations, salt, digest = password_hash.split('$', 3)
-if algorithm != 'pbkdf2_sha256':
-return False
-test_digest = hashlib.pbkdf2_hmac(
-'sha256',
-password.encode('utf-8'),
-salt.encode('utf-8'),
-int(iterations)
-).hex()
-return hmac.compare_digest(test_digest, digest)
-except (ValueError, TypeError):
-return False
+
+    if not password_hash:
+        return False
+
+    try:
+
+        algorithm, iterations, salt, digest = password_hash.split('$', 3)
+
+        if algorithm != 'pbkdf2_sha256':
+            return False
+
+        test_digest = hashlib.pbkdf2_hmac(
+            'sha256',
+            password.encode('utf-8'),
+            salt.encode('utf-8'),
+            int(iterations)
+        ).hex()
+
+        return hmac.compare_digest(test_digest, digest)
+
+    except (ValueError, TypeError):
+
+        return False
 
 
 def obtener_password_admin_inicial() -> str:
-"""Obtiene contraseña inicial desde entorno para evitar hardcode total en el código."""
-return os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
+    """Obtiene contraseña inicial desde entorno para evitar hardcode total en el código."""
+
+    return os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
 # ===========================================================
@@ -3676,6 +3695,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
