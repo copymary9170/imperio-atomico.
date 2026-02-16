@@ -1046,7 +1046,7 @@ elif menu == "📦 Inventario":
                         usuario_actual
                     ))
 
-                conn.commit()
+                    conn.commit()
 
             cargar_datos()
             st.success("Compra registrada correctamente.")
@@ -3697,6 +3697,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
