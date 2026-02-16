@@ -1783,11 +1783,10 @@ with st.form("form_costos_operativos"):
 
         st.rerun()
 
-
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
 # ===========================================================
-if menu == "🎨 Análisis CMYK":
+elif menu == "🎨 Análisis CMYK":
 
     st.title("🎨 Analizador Profesional de Cobertura CMYK")
 
@@ -3903,6 +3902,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
