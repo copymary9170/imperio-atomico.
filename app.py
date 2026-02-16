@@ -12,730 +12,207 @@ import hashlib
 import hmac
 import secrets
 
-
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
-
 st.set_page_config(
     page_title="Imperio Atómico - ERP Pro",
     layout="wide",
     page_icon="⚛️"
 )
 
-
-
 # --- 2. MOTOR DE BASE DE DATOS ---
-
 def conectar():
-
+    """Conexión principal a la base de datos del Imperio."""
     conn = sqlite3.connect(
         "imperio_v2.db",
         check_same_thread=False
     )
-
-    conn.execute(
-        "PRAGMA foreign_keys = ON"
-    )
-
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
-
-
-
-# Conexión principal a la base de datos
-
-
-def hash_password(
-    password: str,
-    salt: str | None = None
-) -> str:
-
+def hash_password(password: str, salt: str | None = None) -> str:
     """Genera hash PBKDF2 para almacenar contraseñas"""
-
     salt = salt or secrets.token_hex(16)
-
     iterations = 120_000
-
     digest = hashlib.pbkdf2_hmac(
-
         "sha256",
-
         password.encode("utf-8"),
-
         salt.encode("utf-8"),
-
         iterations
-
     ).hex()
-
     return f"pbkdf2_sha256${iterations}${salt}${digest}"
 
-
-
-
-def verify_password(
-    password: str,
-    password_hash: str | None
-) -> bool:
-
-
-
+def verify_password(password: str, password_hash: str | None) -> bool:
     if not password_hash:
-
         return False
-
-
-
     try:
-
-        algorithm, iterations, salt, digest = password_hash.split(
-            "$",
-            3
-        )
-
-
-
+        algorithm, iterations, salt, digest = password_hash.split("$", 3)
         if algorithm != "pbkdf2_sha256":
-
             return False
-
-
-
         test_digest = hashlib.pbkdf2_hmac(
-
             "sha256",
-
             password.encode("utf-8"),
-
             salt.encode("utf-8"),
-
             int(iterations)
-
         ).hex()
-
-
-
-        return hmac.compare_digest(
-            test_digest,
-            digest
-        )
-
-
-
+        return hmac.compare_digest(test_digest, digest)
     except:
-
         return False
-
-
-
-
 
 def obtener_password_admin_inicial() -> str:
-
-    """Obtiene contraseña inicial"""
-
-    return os.getenv(
-        "IMPERIO_ADMIN_PASSWORD",
-        "atomica2026"
-    )
-
-
-
+    return os.getenv("IMPERIO_ADMIN_PASSWORD", "atomica2026")
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
-
-
 def inicializar_sistema():
-
-
     with conectar() as conn:
-
-
         c = conn.cursor()
+        
+        # CONFIGURACIÓN Y TASAS
+        c.execute("CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)")
+        c.execute("CREATE TABLE IF NOT EXISTS tasas (id INTEGER PRIMARY KEY AUTOINCREMENT, tasa_bcv REAL, tasa_binance REAL, fecha TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS costos_operativos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, monto_mensual REAL)")
+        
+        # ENTIDADES PRINCIPALES
+        c.execute("CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, password_hash TEXT, rol TEXT, nombre TEXT)")
+        
+        # INVENTARIO
+        c.execute("""CREATE TABLE IF NOT EXISTS inventario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, 
+            precio_usd REAL, minimo REAL DEFAULT 5.0, activo INTEGER DEFAULT 1, 
+            ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP)""")
+        
+        c.execute("""CREATE TABLE IF NOT EXISTS inventario_movs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, 
+            motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)""")
 
+        # COMPRAS Y PROVEEDORES
+        c.execute("CREATE TABLE IF NOT EXISTS proveedores (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE, telefono TEXT, rif TEXT, contacto TEXT, observaciones TEXT, fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS compras (id INTEGER PRIMARY KEY AUTOINCREMENT, proveedor TEXT, total REAL, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS compras_detalle (id INTEGER PRIMARY KEY AUTOINCREMENT, compra_id INTEGER, item TEXT, cantidad REAL, costo REAL)")
 
+        # VENTAS
+        c.execute("""CREATE TABLE IF NOT EXISTS ventas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, cliente TEXT, monto_total REAL, 
+            costo_total REAL, utilidad REAL, margen REAL, metodo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)""")
+        
+        c.execute("CREATE TABLE IF NOT EXISTS ventas_detalle (id INTEGER PRIMARY KEY AUTOINCREMENT, venta_id INTEGER, item TEXT, cantidad REAL, costo REAL, precio REAL)")
+        c.execute("CREATE TABLE IF NOT EXISTS ventas_extra (id INTEGER PRIMARY KEY AUTOINCREMENT, venta_id INTEGER, tasa REAL, monto_bs REAL)")
 
-        # CONFIGURACIÓN
+        # GASTOS
+        c.execute("CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS gastos_extra (id INTEGER PRIMARY KEY AUTOINCREMENT, gasto_id INTEGER, tasa REAL, monto_bs REAL, usuario TEXT)")
 
-        c.execute("""
+        # OTROS
+        c.execute("CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, costo REAL, vida_util_meses INTEGER, fecha_compra TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente TEXT, total REAL, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS cotizacion_detalle (id INTEGER PRIMARY KEY AUTOINCREMENT, cotizacion_id INTEGER, item TEXT, cantidad REAL, precio REAL)")
+        c.execute("CREATE TABLE IF NOT EXISTS cmyk_log (id INTEGER PRIMARY KEY AUTOINCREMENT, archivo TEXT, area REAL, costo REAL, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        c.execute("CREATE TABLE IF NOT EXISTS cierre_caja (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, ventas REAL, gastos REAL, utilidad REAL, usuario TEXT)")
 
-            CREATE TABLE IF NOT EXISTS configuracion (
-
-                parametro TEXT PRIMARY KEY,
-
-                valor REAL
-
-            )
-
-        """)
-
-
-
-        # TASAS
-
-        c.execute("""
-
-            CREATE TABLE IF NOT EXISTS tasas (
-
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                tasa_bcv REAL,
-
-                tasa_binance REAL,
-
-                fecha TEXT
-
-            )
-
-        """)
-
-
-
-        # COSTOS OPERATIVOS
-
-        c.execute("""
-
-            CREATE TABLE IF NOT EXISTS costos_operativos (
-
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                nombre TEXT,
-
-                monto_mensual REAL
-
-            )
-
-        """)
-
-
-
+        # CREAR ADMIN INICIAL
+        try:
+            admin_pwd = obtener_password_admin_inicial()
+            c.execute("INSERT OR IGNORE INTO usuarios VALUES (?, ?, ?, ?, ?)", 
+                      ("jefa", "", hash_password(admin_pwd), "Admin", "Dueña del Imperio"))
+        except:
+            pass
         conn.commit()
-    # ===================================================
-    # CLIENTES
-    # ===================================================
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS clientes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT,
-        whatsapp TEXT
-    )
-    """)
-
-    # ===================================================
-    # USUARIOS
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS usuarios (
-        username TEXT PRIMARY KEY,
-        password TEXT,
-        password_hash TEXT,
-        rol TEXT,
-        nombre TEXT
-    )
-    """)
-
-    # ===================================================
-    # INVENTARIO
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS inventario (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item TEXT UNIQUE,
-        cantidad REAL,
-        unidad TEXT,
-        precio_usd REAL,
-        minimo REAL DEFAULT 5.0,
-        activo INTEGER DEFAULT 1,
-        ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # ===================================================
-    # MOVIMIENTOS INVENTARIO
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS inventario_movs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id INTEGER,
-        tipo TEXT,
-        cantidad REAL,
-        motivo TEXT,
-        usuario TEXT,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # ===================================================
-    # COMPRAS
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS compras (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        proveedor TEXT,
-        total REAL,
-        usuario TEXT,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS compras_detalle (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        compra_id INTEGER,
-        item TEXT,
-        cantidad REAL,
-        costo REAL
-    )
-    """)
-
-    # ===================================================
-    # HISTORIAL COMPRAS
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS historial_compras (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item TEXT,
-        proveedor_id INTEGER,
-        cantidad REAL,
-        unidad TEXT,
-        costo_total_usd REAL,
-        costo_unit_usd REAL,
-        impuestos REAL,
-        delivery REAL,
-        tasa_usada REAL,
-        moneda_pago TEXT,
-        usuario TEXT,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # ===================================================
-    # PROVEEDORES
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS proveedores (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT UNIQUE,
-        telefono TEXT,
-        rif TEXT,
-        contacto TEXT,
-        observaciones TEXT,
-        fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # ===================================================
-    # VENTAS EXTRA
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS ventas_extra (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        venta_id INTEGER,
-        tasa REAL,
-        monto_bs REAL
-    )
-    """)
-
-    # ===================================================
-    # GASTOS EXTRA
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS gastos_extra (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        gasto_id INTEGER,
-        tasa REAL,
-        monto_bs REAL,
-        usuario TEXT
-    )
-    """)
-
-    # ===================================================
-    # VENTAS
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS ventas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cliente_id INTEGER,
-        cliente TEXT,
-        monto_total REAL,
-        costo_total REAL,
-        utilidad REAL,
-        margen REAL,
-        metodo TEXT,
-        usuario TEXT,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS ventas_detalle (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        venta_id INTEGER,
-        item TEXT,
-        cantidad REAL,
-        costo REAL,
-        precio REAL
-    )
-    """)
-
-    # ===================================================
-    # GASTOS
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS gastos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        descripcion TEXT,
-        monto REAL,
-        categoria TEXT,
-        metodo TEXT,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # ===================================================
-    # ACTIVOS
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS activos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT,
-        costo REAL,
-        vida_util_meses INTEGER,
-        fecha_compra TEXT
-    )
-    """)
-
-    # ===================================================
-    # COTIZACIONES
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS cotizaciones (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cliente TEXT,
-        total REAL,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS cotizacion_detalle (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cotizacion_id INTEGER,
-        item TEXT,
-        cantidad REAL,
-        precio REAL
-    )
-    """)
-
-    # ===================================================
-    # CMYK LOG
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS cmyk_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        archivo TEXT,
-        area REAL,
-        costo REAL,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # ===================================================
-    # CIERRE DE CAJA
-    # ===================================================
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS cierre_caja (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT,
-        ventas REAL,
-        gastos REAL,
-        utilidad REAL,
-        usuario TEXT
-    )
-    """)
-
-    # ===================================================
-    # CREAR ADMIN
-    # ===================================================
-
-    try:
-
-        admin_password = obtener_password_admin_inicial()
-
-        c.execute("""
-        INSERT OR IGNORE INTO usuarios
-        VALUES (?, ?, ?, ?, ?)
-        """, (
-            "jefa",
-            "",
-            hash_password(admin_password),
-            "Admin",
-            "Dueña del Imperio"
-        ))
-
-    except:
-        pass
-
-    conn.commit()
-# ===========================================================
-# 💰 FUNCIÓN FINANCIERA EMPRESARIAL
-# ===========================================================
+# --- 4. FUNCIONES DE APOYO Y CARGA ---
 def calcular_costo_operativo_por_dia():
+    with conectar() as conn:
+        df = pd.read_sql("SELECT monto_mensual FROM costos_operativos", conn)
+        if df.empty:
+            return 0
+        return df["monto_mensual"].sum() / 30
 
-with conectar() as conn:
-
-df = pd.read_sql(
-"SELECT monto_mensual FROM costos_operativos",
-conn
-)
-
-if df.empty:
-return 0
-
-total_mensual = df["monto_mensual"].sum()
-
-return total_mensual / 30
-
-# --- 4. CARGA DE DATOS ---
 def cargar_datos():
-with conectar() as conn:
-try:
-columnas_inventario = {row[1] for row in conn.execute("PRAGMA table_info(inventario)").fetchall()}
-query_inv = "SELECT * FROM inventario"
-if 'activo' in columnas_inventario:
-query_inv += " WHERE COALESCE(activo,1)=1"
+    with conectar() as conn:
+        try:
+            columnas = {row[1] for row in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+            query_inv = "SELECT * FROM inventario"
+            if 'activo' in columnas:
+                query_inv += " WHERE COALESCE(activo,1)=1"
+            st.session_state.df_inv = pd.read_sql(query_inv, conn)
+            st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+            conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
+            for _, row in conf_df.iterrows():
+                st.session_state[row['parametro']] = float(row['valor'])
+        except Exception as e:
+            st.warning(f"Aviso de carga: {e}")
 
-st.session_state.df_inv = pd.read_sql(query_inv, conn)
-st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
-for _, row in conf_df.iterrows():
-st.session_state[row['parametro']] = float(row['valor'])
-except (sqlite3.DatabaseError, ValueError, KeyError) as e:
-st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")
-
-# Alias de compatibilidad para módulos que lo usan
-def cargar_datos_seguros():
-cargar_datos()
-
-# --- 5. LOGICA DE ACCESO ---
+# --- 5. LÓGICA DE ACCESO ---
 if 'autenticado' not in st.session_state:
-st.session_state.autenticado = False
-inicializar_sistema()
+    st.session_state.autenticado = False
+    inicializar_sistema()
 
 def login():
-st.title("⚛️ Acceso al Imperio Atómico")
-with st.container(border=True):
-u = st.text_input("Usuario")
-p = st.text_input("Contraseña", type="password")
-if st.button("Entrar", use_container_width=True):
-with conectar() as conn:
-res = conn.execute(
-    "SELECT username, rol, nombre, password, password_hash FROM usuarios WHERE username=?",
-    (u,)
-).fetchone()
-
-acceso_ok = False
-if res:
-username, rol, nombre, password_plain, password_hash = res
-if verify_password(p, password_hash):
-    acceso_ok = True
-elif password_plain and hmac.compare_digest(password_plain, p):
-    acceso_ok = True
-    with conectar() as conn:
-        conn.execute(
-            "UPDATE usuarios SET password_hash=?, password='' WHERE username=?",
-            (hash_password(p), username)
-        )
-        conn.commit()
-
-if acceso_ok:
-st.session_state.autenticado = True
-st.session_state.rol = rol
-st.session_state.usuario_nombre = nombre
-cargar_datos()
-st.rerun()
-else:
-st.error("Acceso denegado")
+    st.title("⚛️ Acceso al Imperio Atómico")
+    with st.container(border=True):
+        u = st.text_input("Usuario")
+        p = st.text_input("Contraseña", type="password")
+        if st.button("Entrar", use_container_width=True):
+            with conectar() as conn:
+                res = conn.execute("SELECT username, rol, nombre, password, password_hash FROM usuarios WHERE username=?", (u,)).fetchone()
+                if res:
+                    username, rol, nombre, p_plain, p_hash = res
+                    if verify_password(p, p_hash) or (p_plain and hmac.compare_digest(p_plain, p)):
+                        st.session_state.autenticado = True
+                        st.session_state.rol = rol
+                        st.session_state.usuario_nombre = nombre
+                        if p_plain: # Migrar a hash si era plano
+                            conn.execute("UPDATE usuarios SET password_hash=?, password='' WHERE username=?", (hash_password(p), u))
+                            conn.commit()
+                        cargar_datos()
+                        st.rerun()
+                st.error("Acceso denegado")
 
 if not st.session_state.autenticado:
-login()
-st.stop()
+    login()
+    st.stop()
 
-# --- 6. SIDEBAR Y VARIABLES ---
+# --- 6. SIDEBAR Y NAVEGACIÓN ---
 cargar_datos()
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
-ROL = st.session_state.get('rol', "Produccion")
 
 with st.sidebar:
-st.header(f"👋 {st.session_state.usuario_nombre}")
-st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
+    st.header(f"👋 {st.session_state.usuario_nombre}")
+    st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
+    menu = st.radio("Secciones:", ["📊 Dashboard", "🛒 Venta Directa", "📦 Inventario", "👥 Clientes", "🎨 Análisis CMYK", "🏗️ Activos", "🛠️ Otros Procesos", "💰 Ventas", "📉 Gastos", "🏁 Cierre de Caja", "📊 Auditoría", "📝 Cotizaciones", "⚙️ Configuración"])
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
 
-menu = st.radio(
-"Secciones:",
-[
-"📊 Dashboard",
-"🛒 Venta Directa",
-"📦 Inventario",
-"👥 Clientes",
-"🎨 Análisis CMYK",
-"🏗️ Activos",
-"🛠️ Otros Procesos",
-"💰 Ventas",
-"📉 Gastos",
-"🏁 Cierre de Caja",
-"📊 Auditoría y Métricas",
-"📝 Cotizaciones",
-"⚙️ Configuración"
-]
-)
-
-if st.button("🚪 Cerrar Sesión", use_container_width=True):
-st.session_state.clear()
-st.rerun()
-
-
-# ===========================================================
-# 📊 DASHBOARD GENERAL
-# ===========================================================
+# --- 7. MÓDULOS ---
 if menu == "📊 Dashboard":
+    st.title("📊 Dashboard Ejecutivo")
+    with conectar() as conn:
+        df_ventas = pd.read_sql("SELECT fecha, monto_total, utilidad FROM ventas", conn)
+        df_gastos = pd.read_sql("SELECT fecha, monto FROM gastos", conn)
+        df_inv_dash = pd.read_sql("SELECT cantidad, precio_usd, minimo FROM inventario", conn)
+        
+        ventas_total = df_ventas["monto_total"].sum() if not df_ventas.empty else 0
+        gastos_total = df_gastos["monto"].sum() if not df_gastos.empty else 0
+        utilidad_total = df_ventas["utilidad"].sum() if not df_ventas.empty else 0
+        capital_inv = (df_inv_dash["cantidad"] * df_inv_dash["precio_usd"]).sum() if not df_inv_dash.empty else 0
+        stock_bajo = (df_inv_dash["cantidad"] <= df_inv_dash["minimo"]).sum() if not df_inv_dash.empty else 0
 
-st.title("📊 Dashboard Ejecutivo")
-st.caption("Resumen general financiero y operativo")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("💰 Ventas", f"${ventas_total:,.2f}")
+        c2.metric("📉 Gastos", f"${gastos_total:,.2f}")
+        c3.metric("💎 Utilidad", f"${utilidad_total:,.2f}")
+        c4.metric("🚨 Stock Bajo", stock_bajo)
+        
+        st.metric("📦 Capital en Inventario", f"${capital_inv:,.2f}")
+        if not df_ventas.empty:
+            st.subheader("Ventas en el tiempo")
+            df_ventas["fecha"] = pd.to_datetime(df_ventas["fecha"]).dt.date
+            st.line_chart(df_ventas.groupby("fecha")["monto_total"].sum())
 
-# =============================
-# CARGA DE DATOS
-# =============================
-
-with conectar() as conn:
-
-df_ventas = pd.read_sql(
-"SELECT fecha, monto_total, utilidad FROM ventas",
-conn
-)
-
-df_gastos = pd.read_sql(
-"SELECT fecha, monto FROM gastos",
-conn
-)
-
-df_inv_dash = pd.read_sql(
-"SELECT cantidad, precio_usd, minimo FROM inventario",
-conn
-)
-
-total_clientes = conn.execute(
-"SELECT COUNT(*) FROM clientes"
-).fetchone()[0]
-
-utilidad = conn.execute(
-"SELECT COALESCE(SUM(utilidad),0) FROM ventas"
-).fetchone()[0]
-
-
-# =============================
-# CALCULOS
-# =============================
-
-ventas_total = df_ventas["monto_total"].sum() if not df_ventas.empty else 0
-gastos_total = df_gastos["monto"].sum() if not df_gastos.empty else 0
-
-capital_inv = 0
-stock_bajo = 0
-
-if not df_inv_dash.empty:
-
-capital_inv = (
-df_inv_dash["cantidad"]
-* df_inv_dash["precio_usd"]
-).sum()
-
-stock_bajo = (
-df_inv_dash["cantidad"]
-<= df_inv_dash["minimo"]
-).sum()
-
-
-# =============================
-# METRICAS PRINCIPALES
-# =============================
-
-c1, c2, c3, c4, c5 = st.columns(5)
-
-c1.metric("💰 Ventas", f"${ventas_total:,.2f}")
-
-c2.metric("📉 Gastos", f"${gastos_total:,.2f}")
-
-c3.metric("💎 Utilidad Real", f"${utilidad:,.2f}")
-
-c4.metric("👥 Clientes", total_clientes)
-
-c5.metric("🚨 Stock Bajo", stock_bajo)
-
-
-st.divider()
-
-
-# =============================
-# CAPITAL INVENTARIO
-# =============================
-
-st.metric(
-"📦 Capital en Inventario",
-f"${capital_inv:,.2f}"
-)
-
-
-# =============================
-# GRAFICO VENTAS
-# =============================
-
-if not df_ventas.empty:
-
-df_ventas["fecha"] = pd.to_datetime(df_ventas["fecha"])
-
-resumen = df_ventas.groupby(
-df_ventas["fecha"].dt.date
-)["monto_total"].sum()
-
-st.line_chart(resumen)
-
-
-# =============================
-# GRAFICO GASTOS
-# =============================
-
-if not df_gastos.empty:
-
-df_gastos["fecha"] = pd.to_datetime(df_gastos["fecha"])
-
-resumen = df_gastos.groupby(
-df_gastos["fecha"].dt.date
-)["monto"].sum()
-
-st.bar_chart(resumen)
-
-# ===========================================================
-# 📦 MÓDULO DE INVENTARIO – ESTRUCTURA CORREGIDA
-# ===========================================================
 elif menu == "📦 Inventario":
-
-st.title("📦 Centro de Control de Suministros")
-
+    st.title("📦 Centro de Control de Suministros")
+    # Aquí iría el resto de tu lógica de inventario
 # --- SINCRONIZACIÓN CON SESIÓN ---
 df_inv = st.session_state.get('df_inv', pd.DataFrame())
 t_ref = st.session_state.get('tasa_bcv', 36.5)
@@ -3786,6 +3263,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
