@@ -2610,7 +2610,6 @@ elif menu == "💰 Ventas":
 
         submit_venta = st.form_submit_button("🚀 Registrar Venta")
 
-    # ESTE IF VA FUERA DEL FORM PERO DENTRO DEL TAB
     if submit_venta:
 
         if not detalle_v.strip():
@@ -2620,7 +2619,6 @@ elif menu == "💰 Ventas":
         consumos = {}
 
         exito, msg = registrar_venta_global(
-
             id_cliente=opciones_cli[cliente_nombre],
             nombre_cliente=cliente_nombre,
             detalle=detalle_v.strip(),
@@ -2628,7 +2626,6 @@ elif menu == "💰 Ventas":
             metodo=metodo_pago,
             consumos=consumos,
             usuario=st.session_state.get("usuario_nombre", "Sistema")
-
         )
 
         if exito:
@@ -2636,7 +2633,6 @@ elif menu == "💰 Ventas":
             st.rerun()
         else:
             st.error(msg)
-
     # -----------------------------------
     # HISTORIAL
     # -----------------------------------
@@ -3814,6 +3810,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
