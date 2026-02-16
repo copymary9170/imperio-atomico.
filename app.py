@@ -992,13 +992,12 @@ with st.form("form_reiniciar_sistema"):
         "Confirmo que deseo reinicializar el sistema"
     )
 
-    btn_reiniciar = st.form_submit_button(
-        "🔄 Reinicializar Sistema (NO borra datos)",
-        use_container_width=True
-    )
+       reiniciar = st.form_submit_button(
+    "🔄 Reinicializar Sistema (NO borra datos)",
+    use_container_width=True
+)
 
-
-if btn_reiniciar and confirmar:
+if reiniciar:
 
     inicializar_sistema()
 
@@ -1921,6 +1920,7 @@ def registrar_venta_global(id_cliente=None, nombre_cliente="Consumidor Final", d
         return False, f"Error: {str(e)}"
     finally:
         if conn: conn.close()
+
 
 
 
