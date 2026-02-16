@@ -2609,7 +2609,7 @@ with st.form("venta_manual", clear_on_submit=True):
     c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
 
     # ✅ EL BOTÓN DEBE ESTAR AQUÍ ADENTRO
-    submit_venta = st.form_submit_button("🚀 Registrar Venta")
+submit_venta = st.form_submit_button("🚀 Registrar Venta")
 
 
 # ✅ Y ESTO VA AFUERA DEL FORM
@@ -3828,6 +3828,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
