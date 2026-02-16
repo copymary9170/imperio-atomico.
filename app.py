@@ -60,14 +60,6 @@ def inicializar_sistema():
 
         tablas = [
 
-
-            """
-CREATE TABLE IF NOT EXISTS costos_operativos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT,
-    monto_mensual REAL
-)
-"""
             
             # CLIENTES
             "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
@@ -413,7 +405,11 @@ if menu == "📊 Dashboard":
 
     ventas_total = float(df_ventas["monto_total"].sum()) if not df_ventas.empty else 0.0
     gastos_total = float(df_gastos["monto"].sum()) if not df_gastos.empty else 0.0
-    utilidad = ventas_total - gastos_total
+    with conectar() as conn:
+
+    utilidad = conn.execute(
+        "SELECT SUM(utilidad) FROM ventas"
+    ).fetchone()[0] or 0
 
     capital_inv = 0.0
     stock_bajo = 0
@@ -1726,7 +1722,38 @@ elif menu == "👥 Clientes":
     else:
         st.info("No hay clientes que coincidan con los filtros.")
 
+st.divider()
+st.subheader("🏢 Costos Operativos Mensuales")
 
+with conectar() as conn:
+
+    df_costos = pd.read_sql(
+        "SELECT * FROM costos_operativos",
+        conn
+    )
+
+st.dataframe(df_costos, use_container_width=True)
+
+with st.form("form_costos_operativos"):
+
+    nombre = st.text_input("Nombre del costo")
+
+    monto = st.number_input("Monto mensual ($)", min_value=0.0)
+
+    if st.form_submit_button("Guardar costo"):
+
+        with conectar() as conn:
+
+            conn.execute(
+                "INSERT INTO costos_operativos (nombre, monto_mensual) VALUES (?,?)",
+                (nombre, monto)
+            )
+
+            conn.commit()
+
+        st.success("Costo agregado")
+
+        st.rerun()
 
 
 # ===========================================================
@@ -3848,6 +3875,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
