@@ -10,7 +10,7 @@ import time
 import os
 import hashlib
 import hmac
-import secrets
+import secrets"form_venta"
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -2611,9 +2611,9 @@ elif menu == "💰 Ventas":
 
             c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
 
-if st.form_submit_button("🚀 Registrar Venta"):
+        if st.form_submit_button("🚀 Registrar Venta"):
 
-    if not detalle_v.strip():
+        if not detalle_v.strip():
         st.error("Debes indicar el detalle de la venta.")
         st.stop()
 
@@ -3814,6 +3814,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
