@@ -2562,94 +2562,80 @@ elif menu == "💰 Ventas":
     # -----------------------------------
     with tab1:
 
-        df_cli = st.session_state.get("df_cli", pd.DataFrame())
+    df_cli = st.session_state.get("df_cli", pd.DataFrame())
 
-        if df_cli.empty:
-            st.warning("⚠️ Registra clientes primero.")
-            st.stop()
-
-with st.form("venta_manual", clear_on_submit=True):
-
-    st.subheader("Datos de la Venta")
-
-    opciones_cli = {
-        row['nombre']: row['id']
-        for _, row in df_cli.iterrows()
-    }
-
-    c1, c2 = st.columns(2)
-
-    cliente_nombre = c1.selectbox(
-        "Cliente:", list(opciones_cli.keys())
-    )
-
-    detalle_v = c2.text_input(
-        "Detalle de lo vendido:"
-    )
-
-    c3, c4, c5 = st.columns(3)
-
-    monto_venta = c3.number_input(
-        "Monto ($):",
-        min_value=0.01,
-        format="%.2f"
-    )
-
-    metodo_pago = c4.selectbox(
-        "Método:",
-        ["Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)", "Pendiente"]
-    )
-
-    tasa_uso = t_bcv if "BCV" in metodo_pago else (
-        t_bin if "Binance" in metodo_pago else 1.0
-    )
-
-    monto_bs = monto_venta * tasa_uso
-
-    c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
-
-    # ✅ EL BOTÓN DEBE ESTAR AQUÍ ADENTRO
-submit_venta = st.form_submit_button("🚀 Registrar Venta")
-
-
-# ✅ Y ESTO VA AFUERA DEL FORM
-if submit_venta:
-
-    if not detalle_v.strip():
-
-        st.error("Debes indicar el detalle de la venta.")
-
+    if df_cli.empty:
+        st.warning("⚠️ Registra clientes primero.")
         st.stop()
 
-    consumos = {}
+    with st.form("venta_manual", clear_on_submit=True):
 
-    exito, msg = registrar_venta_global(
+        st.subheader("Datos de la Venta")
 
-        id_cliente=opciones_cli[cliente_nombre],
+        opciones_cli = {
+            row['nombre']: row['id']
+            for _, row in df_cli.iterrows()
+        }
 
-        nombre_cliente=cliente_nombre,
+        c1, c2 = st.columns(2)
 
-        detalle=detalle_v.strip(),
+        cliente_nombre = c1.selectbox(
+            "Cliente:", list(opciones_cli.keys())
+        )
 
-        monto_usd=float(monto_venta),
+        detalle_v = c2.text_input(
+            "Detalle de lo vendido:"
+        )
 
-        metodo=metodo_pago,
+        c3, c4, c5 = st.columns(3)
 
-        consumos=consumos,
+        monto_venta = c3.number_input(
+            "Monto ($):",
+            min_value=0.01,
+            format="%.2f"
+        )
 
-        usuario=st.session_state.get("usuario_nombre", "Sistema")
+        metodo_pago = c4.selectbox(
+            "Método:",
+            ["Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)", "Pendiente"]
+        )
 
-    )
+        tasa_uso = t_bcv if "BCV" in metodo_pago else (
+            t_bin if "Binance" in metodo_pago else 1.0
+        )
 
-    if exito:
+        monto_bs = monto_venta * tasa_uso
 
-        st.success(msg)
+        c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
 
-        st.rerun()
+        submit_venta = st.form_submit_button("🚀 Registrar Venta")
 
-    else:
+    # ESTE IF VA FUERA DEL FORM PERO DENTRO DEL TAB
+    if submit_venta:
 
-        st.error(msg)
+        if not detalle_v.strip():
+            st.error("Debes indicar el detalle de la venta.")
+            st.stop()
+
+        consumos = {}
+
+        exito, msg = registrar_venta_global(
+
+            id_cliente=opciones_cli[cliente_nombre],
+            nombre_cliente=cliente_nombre,
+            detalle=detalle_v.strip(),
+            monto_usd=float(monto_venta),
+            metodo=metodo_pago,
+            consumos=consumos,
+            usuario=st.session_state.get("usuario_nombre", "Sistema")
+
+        )
+
+        if exito:
+            st.success(msg)
+            st.rerun()
+        else:
+            st.error(msg)
 
     # -----------------------------------
     # HISTORIAL
@@ -3828,6 +3814,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
