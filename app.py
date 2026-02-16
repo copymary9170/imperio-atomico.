@@ -287,21 +287,34 @@ if not st.session_state.autenticado:
 
 # --- 6. SIDEBAR Y DASHBOARD ---
 
-cargar_datos()
-t_bcv = st.session_state.get('tasa_bcv', 1.0)
-t_bin = st.session_state.get('tasa_binance', 1.0)
-
 with st.sidebar:
+
+    ROL = st.session_state.get("rol", "")
+
     st.header(f"👋 {st.session_state.usuario_nombre}")
+
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
-    
+
     menu = st.radio(
         "Secciones:",
-        ["📊 Dashboard", "📦 Inventario", "💰 Ventas", "📉 Gastos", "⚙️ Configuración"]
+        [
+            "📊 Dashboard",
+            "📦 Inventario",
+            "💰 Ventas",
+            "📉 Gastos",
+            "🎨 Análisis CMYK",
+            "🏗️ Activos",
+            "🛠️ Otros Procesos",
+            "🏁 Cierre de Caja",
+            "📊 Auditoría y Métricas",
+            "⚙️ Configuración"
+        ]
     )
-    
+
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
+
         st.session_state.clear()
+
         st.rerun()
 
 # --- 7. MÓDULOS ---
@@ -1887,3 +1900,4 @@ def registrar_venta_global(id_cliente=None, nombre_cliente="Consumidor Final", d
         return False, f"Error: {str(e)}"
     finally:
         if conn: conn.close()
+
