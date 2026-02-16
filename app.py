@@ -289,6 +289,11 @@ if not st.session_state.autenticado:
 
 with st.sidebar:
 
+    t_bcv = st.session_state.get("tasa_bcv", 0.0)
+t_bin = st.session_state.get("tasa_binance", 0.0)
+
+with st.sidebar:
+
     ROL = st.session_state.get("rol", "")
 
     st.header(f"👋 {st.session_state.usuario_nombre}")
@@ -1900,4 +1905,5 @@ def registrar_venta_global(id_cliente=None, nombre_cliente="Consumidor Final", d
         return False, f"Error: {str(e)}"
     finally:
         if conn: conn.close()
+
 
