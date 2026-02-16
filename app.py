@@ -18,11 +18,11 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 # --- 2. MOTOR DE BASE DE DATOS ---
 
 def conectar():
-    """Conexión principal a la base de datos del Imperio."""
-    conn = sqlite3.connect('imperio_v2.db', check_same_thread=False)
+    conn = sqlite3.connect("imperio_v2.db", check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
+# Conexión principal a la base de datos
 
 def hash_password(password: str, salt: str | None = None) -> str:
     """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
@@ -3695,6 +3695,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
