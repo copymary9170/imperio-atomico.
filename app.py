@@ -189,6 +189,16 @@ CREATE TABLE IF NOT EXISTS nomina_movs (
         if 'usuario' not in columnas_ventas:
             c.execute("ALTER TABLE ventas ADD COLUMN usuario TEXT")
 
+        # --- COLUMNAS FINANCIERAS PROFESIONALES ---
+        if 'costo_total' not in columnas_ventas:
+            c.execute("ALTER TABLE ventas ADD COLUMN costo_total REAL DEFAULT 0")
+
+        if 'utilidad' not in columnas_ventas:
+            c.execute("ALTER TABLE ventas ADD COLUMN utilidad REAL DEFAULT 0")
+
+        if 'margen' not in columnas_ventas:
+            c.execute("ALTER TABLE ventas ADD COLUMN margen REAL DEFAULT 0")
+        
         columnas_proveedores = {row[1] for row in c.execute("PRAGMA table_info(proveedores)").fetchall()}
         if "telefono" not in columnas_proveedores:
             c.execute("ALTER TABLE proveedores ADD COLUMN telefono TEXT")
@@ -3775,17 +3785,46 @@ def registrar_venta_global(
                 VALUES (?, 'SALIDA', ?, ?, ?)
             """, (item_id, cant, f"Venta: {detalle}", usuario))
 
+                # ================================
+        # CALCULAR COSTO REAL DE INVENTARIO
+        # ================================
+        costo_total_real = 0.0
+
+        for item_id, cant in consumos.items():
+            data = cursor.execute(
+                "SELECT precio_usd FROM inventario WHERE id = ?",
+                (item_id,)
+            ).fetchone()
+
+            if data and data[0]:
+                costo_total_real += float(data[0]) * float(cant)
+
+        utilidad_real = float(monto_usd) - costo_total_real
+
+        if float(monto_usd) > 0:
+            margen_real = (utilidad_real / float(monto_usd)) * 100
+        else:
+            margen_real = 0.0
+
+        # ================================
+        # INSERTAR VENTA CON DATOS FINANCIEROS
+        # ================================
         cursor.execute("""
             INSERT INTO ventas
-            (cliente_id, cliente, detalle, monto_total, metodo, usuario)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (cliente_id, cliente, detalle, monto_total,
+             metodo, usuario,
+             costo_total, utilidad, margen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             id_cliente,
             nombre_cliente,
             detalle,
             float(monto_usd),
             metodo,
-            usuario
+            usuario,
+            costo_total_real,
+            utilidad_real,
+            margen_real
         ))
 
         conn.commit()
@@ -3802,6 +3841,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
 
 
 
