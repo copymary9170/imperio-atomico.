@@ -56,50 +56,7 @@ def obtener_password_admin_inicial() -> str:
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
 def inicializar_sistema():
     st.divider()
-st.subheader("🏢 Costos Operativos Mensuales")
 
-# Cargar costos operativos correctamente
-try:
-    with conectar() as conn:
-        df_costos = pd.read_sql(
-            "SELECT * FROM costos_operativos",
-            conn
-        )
-except Exception:
-    df_costos = pd.DataFrame(
-        columns=["id", "nombre", "monto_mensual"]
-    )
-
-st.dataframe(df_costos, use_container_width=True)
-
-# Formulario agregar costo
-with st.form("form_costos_operativos"):
-
-    nombre = st.text_input("Nombre del costo")
-
-    monto = st.number_input(
-        "Monto mensual ($)",
-        min_value=0.0
-    )
-
-    if st.form_submit_button("Guardar costo"):
-
-        with conectar() as conn:
-
-            conn.execute(
-                """
-                INSERT INTO costos_operativos
-                (nombre, monto_mensual)
-                VALUES (?,?)
-                """,
-                (nombre, monto)
-            )
-
-            conn.commit()
-
-        st.success("Costo agregado")
-
-        st.rerun()
         
         # FORZAR CREACIÓN
         c.execute("""
@@ -2065,6 +2022,51 @@ if menu == "🎨 Análisis CMYK":
             st.plotly_chart(fig_hist, use_container_width=True)
 
 
+st.subheader("🏢 Costos Operativos Mensuales")
+
+# Cargar costos operativos correctamente
+try:
+    with conectar() as conn:
+        df_costos = pd.read_sql(
+            "SELECT * FROM costos_operativos",
+            conn
+        )
+except Exception:
+    df_costos = pd.DataFrame(
+        columns=["id", "nombre", "monto_mensual"]
+    )
+
+st.dataframe(df_costos, use_container_width=True)
+
+# Formulario agregar costo
+with st.form("form_costos_operativos"):
+
+    nombre = st.text_input("Nombre del costo")
+
+    monto = st.number_input(
+        "Monto mensual ($)",
+        min_value=0.0
+    )
+
+    if st.form_submit_button("Guardar costo"):
+
+        with conectar() as conn:
+
+            conn.execute(
+                """
+                INSERT INTO costos_operativos
+                (nombre, monto_mensual)
+                VALUES (?,?)
+                """,
+                (nombre, monto)
+            )
+
+            conn.commit()
+
+        st.success("Costo agregado")
+
+        st.rerun()
+
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
 
@@ -3670,6 +3672,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
