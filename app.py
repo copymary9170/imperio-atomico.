@@ -2611,12 +2611,13 @@ elif menu == "💰 Ventas":
 
             c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
 
-        if st.form_submit_button("🚀 Registrar Venta"):
+if st.form_submit_button("🚀 Registrar Venta"):
 
     if not detalle_v.strip():
         st.error("Debes indicar el detalle de la venta.")
         st.stop()
 
+    # Sin consumo de inventario en venta manual
     consumos = {}
 
     exito, msg = registrar_venta_global(
@@ -3813,6 +3814,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
