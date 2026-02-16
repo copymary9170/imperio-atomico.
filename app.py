@@ -520,157 +520,149 @@ elif menu == "📦 Inventario":
 
 
 # =======================================================
-# 📊 TAB 3 — HISTORIAL DE COMPRAS
-# =======================================================
-with tabs[2]:
+    # 📊 TAB 3 — HISTORIAL DE COMPRAS
+    # =======================================================
+    with tabs[2]:
+        st.subheader("📊 Historial Profesional de Compras")
 
-st.subheader("📊 Historial Profesional de Compras")
+        with conectar() as conn:
+            df_hist = pd.read_sql("""
+                SELECT 
+                    h.id as compra_id,
+                    h.fecha,
+                    h.item,
+                    h.cantidad,
+                    h.unidad,
+                    h.costo_total_usd,
+                    h.costo_unit_usd,
+                    h.impuestos,
+                    h.delivery,
+                    h.moneda_pago,
+                    p.nombre as proveedor
+                FROM historial_compras h
+                LEFT JOIN proveedores p ON h.proveedor_id = p.id
+                ORDER BY h.fecha DESC
+            """, conn)
 
-with conectar() as conn:
-df_hist = pd.read_sql("""
-SELECT 
-    h.id as compra_id,
-    h.fecha,
-    h.item,
-    h.cantidad,
-    h.unidad,
-    h.costo_total_usd,
-    h.costo_unit_usd,
-    h.impuestos,
-    h.delivery,
-    h.moneda_pago,
-    p.nombre as proveedor
-FROM historial_compras h
-LEFT JOIN proveedores p ON h.proveedor_id = p.id
-ORDER BY h.fecha DESC
-""", conn)
+        if df_hist.empty:
+            st.info("No hay compras registradas.")
+        else:
+            col1, col2 = st.columns(2)
+            filtro_item = col1.text_input("🔍 Filtrar por Insumo")
+            filtro_proveedor = col2.text_input("👤 Filtrar por Proveedor")
 
-if df_hist.empty:
-st.info("No hay compras registradas.")
-else:
+            df_v = df_hist.copy()
 
-col1, col2 = st.columns(2)
+            if filtro_item:
+                df_v = df_v[df_v["item"].str.contains(filtro_item, case=False)]
 
-filtro_item = col1.text_input("🔍 Filtrar por Insumo")
-filtro_proveedor = col2.text_input("👤 Filtrar por Proveedor")
+            if filtro_proveedor:
+                df_v = df_v[df_v["proveedor"].fillna("").str.contains(filtro_proveedor, case=False)]
 
-df_v = df_hist.copy()
+            total_compras = df_v["costo_total_usd"].sum()
+            st.metric("💰 Total Comprado (USD)", f"${total_compras:,.2f}")
 
-if filtro_item:
-df_v = df_v[df_v["item"].str.contains(filtro_item, case=False)]
+            st.dataframe(
+                df_v,
+                column_config={
+                    "compra_id": None,
+                    "fecha": "Fecha",
+                    "item": "Insumo",
+                    "cantidad": "Cantidad",
+                    "unidad": "Unidad",
+                    "costo_total_usd": st.column_config.NumberColumn("Costo Total ($)", format="%.2f"),
+                    "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.4f"),
+                    "impuestos": "Impuestos %",
+                    "delivery": "Delivery $",
+                    "moneda_pago": "Moneda",
+                    "proveedor": "Proveedor"
+                },
+                use_container_width=True,
+                hide_index=True
+            )
 
-if filtro_proveedor:
-df_v = df_v[df_v["proveedor"].fillna("").str.contains(filtro_proveedor, case=False)]
+            st.divider()
+            st.subheader("Sweep 🧹 Corregir historial de compras")
+            
+            opciones_compra = {
+                f"#{int(r.compra_id)} | {r.fecha} | {r.item} | {r.cantidad} {r.unidad} | ${r.costo_total_usd:.2f}": int(r.compra_id)
+                for r in df_hist.itertuples(index=False)
+            }
+            
+            compra_sel_label = st.selectbox("Selecciona la compra a corregir", list(opciones_compra.keys()))
+            compra_sel_id = opciones_compra[compra_sel_label]
+            compra_row = df_hist[df_hist["compra_id"] == compra_sel_id].iloc[0]
+            
+            st.caption("Si eliminas la compra, el sistema descuenta esa cantidad del inventario.")
 
-total_compras = df_v["costo_total_usd"].sum()
+            if st.button("🗑 Eliminar compra seleccionada", type="secondary"):
+                with conectar() as conn:
+                    cur = conn.cursor()
+                    actual_row = cur.execute(
+                        "SELECT id, cantidad FROM inventario WHERE item=?",
+                        (str(compra_row["item"]),)
+                    ).fetchone()
 
-st.metric("💰 Total Comprado (USD)", f"${total_compras:,.2f}")
+                    if actual_row:
+                        item_id, cantidad_actual = actual_row
+                        nueva_cant = max(0.0, float(cantidad_actual or 0) - float(compra_row["cantidad"]))
+                        cur.execute(
+                            "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
+                            (nueva_cant, int(item_id))
+                        )
+                        cur.execute("""
+                            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+                            VALUES (?, 'SALIDA', ?, 'Corrección: eliminación de compra', ?)
+                        """, (int(item_id), float(compra_row["cantidad"]), usuario_actual))
 
-st.dataframe(
-df_v,
-column_config={
-    "compra_id": None,
-    "fecha": "Fecha",
-    "item": "Insumo",
-    "cantidad": "Cantidad",
-    "unidad": "Unidad",
-    "costo_total_usd": st.column_config.NumberColumn("Costo Total ($)", format="%.2f"),
-    "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.4f"),
-    "impuestos": "Impuestos %",
-    "delivery": "Delivery $",
-    "moneda_pago": "Moneda",
-    "proveedor": "Proveedor"
-},
-use_container_width=True,
-hide_index=True
-)
+                    cur.execute("DELETE FROM historial_compras WHERE id=?", (int(compra_sel_id),))
+                    conn.commit()
 
-st.divider()
-st.subheader("🧹 Corregir historial de compras")
-opciones_compra = {
-f"#{int(r.compra_id)} | {r.fecha} | {r.item} | {r.cantidad} {r.unidad} | ${r.costo_total_usd:.2f}": int(r.compra_id)
-for r in df_hist.itertuples(index=False)
-}
-compra_sel_label = st.selectbox("Selecciona la compra a corregir", list(opciones_compra.keys()))
-compra_sel_id = opciones_compra[compra_sel_label]
-compra_row = df_hist[df_hist["compra_id"] == compra_sel_id].iloc[0]
-st.caption("Si eliminas la compra, el sistema descuenta esa cantidad del inventario del insumo asociado.")
+                st.success("Compra eliminada y stock ajustado correctamente.")
+                cargar_datos()
+                st.rerun()
 
-if st.button("🗑 Eliminar compra seleccionada", type="secondary"):
-with conectar() as conn:
-    cur = conn.cursor()
-    actual_row = cur.execute(
-        "SELECT id, cantidad FROM inventario WHERE item=?",
-        (str(compra_row["item"]),)
-    ).fetchone()
+            st.divider()
+            st.subheader("🧽 Limpiar historial por insumo")
+            df_hist_aux = df_hist.copy()
+            df_hist_aux["item_norm"] = df_hist_aux["item"].fillna("").str.strip().str.lower()
+            items_disponibles = sorted([i for i in df_hist_aux["item_norm"].unique().tolist() if i])
 
-    if actual_row:
-        item_id, cantidad_actual = actual_row
-        nueva_cant = max(0.0, float(cantidad_actual or 0) - float(compra_row["cantidad"]))
-        cur.execute(
-            "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
-            (nueva_cant, int(item_id))
-        )
-        cur.execute(
-            """
-            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-            VALUES (?, 'SALIDA', ?, 'Corrección: eliminación de compra', ?)
-            """,
-            (int(item_id), float(compra_row["cantidad"]), usuario_actual)
-        )
+            if items_disponibles:
+                item_norm_sel = st.selectbox("Insumo a limpiar del historial", items_disponibles, key="hist_item_norm")
+                filas_item = df_hist_aux[df_hist_aux["item_norm"] == item_norm_sel]
+                st.caption(f"Se eliminarán {len(filas_item)} compras del historial.")
 
-    cur.execute("DELETE FROM historial_compras WHERE id=?", (int(compra_sel_id),))
-    conn.commit()
+                confirmar_limpieza = st.checkbox("Confirmo que deseo borrar ese historial", key="hist_confirma_limpieza")
+                if st.button("🗑 Borrar historial del insumo", type="secondary", disabled=not confirmar_limpieza):
+                    with conectar() as conn:
+                        cur = conn.cursor()
 
-st.success("Compra eliminada y stock ajustado correctamente.")
-cargar_datos()
-st.rerun()
+                        for _, row in filas_item.iterrows():
+                            actual_row = cur.execute(
+                                "SELECT id, cantidad FROM inventario WHERE lower(trim(item))=?",
+                                (str(row["item_norm"]),)
+                            ).fetchone()
 
-st.divider()
-st.subheader("🧽 Limpiar historial por insumo")
-df_hist_aux = df_hist.copy()
-df_hist_aux["item_norm"] = df_hist_aux["item"].fillna("").str.strip().str.lower()
-items_disponibles = sorted([i for i in df_hist_aux["item_norm"].unique().tolist() if i])
+                            if actual_row:
+                                item_id, cantidad_actual = actual_row
+                                nueva_cant = max(0.0, float(cantidad_actual or 0) - float(row["cantidad"]))
+                                cur.execute(
+                                    "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
+                                    (nueva_cant, int(item_id))
+                                )
+                                cur.execute("""
+                                    INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+                                    VALUES (?, 'SALIDA', ?, 'Corrección masiva', ?)
+                                """, (int(item_id), float(row["cantidad"]), usuario_actual))
 
-if items_disponibles:
-item_norm_sel = st.selectbox("Insumo a limpiar del historial", items_disponibles, key="hist_item_norm")
-filas_item = df_hist_aux[df_hist_aux["item_norm"] == item_norm_sel]
-st.caption(f"Se eliminarán {len(filas_item)} compras del historial para ese insumo.")
+                        ids_borrar = [int(x) for x in filas_item["compra_id"].tolist()]
+                        cur.executemany("DELETE FROM historial_compras WHERE id=?", [(i,) for i in ids_borrar])
+                        conn.commit()
 
-confirmar_limpieza = st.checkbox("Confirmo que deseo borrar ese historial por error de carga", key="hist_confirma_limpieza")
-if st.button("🗑 Borrar historial del insumo seleccionado", type="secondary", disabled=not confirmar_limpieza):
-    with conectar() as conn:
-        cur = conn.cursor()
-
-        for _, row in filas_item.iterrows():
-            actual_row = cur.execute(
-                "SELECT id, cantidad FROM inventario WHERE lower(trim(item))=?",
-                (str(row["item_norm"]),)
-            ).fetchone()
-
-            if actual_row:
-                item_id, cantidad_actual = actual_row
-                nueva_cant = max(0.0, float(cantidad_actual or 0) - float(row["cantidad"]))
-                cur.execute(
-                    "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
-                    (nueva_cant, int(item_id))
-                )
-                cur.execute(
-                    """
-                    INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-                    VALUES (?, 'SALIDA', ?, 'Corrección masiva: limpieza historial por insumo', ?)
-                    """,
-                    (int(item_id), float(row["cantidad"]), usuario_actual)
-                )
-
-        ids_borrar = [int(x) for x in filas_item["compra_id"].tolist()]
-        cur.executemany("DELETE FROM historial_compras WHERE id=?", [(i,) for i in ids_borrar])
-        conn.commit()
-
-    st.success(f"Se borró el historial de '{item_norm_sel}' y se ajustó el stock donde correspondía.")
-    cargar_datos()
-    st.rerun()
-
+                    st.success(f"Se borró el historial de '{item_norm_sel}'.")
+                    cargar_datos()
+                    st.rerun()
 # =======================================================
 # 👤 TAB 4 — PROVEEDORES
 # =======================================================
@@ -3163,6 +3155,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
