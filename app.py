@@ -967,24 +967,41 @@ elif menu == "⚙️ Configuración":
 
 
 # ===========================================================
-        # 📊 RESUMEN COSTOS (Dentro de Configuración)
-        # ===========================================================
-        if not df_costos.empty:
-            total = df_costos["monto_mensual"].sum()
-            costo_diario = total / 30
-            col1, col2 = st.columns(2)
-            col1.metric("Total mensual", f"${total:,.2f}")
-            col2.metric("Costo operativo diario", f"${costo_diario:,.2f}")
-        else:
-            st.info("No hay costos operativos registrados")
+# 📊 RESUMEN COSTOS (Dentro de Configuración)
+# ===========================================================
 
-        st.divider()
+if not df_costos.empty:
 
-        ## ===========================================================
+    total = df_costos["monto_mensual"].sum()
+
+    costo_diario = total / 30
+
+    col1, col2 = st.columns(2)
+
+    col1.metric(
+        "Total mensual",
+        f"${total:,.2f}"
+    )
+
+    col2.metric(
+        "Costo operativo diario",
+        f"${costo_diario:,.2f}"
+    )
+
+else:
+
+    st.info("No hay costos operativos registrados")
+
+
+st.divider()
+
+
+# ===========================================================
 # 🧹 OPCIONES DEL SISTEMA
 # ===========================================================
 
 st.subheader("🧹 Sistema")
+
 
 with st.form("form_reiniciar_sistema"):
 
@@ -992,12 +1009,13 @@ with st.form("form_reiniciar_sistema"):
         "Confirmo que deseo reinicializar el sistema"
     )
 
-       reiniciar = st.form_submit_button(
-    "🔄 Reinicializar Sistema (NO borra datos)",
-    use_container_width=True
-)
+    reiniciar = st.form_submit_button(
+        "🔄 Reinicializar Sistema (NO borra datos)",
+        use_container_width=True
+    )
 
-if reiniciar:
+
+if reiniciar and confirmar:
 
     inicializar_sistema()
 
@@ -1920,6 +1938,7 @@ def registrar_venta_global(id_cliente=None, nombre_cliente="Consumidor Final", d
         return False, f"Error: {str(e)}"
     finally:
         if conn: conn.close()
+
 
 
 
