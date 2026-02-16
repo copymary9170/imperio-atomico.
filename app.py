@@ -2577,25 +2577,26 @@ elif menu == "💰 Ventas":
             for _, row in df_cli.iterrows()
         }
 
-        c1, c2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-        cliente_nombre = c1.selectbox(
-            "Cliente:", list(opciones_cli.keys())
+        cliente_nombre = col1.selectbox(
+            "Cliente:",
+            list(opciones_cli.keys())
         )
 
-        detalle_v = c2.text_input(
+        detalle_v = col2.text_input(
             "Detalle de lo vendido:"
         )
 
-        c3, c4, c5 = st.columns(3)
+        col3, col4, col5 = st.columns(3)
 
-        monto_venta = c3.number_input(
+        monto_venta = col3.number_input(
             "Monto ($):",
             min_value=0.01,
             format="%.2f"
         )
 
-        metodo_pago = c4.selectbox(
+        metodo_pago = col4.selectbox(
             "Método:",
             ["Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)", "Pendiente"]
         )
@@ -2606,7 +2607,7 @@ elif menu == "💰 Ventas":
 
         monto_bs = monto_venta * tasa_uso
 
-        c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
+        col5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
 
         submit_venta = st.form_submit_button("🚀 Registrar Venta")
 
@@ -3810,6 +3811,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
