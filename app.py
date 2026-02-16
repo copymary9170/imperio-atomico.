@@ -664,161 +664,159 @@ elif menu == "📦 Inventario":
                     cargar_datos()
                     st.rerun()
 # =======================================================
-# 👤 TAB 4 — PROVEEDORES
-# =======================================================
-with tabs[3]:
+    # 👤 TAB 4 — PROVEEDORES
+    # =======================================================
+    with tabs[3]:
+        st.subheader("👤 Directorio de Proveedores")
 
-st.subheader("👤 Directorio de Proveedores")
+        with conectar() as conn:
+            try:
+                columnas_proveedores = {
+                    row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
+                }
+                if not columnas_proveedores:
+                    conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS proveedores (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            nombre TEXT UNIQUE,
+                            telefono TEXT,
+                            rif TEXT,
+                            contacto TEXT,
+                            observaciones TEXT,
+                            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+                    conn.commit()
+                    columnas_proveedores = {
+                        row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
+                    }
 
-with conectar() as conn:
-try:
-columnas_proveedores = {
-    row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
-}
-if not columnas_proveedores:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS proveedores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT UNIQUE,
-            telefono TEXT,
-            rif TEXT,
-            contacto TEXT,
-            observaciones TEXT,
-            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    conn.commit()
-    columnas_proveedores = {
-        row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
-    }
+                def sel_col(nombre_columna):
+                    return nombre_columna if nombre_columna in columnas_proveedores else f"NULL AS {nombre_columna}"
 
-def sel_col(nombre_columna):
-    return nombre_columna if nombre_columna in columnas_proveedores else f"NULL AS {nombre_columna}"
-
-query_proveedores = f"""
-    SELECT
-        {sel_col('id')},
-        {sel_col('nombre')},
-        {sel_col('telefono')},
-        {sel_col('rif')},
-        {sel_col('contacto')},
-        {sel_col('observaciones')},
-        {sel_col('fecha_creacion')}
-    FROM proveedores
-    ORDER BY nombre ASC
-"""
-df_prov = pd.read_sql(query_proveedores, conn)
-except (sqlite3.DatabaseError, pd.errors.DatabaseError) as e:
-st.error(f"No se pudo cargar la tabla de proveedores: {e}")
-df_prov = pd.DataFrame(columns=[
-    'id', 'nombre', 'telefono', 'rif', 'contacto', 'observaciones', 'fecha_creacion'
-])
-
-if df_prov.empty:
-st.info("No hay proveedores registrados todavía.")
-else:
-filtro_proveedor = st.text_input("🔍 Buscar proveedor")
-df_prov_view = df_prov.copy()
-
-if filtro_proveedor:
-mask_nombre = df_prov_view["nombre"].fillna("").str.contains(filtro_proveedor, case=False)
-mask_contacto = df_prov_view["contacto"].fillna("").str.contains(filtro_proveedor, case=False)
-mask_rif = df_prov_view["rif"].fillna("").str.contains(filtro_proveedor, case=False)
-df_prov_view = df_prov_view[mask_nombre | mask_contacto | mask_rif]
-
-st.dataframe(
-df_prov_view,
-column_config={
-    "id": None,
-    "nombre": "Proveedor",
-    "telefono": "Teléfono",
-    "rif": "RIF",
-    "contacto": "Contacto",
-    "observaciones": "Observaciones",
-    "fecha_creacion": "Creado"
-},
-use_container_width=True,
-hide_index=True
-)
-
-st.divider()
-st.subheader("➕ Registrar / Editar proveedor")
-
-nombre_edit = st.selectbox(
-"Proveedor a editar",
-["Nuevo proveedor"] + (df_prov["nombre"].tolist() if not df_prov.empty else []),
-key="inv_proveedor_selector"
-)
-
-prov_actual = None
-if nombre_edit != "Nuevo proveedor" and not df_prov.empty:
-prov_actual = df_prov[df_prov["nombre"] == nombre_edit].iloc[0]
-
-with st.form("form_proveedor"):
-c1, c2 = st.columns(2)
-nombre_prov = c1.text_input("Nombre", value="" if prov_actual is None else str(prov_actual["nombre"] or ""))
-telefono_prov = c2.text_input("Teléfono", value="" if prov_actual is None else str(prov_actual["telefono"] or ""))
-c3, c4 = st.columns(2)
-rif_prov = c3.text_input("RIF", value="" if prov_actual is None else str(prov_actual["rif"] or ""))
-contacto_prov = c4.text_input("Persona de contacto", value="" if prov_actual is None else str(prov_actual["contacto"] or ""))
-observaciones_prov = st.text_area("Observaciones", value="" if prov_actual is None else str(prov_actual["observaciones"] or ""))
-
-guardar_proveedor = st.form_submit_button("💾 Guardar proveedor", use_container_width=True)
-
-if guardar_proveedor:
-if not nombre_prov.strip():
-st.error("El nombre del proveedor es obligatorio.")
-else:
-try:
-    with conectar() as conn:
-        if prov_actual is None:
-            conn.execute(
+                query_proveedores = f"""
+                    SELECT
+                        {sel_col('id')},
+                        {sel_col('nombre')},
+                        {sel_col('telefono')},
+                        {sel_col('rif')},
+                        {sel_col('contacto')},
+                        {sel_col('observaciones')},
+                        {sel_col('fecha_creacion')}
+                    FROM proveedores
+                    ORDER BY nombre ASC
                 """
-                INSERT INTO proveedores (nombre, telefono, rif, contacto, observaciones)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (nombre_prov.strip(), telefono_prov.strip(), rif_prov.strip(), contacto_prov.strip(), observaciones_prov.strip())
-            )
+                df_prov = pd.read_sql(query_proveedores, conn)
+            except (sqlite3.DatabaseError, pd.errors.DatabaseError) as e:
+                st.error(f"No se pudo cargar la tabla de proveedores: {e}")
+                df_prov = pd.DataFrame(columns=[
+                    'id', 'nombre', 'telefono', 'rif', 'contacto', 'observaciones', 'fecha_creacion'
+                ])
+
+        if df_prov.empty:
+            st.info("No hay proveedores registrados todavía.")
         else:
-            conn.execute(
-                """
-                UPDATE proveedores
-                SET nombre=?, telefono=?, rif=?, contacto=?, observaciones=?
-                WHERE id=?
-                """,
-                (
-                    nombre_prov.strip(),
-                    telefono_prov.strip(),
-                    rif_prov.strip(),
-                    contacto_prov.strip(),
-                    observaciones_prov.strip(),
-                    int(prov_actual["id"])
-                )
+            filtro_proveedor = st.text_input("🔍 Buscar proveedor")
+            df_prov_view = df_prov.copy()
+
+            if filtro_proveedor:
+                mask_nombre = df_prov_view["nombre"].fillna("").str.contains(filtro_proveedor, case=False)
+                mask_contacto = df_prov_view["contacto"].fillna("").str.contains(filtro_proveedor, case=False)
+                mask_rif = df_prov_view["rif"].fillna("").str.contains(filtro_proveedor, case=False)
+                df_prov_view = df_prov_view[mask_nombre | mask_contacto | mask_rif]
+
+            st.dataframe(
+                df_prov_view,
+                column_config={
+                    "id": None,
+                    "nombre": "Proveedor",
+                    "telefono": "Teléfono",
+                    "rif": "RIF",
+                    "contacto": "Contacto",
+                    "observaciones": "Observaciones",
+                    "fecha_creacion": "Creado"
+                },
+                use_container_width=True,
+                hide_index=True
             )
-        conn.commit()
-    st.success("Proveedor guardado correctamente.")
-    st.rerun()
-except sqlite3.IntegrityError:
-    st.error("Ya existe un proveedor con ese nombre.")
 
-if prov_actual is not None:
-if st.button("🗑 Eliminar proveedor seleccionado", type="secondary"):
-with conectar() as conn:
-    compras = conn.execute(
-        "SELECT COUNT(*) FROM historial_compras WHERE proveedor_id=?",
-        (int(prov_actual["id"]),)
-    ).fetchone()[0]
+        st.divider()
+        st.subheader("➕ Registrar / Editar proveedor")
 
-    if compras > 0:
-        st.error("No se puede eliminar: el proveedor tiene compras asociadas.")
-    else:
-        conn.execute("DELETE FROM proveedores WHERE id=?", (int(prov_actual["id"]),))
-        conn.commit()
-        st.success("Proveedor eliminado.")
-        st.rerun()
+        nombre_edit = st.selectbox(
+            "Proveedor a editar",
+            ["Nuevo proveedor"] + (df_prov["nombre"].tolist() if not df_prov.empty else []),
+            key="inv_proveedor_selector"
+        )
 
+        prov_actual = None
+        if nombre_edit != "Nuevo proveedor" and not df_prov.empty:
+            prov_actual = df_prov[df_prov["nombre"] == nombre_edit].iloc[0]
+
+        with st.form("form_proveedor"):
+            c1, c2 = st.columns(2)
+            nombre_prov = c1.text_input("Nombre", value="" if prov_actual is None else str(prov_actual["nombre"] or ""))
+            telefono_prov = c2.text_input("Teléfono", value="" if prov_actual is None else str(prov_actual["telefono"] or ""))
+            c3, c4 = st.columns(2)
+            rif_prov = c3.text_input("RIF", value="" if prov_actual is None else str(prov_actual["rif"] or ""))
+            contacto_prov = c4.text_input("Persona de contacto", value="" if prov_actual is None else str(prov_actual["contacto"] or ""))
+            observaciones_prov = st.text_area("Observaciones", value="" if prov_actual is None else str(prov_actual["observaciones"] or ""))
+
+            guardar_proveedor = st.form_submit_button("💾 Guardar proveedor", use_container_width=True)
+
+            if guardar_proveedor:
+                if not nombre_prov.strip():
+                    st.error("El nombre del proveedor es obligatorio.")
+                else:
+                    try:
+                        with conectar() as conn:
+                            if prov_actual is None:
+                                conn.execute(
+                                    """
+                                    INSERT INTO proveedores (nombre, telefono, rif, contacto, observaciones)
+                                    VALUES (?, ?, ?, ?, ?)
+                                    """,
+                                    (nombre_prov.strip(), telefono_prov.strip(), rif_prov.strip(), contacto_prov.strip(), observaciones_prov.strip())
+                                )
+                            else:
+                                conn.execute(
+                                    """
+                                    UPDATE proveedores
+                                    SET nombre=?, telefono=?, rif=?, contacto=?, observaciones=?
+                                    WHERE id=?
+                                    """,
+                                    (
+                                        nombre_prov.strip(),
+                                        telefono_prov.strip(),
+                                        rif_prov.strip(),
+                                        contacto_prov.strip(),
+                                        observaciones_prov.strip(),
+                                        int(prov_actual["id"])
+                                    )
+                                )
+                            conn.commit()
+                        st.success("Proveedor guardado correctamente.")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("Ya existe un proveedor con ese nombre.")
+
+        if prov_actual is not None:
+            if st.button("🗑 Eliminar proveedor seleccionado", type="secondary"):
+                with conectar() as conn:
+                    compras = conn.execute(
+                        "SELECT COUNT(*) FROM historial_compras WHERE proveedor_id=?",
+                        (int(prov_actual["id"]),)
+                    ).fetchone()[0]
+
+                    if compras > 0:
+                        st.error("No se puede eliminar: el proveedor tiene compras asociadas.")
+                    else:
+                        conn.execute("DELETE FROM proveedores WHERE id=?", (int(prov_actual["id"]),))
+                        conn.commit()
+                        st.success("Proveedor eliminado.")
+                        st.rerun()
 # =======================================================
 # 🔧 TAB 5 — AJUSTES
 # =======================================================
@@ -3155,6 +3153,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
