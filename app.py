@@ -980,15 +980,31 @@ elif menu == "⚙️ Configuración":
 
         st.divider()
 
-        # ===========================================================
-        # 🧹 OPCIONES DEL SISTEMA
-        # ===========================================================
-        st.subheader("🧹 Sistema")
-        if st.button("🔄 Reinicializar Sistema (NO borra datos)", use_container_width=True):
-            inicializar_sistema()
-            st.success("Sistema verificado correctamente")
-            st.rerun()
+        ## ===========================================================
+# 🧹 OPCIONES DEL SISTEMA
+# ===========================================================
 
+st.subheader("🧹 Sistema")
+
+with st.form("form_reiniciar_sistema"):
+
+    confirmar = st.checkbox(
+        "Confirmo que deseo reinicializar el sistema"
+    )
+
+    btn_reiniciar = st.form_submit_button(
+        "🔄 Reinicializar Sistema (NO borra datos)",
+        use_container_width=True
+    )
+
+
+if btn_reiniciar and confirmar:
+
+    inicializar_sistema()
+
+    st.success("Sistema verificado correctamente")
+
+    st.rerun()
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
 # ===========================================================
@@ -1905,5 +1921,6 @@ def registrar_venta_global(id_cliente=None, nombre_cliente="Consumidor Final", d
         return False, f"Error: {str(e)}"
     finally:
         if conn: conn.close()
+
 
 
