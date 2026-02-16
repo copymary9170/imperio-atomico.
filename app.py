@@ -2562,78 +2562,78 @@ elif menu == "💰 Ventas":
     # -----------------------------------
     with tab1:
 
-    df_cli = st.session_state.get("df_cli", pd.DataFrame())
+        df_cli = st.session_state.get("df_cli", pd.DataFrame())
 
-    if df_cli.empty:
-        st.warning("⚠️ Registra clientes primero.")
-        st.stop()
-
-    with st.form("venta_manual", clear_on_submit=True):
-
-        st.subheader("Datos de la Venta")
-
-        opciones_cli = {
-            row['nombre']: row['id']
-            for _, row in df_cli.iterrows()
-        }
-
-        col1, col2 = st.columns(2)
-
-        cliente_nombre = col1.selectbox(
-            "Cliente:",
-            list(opciones_cli.keys())
-        )
-
-        detalle_v = col2.text_input(
-            "Detalle de lo vendido:"
-        )
-
-        col3, col4, col5 = st.columns(3)
-
-        monto_venta = col3.number_input(
-            "Monto ($):",
-            min_value=0.01,
-            format="%.2f"
-        )
-
-        metodo_pago = col4.selectbox(
-            "Método:",
-            ["Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)", "Pendiente"]
-        )
-
-        tasa_uso = t_bcv if "BCV" in metodo_pago else (
-            t_bin if "Binance" in metodo_pago else 1.0
-        )
-
-        monto_bs = monto_venta * tasa_uso
-
-        col5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
-
-        submit_venta = st.form_submit_button("🚀 Registrar Venta")
-
-    if submit_venta:
-
-        if not detalle_v.strip():
-            st.error("Debes indicar el detalle de la venta.")
+        if df_cli.empty:
+            st.warning("⚠️ Registra clientes primero.")
             st.stop()
 
-        consumos = {}
+        with st.form("venta_manual", clear_on_submit=True):
 
-        exito, msg = registrar_venta_global(
-            id_cliente=opciones_cli[cliente_nombre],
-            nombre_cliente=cliente_nombre,
-            detalle=detalle_v.strip(),
-            monto_usd=float(monto_venta),
-            metodo=metodo_pago,
-            consumos=consumos,
-            usuario=st.session_state.get("usuario_nombre", "Sistema")
-        )
+            st.subheader("Datos de la Venta")
 
-        if exito:
-            st.success(msg)
-            st.rerun()
-        else:
-            st.error(msg)
+            opciones_cli = {
+                row['nombre']: row['id']
+                for _, row in df_cli.iterrows()
+            }
+
+            col1, col2 = st.columns(2)
+
+            cliente_nombre = col1.selectbox(
+                "Cliente:",
+                list(opciones_cli.keys())
+            )
+
+            detalle_v = col2.text_input(
+                "Detalle de lo vendido:"
+            )
+
+            col3, col4, col5 = st.columns(3)
+
+            monto_venta = col3.number_input(
+                "Monto ($):",
+                min_value=0.01,
+                format="%.2f"
+            )
+
+            metodo_pago = col4.selectbox(
+                "Método:",
+                ["Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)", "Pendiente"]
+            )
+
+            tasa_uso = t_bcv if "BCV" in metodo_pago else (
+                t_bin if "Binance" in metodo_pago else 1.0
+            )
+
+            monto_bs = monto_venta * tasa_uso
+
+            col5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
+
+            submit_venta = st.form_submit_button("🚀 Registrar Venta")
+
+        if submit_venta:
+
+            if not detalle_v.strip():
+                st.error("Debes indicar el detalle de la venta.")
+                st.stop()
+
+            consumos = {}
+
+            exito, msg = registrar_venta_global(
+                id_cliente=opciones_cli[cliente_nombre],
+                nombre_cliente=cliente_nombre,
+                detalle=detalle_v.strip(),
+                monto_usd=float(monto_venta),
+                metodo=metodo_pago,
+                consumos=consumos,
+                usuario=st.session_state.get("usuario_nombre", "Sistema")
+            )
+
+            if exito:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
     # -----------------------------------
     # HISTORIAL
     # -----------------------------------
@@ -3811,6 +3811,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
