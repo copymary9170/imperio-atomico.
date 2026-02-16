@@ -2613,56 +2613,29 @@ elif menu == "💰 Ventas":
 
             if st.form_submit_button("🚀 Registrar Venta"):
 
-                if not detalle_v.strip():
-                    st.error("Debes indicar el detalle de la venta.")
-                    st.stop()
+    if not detalle_v.strip():
+        st.error("Debes indicar el detalle de la venta.")
+        st.stop()
 
-                try:
-                    with conectar() as conn:
+    # Sin consumo de inventario en venta manual
+    consumos = {}
 
-                        conn.execute("""
-                            CREATE TABLE IF NOT EXISTS ventas_extra (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                venta_id INTEGER,
-                                tasa REAL,
-                                monto_bs REAL
-                            )
-                        """)
+    exito, msg = registrar_venta_global(
+        id_cliente=opciones_cli[cliente_nombre],
+        nombre_cliente=cliente_nombre,
+        detalle=detalle_v.strip(),
+        monto_usd=float(monto_venta),
+        metodo=metodo_pago,
+        consumos=consumos,
+        usuario=st.session_state.get("usuario_nombre", "Sistema")
+    )
 
-                        cur = conn.cursor()
-
-                        cur.execute("""
-                            INSERT INTO ventas 
-                            (cliente_id, cliente, detalle, monto_total, metodo)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, (
-                            opciones_cli[cliente_nombre],
-                            cliente_nombre,
-                            detalle_v.strip(),
-                            float(monto_venta),
-                            metodo_pago
-                        ))
-
-                        venta_id = cur.lastrowid
-
-                        cur.execute("""
-                            INSERT INTO ventas_extra
-                            (venta_id, tasa, monto_bs)
-                            VALUES (?, ?, ?)
-                        """, (
-                            venta_id,
-                            float(tasa_uso),
-                            float(monto_bs)
-                        ))
-
-                        conn.commit()
-
-                    st.success("Venta registrada correctamente")
-                    st.balloons()
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"Error: {e}")
+    if exito:
+        st.success(msg)
+        st.balloons()
+        st.rerun()
+    else:
+        st.error(msg)
 
     # -----------------------------------
     # HISTORIAL
@@ -3841,3 +3814,4 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
