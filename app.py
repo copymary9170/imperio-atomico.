@@ -1519,6 +1519,116 @@ elif menu == "⚙️ Configuración":
             except Exception as e:
                 st.error(f"❌ Error al guardar: {e}")
 
+
+        # ===========================================================
+    # 🏢 COSTOS OPERATIVOS DEL NEGOCIO
+    # ===========================================================
+
+    st.divider()
+    st.subheader("🏢 Costos Operativos Mensuales")
+
+    # Crear tabla si no existe
+    with conectar() as conn:
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS costos_operativos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                monto_mensual REAL
+            )
+        """)
+
+        conn.commit()
+
+    # Cargar datos
+    try:
+
+        with conectar() as conn:
+
+            df_costos = pd.read_sql(
+                "SELECT * FROM costos_operativos ORDER BY nombre",
+                conn
+            )
+
+    except Exception:
+
+        df_costos = pd.DataFrame(
+            columns=["id", "nombre", "monto_mensual"]
+        )
+
+    st.dataframe(
+        df_costos,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # FORMULARIO NUEVO COSTO
+
+    with st.form("form_costos_operativos"):
+
+        col1, col2 = st.columns(2)
+
+        nombre_costo = col1.text_input(
+            "Nombre del costo",
+            placeholder="Ej: Alquiler, Internet, Electricidad"
+        )
+
+        monto_costo = col2.number_input(
+            "Monto mensual ($)",
+            min_value=0.0,
+            format="%.2f"
+        )
+
+        guardar = st.form_submit_button(
+            "💾 Guardar costo",
+            use_container_width=True
+        )
+
+    if guardar:
+
+        if not nombre_costo:
+
+            st.error("Debe escribir el nombre")
+
+        else:
+
+            with conectar() as conn:
+
+                conn.execute(
+                    """
+                    INSERT INTO costos_operativos
+                    (nombre, monto_mensual)
+                    VALUES (?,?)
+                    """,
+                    (nombre_costo, monto_costo)
+                )
+
+                conn.commit()
+
+            st.success("Costo guardado correctamente")
+
+            st.rerun()
+
+    # TOTAL
+
+    if not df_costos.empty:
+
+        total = df_costos["monto_mensual"].sum()
+
+        costo_diario = total / 30
+
+        c1, c2 = st.columns(2)
+
+        c1.metric(
+            "Total mensual",
+            f"${total:,.2f}"
+        )
+
+        c2.metric(
+            "Costo operativo diario",
+            f"${costo_diario:,.2f}"
+        )
+
     # --- VISUALIZAR HISTORIAL DE CAMBIOS ---
     with st.expander("📜 Ver Historial de Cambios"):
 
@@ -1802,21 +1912,6 @@ elif menu == "👥 Clientes":
 
     else:
         st.info("No hay clientes que coincidan con los filtros.")
-
-st.divider()
-st.subheader("🏢 Costos Operativos Mensuales")
-
-with conectar() as conn:
-
-try:
-    df_costos = pd.read_sql(
-        "SELECT * FROM costos_operativos",
-        conn
-    )
-except:
-    df_costos = pd.DataFrame(
-        columns=["id","nombre","monto_mensual"]
-    )
 
 
 st.dataframe(df_costos, use_container_width=True)
@@ -3961,6 +4056,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
