@@ -55,24 +55,24 @@ def obtener_password_admin_inicial() -> str:
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
 def inicializar_sistema():
-    stst.divider()
+    st.divider()
 st.subheader("🏢 Costos Operativos Mensuales")
 
-# Cargar costos operativos de forma segura
+# Cargar costos operativos correctamente
 try:
     with conectar() as conn:
         df_costos = pd.read_sql(
             "SELECT * FROM costos_operativos",
             conn
         )
-except:
+except Exception:
     df_costos = pd.DataFrame(
         columns=["id", "nombre", "monto_mensual"]
     )
 
 st.dataframe(df_costos, use_container_width=True)
 
-# Formulario para agregar costos
+# Formulario agregar costo
 with st.form("form_costos_operativos"):
 
     nombre = st.text_input("Nombre del costo")
@@ -97,9 +97,10 @@ with st.form("form_costos_operativos"):
 
             conn.commit()
 
-        st.success("Costo agregado correctamente")
+        st.success("Costo agregado")
 
         st.rerun()
+        
         # FORZAR CREACIÓN
         c.execute("""
         CREATE TABLE IF NOT EXISTS costos_operativos (
@@ -3960,6 +3961,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
