@@ -60,6 +60,15 @@ def inicializar_sistema():
 
         tablas = [
 
+
+            """
+CREATE TABLE IF NOT EXISTS costos_operativos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT,
+    monto_mensual REAL
+)
+"""
+            
             # CLIENTES
             "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
 
@@ -87,6 +96,15 @@ def inicializar_sistema():
 
             # GASTOS
             "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+
+            # COSTOS OPERATIVOS FIJOS
+"""
+CREATE TABLE IF NOT EXISTS costos_operativos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT,
+    monto_mensual REAL
+)
+"""
 
             # MOVIMIENTOS DE INVENTARIO (MEJORADO)
             """CREATE TABLE IF NOT EXISTS inventario_movs (
@@ -246,6 +264,24 @@ CREATE TABLE IF NOT EXISTS nomina_movs (
 
         conn.commit()
 
+# ===========================================================
+# 💰 FUNCIÓN FINANCIERA EMPRESARIAL
+# ===========================================================
+def calcular_costo_operativo_por_dia():
+
+    with conectar() as conn:
+
+        df = pd.read_sql(
+            "SELECT monto_mensual FROM costos_operativos",
+            conn
+        )
+
+    if df.empty:
+        return 0
+
+    total_mensual = df["monto_mensual"].sum()
+
+    return total_mensual / 30
 
 # --- 4. CARGA DE DATOS ---
 def cargar_datos():
@@ -3756,7 +3792,8 @@ def registrar_venta_global(
         # ================================
         # CALCULAR UTILIDAD REAL
         # ================================
-        utilidad_real = float(monto_usd) - costo_total_real
+        costo_operativo = calcular_costo_operativo_por_dia()
+        utilidad_real = float(monto_usd) - costo_total_real - costo_operativo
         margen_real = (utilidad_real / float(monto_usd) * 100) if monto_usd > 0 else 0.0
 
         # ================================
@@ -3811,6 +3848,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
