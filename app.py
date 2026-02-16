@@ -2568,7 +2568,7 @@ elif menu == "💰 Ventas":
             st.warning("⚠️ Registra clientes primero.")
             st.stop()
 
-        with st.form("venta_manual", clear_on_submit=True):
+with st.form("venta_manual", clear_on_submit=True):
 
     st.subheader("Datos de la Venta")
 
