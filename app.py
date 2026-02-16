@@ -330,185 +330,170 @@ if menu == "📊 Dashboard":
             df_ventas["fecha"] = pd.to_datetime(df_ventas["fecha"]).dt.date
             st.line_chart(df_ventas.groupby("fecha")["monto_total"].sum())
 
+# ===========================================================
+# 📦 MÓDULO DE INVENTARIO
+# ===========================================================
 elif menu == "📦 Inventario":
     st.title("📦 Centro de Control de Suministros")
-    # Aquí iría el resto de tu lógica de inventario
-# --- SINCRONIZACIÓN CON SESIÓN ---
-df_inv = st.session_state.get('df_inv', pd.DataFrame())
-t_ref = st.session_state.get('tasa_bcv', 36.5)
-t_bin = st.session_state.get('tasa_binance', 38.0)
-usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
 
-# =======================================================
-# 1️⃣ DASHBOARD EJECUTIVO
-# =======================================================
-if not df_inv.empty:
+    # --- SINCRONIZACIÓN CON SESIÓN ---
+    df_inv = st.session_state.get('df_inv', pd.DataFrame())
+    t_ref = st.session_state.get('tasa_bcv', 36.5)
+    t_bin = st.session_state.get('tasa_binance', 38.0)
+    usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
 
-with st.container(border=True):
+    # =======================================================
+    # 1️⃣ DASHBOARD EJECUTIVO
+    # =======================================================
+    if not df_inv.empty:
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns(4)
 
-c1, c2, c3, c4 = st.columns(4)
+            capital_total = (df_inv["cantidad"] * df_inv["precio_usd"]).sum()
+            items_criticos = df_inv[df_inv["cantidad"] <= df_inv["minimo"]]
+            total_items = len(df_inv)
+            salud = ((total_items - len(items_criticos)) / total_items) * 100 if total_items > 0 else 0
 
-capital_total = (df_inv["cantidad"] * df_inv["precio_usd"]).sum()
-items_criticos = df_inv[df_inv["cantidad"] <= df_inv["minimo"]]
-total_items = len(df_inv)
+            c1.metric("💰 Capital en Inventario", f"${capital_total:,.2f}")
+            c2.metric("📦 Total Ítems", total_items)
+            c3.metric("🚨 Stock Bajo", len(items_criticos), 
+                      delta="Revisar" if len(items_criticos) > 0 else "OK", 
+                      delta_color="inverse")
+            c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
 
-salud = ((total_items - len(items_criticos)) / total_items) * 100 if total_items > 0 else 0
+    # =======================================================
+    # 2️⃣ TABS
+    # =======================================================
+    tabs = st.tabs([
+        "📋 Existencias", 
+        "📥 Registrar Compra", 
+        "📊 Historial Compras", 
+        "👤 Proveedores", 
+        "🔧 Ajustes"
+    ])
 
-c1.metric("💰 Capital en Inventario", f"${capital_total:,.2f}")
-c2.metric("📦 Total Ítems", total_items)
-c3.metric("🚨 Stock Bajo", len(items_criticos), delta="Revisar" if len(items_criticos) > 0 else "OK", delta_color="inverse")
-c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
+    # =======================================================
+    # 📋 TAB 1 — EXISTENCIAS
+    # =======================================================
+    with tabs[0]:
+        if df_inv.empty:
+            st.info("Inventario vacío.")
+        else:
+            col1, col2, col3 = st.columns([2, 1, 1])
+            filtro = col1.text_input("🔍 Buscar insumo")
+            moneda_vista = col2.selectbox("Moneda", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="inv_moneda_vista")
+            solo_bajo = col3.checkbox("🚨 Solo stock bajo")
 
-# =======================================================
-# 2️⃣ TABS
-# =======================================================
-tabs = st.tabs([
-"📋 Existencias",
-"📥 Registrar Compra",
-"📊 Historial Compras",
-"👤 Proveedores",
-"🔧 Ajustes"
-])
+            tasa_vista = 1.0
+            simbolo = "$"
 
-# =======================================================
-# 📋 TAB 1 — EXISTENCIAS
-# =======================================================
-with tabs[0]:
+            if "BCV" in moneda_vista:
+                tasa_vista = t_ref
+                simbolo = "Bs"
+            elif "Binance" in moneda_vista:
+                tasa_vista = t_bin
+                simbolo = "Bs"
 
-if df_inv.empty:
-st.info("Inventario vacío.")
-else:
-col1, col2, col3 = st.columns([2, 1, 1])
-filtro = col1.text_input("🔍 Buscar insumo")
-moneda_vista = col2.selectbox("Moneda", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="inv_moneda_vista")
-solo_bajo = col3.checkbox("🚨 Solo stock bajo")
+            df_v = df_inv.copy()
 
-tasa_vista = 1.0
-simbolo = "$"
+            if filtro:
+                df_v = df_v[df_v["item"].str.contains(filtro, case=False)]
 
-if "BCV" in moneda_vista:
-tasa_vista = t_ref
-simbolo = "Bs"
-elif "Binance" in moneda_vista:
-tasa_vista = t_bin
-simbolo = "Bs"
+            if solo_bajo:
+                df_v = df_v[df_v["cantidad"] <= df_v["minimo"]]
 
-df_v = df_inv.copy()
+            df_v["Costo Unitario"] = df_v["precio_usd"] * tasa_vista
+            df_v["Valor Total"] = df_v["cantidad"] * df_v["Costo Unitario"]
 
-if filtro:
-df_v = df_v[df_v["item"].str.contains(filtro, case=False)]
+            def resaltar_critico(row):
+                if row["cantidad"] <= row["minimo"]:
+                    return ['background-color: rgba(255,0,0,0.15)'] * len(row)
+                return [''] * len(row)
 
-if solo_bajo:
-df_v = df_v[df_v["cantidad"] <= df_v["minimo"]]
+            st.dataframe(
+                df_v.style.apply(resaltar_critico, axis=1),
+                column_config={
+                    "item": "Insumo",
+                    "cantidad": "Stock",
+                    "unidad": "Unidad",
+                    "Costo Unitario": st.column_config.NumberColumn(f"Costo ({simbolo})", format="%.4f"),
+                    "Valor Total": st.column_config.NumberColumn(f"Valor Total ({simbolo})", format="%.2f"),
+                    "minimo": "Mínimo",
+                    "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión"),
+                    "area_por_pliego_cm2": st.column_config.NumberColumn("cm²/pliego", format="%.2f"),
+                    "precio_usd": None, "id": None, "activo": None, "ultima_actualizacion": None
+                },
+                use_container_width=True,
+                hide_index=True
+            )
 
-df_v["Costo Unitario"] = df_v["precio_usd"] * tasa_vista
-df_v["Valor Total"] = df_v["cantidad"] * df_v["Costo Unitario"]
+            st.divider()
+            st.subheader("🛠 Gestión de Insumo Existente")
 
+            if not df_inv.empty:
+                insumo_sel = st.selectbox("Seleccionar Insumo", df_inv["item"].tolist())
+                fila_sel = df_inv[df_inv["item"] == insumo_sel].iloc[0]
+                
+                colA, colB, colC = st.columns(3)
+                nuevo_min = colA.number_input("Nuevo Stock Mínimo", min_value=0.0, value=float(fila_sel.get('minimo', 0)))
+                flag_cmyk = colB.checkbox("Visible en CMYK", value=bool(fila_sel.get('imprimible_cmyk', 0)))
 
-def resaltar_critico(row):
-if row["cantidad"] <= row["minimo"]:
-    return ['background-color: rgba(255,0,0,0.15)'] * len(row)
-return [''] * len(row)
+                if colA.button("Actualizar Mínimo"):
+                    with conectar() as conn:
+                        conn.execute(
+                            "UPDATE inventario SET minimo=?, imprimible_cmyk=? WHERE item=?",
+                            (nuevo_min, 1 if flag_cmyk else 0, insumo_sel)
+                        )
+                        conn.commit()
+                    cargar_datos()
+                    st.success("Configuración actualizada.")
+                    st.rerun()
 
-st.dataframe(
-df_v.style.apply(resaltar_critico, axis=1),
-column_config={
-    "item": "Insumo",
-    "cantidad": "Stock",
-    "unidad": "Unidad",
-    "Costo Unitario": st.column_config.NumberColumn(
-        f"Costo ({simbolo})", format="%.4f"
-    ),
-    "Valor Total": st.column_config.NumberColumn(
-        f"Valor Total ({simbolo})", format="%.2f"
-    ),
-    "minimo": "Mínimo",
-    "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión en Análisis CMYK"),
-    "area_por_pliego_cm2": st.column_config.NumberColumn("cm²/pliego", format="%.2f"),
-    "precio_usd": None,
-    "id": None,
-    "activo": None,
-    "ultima_actualizacion": None
-},
-use_container_width=True,
-hide_index=True
-)
+                # Conversión de cm2 a pliegos
+                if str(fila_sel.get('unidad', '')).lower() == 'cm2':
+                    st.warning("Insumo en cm². Convertir a pliegos para mejor control.")
+                    ref_default = float(fila_sel.get('area_por_pliego_cm2') or fila_sel.get('cantidad', 1) or 1)
+                    cm2_por_hoja = colC.number_input("cm² por pliego", min_value=1.0, value=ref_default)
+                    if colC.button("🔄 Convertir a pliegos"):
+                        pliegos = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
+                        with conectar() as conn:
+                            conn.execute(
+                                "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE item=?",
+                                (pliegos, cm2_por_hoja, insumo_sel)
+                            )
+                            conn.commit()
+                        st.success(f"Convertido a {pliegos:.3f} pliegos.")
+                        cargar_datos()
+                        st.rerun()
 
-st.divider()
-st.subheader("🛠 Gestión de Insumo Existente")
+                if colB.button("🗑 Eliminar Insumo"):
+                    with conectar() as conn:
+                        existe_historial = conn.execute(
+                            "SELECT COUNT(*) FROM historial_compras WHERE item=?",
+                            (insumo_sel,)
+                        ).fetchone()[0]
+                        if existe_historial > 0:
+                            conn.execute("UPDATE inventario SET activo=0, cantidad=0 WHERE item=?", (insumo_sel,))
+                            conn.commit()
+                            st.success("Insumo archivado.")
+                            cargar_datos()
+                            st.rerun()
+                        else:
+                            st.session_state.confirmar_borrado = True
 
-if not df_inv.empty:
-
-insumo_sel = st.selectbox("Seleccionar Insumo", df_inv["item"].tolist())
-fila_sel = df_inv[df_inv["item"] == insumo_sel].iloc[0]
-colA, colB, colC = st.columns(3)
-nuevo_min = colA.number_input("Nuevo Stock Mínimo", min_value=0.0, value=float(fila_sel.get('minimo', 0)))
-flag_cmyk = colB.checkbox("Visible en CMYK", value=bool(fila_sel.get('imprimible_cmyk', 0)))
-
-if colA.button("Actualizar Mínimo"):
-with conectar() as conn:
-    conn.execute(
-        "UPDATE inventario SET minimo=?, imprimible_cmyk=? WHERE item=?",
-        (nuevo_min, 1 if flag_cmyk else 0, insumo_sel)
-    )
-    conn.commit()
-cargar_datos()
-st.success("Stock mínimo actualizado.")
-st.rerun()
-
-# Conversión para inventarios viejos cargados como cm2
-if str(fila_sel.get('unidad', '')).lower() == 'cm2':
-st.warning("Este insumo aún está en cm². Conviene convertirlo a pliegos para control real de stock.")
-ref_default = float(fila_sel.get('area_por_pliego_cm2') or fila_sel.get('cantidad', 1) or 1)
-cm2_por_hoja = colC.number_input("cm² por pliego", min_value=1.0, value=ref_default)
-if colC.button("🔄 Convertir stock cm2 → pliegos"):
-    pliegos = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
-    with conectar() as conn:
-        conn.execute(
-            "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE item=?",
-            (pliegos, cm2_por_hoja, insumo_sel)
-        )
-        conn.commit()
-    st.success(f"Convertido a {pliegos:.3f} pliegos.")
-    cargar_datos()
-    st.rerun()
-if colB.button("🗑 Eliminar Insumo"):
-with conectar() as conn:
-    existe_historial = conn.execute(
-        "SELECT COUNT(*) FROM historial_compras WHERE item=?",
-        (insumo_sel,)
-    ).fetchone()[0]
-    if existe_historial > 0:
-        conn.execute(
-            "UPDATE inventario SET activo=0, cantidad=0 WHERE item=?",
-            (insumo_sel,)
-        )
-        conn.commit()
-        st.success("Insumo archivado (tiene historial y no se elimina físicamente).")
-        cargar_datos()
-        st.rerun()
-    else:
-        st.session_state.confirmar_borrado = True
-
-if st.session_state.get("confirmar_borrado", False):
-st.warning(f"⚠ Confirmar eliminación de '{insumo_sel}'")
-colC, colD = st.columns(2)
-
-if colC.button("✅ Confirmar"):
-    with conectar() as conn:
-        conn.execute(
-            "DELETE FROM inventario WHERE item=?",
-            (insumo_sel,)
-        )
-        conn.commit()
-    st.session_state.confirmar_borrado = False
-    cargar_datos()
-    st.success("Insumo eliminado.")
-    st.rerun()
-
-if colD.button("❌ Cancelar"):
-    st.session_state.confirmar_borrado = False
-
+                if st.session_state.get("confirmar_borrado", False):
+                    st.warning(f"⚠ ¿Eliminar '{insumo_sel}' físicamente?")
+                    cb1, cb2 = st.columns(2)
+                    if cb1.button("✅ Confirmar"):
+                        with conectar() as conn:
+                            conn.execute("DELETE FROM inventario WHERE item=?", (insumo_sel,))
+                            conn.commit()
+                        st.session_state.confirmar_borrado = False
+                        cargar_datos()
+                        st.rerun()
+                    if cb2.button("❌ Cancelar"):
+                        st.session_state.confirmar_borrado = False
+                        st.rerun()
 # =======================================================
 # 📥 TAB 2 — REGISTRAR COMPRA
 # =======================================================
@@ -3383,6 +3368,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
