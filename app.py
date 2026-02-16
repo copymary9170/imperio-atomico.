@@ -190,6 +190,74 @@ def inicializar_sistema():
         """)
 
 
+
+        # ===================================================
+# HISTORIAL COMPRAS
+# ===================================================
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS historial_compras (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item TEXT,
+    proveedor_id INTEGER,
+    cantidad REAL,
+    unidad TEXT,
+    costo_total_usd REAL,
+    costo_unit_usd REAL,
+    impuestos REAL,
+    delivery REAL,
+    tasa_usada REAL,
+    moneda_pago TEXT,
+    usuario TEXT,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+
+# ===================================================
+# PROVEEDORES
+# ===================================================
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS proveedores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT UNIQUE,
+    telefono TEXT,
+    rif TEXT,
+    contacto TEXT,
+    observaciones TEXT,
+    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+
+# ===================================================
+# VENTAS EXTRA
+# ===================================================
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS ventas_extra (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    venta_id INTEGER,
+    tasa REAL,
+    monto_bs REAL
+)
+""")
+
+
+# ===================================================
+# GASTOS EXTRA
+# ===================================================
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS gastos_extra (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gasto_id INTEGER,
+    tasa REAL,
+    monto_bs REAL,
+    usuario TEXT
+)
+""")
         # ===================================================
         # VENTAS
         # ===================================================
@@ -3629,6 +3697,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
