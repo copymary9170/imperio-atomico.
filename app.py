@@ -57,7 +57,8 @@ def obtener_password_admin_inicial() -> str:
 def inicializar_sistema():
     with conectar() as conn:
         c = conn.cursor()
-       
+        st.set_page_config(...)
+        
         # FORZAR CREACIÓN
         c.execute("""
         CREATE TABLE IF NOT EXISTS costos_operativos (
@@ -3918,6 +3919,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
