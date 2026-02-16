@@ -3718,7 +3718,7 @@ def registrar_venta_global(
     usuario=None
 ):
     """
-    FUNCIÓN MAESTRA DEL IMPERIO – VERSIÓN SEGURA Y TRANSACCIONAL
+    FUNCIÓN MAESTRA DEL IMPERIO – VERSIÓN FINANCIERA PROFESIONAL
     """
 
     if consumos is None:
@@ -3740,6 +3740,9 @@ def registrar_venta_global(
 
         conn.execute("BEGIN TRANSACTION")
 
+        # ================================
+        # VALIDAR CLIENTE
+        # ================================
         if id_cliente is not None:
             existe_cli = cursor.execute(
                 "SELECT id FROM clientes WHERE id = ?",
@@ -3748,29 +3751,47 @@ def registrar_venta_global(
 
             if not existe_cli:
                 conn.rollback()
-                return False, "❌ Cliente no encontrado en base de datos"
+                return False, "❌ Cliente no encontrado"
+
+        # ================================
+        # VALIDAR STOCK Y CALCULAR COSTO
+        # ================================
+        costo_total_real = 0.0
 
         for item_id, cant in consumos.items():
 
             if cant <= 0:
                 conn.rollback()
-                return False, f"⚠️ Cantidad inválida para el insumo {item_id}"
+                return False, f"⚠️ Cantidad inválida para insumo {item_id}"
 
-            stock_actual = cursor.execute(
-                "SELECT cantidad, item FROM inventario WHERE id = ?",
+            data = cursor.execute(
+                "SELECT cantidad, precio_usd, item FROM inventario WHERE id = ?",
                 (item_id,)
             ).fetchone()
 
-            if not stock_actual:
+            if not data:
                 conn.rollback()
-                return False, f"❌ Insumo con ID {item_id} no existe"
+                return False, f"❌ Insumo {item_id} no existe"
 
-            cantidad_disponible, nombre_item = stock_actual
+            cantidad_disponible, precio_unitario, nombre_item = data
 
             if cant > cantidad_disponible:
                 conn.rollback()
-                return False, f"⚠️ Stock insuficiente para: {nombre_item}"
+                return False, f"⚠️ Stock insuficiente para {nombre_item}"
 
+            # COSTO HISTÓRICO
+            if precio_unitario:
+                costo_total_real += float(precio_unitario) * float(cant)
+
+        # ================================
+        # CALCULAR UTILIDAD REAL
+        # ================================
+        utilidad_real = float(monto_usd) - costo_total_real
+        margen_real = (utilidad_real / float(monto_usd) * 100) if monto_usd > 0 else 0.0
+
+        # ================================
+        # DESCONTAR INVENTARIO
+        # ================================
         for item_id, cant in consumos.items():
 
             cursor.execute("""
@@ -3785,29 +3806,8 @@ def registrar_venta_global(
                 VALUES (?, 'SALIDA', ?, ?, ?)
             """, (item_id, cant, f"Venta: {detalle}", usuario))
 
-                # ================================
-        # CALCULAR COSTO REAL DE INVENTARIO
         # ================================
-        costo_total_real = 0.0
-
-        for item_id, cant in consumos.items():
-            data = cursor.execute(
-                "SELECT precio_usd FROM inventario WHERE id = ?",
-                (item_id,)
-            ).fetchone()
-
-            if data and data[0]:
-                costo_total_real += float(data[0]) * float(cant)
-
-        utilidad_real = float(monto_usd) - costo_total_real
-
-        if float(monto_usd) > 0:
-            margen_real = (utilidad_real / float(monto_usd)) * 100
-        else:
-            margen_real = 0.0
-
-        # ================================
-        # INSERTAR VENTA CON DATOS FINANCIEROS
+        # INSERTAR VENTA
         # ================================
         cursor.execute("""
             INSERT INTO ventas
@@ -3832,7 +3832,7 @@ def registrar_venta_global(
 
         cargar_datos()
 
-        return True, "✅ Venta procesada correctamente"
+        return True, f"✅ Venta registrada | Utilidad: ${utilidad_real:.2f} | Margen: {margen_real:.1f}%"
 
     except Exception as e:
         try:
@@ -3840,19 +3840,4 @@ def registrar_venta_global(
         except:
             pass
 
-        return False, f"❌ Error interno al procesar la venta: {str(e)}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        return False, f"❌ Error interno: {str(e)}"
