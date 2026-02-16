@@ -18,59 +18,59 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 # --- 2. MOTOR DE BASE DE DATOS ---
 
 def conectar():
-    conn = sqlite3.connect("imperio_v2.db", check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+conn = sqlite3.connect("imperio_v2.db", check_same_thread=False)
+conn.execute("PRAGMA foreign_keys = ON")
+return conn
 
 # Conexión principal a la base de datos
 
 def hash_password(password: str, salt: str | None = None) -> str:
-    """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
+"""Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
 
-    salt = salt or secrets.token_hex(16)
+salt = salt or secrets.token_hex(16)
 
-    iterations = 120_000
+iterations = 120_000
 
-    digest = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        iterations
-    ).hex()
+digest = hashlib.pbkdf2_hmac(
+    'sha256',
+    password.encode('utf-8'),
+    salt.encode('utf-8'),
+    iterations
+).hex()
 
-    return f"pbkdf2_sha256${iterations}${salt}${digest}"
+return f"pbkdf2_sha256${iterations}${salt}${digest}"
 
 
 def verify_password(password: str, password_hash: str | None) -> bool:
 
-    if not password_hash:
+if not password_hash:
+    return False
+
+try:
+
+    algorithm, iterations, salt, digest = password_hash.split('$', 3)
+
+    if algorithm != 'pbkdf2_sha256':
         return False
 
-    try:
+    test_digest = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt.encode('utf-8'),
+        int(iterations)
+    ).hex()
 
-        algorithm, iterations, salt, digest = password_hash.split('$', 3)
+    return hmac.compare_digest(test_digest, digest)
 
-        if algorithm != 'pbkdf2_sha256':
-            return False
+except (ValueError, TypeError):
 
-        test_digest = hashlib.pbkdf2_hmac(
-            'sha256',
-            password.encode('utf-8'),
-            salt.encode('utf-8'),
-            int(iterations)
-        ).hex()
-
-        return hmac.compare_digest(test_digest, digest)
-
-    except (ValueError, TypeError):
-
-        return False
+    return False
 
 
 def obtener_password_admin_inicial() -> str:
-    """Obtiene contraseña inicial desde entorno para evitar hardcode total en el código."""
+"""Obtiene contraseña inicial desde entorno para evitar hardcode total en el código."""
 
-    return os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
+return os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
 # ===========================================================
@@ -78,328 +78,328 @@ def obtener_password_admin_inicial() -> str:
 # ===========================================================
 def inicializar_sistema():
 
-    with conectar() as conn:
+with conectar() as conn:
 
-        c = conn.cursor()
+    c = conn.cursor()
 
-        # ===================================================
-        # CONFIGURACIÓN GENERAL
-        # ===================================================
+    # ===================================================
+    # CONFIGURACIÓN GENERAL
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS configuracion (
+        parametro TEXT PRIMARY KEY,
+        valor REAL
+    )
+    """)
+
+    # ===================================================
+    # TASAS DE CAMBIO
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS tasas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tasa_bcv REAL,
+        tasa_binance REAL,
+        fecha TEXT
+    )
+    """)
+
+    # ===================================================
+    # COSTOS OPERATIVOS
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS costos_operativos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT,
+        monto_mensual REAL
+    )
+    """)
+
+    # ===================================================
+    # CLIENTES
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS clientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT,
+        whatsapp TEXT
+    )
+    """)
+
+    # ===================================================
+    # USUARIOS
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS usuarios (
+        username TEXT PRIMARY KEY,
+        password TEXT,
+        password_hash TEXT,
+        rol TEXT,
+        nombre TEXT
+    )
+    """)
+
+    # ===================================================
+    # INVENTARIO
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS inventario (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item TEXT UNIQUE,
+        cantidad REAL,
+        unidad TEXT,
+        precio_usd REAL,
+        minimo REAL DEFAULT 5.0,
+        activo INTEGER DEFAULT 1,
+        ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # ===================================================
+    # MOVIMIENTOS INVENTARIO
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_movs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER,
+        tipo TEXT,
+        cantidad REAL,
+        motivo TEXT,
+        usuario TEXT,
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # ===================================================
+    # COMPRAS
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS compras (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proveedor TEXT,
+        total REAL,
+        usuario TEXT,
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS compras_detalle (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        compra_id INTEGER,
+        item TEXT,
+        cantidad REAL,
+        costo REAL
+    )
+    """)
+
+    # ===================================================
+    # HISTORIAL COMPRAS
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS historial_compras (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item TEXT,
+        proveedor_id INTEGER,
+        cantidad REAL,
+        unidad TEXT,
+        costo_total_usd REAL,
+        costo_unit_usd REAL,
+        impuestos REAL,
+        delivery REAL,
+        tasa_usada REAL,
+        moneda_pago TEXT,
+        usuario TEXT,
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # ===================================================
+    # PROVEEDORES
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS proveedores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT UNIQUE,
+        telefono TEXT,
+        rif TEXT,
+        contacto TEXT,
+        observaciones TEXT,
+        fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # ===================================================
+    # VENTAS EXTRA
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ventas_extra (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        venta_id INTEGER,
+        tasa REAL,
+        monto_bs REAL
+    )
+    """)
+
+    # ===================================================
+    # GASTOS EXTRA
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS gastos_extra (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gasto_id INTEGER,
+        tasa REAL,
+        monto_bs REAL,
+        usuario TEXT
+    )
+    """)
+
+    # ===================================================
+    # VENTAS
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ventas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente_id INTEGER,
+        cliente TEXT,
+        monto_total REAL,
+        costo_total REAL,
+        utilidad REAL,
+        margen REAL,
+        metodo TEXT,
+        usuario TEXT,
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ventas_detalle (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        venta_id INTEGER,
+        item TEXT,
+        cantidad REAL,
+        costo REAL,
+        precio REAL
+    )
+    """)
+
+    # ===================================================
+    # GASTOS
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS gastos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        descripcion TEXT,
+        monto REAL,
+        categoria TEXT,
+        metodo TEXT,
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # ===================================================
+    # ACTIVOS
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS activos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT,
+        costo REAL,
+        vida_util_meses INTEGER,
+        fecha_compra TEXT
+    )
+    """)
+
+    # ===================================================
+    # COTIZACIONES
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS cotizaciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente TEXT,
+        total REAL,
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS cotizacion_detalle (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cotizacion_id INTEGER,
+        item TEXT,
+        cantidad REAL,
+        precio REAL
+    )
+    """)
+
+    # ===================================================
+    # CMYK LOG
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS cmyk_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        archivo TEXT,
+        area REAL,
+        costo REAL,
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # ===================================================
+    # CIERRE DE CAJA
+    # ===================================================
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS cierre_caja (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT,
+        ventas REAL,
+        gastos REAL,
+        utilidad REAL,
+        usuario TEXT
+    )
+    """)
+
+    # ===================================================
+    # CREAR ADMIN
+    # ===================================================
+
+    try:
+
+        admin_password = obtener_password_admin_inicial()
 
         c.execute("""
-        CREATE TABLE IF NOT EXISTS configuracion (
-            parametro TEXT PRIMARY KEY,
-            valor REAL
-        )
-        """)
+        INSERT OR IGNORE INTO usuarios
+        VALUES (?, ?, ?, ?, ?)
+        """, (
+            "jefa",
+            "",
+            hash_password(admin_password),
+            "Admin",
+            "Dueña del Imperio"
+        ))
 
-        # ===================================================
-        # TASAS DE CAMBIO
-        # ===================================================
+    except:
+        pass
 
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS tasas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tasa_bcv REAL,
-            tasa_binance REAL,
-            fecha TEXT
-        )
-        """)
-
-        # ===================================================
-        # COSTOS OPERATIVOS
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS costos_operativos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT,
-            monto_mensual REAL
-        )
-        """)
-
-        # ===================================================
-        # CLIENTES
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS clientes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT,
-            whatsapp TEXT
-        )
-        """)
-
-        # ===================================================
-        # USUARIOS
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            username TEXT PRIMARY KEY,
-            password TEXT,
-            password_hash TEXT,
-            rol TEXT,
-            nombre TEXT
-        )
-        """)
-
-        # ===================================================
-        # INVENTARIO
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS inventario (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item TEXT UNIQUE,
-            cantidad REAL,
-            unidad TEXT,
-            precio_usd REAL,
-            minimo REAL DEFAULT 5.0,
-            activo INTEGER DEFAULT 1,
-            ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        # ===================================================
-        # MOVIMIENTOS INVENTARIO
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS inventario_movs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_id INTEGER,
-            tipo TEXT,
-            cantidad REAL,
-            motivo TEXT,
-            usuario TEXT,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        # ===================================================
-        # COMPRAS
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS compras (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            proveedor TEXT,
-            total REAL,
-            usuario TEXT,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS compras_detalle (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            compra_id INTEGER,
-            item TEXT,
-            cantidad REAL,
-            costo REAL
-        )
-        """)
-
-        # ===================================================
-        # HISTORIAL COMPRAS
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS historial_compras (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item TEXT,
-            proveedor_id INTEGER,
-            cantidad REAL,
-            unidad TEXT,
-            costo_total_usd REAL,
-            costo_unit_usd REAL,
-            impuestos REAL,
-            delivery REAL,
-            tasa_usada REAL,
-            moneda_pago TEXT,
-            usuario TEXT,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        # ===================================================
-        # PROVEEDORES
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS proveedores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT UNIQUE,
-            telefono TEXT,
-            rif TEXT,
-            contacto TEXT,
-            observaciones TEXT,
-            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        # ===================================================
-        # VENTAS EXTRA
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS ventas_extra (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            venta_id INTEGER,
-            tasa REAL,
-            monto_bs REAL
-        )
-        """)
-
-        # ===================================================
-        # GASTOS EXTRA
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS gastos_extra (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            gasto_id INTEGER,
-            tasa REAL,
-            monto_bs REAL,
-            usuario TEXT
-        )
-        """)
-
-        # ===================================================
-        # VENTAS
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS ventas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id INTEGER,
-            cliente TEXT,
-            monto_total REAL,
-            costo_total REAL,
-            utilidad REAL,
-            margen REAL,
-            metodo TEXT,
-            usuario TEXT,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS ventas_detalle (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            venta_id INTEGER,
-            item TEXT,
-            cantidad REAL,
-            costo REAL,
-            precio REAL
-        )
-        """)
-
-        # ===================================================
-        # GASTOS
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS gastos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            descripcion TEXT,
-            monto REAL,
-            categoria TEXT,
-            metodo TEXT,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        # ===================================================
-        # ACTIVOS
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS activos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT,
-            costo REAL,
-            vida_util_meses INTEGER,
-            fecha_compra TEXT
-        )
-        """)
-
-        # ===================================================
-        # COTIZACIONES
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS cotizaciones (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente TEXT,
-            total REAL,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS cotizacion_detalle (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cotizacion_id INTEGER,
-            item TEXT,
-            cantidad REAL,
-            precio REAL
-        )
-        """)
-
-        # ===================================================
-        # CMYK LOG
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS cmyk_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            archivo TEXT,
-            area REAL,
-            costo REAL,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        # ===================================================
-        # CIERRE DE CAJA
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS cierre_caja (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TEXT,
-            ventas REAL,
-            gastos REAL,
-            utilidad REAL,
-            usuario TEXT
-        )
-        """)
-
-        # ===================================================
-        # CREAR ADMIN
-        # ===================================================
-
-        try:
-
-            admin_password = obtener_password_admin_inicial()
-
-            c.execute("""
-            INSERT OR IGNORE INTO usuarios
-            VALUES (?, ?, ?, ?, ?)
-            """, (
-                "jefa",
-                "",
-                hash_password(admin_password),
-                "Admin",
-                "Dueña del Imperio"
-            ))
-
-        except:
-            pass
-
-        conn.commit()
+    conn.commit()
 # ===========================================================
 # 💰 FUNCIÓN FINANCIERA EMPRESARIAL
 # ===========================================================
@@ -426,13 +426,13 @@ try:
 columnas_inventario = {row[1] for row in conn.execute("PRAGMA table_info(inventario)").fetchall()}
 query_inv = "SELECT * FROM inventario"
 if 'activo' in columnas_inventario:
-    query_inv += " WHERE COALESCE(activo,1)=1"
+query_inv += " WHERE COALESCE(activo,1)=1"
 
 st.session_state.df_inv = pd.read_sql(query_inv, conn)
 st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
 conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
 for _, row in conf_df.iterrows():
-    st.session_state[row['parametro']] = float(row['valor'])
+st.session_state[row['parametro']] = float(row['valor'])
 except (sqlite3.DatabaseError, ValueError, KeyError) as e:
 st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")
 
@@ -452,33 +452,33 @@ u = st.text_input("Usuario")
 p = st.text_input("Contraseña", type="password")
 if st.button("Entrar", use_container_width=True):
 with conectar() as conn:
-    res = conn.execute(
-        "SELECT username, rol, nombre, password, password_hash FROM usuarios WHERE username=?",
-        (u,)
-    ).fetchone()
+res = conn.execute(
+    "SELECT username, rol, nombre, password, password_hash FROM usuarios WHERE username=?",
+    (u,)
+).fetchone()
 
 acceso_ok = False
 if res:
-    username, rol, nombre, password_plain, password_hash = res
-    if verify_password(p, password_hash):
-        acceso_ok = True
-    elif password_plain and hmac.compare_digest(password_plain, p):
-        acceso_ok = True
-        with conectar() as conn:
-            conn.execute(
-                "UPDATE usuarios SET password_hash=?, password='' WHERE username=?",
-                (hash_password(p), username)
-            )
-            conn.commit()
+username, rol, nombre, password_plain, password_hash = res
+if verify_password(p, password_hash):
+    acceso_ok = True
+elif password_plain and hmac.compare_digest(password_plain, p):
+    acceso_ok = True
+    with conectar() as conn:
+        conn.execute(
+            "UPDATE usuarios SET password_hash=?, password='' WHERE username=?",
+            (hash_password(p), username)
+        )
+        conn.commit()
 
 if acceso_ok:
-    st.session_state.autenticado = True
-    st.session_state.rol = rol
-    st.session_state.usuario_nombre = nombre
-    cargar_datos()
-    st.rerun()
+st.session_state.autenticado = True
+st.session_state.rol = rol
+st.session_state.usuario_nombre = nombre
+cargar_datos()
+st.rerun()
 else:
-    st.error("Acceso denegado")
+st.error("Acceso denegado")
 
 if not st.session_state.autenticado:
 login()
@@ -699,51 +699,51 @@ tasa_vista = 1.0
 simbolo = "$"
 
 if "BCV" in moneda_vista:
-    tasa_vista = t_ref
-    simbolo = "Bs"
+tasa_vista = t_ref
+simbolo = "Bs"
 elif "Binance" in moneda_vista:
-    tasa_vista = t_bin
-    simbolo = "Bs"
+tasa_vista = t_bin
+simbolo = "Bs"
 
 df_v = df_inv.copy()
 
 if filtro:
-    df_v = df_v[df_v["item"].str.contains(filtro, case=False)]
+df_v = df_v[df_v["item"].str.contains(filtro, case=False)]
 
 if solo_bajo:
-    df_v = df_v[df_v["cantidad"] <= df_v["minimo"]]
+df_v = df_v[df_v["cantidad"] <= df_v["minimo"]]
 
 df_v["Costo Unitario"] = df_v["precio_usd"] * tasa_vista
 df_v["Valor Total"] = df_v["cantidad"] * df_v["Costo Unitario"]
 
 
 def resaltar_critico(row):
-    if row["cantidad"] <= row["minimo"]:
-        return ['background-color: rgba(255,0,0,0.15)'] * len(row)
-    return [''] * len(row)
+if row["cantidad"] <= row["minimo"]:
+    return ['background-color: rgba(255,0,0,0.15)'] * len(row)
+return [''] * len(row)
 
 st.dataframe(
-   df_v.style.apply(resaltar_critico, axis=1),
-    column_config={
-        "item": "Insumo",
-        "cantidad": "Stock",
-        "unidad": "Unidad",
-        "Costo Unitario": st.column_config.NumberColumn(
-            f"Costo ({simbolo})", format="%.4f"
-        ),
-        "Valor Total": st.column_config.NumberColumn(
-            f"Valor Total ({simbolo})", format="%.2f"
-        ),
-        "minimo": "Mínimo",
-        "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión en Análisis CMYK"),
-        "area_por_pliego_cm2": st.column_config.NumberColumn("cm²/pliego", format="%.2f"),
-        "precio_usd": None,
-        "id": None,
-        "activo": None,
-        "ultima_actualizacion": None
-    },
-    use_container_width=True,
-    hide_index=True
+df_v.style.apply(resaltar_critico, axis=1),
+column_config={
+    "item": "Insumo",
+    "cantidad": "Stock",
+    "unidad": "Unidad",
+    "Costo Unitario": st.column_config.NumberColumn(
+        f"Costo ({simbolo})", format="%.4f"
+    ),
+    "Valor Total": st.column_config.NumberColumn(
+        f"Valor Total ({simbolo})", format="%.2f"
+    ),
+    "minimo": "Mínimo",
+    "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión en Análisis CMYK"),
+    "area_por_pliego_cm2": st.column_config.NumberColumn("cm²/pliego", format="%.2f"),
+    "precio_usd": None,
+    "id": None,
+    "activo": None,
+    "ultima_actualizacion": None
+},
+use_container_width=True,
+hide_index=True
 )
 
 st.divider()
@@ -758,68 +758,68 @@ nuevo_min = colA.number_input("Nuevo Stock Mínimo", min_value=0.0, value=float(
 flag_cmyk = colB.checkbox("Visible en CMYK", value=bool(fila_sel.get('imprimible_cmyk', 0)))
 
 if colA.button("Actualizar Mínimo"):
-    with conectar() as conn:
-        conn.execute(
-            "UPDATE inventario SET minimo=?, imprimible_cmyk=? WHERE item=?",
-            (nuevo_min, 1 if flag_cmyk else 0, insumo_sel)
-        )
-        conn.commit()
-    cargar_datos()
-    st.success("Stock mínimo actualizado.")
-    st.rerun()
+with conectar() as conn:
+    conn.execute(
+        "UPDATE inventario SET minimo=?, imprimible_cmyk=? WHERE item=?",
+        (nuevo_min, 1 if flag_cmyk else 0, insumo_sel)
+    )
+    conn.commit()
+cargar_datos()
+st.success("Stock mínimo actualizado.")
+st.rerun()
 
 # Conversión para inventarios viejos cargados como cm2
 if str(fila_sel.get('unidad', '')).lower() == 'cm2':
-    st.warning("Este insumo aún está en cm². Conviene convertirlo a pliegos para control real de stock.")
-    ref_default = float(fila_sel.get('area_por_pliego_cm2') or fila_sel.get('cantidad', 1) or 1)
-    cm2_por_hoja = colC.number_input("cm² por pliego", min_value=1.0, value=ref_default)
-    if colC.button("🔄 Convertir stock cm2 → pliegos"):
-        pliegos = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
-        with conectar() as conn:
-            conn.execute(
-                "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE item=?",
-                (pliegos, cm2_por_hoja, insumo_sel)
-            )
-            conn.commit()
-        st.success(f"Convertido a {pliegos:.3f} pliegos.")
+st.warning("Este insumo aún está en cm². Conviene convertirlo a pliegos para control real de stock.")
+ref_default = float(fila_sel.get('area_por_pliego_cm2') or fila_sel.get('cantidad', 1) or 1)
+cm2_por_hoja = colC.number_input("cm² por pliego", min_value=1.0, value=ref_default)
+if colC.button("🔄 Convertir stock cm2 → pliegos"):
+    pliegos = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
+    with conectar() as conn:
+        conn.execute(
+            "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE item=?",
+            (pliegos, cm2_por_hoja, insumo_sel)
+        )
+        conn.commit()
+    st.success(f"Convertido a {pliegos:.3f} pliegos.")
+    cargar_datos()
+    st.rerun()
+if colB.button("🗑 Eliminar Insumo"):
+with conectar() as conn:
+    existe_historial = conn.execute(
+        "SELECT COUNT(*) FROM historial_compras WHERE item=?",
+        (insumo_sel,)
+    ).fetchone()[0]
+    if existe_historial > 0:
+        conn.execute(
+            "UPDATE inventario SET activo=0, cantidad=0 WHERE item=?",
+            (insumo_sel,)
+        )
+        conn.commit()
+        st.success("Insumo archivado (tiene historial y no se elimina físicamente).")
         cargar_datos()
         st.rerun()
-if colB.button("🗑 Eliminar Insumo"):
-    with conectar() as conn:
-        existe_historial = conn.execute(
-            "SELECT COUNT(*) FROM historial_compras WHERE item=?",
-            (insumo_sel,)
-        ).fetchone()[0]
-        if existe_historial > 0:
-            conn.execute(
-                "UPDATE inventario SET activo=0, cantidad=0 WHERE item=?",
-                (insumo_sel,)
-            )
-            conn.commit()
-            st.success("Insumo archivado (tiene historial y no se elimina físicamente).")
-            cargar_datos()
-            st.rerun()
-        else:
-            st.session_state.confirmar_borrado = True
+    else:
+        st.session_state.confirmar_borrado = True
 
 if st.session_state.get("confirmar_borrado", False):
-    st.warning(f"⚠ Confirmar eliminación de '{insumo_sel}'")
-    colC, colD = st.columns(2)
+st.warning(f"⚠ Confirmar eliminación de '{insumo_sel}'")
+colC, colD = st.columns(2)
 
-    if colC.button("✅ Confirmar"):
-        with conectar() as conn:
-            conn.execute(
-                "DELETE FROM inventario WHERE item=?",
-                (insumo_sel,)
-            )
-            conn.commit()
-        st.session_state.confirmar_borrado = False
-        cargar_datos()
-        st.success("Insumo eliminado.")
-        st.rerun()
+if colC.button("✅ Confirmar"):
+    with conectar() as conn:
+        conn.execute(
+            "DELETE FROM inventario WHERE item=?",
+            (insumo_sel,)
+        )
+        conn.commit()
+    st.session_state.confirmar_borrado = False
+    cargar_datos()
+    st.success("Insumo eliminado.")
+    st.rerun()
 
-    if colD.button("❌ Cancelar"):
-        st.session_state.confirmar_borrado = False
+if colD.button("❌ Cancelar"):
+    st.session_state.confirmar_borrado = False
 
 # =======================================================
 # 📥 TAB 2 — REGISTRAR COMPRA
@@ -830,12 +830,12 @@ st.subheader("📥 Registrar Nueva Compra")
 
 with conectar() as conn:
 try:
-    proveedores_existentes = pd.read_sql(
-        "SELECT nombre FROM proveedores ORDER BY nombre ASC",
-        conn
-    )["nombre"].dropna().astype(str).tolist()
+proveedores_existentes = pd.read_sql(
+    "SELECT nombre FROM proveedores ORDER BY nombre ASC",
+    conn
+)["nombre"].dropna().astype(str).tolist()
 except (sqlite3.DatabaseError, pd.errors.DatabaseError):
-    proveedores_existentes = []
+proveedores_existentes = []
 
 col_base1, col_base2 = st.columns(2)
 nombre_c = col_base1.text_input("Nombre del Insumo")
@@ -885,8 +885,8 @@ unidad_final = "pliegos"
 area_por_pliego_val = area_por_pliego
 
 st.caption(
-    f"Referencia técnica: {area_por_pliego:,.2f} cm² por pliego | "
-    f"Área total cargada: {area_total_ref:,.2f} cm²"
+f"Referencia técnica: {area_por_pliego:,.2f} cm² por pliego | "
+f"Área total cargada: {area_total_ref:,.2f} cm²"
 )
 
 elif tipo_unidad == "Líquido (ml)":
@@ -934,117 +934,117 @@ delivery = st.number_input("Gastos Logística / Delivery ($)", value=float(st.se
 if st.button("💾 Guardar Compra", use_container_width=True):
 
 if not nombre_c:
-    st.error("Debe indicar nombre del insumo.")
-    st.stop()
+st.error("Debe indicar nombre del insumo.")
+st.stop()
 
 if stock_real <= 0:
-    st.error("Cantidad inválida.")
-    st.stop()
+st.error("Cantidad inválida.")
+st.stop()
 
 if "BCV" in moneda_pago:
-    tasa_usada = t_ref
+tasa_usada = t_ref
 elif "Binance" in moneda_pago:
-    tasa_usada = t_bin
+tasa_usada = t_bin
 
 else:
-    tasa_usada = 1.0
+tasa_usada = 1.0
 
 porc_impuestos = 0
 if iva_activo:
-    porc_impuestos += st.session_state.get("iva_perc", 16)
+porc_impuestos += st.session_state.get("iva_perc", 16)
 if igtf_activo:
-    porc_impuestos += st.session_state.get("igtf_perc", 3)
+porc_impuestos += st.session_state.get("igtf_perc", 3)
 if banco_activo:
-    porc_impuestos += st.session_state.get("banco_perc", 0.5)
+porc_impuestos += st.session_state.get("banco_perc", 0.5)
 
 costo_total_usd = ((monto_factura / tasa_usada) * (1 + (porc_impuestos / 100))) + delivery
 costo_unitario = costo_total_usd / stock_real
 
 with conectar() as conn:
-    cur = conn.cursor()
+cur = conn.cursor()
 
 
-    proveedor_id = None
-    if proveedor:
-        cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
-        prov = cur.fetchone()
-        if not prov:
-            cur.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor,))
-            proveedor_id = cur.lastrowid
-        else:
-            proveedor_id = prov[0]
-
-    old = cur.execute(
-        "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
-        (nombre_c,)
-    ).fetchone()
-
-    if old:
-        nueva_cant = old[0] + stock_real
-        precio_ponderado = (
-            (old[0] * old[1] + stock_real * costo_unitario)
-            / nueva_cant
-        )
+proveedor_id = None
+if proveedor:
+    cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
+    prov = cur.fetchone()
+    if not prov:
+        cur.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor,))
+        proveedor_id = cur.lastrowid
     else:
-        nueva_cant = stock_real
-        precio_ponderado = costo_unitario
+        proveedor_id = prov[0]
 
-    if old:
-        cur.execute(
-            """
-            UPDATE inventario
-            SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, area_por_pliego_cm2=?, activo=1, ultima_actualizacion=CURRENT_TIMESTAMP
-            WHERE item=?
-            """,
-            (nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, nombre_c)
-        )
-    else:
-        cur.execute(
-            """
-            INSERT INTO inventario
-            (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, area_por_pliego_cm2, activo, ultima_actualizacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-            (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, 1)
-        )
+old = cur.execute(
+    "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
+    (nombre_c,)
+).fetchone()
 
+if old:
+    nueva_cant = old[0] + stock_real
+    precio_ponderado = (
+        (old[0] * old[1] + stock_real * costo_unitario)
+        / nueva_cant
+    )
+else:
+    nueva_cant = stock_real
+    precio_ponderado = costo_unitario
+
+if old:
+    cur.execute(
+        """
+        UPDATE inventario
+        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, area_por_pliego_cm2=?, activo=1, ultima_actualizacion=CURRENT_TIMESTAMP
+        WHERE item=?
+        """,
+        (nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, nombre_c)
+    )
+else:
+    cur.execute(
+        """
+        INSERT INTO inventario
+        (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, area_por_pliego_cm2, activo, ultima_actualizacion)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, 1)
+    )
+
+cur.execute("""
+    INSERT INTO historial_compras
+    (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+""", (
+    nombre_c,
+    proveedor_id,
+    stock_real,
+    unidad_final,
+    costo_total_usd,
+    costo_unitario,
+    porc_impuestos,
+    delivery,
+    tasa_usada,
+    moneda_pago,
+    usuario_actual
+))
+
+item_id_row = cur.execute(
+    "SELECT id FROM inventario WHERE item = ?",
+    (nombre_c,)
+).fetchone()
+
+if item_id_row:
     cur.execute("""
-        INSERT INTO historial_compras
-        (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO inventario_movs
+        (item_id, tipo, cantidad, motivo, usuario)
+        VALUES (?,?,?,?,?)
     """, (
-        nombre_c,
-        proveedor_id,
+        item_id_row[0],
+        "ENTRADA",
         stock_real,
-        unidad_final,
-        costo_total_usd,
-        costo_unitario,
-        porc_impuestos,
-        delivery,
-        tasa_usada,
-        moneda_pago,
+        "Compra registrada",
         usuario_actual
     ))
 
-    item_id_row = cur.execute(
-        "SELECT id FROM inventario WHERE item = ?",
-        (nombre_c,)
-    ).fetchone()
-
-    if item_id_row:
-        cur.execute("""
-            INSERT INTO inventario_movs
-            (item_id, tipo, cantidad, motivo, usuario)
-            VALUES (?,?,?,?,?)
-        """, (
-            item_id_row[0],
-            "ENTRADA",
-            stock_real,
-            "Compra registrada",
-            usuario_actual
-        ))
-
-        conn.commit()
+    conn.commit()
 
 cargar_datos()
 st.success("Compra registrada correctamente.")
@@ -1060,21 +1060,21 @@ st.subheader("📊 Historial Profesional de Compras")
 
 with conectar() as conn:
 df_hist = pd.read_sql("""
-    SELECT 
-        h.id as compra_id,
-        h.fecha,
-        h.item,
-        h.cantidad,
-        h.unidad,
-        h.costo_total_usd,
-        h.costo_unit_usd,
-        h.impuestos,
-        h.delivery,
-        h.moneda_pago,
-        p.nombre as proveedor
-    FROM historial_compras h
-    LEFT JOIN proveedores p ON h.proveedor_id = p.id
-    ORDER BY h.fecha DESC
+SELECT 
+    h.id as compra_id,
+    h.fecha,
+    h.item,
+    h.cantidad,
+    h.unidad,
+    h.costo_total_usd,
+    h.costo_unit_usd,
+    h.impuestos,
+    h.delivery,
+    h.moneda_pago,
+    p.nombre as proveedor
+FROM historial_compras h
+LEFT JOIN proveedores p ON h.proveedor_id = p.id
+ORDER BY h.fecha DESC
 """, conn)
 
 if df_hist.empty:
@@ -1089,39 +1089,39 @@ filtro_proveedor = col2.text_input("👤 Filtrar por Proveedor")
 df_v = df_hist.copy()
 
 if filtro_item:
-    df_v = df_v[df_v["item"].str.contains(filtro_item, case=False)]
+df_v = df_v[df_v["item"].str.contains(filtro_item, case=False)]
 
 if filtro_proveedor:
-    df_v = df_v[df_v["proveedor"].fillna("").str.contains(filtro_proveedor, case=False)]
+df_v = df_v[df_v["proveedor"].fillna("").str.contains(filtro_proveedor, case=False)]
 
 total_compras = df_v["costo_total_usd"].sum()
 
 st.metric("💰 Total Comprado (USD)", f"${total_compras:,.2f}")
 
 st.dataframe(
-    df_v,
-    column_config={
-        "compra_id": None,
-        "fecha": "Fecha",
-        "item": "Insumo",
-        "cantidad": "Cantidad",
-        "unidad": "Unidad",
-        "costo_total_usd": st.column_config.NumberColumn("Costo Total ($)", format="%.2f"),
-        "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.4f"),
-        "impuestos": "Impuestos %",
-        "delivery": "Delivery $",
-        "moneda_pago": "Moneda",
-        "proveedor": "Proveedor"
-    },
-    use_container_width=True,
-    hide_index=True
+df_v,
+column_config={
+    "compra_id": None,
+    "fecha": "Fecha",
+    "item": "Insumo",
+    "cantidad": "Cantidad",
+    "unidad": "Unidad",
+    "costo_total_usd": st.column_config.NumberColumn("Costo Total ($)", format="%.2f"),
+    "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.4f"),
+    "impuestos": "Impuestos %",
+    "delivery": "Delivery $",
+    "moneda_pago": "Moneda",
+    "proveedor": "Proveedor"
+},
+use_container_width=True,
+hide_index=True
 )
 
 st.divider()
 st.subheader("🧹 Corregir historial de compras")
 opciones_compra = {
-    f"#{int(r.compra_id)} | {r.fecha} | {r.item} | {r.cantidad} {r.unidad} | ${r.costo_total_usd:.2f}": int(r.compra_id)
-    for r in df_hist.itertuples(index=False)
+f"#{int(r.compra_id)} | {r.fecha} | {r.item} | {r.cantidad} {r.unidad} | ${r.costo_total_usd:.2f}": int(r.compra_id)
+for r in df_hist.itertuples(index=False)
 }
 compra_sel_label = st.selectbox("Selecciona la compra a corregir", list(opciones_compra.keys()))
 compra_sel_id = opciones_compra[compra_sel_label]
@@ -1129,34 +1129,34 @@ compra_row = df_hist[df_hist["compra_id"] == compra_sel_id].iloc[0]
 st.caption("Si eliminas la compra, el sistema descuenta esa cantidad del inventario del insumo asociado.")
 
 if st.button("🗑 Eliminar compra seleccionada", type="secondary"):
-    with conectar() as conn:
-        cur = conn.cursor()
-        actual_row = cur.execute(
-            "SELECT id, cantidad FROM inventario WHERE item=?",
-            (str(compra_row["item"]),)
-        ).fetchone()
+with conectar() as conn:
+    cur = conn.cursor()
+    actual_row = cur.execute(
+        "SELECT id, cantidad FROM inventario WHERE item=?",
+        (str(compra_row["item"]),)
+    ).fetchone()
 
-        if actual_row:
-            item_id, cantidad_actual = actual_row
-            nueva_cant = max(0.0, float(cantidad_actual or 0) - float(compra_row["cantidad"]))
-            cur.execute(
-                "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
-                (nueva_cant, int(item_id))
-            )
-            cur.execute(
-                """
-                INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-                VALUES (?, 'SALIDA', ?, 'Corrección: eliminación de compra', ?)
-                """,
-                (int(item_id), float(compra_row["cantidad"]), usuario_actual)
-            )
+    if actual_row:
+        item_id, cantidad_actual = actual_row
+        nueva_cant = max(0.0, float(cantidad_actual or 0) - float(compra_row["cantidad"]))
+        cur.execute(
+            "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
+            (nueva_cant, int(item_id))
+        )
+        cur.execute(
+            """
+            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+            VALUES (?, 'SALIDA', ?, 'Corrección: eliminación de compra', ?)
+            """,
+            (int(item_id), float(compra_row["cantidad"]), usuario_actual)
+        )
 
-        cur.execute("DELETE FROM historial_compras WHERE id=?", (int(compra_sel_id),))
-        conn.commit()
+    cur.execute("DELETE FROM historial_compras WHERE id=?", (int(compra_sel_id),))
+    conn.commit()
 
-    st.success("Compra eliminada y stock ajustado correctamente.")
-    cargar_datos()
-    st.rerun()
+st.success("Compra eliminada y stock ajustado correctamente.")
+cargar_datos()
+st.rerun()
 
 st.divider()
 st.subheader("🧽 Limpiar historial por insumo")
@@ -1165,43 +1165,43 @@ df_hist_aux["item_norm"] = df_hist_aux["item"].fillna("").str.strip().str.lower(
 items_disponibles = sorted([i for i in df_hist_aux["item_norm"].unique().tolist() if i])
 
 if items_disponibles:
-    item_norm_sel = st.selectbox("Insumo a limpiar del historial", items_disponibles, key="hist_item_norm")
-    filas_item = df_hist_aux[df_hist_aux["item_norm"] == item_norm_sel]
-    st.caption(f"Se eliminarán {len(filas_item)} compras del historial para ese insumo.")
+item_norm_sel = st.selectbox("Insumo a limpiar del historial", items_disponibles, key="hist_item_norm")
+filas_item = df_hist_aux[df_hist_aux["item_norm"] == item_norm_sel]
+st.caption(f"Se eliminarán {len(filas_item)} compras del historial para ese insumo.")
 
-    confirmar_limpieza = st.checkbox("Confirmo que deseo borrar ese historial por error de carga", key="hist_confirma_limpieza")
-    if st.button("🗑 Borrar historial del insumo seleccionado", type="secondary", disabled=not confirmar_limpieza):
-        with conectar() as conn:
-            cur = conn.cursor()
+confirmar_limpieza = st.checkbox("Confirmo que deseo borrar ese historial por error de carga", key="hist_confirma_limpieza")
+if st.button("🗑 Borrar historial del insumo seleccionado", type="secondary", disabled=not confirmar_limpieza):
+    with conectar() as conn:
+        cur = conn.cursor()
 
-            for _, row in filas_item.iterrows():
-                actual_row = cur.execute(
-                    "SELECT id, cantidad FROM inventario WHERE lower(trim(item))=?",
-                    (str(row["item_norm"]),)
-                ).fetchone()
+        for _, row in filas_item.iterrows():
+            actual_row = cur.execute(
+                "SELECT id, cantidad FROM inventario WHERE lower(trim(item))=?",
+                (str(row["item_norm"]),)
+            ).fetchone()
 
-                if actual_row:
-                    item_id, cantidad_actual = actual_row
-                    nueva_cant = max(0.0, float(cantidad_actual or 0) - float(row["cantidad"]))
-                    cur.execute(
-                        "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
-                        (nueva_cant, int(item_id))
-                    )
-                    cur.execute(
-                        """
-                        INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-                        VALUES (?, 'SALIDA', ?, 'Corrección masiva: limpieza historial por insumo', ?)
-                        """,
-                        (int(item_id), float(row["cantidad"]), usuario_actual)
-                    )
+            if actual_row:
+                item_id, cantidad_actual = actual_row
+                nueva_cant = max(0.0, float(cantidad_actual or 0) - float(row["cantidad"]))
+                cur.execute(
+                    "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
+                    (nueva_cant, int(item_id))
+                )
+                cur.execute(
+                    """
+                    INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+                    VALUES (?, 'SALIDA', ?, 'Corrección masiva: limpieza historial por insumo', ?)
+                    """,
+                    (int(item_id), float(row["cantidad"]), usuario_actual)
+                )
 
-            ids_borrar = [int(x) for x in filas_item["compra_id"].tolist()]
-            cur.executemany("DELETE FROM historial_compras WHERE id=?", [(i,) for i in ids_borrar])
-            conn.commit()
+        ids_borrar = [int(x) for x in filas_item["compra_id"].tolist()]
+        cur.executemany("DELETE FROM historial_compras WHERE id=?", [(i,) for i in ids_borrar])
+        conn.commit()
 
-        st.success(f"Se borró el historial de '{item_norm_sel}' y se ajustó el stock donde correspondía.")
-        cargar_datos()
-        st.rerun()
+    st.success(f"Se borró el historial de '{item_norm_sel}' y se ajustó el stock donde correspondía.")
+    cargar_datos()
+    st.rerun()
 
 # =======================================================
 # 👤 TAB 4 — PROVEEDORES
@@ -1212,49 +1212,49 @@ st.subheader("👤 Directorio de Proveedores")
 
 with conectar() as conn:
 try:
+columnas_proveedores = {
+    row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
+}
+if not columnas_proveedores:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS proveedores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE,
+            telefono TEXT,
+            rif TEXT,
+            contacto TEXT,
+            observaciones TEXT,
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.commit()
     columnas_proveedores = {
         row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
     }
-    if not columnas_proveedores:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS proveedores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT UNIQUE,
-                telefono TEXT,
-                rif TEXT,
-                contacto TEXT,
-                observaciones TEXT,
-                fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        conn.commit()
-        columnas_proveedores = {
-            row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
-        }
 
-    def sel_col(nombre_columna):
-        return nombre_columna if nombre_columna in columnas_proveedores else f"NULL AS {nombre_columna}"
+def sel_col(nombre_columna):
+    return nombre_columna if nombre_columna in columnas_proveedores else f"NULL AS {nombre_columna}"
 
-    query_proveedores = f"""
-        SELECT
-            {sel_col('id')},
-            {sel_col('nombre')},
-            {sel_col('telefono')},
-            {sel_col('rif')},
-            {sel_col('contacto')},
-            {sel_col('observaciones')},
-            {sel_col('fecha_creacion')}
-        FROM proveedores
-        ORDER BY nombre ASC
-    """
-    df_prov = pd.read_sql(query_proveedores, conn)
+query_proveedores = f"""
+    SELECT
+        {sel_col('id')},
+        {sel_col('nombre')},
+        {sel_col('telefono')},
+        {sel_col('rif')},
+        {sel_col('contacto')},
+        {sel_col('observaciones')},
+        {sel_col('fecha_creacion')}
+    FROM proveedores
+    ORDER BY nombre ASC
+"""
+df_prov = pd.read_sql(query_proveedores, conn)
 except (sqlite3.DatabaseError, pd.errors.DatabaseError) as e:
-    st.error(f"No se pudo cargar la tabla de proveedores: {e}")
-    df_prov = pd.DataFrame(columns=[
-        'id', 'nombre', 'telefono', 'rif', 'contacto', 'observaciones', 'fecha_creacion'
-    ])
+st.error(f"No se pudo cargar la tabla de proveedores: {e}")
+df_prov = pd.DataFrame(columns=[
+    'id', 'nombre', 'telefono', 'rif', 'contacto', 'observaciones', 'fecha_creacion'
+])
 
 if df_prov.empty:
 st.info("No hay proveedores registrados todavía.")
@@ -1263,24 +1263,24 @@ filtro_proveedor = st.text_input("🔍 Buscar proveedor")
 df_prov_view = df_prov.copy()
 
 if filtro_proveedor:
-    mask_nombre = df_prov_view["nombre"].fillna("").str.contains(filtro_proveedor, case=False)
-    mask_contacto = df_prov_view["contacto"].fillna("").str.contains(filtro_proveedor, case=False)
-    mask_rif = df_prov_view["rif"].fillna("").str.contains(filtro_proveedor, case=False)
-    df_prov_view = df_prov_view[mask_nombre | mask_contacto | mask_rif]
+mask_nombre = df_prov_view["nombre"].fillna("").str.contains(filtro_proveedor, case=False)
+mask_contacto = df_prov_view["contacto"].fillna("").str.contains(filtro_proveedor, case=False)
+mask_rif = df_prov_view["rif"].fillna("").str.contains(filtro_proveedor, case=False)
+df_prov_view = df_prov_view[mask_nombre | mask_contacto | mask_rif]
 
 st.dataframe(
-    df_prov_view,
-    column_config={
-        "id": None,
-        "nombre": "Proveedor",
-        "telefono": "Teléfono",
-        "rif": "RIF",
-        "contacto": "Contacto",
-        "observaciones": "Observaciones",
-        "fecha_creacion": "Creado"
-    },
-    use_container_width=True,
-    hide_index=True
+df_prov_view,
+column_config={
+    "id": None,
+    "nombre": "Proveedor",
+    "telefono": "Teléfono",
+    "rif": "RIF",
+    "contacto": "Contacto",
+    "observaciones": "Observaciones",
+    "fecha_creacion": "Creado"
+},
+use_container_width=True,
+hide_index=True
 )
 
 st.divider()
@@ -1309,55 +1309,55 @@ guardar_proveedor = st.form_submit_button("💾 Guardar proveedor", use_containe
 
 if guardar_proveedor:
 if not nombre_prov.strip():
-    st.error("El nombre del proveedor es obligatorio.")
+st.error("El nombre del proveedor es obligatorio.")
 else:
-    try:
-        with conectar() as conn:
-            if prov_actual is None:
-                conn.execute(
-                    """
-                    INSERT INTO proveedores (nombre, telefono, rif, contacto, observaciones)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (nombre_prov.strip(), telefono_prov.strip(), rif_prov.strip(), contacto_prov.strip(), observaciones_prov.strip())
+try:
+    with conectar() as conn:
+        if prov_actual is None:
+            conn.execute(
+                """
+                INSERT INTO proveedores (nombre, telefono, rif, contacto, observaciones)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (nombre_prov.strip(), telefono_prov.strip(), rif_prov.strip(), contacto_prov.strip(), observaciones_prov.strip())
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE proveedores
+                SET nombre=?, telefono=?, rif=?, contacto=?, observaciones=?
+                WHERE id=?
+                """,
+                (
+                    nombre_prov.strip(),
+                    telefono_prov.strip(),
+                    rif_prov.strip(),
+                    contacto_prov.strip(),
+                    observaciones_prov.strip(),
+                    int(prov_actual["id"])
                 )
-            else:
-                conn.execute(
-                    """
-                    UPDATE proveedores
-                    SET nombre=?, telefono=?, rif=?, contacto=?, observaciones=?
-                    WHERE id=?
-                    """,
-                    (
-                        nombre_prov.strip(),
-                        telefono_prov.strip(),
-                        rif_prov.strip(),
-                        contacto_prov.strip(),
-                        observaciones_prov.strip(),
-                        int(prov_actual["id"])
-                    )
-                )
-            conn.commit()
-        st.success("Proveedor guardado correctamente.")
-        st.rerun()
-    except sqlite3.IntegrityError:
-        st.error("Ya existe un proveedor con ese nombre.")
+            )
+        conn.commit()
+    st.success("Proveedor guardado correctamente.")
+    st.rerun()
+except sqlite3.IntegrityError:
+    st.error("Ya existe un proveedor con ese nombre.")
 
 if prov_actual is not None:
 if st.button("🗑 Eliminar proveedor seleccionado", type="secondary"):
-    with conectar() as conn:
-        compras = conn.execute(
-            "SELECT COUNT(*) FROM historial_compras WHERE proveedor_id=?",
-            (int(prov_actual["id"]),)
-        ).fetchone()[0]
+with conectar() as conn:
+    compras = conn.execute(
+        "SELECT COUNT(*) FROM historial_compras WHERE proveedor_id=?",
+        (int(prov_actual["id"]),)
+    ).fetchone()[0]
 
-        if compras > 0:
-            st.error("No se puede eliminar: el proveedor tiene compras asociadas.")
-        else:
-            conn.execute("DELETE FROM proveedores WHERE id=?", (int(prov_actual["id"]),))
-            conn.commit()
-            st.success("Proveedor eliminado.")
-            st.rerun()
+    if compras > 0:
+        st.error("No se puede eliminar: el proveedor tiene compras asociadas.")
+    else:
+        conn.execute("DELETE FROM proveedores WHERE id=?", (int(prov_actual["id"]),))
+        conn.commit()
+        st.success("Proveedor eliminado.")
+        st.rerun()
 
 # =======================================================
 # 🔧 TAB 5 — AJUSTES
@@ -1369,53 +1369,53 @@ st.caption("Estos parámetros precargan valores al registrar compras y ayudan al
 
 with conectar() as conn:
 cfg_inv = pd.read_sql(
-    """
-    SELECT parametro, valor
-    FROM configuracion
-    WHERE parametro IN ('inv_alerta_dias', 'inv_impuesto_default', 'inv_delivery_default')
-    """,
-    conn
+"""
+SELECT parametro, valor
+FROM configuracion
+WHERE parametro IN ('inv_alerta_dias', 'inv_impuesto_default', 'inv_delivery_default')
+""",
+conn
 )
 
 cfg_map = {row["parametro"]: float(row["valor"]) for _, row in cfg_inv.iterrows()}
 
 with st.form("form_ajustes_inventario"):
 alerta_dias = st.number_input(
-    "Días para alerta de reposición",
-    min_value=1,
-    max_value=120,
-    value=int(cfg_map.get("inv_alerta_dias", 14)),
-    help="Referencia para revisar proveedores y planificar compras preventivas."
+"Días para alerta de reposición",
+min_value=1,
+max_value=120,
+value=int(cfg_map.get("inv_alerta_dias", 14)),
+help="Referencia para revisar proveedores y planificar compras preventivas."
 )
 impuesto_default = st.number_input(
-    "Impuesto por defecto en compras (%)",
-    min_value=0.0,
-    max_value=100.0,
-    value=float(cfg_map.get("inv_impuesto_default", 16.0)),
-    format="%.2f"
+"Impuesto por defecto en compras (%)",
+min_value=0.0,
+max_value=100.0,
+value=float(cfg_map.get("inv_impuesto_default", 16.0)),
+format="%.2f"
 )
 delivery_default = st.number_input(
-    "Delivery por defecto por compra ($)",
-    min_value=0.0,
-    value=float(cfg_map.get("inv_delivery_default", 0.0)),
-    format="%.2f"
+"Delivery por defecto por compra ($)",
+min_value=0.0,
+value=float(cfg_map.get("inv_delivery_default", 0.0)),
+format="%.2f"
 )
 
 guardar_ajustes = st.form_submit_button("💾 Guardar ajustes", use_container_width=True)
 
 if guardar_ajustes:
 with conectar() as conn:
-    ajustes = [
-        ("inv_alerta_dias", float(alerta_dias)),
-        ("inv_impuesto_default", float(impuesto_default)),
-        ("inv_delivery_default", float(delivery_default))
-    ]
-    for parametro, valor in ajustes:
-        conn.execute(
-            "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES (?, ?)",
-            (parametro, valor)
-        )
-    conn.commit()
+ajustes = [
+    ("inv_alerta_dias", float(alerta_dias)),
+    ("inv_impuesto_default", float(impuesto_default)),
+    ("inv_delivery_default", float(delivery_default))
+]
+for parametro, valor in ajustes:
+    conn.execute(
+        "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES (?, ?)",
+        (parametro, valor)
+    )
+conn.commit()
 
 st.session_state["inv_alerta_dias"] = float(alerta_dias)
 st.session_state["inv_impuesto_default"] = float(impuesto_default)
@@ -1447,11 +1447,11 @@ monto = st.number_input("Monto")
 
 if st.form_submit_button("Guardar"):
 with conectar() as conn:
-    conn.execute(
-        "INSERT INTO costos_operativos (nombre, monto_mensual) VALUES (?,?)",
-        (nombre, monto)
-    )
-    conn.commit()
+conn.execute(
+    "INSERT INTO costos_operativos (nombre, monto_mensual) VALUES (?,?)",
+    (nombre, monto)
+)
+conn.commit()
 
 st.rerun()
 
@@ -1467,10 +1467,10 @@ with conectar() as conn:
 
 conn.execute("""
 CREATE TABLE IF NOT EXISTS tasas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tasa_bcv REAL,
-    tasa_binance REAL,
-    fecha TEXT
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+tasa_bcv REAL,
+tasa_binance REAL,
+fecha TEXT
 )
 """)
 
@@ -1511,12 +1511,12 @@ if guardar_tasa:
 with conectar() as conn:
 
 conn.execute(
-    """
-    INSERT INTO tasas
-    (tasa_bcv, tasa_binance, fecha)
-    VALUES (?, ?, datetime('now'))
-    """,
-    (tasa_bcv, tasa_binance)
+"""
+INSERT INTO tasas
+(tasa_bcv, tasa_binance, fecha)
+VALUES (?, ?, datetime('now'))
+""",
+(tasa_bcv, tasa_binance)
 )
 
 conn.commit()
@@ -1589,32 +1589,32 @@ with conectar() as conn:
 
 # Usamos el inventario como fuente de tintas
 df_tintas_db = pd.read_sql_query(
-    "SELECT * FROM inventario", conn
+"SELECT * FROM inventario", conn
 )
 if 'imprimible_cmyk' in df_tintas_db.columns:
-    df_impresion_db = df_tintas_db[df_tintas_db['imprimible_cmyk'].fillna(0) == 1].copy()
+df_impresion_db = df_tintas_db[df_tintas_db['imprimible_cmyk'].fillna(0) == 1].copy()
 else:
-    df_impresion_db = df_tintas_db.copy()
+df_impresion_db = df_tintas_db.copy()
 try:
-    df_activos_cmyk = pd.read_sql_query(
-        "SELECT equipo, categoria, unidad FROM activos", conn
-    )
+df_activos_cmyk = pd.read_sql_query(
+    "SELECT equipo, categoria, unidad FROM activos", conn
+)
 except Exception:
-    df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad'])
+df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad'])
 
 # Tabla histórica
 conn.execute("""
-    CREATE TABLE IF NOT EXISTS historial_cmyk (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        impresora TEXT,
-        paginas INTEGER,
-        costo REAL,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
+CREATE TABLE IF NOT EXISTS historial_cmyk (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    impresora TEXT,
+    paginas INTEGER,
+    costo REAL,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)
 """)
 df_hist_cmyk = pd.read_sql(
-    "SELECT fecha, impresora, paginas, costo FROM historial_cmyk ORDER BY fecha DESC LIMIT 100",
-    conn
+"SELECT fecha, impresora, paginas, costo FROM historial_cmyk ORDER BY fecha DESC LIMIT 100",
+conn
 )
 
 except Exception as e:
@@ -1635,9 +1635,9 @@ posibles_activos = act[mask_maquinaria & (mask_categoria_imp | mask_equipo_imp)]
 for eq in posibles_activos:
 nombre_limpio = eq
 if '] ' in nombre_limpio:
-    nombre_limpio = nombre_limpio.split('] ', 1)[1]
+nombre_limpio = nombre_limpio.split('] ', 1)[1]
 if nombre_limpio not in impresoras_disponibles:
-    impresoras_disponibles.append(nombre_limpio)
+impresoras_disponibles.append(nombre_limpio)
 
 # 2) Fallback: equipos con palabra impresora en inventario
 if not df_impresion_db.empty:
@@ -1647,7 +1647,7 @@ df_impresion_db['item'].str.contains("impresora", case=False, na=False)
 
 for p in posibles:
 if p not in impresoras_disponibles:
-    impresoras_disponibles.append(p)
+impresoras_disponibles.append(p)
 
 # 3) Último fallback por defecto
 if not impresoras_disponibles:
@@ -1706,15 +1706,15 @@ mask = df_impresion_db['item'].str.contains("tinta", case=False, na=False)
 tintas = df_impresion_db[mask]
 
 if usar_stock_por_impresora and not tintas.empty:
-    tintas_imp = tintas[tintas['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
-    if not tintas_imp.empty:
-        tintas = tintas_imp
-    else:
-        st.info("No se encontraron tintas asociadas a esta impresora; se usará promedio global de tintas.")
+tintas_imp = tintas[tintas['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
+if not tintas_imp.empty:
+    tintas = tintas_imp
+else:
+    st.info("No se encontraron tintas asociadas a esta impresora; se usará promedio global de tintas.")
 
 if not tintas.empty:
-    precio_tinta_ml = tintas['precio_usd'].mean()
-    st.success(f"💧 Precio de tinta detectado: ${precio_tinta_ml:.4f}/ml")
+precio_tinta_ml = tintas['precio_usd'].mean()
+st.success(f"💧 Precio de tinta detectado: ${precio_tinta_ml:.4f}/ml")
 
 st.subheader("⚙️ Ajustes de Calibración")
 
@@ -1730,14 +1730,14 @@ if auto_negro_inteligente:
 st.success("🧠 Modo automático de negro activo: se detectan sombras y mezclas con negro en cada página.")
 else:
 factor_k = st.slider(
-    "Factor Especial para Negro (K)",
-    0.5, 1.2, 0.8, 0.05,
-    help="Modo manual: ajusta consumo base del negro."
+"Factor Especial para Negro (K)",
+0.5, 1.2, 0.8, 0.05,
+help="Modo manual: ajusta consumo base del negro."
 )
 refuerzo_negro = st.slider(
-    "Refuerzo de Negro en Mezclas Oscuras",
-    0.0, 0.2, 0.06, 0.01,
-    help="Modo manual: simula uso extra de K en sombras."
+"Refuerzo de Negro en Mezclas Oscuras",
+0.0, 0.2, 0.06, 0.01,
+help="Modo manual: simula uso extra de K en sombras."
 )
 
 with c_file:
@@ -1766,105 +1766,105 @@ with st.spinner('🚀 Analizando cobertura real...'):
 
 for arc in archivos_multiples:
 
-    try:
-        paginas_items = []
-        bytes_data = arc.read()
+try:
+    paginas_items = []
+    bytes_data = arc.read()
 
-        if arc.name.lower().endswith('.pdf'):
+    if arc.name.lower().endswith('.pdf'):
 
-            if fitz is None:
-                st.error(
-                    f"No se puede analizar '{arc.name}' porque falta PyMuPDF (fitz). "
-                    "Carga imágenes (PNG/JPG) o instala la dependencia para PDF."
-                )
-                continue
+        if fitz is None:
+            st.error(
+                f"No se puede analizar '{arc.name}' porque falta PyMuPDF (fitz). "
+                "Carga imágenes (PNG/JPG) o instala la dependencia para PDF."
+            )
+            continue
 
-            doc = fitz.open(stream=bytes_data, filetype="pdf")
+        doc = fitz.open(stream=bytes_data, filetype="pdf")
 
-            for i in range(len(doc)):
-                page = doc.load_page(i)
+        for i in range(len(doc)):
+            page = doc.load_page(i)
 
-                pix = page.get_pixmap(colorspace=fitz.csCMYK, dpi=150)
+            pix = page.get_pixmap(colorspace=fitz.csCMYK, dpi=150)
 
-                img = Image.frombytes(
-                    "CMYK",
-                    [pix.width, pix.height],
-                    pix.samples
-                )
+            img = Image.frombytes(
+                "CMYK",
+                [pix.width, pix.height],
+                pix.samples
+            )
 
-                paginas_items.append((f"{arc.name} (P{i+1})", img))
+            paginas_items.append((f"{arc.name} (P{i+1})", img))
 
-            doc.close()
+        doc.close()
 
+    else:
+        img = Image.open(io.BytesIO(bytes_data)).convert('CMYK')
+        paginas_items.append((arc.name, img))
+
+    for nombre, img_obj in paginas_items:
+
+        total_pags += 1
+        arr = np.array(img_obj)
+
+        c_chan = arr[:, :, 0] / 255.0
+        m_chan = arr[:, :, 1] / 255.0
+        y_chan = arr[:, :, 2] / 255.0
+        k_chan = arr[:, :, 3] / 255.0
+
+        c_media = float(np.mean(c_chan))
+        m_media = float(np.mean(m_chan))
+        y_media = float(np.mean(y_chan))
+        k_media = float(np.mean(k_chan))
+
+        ml_c = c_media * ml_base_pagina * factor
+        ml_m = m_media * ml_base_pagina * factor
+        ml_y = y_media * ml_base_pagina * factor
+
+        ml_k_base = k_media * ml_base_pagina * factor * factor_k
+        k_extra_ml = 0.0
+
+        if auto_negro_inteligente:
+            cobertura_cmy = (c_chan + m_chan + y_chan) / 3.0
+            neutral_mask = (
+                (np.abs(c_chan - m_chan) < 0.08)
+                & (np.abs(m_chan - y_chan) < 0.08)
+            )
+            shadow_mask = (k_chan > 0.45) | (cobertura_cmy > 0.60)
+            rich_black_mask = shadow_mask & (cobertura_cmy > 0.35)
+
+            ratio_extra = (
+                float(np.mean(shadow_mask)) * 0.12
+                + float(np.mean(neutral_mask)) * 0.10
+                + float(np.mean(rich_black_mask)) * 0.18
+            )
+            k_extra_ml = ml_base_pagina * factor * ratio_extra
         else:
-            img = Image.open(io.BytesIO(bytes_data)).convert('CMYK')
-            paginas_items.append((arc.name, img))
+            promedio_color = (c_media + m_media + y_media) / 3
+            if promedio_color > 0.55:
+                k_extra_ml = promedio_color * refuerzo_negro * factor
 
-        for nombre, img_obj in paginas_items:
+        ml_k = ml_k_base + k_extra_ml
+        consumo_total_f = ml_c + ml_m + ml_y + ml_k
 
-            total_pags += 1
-            arr = np.array(img_obj)
+        costo_f = (consumo_total_f * precio_tinta_ml) + costo_desgaste
 
-            c_chan = arr[:, :, 0] / 255.0
-            m_chan = arr[:, :, 1] / 255.0
-            y_chan = arr[:, :, 2] / 255.0
-            k_chan = arr[:, :, 3] / 255.0
+        totales_lote_cmyk['C'] += ml_c
+        totales_lote_cmyk['M'] += ml_m
+        totales_lote_cmyk['Y'] += ml_y
+        totales_lote_cmyk['K'] += ml_k
 
-            c_media = float(np.mean(c_chan))
-            m_media = float(np.mean(m_chan))
-            y_media = float(np.mean(y_chan))
-            k_media = float(np.mean(k_chan))
+        resultados.append({
+            "Archivo": nombre,
+            "C (ml)": round(ml_c, 4),
+            "M (ml)": round(ml_m, 4),
+            "Y (ml)": round(ml_y, 4),
+            "K (ml)": round(ml_k, 4),
+            "K extra auto (ml)": round(k_extra_ml, 4),
+            "Total ml": round(consumo_total_f, 4),
+            "Costo $": round(costo_f, 4)
+        })
 
-            ml_c = c_media * ml_base_pagina * factor
-            ml_m = m_media * ml_base_pagina * factor
-            ml_y = y_media * ml_base_pagina * factor
-
-            ml_k_base = k_media * ml_base_pagina * factor * factor_k
-            k_extra_ml = 0.0
-
-            if auto_negro_inteligente:
-                cobertura_cmy = (c_chan + m_chan + y_chan) / 3.0
-                neutral_mask = (
-                    (np.abs(c_chan - m_chan) < 0.08)
-                    & (np.abs(m_chan - y_chan) < 0.08)
-                )
-                shadow_mask = (k_chan > 0.45) | (cobertura_cmy > 0.60)
-                rich_black_mask = shadow_mask & (cobertura_cmy > 0.35)
-
-                ratio_extra = (
-                    float(np.mean(shadow_mask)) * 0.12
-                    + float(np.mean(neutral_mask)) * 0.10
-                    + float(np.mean(rich_black_mask)) * 0.18
-                )
-                k_extra_ml = ml_base_pagina * factor * ratio_extra
-            else:
-                promedio_color = (c_media + m_media + y_media) / 3
-                if promedio_color > 0.55:
-                    k_extra_ml = promedio_color * refuerzo_negro * factor
-
-            ml_k = ml_k_base + k_extra_ml
-            consumo_total_f = ml_c + ml_m + ml_y + ml_k
-
-            costo_f = (consumo_total_f * precio_tinta_ml) + costo_desgaste
-
-            totales_lote_cmyk['C'] += ml_c
-            totales_lote_cmyk['M'] += ml_m
-            totales_lote_cmyk['Y'] += ml_y
-            totales_lote_cmyk['K'] += ml_k
-
-            resultados.append({
-                "Archivo": nombre,
-                "C (ml)": round(ml_c, 4),
-                "M (ml)": round(ml_m, 4),
-                "Y (ml)": round(ml_y, 4),
-                "K (ml)": round(ml_k, 4),
-                "K extra auto (ml)": round(k_extra_ml, 4),
-                "Total ml": round(consumo_total_f, 4),
-                "Costo $": round(costo_f, 4)
-            })
-
-    except Exception as e:
-        st.error(f"Error analizando {arc.name}: {e}")
+except Exception as e:
+    st.error(f"Error analizando {arc.name}: {e}")
 
 # --- RESULTADOS ---
 if resultados:
@@ -1887,26 +1887,26 @@ total_usd_lote = sum(r['Costo $'] for r in resultados)
 
 costo_promedio_pagina = (total_usd_lote / total_pags) if total_pags > 0 else 0
 st.metric(
-    "💰 Costo Total Estimado de Producción",
-    f"$ {total_usd_lote:.2f}",
-    delta=f"$ {costo_promedio_pagina:.4f} por pág"
+"💰 Costo Total Estimado de Producción",
+f"$ {total_usd_lote:.2f}",
+delta=f"$ {costo_promedio_pagina:.4f} por pág"
 )
 
 df_totales = pd.DataFrame([
-    {"Color": "C", "ml": totales_lote_cmyk['C']},
-    {"Color": "M", "ml": totales_lote_cmyk['M']},
-    {"Color": "Y", "ml": totales_lote_cmyk['Y']},
-    {"Color": "K", "ml": totales_lote_cmyk['K']}
+{"Color": "C", "ml": totales_lote_cmyk['C']},
+{"Color": "M", "ml": totales_lote_cmyk['M']},
+{"Color": "Y", "ml": totales_lote_cmyk['Y']},
+{"Color": "K", "ml": totales_lote_cmyk['K']}
 ])
 fig_cmyk = px.pie(df_totales, names='Color', values='ml', title='Distribución de consumo CMYK')
 st.plotly_chart(fig_cmyk, use_container_width=True)
 
 df_resultados = pd.DataFrame(resultados)
 st.download_button(
-    "📥 Descargar desglose CMYK (CSV)",
-    data=df_resultados.to_csv(index=False).encode('utf-8'),
-    file_name="analisis_cmyk.csv",
-    mime="text/csv"
+"📥 Descargar desglose CMYK (CSV)",
+data=df_resultados.to_csv(index=False).encode('utf-8'),
+file_name="analisis_cmyk.csv",
+mime="text/csv"
 )
 
 # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
@@ -1914,39 +1914,39 @@ st.subheader("🧾 Simulación automática por Papel y Calidad")
 # Papeles desde inventario (precio_usd) con fallback por defecto
 perfiles_papel = {}
 try:
-    papeles_inv = df_impresion_db[
-        df_impresion_db['item'].fillna('').str.contains(
-            'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
-            case=False,
-            na=False
-        )
-    ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
+papeles_inv = df_impresion_db[
+    df_impresion_db['item'].fillna('').str.contains(
+        'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
+        case=False,
+        na=False
+    )
+][['item', 'precio_usd']].dropna(subset=['precio_usd'])
 
-    for _, row_p in papeles_inv.iterrows():
-        nombre_p = str(row_p['item']).strip()
-        precio_p = float(row_p['precio_usd'])
-        if precio_p > 0:
-            perfiles_papel[nombre_p] = precio_p
+for _, row_p in papeles_inv.iterrows():
+    nombre_p = str(row_p['item']).strip()
+    precio_p = float(row_p['precio_usd'])
+    if precio_p > 0:
+        perfiles_papel[nombre_p] = precio_p
 except Exception:
-    perfiles_papel = {}
+perfiles_papel = {}
 
 if not perfiles_papel:
-    perfiles_papel = {
-        "Bond 75g": 0.03,
-        "Bond 90g": 0.05,
-        "Fotográfico Brillante": 0.22,
-        "Fotográfico Mate": 0.20,
-        "Cartulina": 0.12,
-        "Adhesivo": 0.16
-    }
-    st.info("No se detectaron papeles en inventario; se usan costos base por defecto.")
+perfiles_papel = {
+    "Bond 75g": 0.03,
+    "Bond 90g": 0.05,
+    "Fotográfico Brillante": 0.22,
+    "Fotográfico Mate": 0.20,
+    "Cartulina": 0.12,
+    "Adhesivo": 0.16
+}
+st.info("No se detectaron papeles en inventario; se usan costos base por defecto.")
 else:
-    st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
+st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
 perfiles_calidad = {
-    "Borrador": {"ink_mult": 0.82, "wear_mult": 0.90},
-    "Normal": {"ink_mult": 1.00, "wear_mult": 1.00},
-    "Alta": {"ink_mult": 1.18, "wear_mult": 1.10},
-    "Foto": {"ink_mult": 1.32, "wear_mult": 1.15}
+"Borrador": {"ink_mult": 0.82, "wear_mult": 0.90},
+"Normal": {"ink_mult": 1.00, "wear_mult": 1.00},
+"Alta": {"ink_mult": 1.18, "wear_mult": 1.10},
+"Foto": {"ink_mult": 1.32, "wear_mult": 1.15}
 }
 
 total_ml_lote = float(sum(totales_lote_cmyk.values()))
@@ -1955,21 +1955,21 @@ costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
 simulaciones = []
 for papel, costo_hoja in perfiles_papel.items():
-    for calidad, cfg_q in perfiles_calidad.items():
-        costo_tinta_q = costo_tinta_base * cfg_q['ink_mult']
-        costo_desgaste_q = costo_desgaste_base * cfg_q['wear_mult']
-        costo_papel_q = float(total_pags) * costo_hoja
-        total_q = costo_tinta_q + costo_desgaste_q + costo_papel_q
-        simulaciones.append({
-            "Papel": papel,
-            "Calidad": calidad,
-            "Páginas": total_pags,
-            "Tinta ($)": round(costo_tinta_q, 2),
-            "Desgaste ($)": round(costo_desgaste_q, 2),
-            "Papel ($)": round(costo_papel_q, 2),
-            "Total ($)": round(total_q, 2),
-            "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
-        })
+for calidad, cfg_q in perfiles_calidad.items():
+    costo_tinta_q = costo_tinta_base * cfg_q['ink_mult']
+    costo_desgaste_q = costo_desgaste_base * cfg_q['wear_mult']
+    costo_papel_q = float(total_pags) * costo_hoja
+    total_q = costo_tinta_q + costo_desgaste_q + costo_papel_q
+    simulaciones.append({
+        "Papel": papel,
+        "Calidad": calidad,
+        "Páginas": total_pags,
+        "Tinta ($)": round(costo_tinta_q, 2),
+        "Desgaste ($)": round(costo_desgaste_q, 2),
+        "Papel ($)": round(costo_papel_q, 2),
+        "Total ($)": round(total_q, 2),
+        "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
+    })
 
 df_sim = pd.DataFrame(simulaciones).sort_values('Total ($)')
 st.dataframe(df_sim, use_container_width=True, hide_index=True)
@@ -1978,98 +1978,98 @@ st.plotly_chart(fig_sim, use_container_width=True)
 
 mejor = df_sim.iloc[0]
 st.success(
-    f"Mejor costo automático: {mejor['Papel']} | {mejor['Calidad']} → ${mejor['Total ($)']:.2f} "
-    f"(${mejor['Costo por pág ($)']:.4f}/pág)"
+f"Mejor costo automático: {mejor['Papel']} | {mejor['Calidad']} → ${mejor['Total ($)']:.2f} "
+f"(${mejor['Costo por pág ($)']:.4f}/pág)"
 )
 
 st.session_state['cmyk_analisis_cache'] = {
-    'resultados': resultados,
-    'simulaciones': simulaciones,
-    'impresora': impresora_sel,
-    'paginas': total_pags
+'resultados': resultados,
+'simulaciones': simulaciones,
+'impresora': impresora_sel,
+'paginas': total_pags
 }
 
 # --- VERIFICAR INVENTARIO ---
 if not df_impresion_db.empty:
 
-    st.subheader("📦 Verificación de Inventario")
+st.subheader("📦 Verificación de Inventario")
 
-    alertas = []
+alertas = []
 
-    stock_base = df_impresion_db[df_impresion_db['item'].str.contains('tinta', case=False, na=False)].copy()
-    if usar_stock_por_impresora:
-        stock_imp = stock_base[stock_base['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
-        if not stock_imp.empty:
-            stock_base = stock_imp
+stock_base = df_impresion_db[df_impresion_db['item'].str.contains('tinta', case=False, na=False)].copy()
+if usar_stock_por_impresora:
+    stock_imp = stock_base[stock_base['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
+    if not stock_imp.empty:
+        stock_base = stock_imp
 
-    alias_colores = {
-        'C': ['cian', 'cyan'],
-        'M': ['magenta'],
-        'Y': ['amarillo', 'yellow'],
-        # K = Negro. Incluye variantes reales de inventario: negro/negra/black/k
-        'K': ['negro', 'negra', 'black', ' k ']
-    }
+alias_colores = {
+    'C': ['cian', 'cyan'],
+    'M': ['magenta'],
+    'Y': ['amarillo', 'yellow'],
+    # K = Negro. Incluye variantes reales de inventario: negro/negra/black/k
+    'K': ['negro', 'negra', 'black', ' k ']
+}
 
-    for color, ml in totales_lote_cmyk.items():
-        aliases = alias_colores.get(color, [])
-        stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
+for color, ml in totales_lote_cmyk.items():
+    aliases = alias_colores.get(color, [])
+    stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
 
-        if not stock.empty:
-            disponible = stock['cantidad'].sum()
+    if not stock.empty:
+        disponible = stock['cantidad'].sum()
 
-            if disponible < ml:
-                alertas.append(
-                    f"⚠️ Falta tinta {color}: necesitas {ml:.2f} ml y hay {disponible:.2f} ml"
-                )
-        else:
-            alertas.append(f"⚠️ No se encontró tinta {color} asociada en inventario para validar stock.")
-
-    if alertas:
-        for a in alertas:
-            st.error(a)
+        if disponible < ml:
+            alertas.append(
+                f"⚠️ Falta tinta {color}: necesitas {ml:.2f} ml y hay {disponible:.2f} ml"
+            )
     else:
-        st.success("✅ Hay suficiente tinta para producir")
+        alertas.append(f"⚠️ No se encontró tinta {color} asociada en inventario para validar stock.")
+
+if alertas:
+    for a in alertas:
+        st.error(a)
+else:
+    st.success("✅ Hay suficiente tinta para producir")
 
 
-           # --- ENVÍO A COTIZACIÓN ---
+       # --- ENVÍO A COTIZACIÓN ---
 if st.button("📝 ENVIAR A COTIZACIÓN", use_container_width=True):
 
-    # Guardamos información completa para el cotizador
-    st.session_state['datos_pre_cotizacion'] = {
-        'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
-        'costo_base': float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote),
-        'unidades': total_pags,
+# Guardamos información completa para el cotizador
+st.session_state['datos_pre_cotizacion'] = {
+    'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
+    'costo_base': float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote),
+    'unidades': total_pags,
 
-        # Desglose de consumo real
-        'consumos': totales_lote_cmyk,
+    # Desglose de consumo real
+    'consumos': totales_lote_cmyk,
 
-        # Información técnica adicional
-        'impresora': impresora_sel,
-        'factor_consumo': factor,
-        'factor_negro': factor_k,
-        'refuerzo_negro': refuerzo_negro,
-        'precio_tinta_ml': precio_tinta_ml,
-        'costo_desgaste': costo_desgaste,
+    # Información técnica adicional
+    'impresora': impresora_sel,
+    'factor_consumo': factor,
+    'factor_negro': factor_k,
+    'refuerzo_negro': refuerzo_negro,
+    'precio_tinta_ml': precio_tinta_ml,
+    'costo_desgaste': costo_desgaste,
 
-        # Historial detallado por archivo
-        'detalle_archivos': resultados
-    }
+    # Historial detallado por archivo
+    'detalle_archivos': resultados
+}
 
-    try:
-        with conectar() as conn:
-            conn.execute("""
-                INSERT INTO historial_cmyk
-                (impresora, paginas, costo)
-                VALUES (?,?,?)
-            """, (impresora_sel, total_pags, total_usd_lote))
-            conn.commit()
-    except Exception as e:
-        st.warning(f"No se pudo guardar en historial: {e}")
+try:
+    with conectar() as conn:
+        conn.execute("""
+            INSERT INTO historial_cmyk
+            (impresora, paginas, costo)
+            VALUES (?,?,?)
+        """, (impresora_sel, total_pags, total_usd_lote))
+        conn.commit()
+except Exception as e:
+    st.warning(f"No se pudo guardar en historial: {e}")
 
-    st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
-    st.toast("Listo para cotizar", icon="📨")
+st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
+st.toast("Listo para cotizar", icon="📨")
 
-    st.rerun()
+st.rerun()
 
 
 st.divider()
@@ -2106,14 +2106,14 @@ df = pd.read_sql_query("SELECT * FROM activos", conn)
 
 # Crear tabla de historial si no existe
 conn.execute("""
-    CREATE TABLE IF NOT EXISTS activos_historial (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        activo TEXT,
-        accion TEXT,
-        detalle TEXT,
-        costo REAL,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
+CREATE TABLE IF NOT EXISTS activos_historial (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    activo TEXT,
+    accion TEXT,
+    detalle TEXT,
+    costo REAL,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)
 """)
 except Exception as e:
 st.error(f"Error al cargar activos: {e}")
@@ -2128,9 +2128,9 @@ c1, c2 = st.columns(2)
 
 nombre_eq = c1.text_input("Nombre del Activo")
 tipo_seccion = c2.selectbox("Tipo de Activo", [
-    "Maquinaria (Equipos Grandes)",
-    "Herramienta Manual (Uso diario)",
-    "Repuesto Crítico (Stock de seguridad)"
+"Maquinaria (Equipos Grandes)",
+"Herramienta Manual (Uso diario)",
+"Repuesto Crítico (Stock de seguridad)"
 ])
 
 col_m1, col_m2, col_m3 = st.columns(3)
@@ -2139,49 +2139,49 @@ monto_inv = col_m1.number_input("Inversión ($)", min_value=0.0)
 vida_util = col_m2.number_input("Vida Útil (Usos)", min_value=1, value=1000)
 
 categoria_especifica = col_m3.selectbox(
-    "Categoría",
-    ["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"]
+"Categoría",
+["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"]
 )
 
 if st.form_submit_button("🚀 Guardar Activo"):
 
-    if not nombre_eq:
-        st.error("Debe indicar un nombre.")
-        st.stop()
+if not nombre_eq:
+    st.error("Debe indicar un nombre.")
+    st.stop()
 
-    if monto_inv <= 0:
-        st.error("La inversión debe ser mayor a cero.")
-        st.stop()
+if monto_inv <= 0:
+    st.error("La inversión debe ser mayor a cero.")
+    st.stop()
 
-    desgaste_u = monto_inv / vida_util
+desgaste_u = monto_inv / vida_util
 
-    try:
-        with conectar() as conn:
-            conn.execute("""
-                INSERT INTO activos 
-                (equipo, categoria, inversion, unidad, desgaste) 
-                VALUES (?,?,?,?,?)
-            """, (
-                f"[{tipo_seccion[:3].upper()}] {nombre_eq}",
-                categoria_especifica,
-                monto_inv,
-                tipo_seccion,
-                desgaste_u
-            ))
+try:
+    with conectar() as conn:
+        conn.execute("""
+            INSERT INTO activos 
+            (equipo, categoria, inversion, unidad, desgaste) 
+            VALUES (?,?,?,?,?)
+        """, (
+            f"[{tipo_seccion[:3].upper()}] {nombre_eq}",
+            categoria_especifica,
+            monto_inv,
+            tipo_seccion,
+            desgaste_u
+        ))
 
-            conn.execute("""
-                INSERT INTO activos_historial 
-                (activo, accion, detalle, costo)
-                VALUES (?,?,?,?)
-            """, (nombre_eq, "CREACIÓN", "Registro inicial", monto_inv))
+        conn.execute("""
+            INSERT INTO activos_historial 
+            (activo, accion, detalle, costo)
+            VALUES (?,?,?,?)
+        """, (nombre_eq, "CREACIÓN", "Registro inicial", monto_inv))
 
-            conn.commit()
+        conn.commit()
 
-        st.success("✅ Activo registrado correctamente.")
-        st.rerun()
+    st.success("✅ Activo registrado correctamente.")
+    st.rerun()
 
-    except Exception as e:
-        st.error(f"Error al registrar: {e}")
+except Exception as e:
+    st.error(f"Error al registrar: {e}")
 
 st.divider()
 
@@ -2197,41 +2197,41 @@ datos = df[df['equipo'] == activo_sel].iloc[0]
 
 with st.form("editar_activo"):
 
-    c1, c2, c3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
-    nueva_inv = c1.number_input("Inversión ($)", value=float(datos['inversion']))
-    nueva_vida = c2.number_input("Vida útil", value=1000)
-    nueva_cat = c3.selectbox(
-        "Categoría",
-        ["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"],
-        index=0
-    )
+nueva_inv = c1.number_input("Inversión ($)", value=float(datos['inversion']))
+nueva_vida = c2.number_input("Vida útil", value=1000)
+nueva_cat = c3.selectbox(
+    "Categoría",
+    ["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"],
+    index=0
+)
 
-    if st.form_submit_button("💾 Guardar Cambios"):
+if st.form_submit_button("💾 Guardar Cambios"):
 
-        nuevo_desgaste = nueva_inv / nueva_vida
+    nuevo_desgaste = nueva_inv / nueva_vida
 
-        try:
-            with conectar() as conn:
-                conn.execute("""
-                    UPDATE activos
-                    SET inversion = ?, categoria = ?, desgaste = ?
-                    WHERE id = ?
-                """, (nueva_inv, nueva_cat, nuevo_desgaste, int(datos['id'])))
+    try:
+        with conectar() as conn:
+            conn.execute("""
+                UPDATE activos
+                SET inversion = ?, categoria = ?, desgaste = ?
+                WHERE id = ?
+            """, (nueva_inv, nueva_cat, nuevo_desgaste, int(datos['id'])))
 
-                conn.execute("""
-                    INSERT INTO activos_historial 
-                    (activo, accion, detalle, costo)
-                    VALUES (?,?,?,?)
-                """, (activo_sel, "EDICIÓN", "Actualización de valores", nueva_inv))
+            conn.execute("""
+                INSERT INTO activos_historial 
+                (activo, accion, detalle, costo)
+                VALUES (?,?,?,?)
+            """, (activo_sel, "EDICIÓN", "Actualización de valores", nueva_inv))
 
-                conn.commit()
+            conn.commit()
 
-            st.success("Activo actualizado.")
-            st.rerun()
+        st.success("Activo actualizado.")
+        st.rerun()
 
-        except Exception as e:
-            st.error(f"Error al actualizar: {e}")
+    except Exception as e:
+        st.error(f"Error al actualizar: {e}")
 
 st.divider()
 
@@ -2271,11 +2271,11 @@ promedio = df['desgaste'].mean() if not df.empty else 0
 c_prom.metric("Desgaste Promedio por Uso", f"$ {promedio:.4f}")
 
 fig = px.bar(
-    df,
-    x='equipo',
-    y='inversion',
-    color='categoria',
-    title="Distribución de Inversión por Activo"
+df,
+x='equipo',
+y='inversion',
+color='categoria',
+title="Distribución de Inversión por Activo"
 )
 st.plotly_chart(fig, use_container_width=True)
 
@@ -2283,19 +2283,19 @@ with t5:
 st.subheader("Historial de Movimientos de Activos")
 
 try:
-    with conectar() as conn:
-        df_hist = pd.read_sql_query(
-            "SELECT activo, accion, detalle, costo, fecha FROM activos_historial ORDER BY fecha DESC",
-            conn
-        )
+with conectar() as conn:
+    df_hist = pd.read_sql_query(
+        "SELECT activo, accion, detalle, costo, fecha FROM activos_historial ORDER BY fecha DESC",
+        conn
+    )
 
-    if not df_hist.empty:
-        st.dataframe(df_hist, use_container_width=True, hide_index=True)
-    else:
-        st.info("No hay movimientos registrados aún.")
+if not df_hist.empty:
+    st.dataframe(df_hist, use_container_width=True, hide_index=True)
+else:
+    st.info("No hay movimientos registrados aún.")
 
 except Exception as e:
-    st.error(f"Error cargando historial: {e}")
+st.error(f"Error cargando historial: {e}")
 
 else:
 st.info("No hay activos registrados todavía.")
@@ -2313,17 +2313,17 @@ st.info("Cálculo de costos de procesos que no usan tinta: corte, laminado, plan
 try:
 with conectar() as conn:
 df_act_db = pd.read_sql_query(
-    "SELECT equipo, categoria, unidad, desgaste FROM activos", conn
+"SELECT equipo, categoria, unidad, desgaste FROM activos", conn
 )
 
 conn.execute("""
-    CREATE TABLE IF NOT EXISTS historial_procesos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        equipo TEXT,
-        cantidad REAL,
-        costo REAL,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
+CREATE TABLE IF NOT EXISTS historial_procesos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    equipo TEXT,
+    cantidad REAL,
+    costo REAL,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)
 """)
 
 except Exception as e:
@@ -2370,9 +2370,9 @@ r2.metric("Costo Total", f"$ {costo_total:.2f}")
 
 if st.button("➕ Agregar Proceso"):
 st.session_state.lista_procesos.append({
-    "equipo": eq_sel,
-    "cantidad": cantidad,
-    "costo": costo_total
+"equipo": eq_sel,
+"cantidad": cantidad,
+"costo": costo_total
 })
 st.toast("Proceso añadido")
 
@@ -2392,36 +2392,36 @@ col1, col2 = st.columns(2)
 with col1:
 if st.button("📝 Enviar a Cotización", use_container_width=True):
 
-    st.session_state['datos_pre_cotizacion'] = {
-        'trabajo': " + ".join(df_proc["equipo"].tolist()),
-        'costo_base': float(total),
-        'unidades': 1,
-        'es_proceso_extra': True
-    }
+st.session_state['datos_pre_cotizacion'] = {
+    'trabajo': " + ".join(df_proc["equipo"].tolist()),
+    'costo_base': float(total),
+    'unidades': 1,
+    'es_proceso_extra': True
+}
 
-    st.success("Enviado a cotización")
-    st.session_state.lista_procesos = []
-    st.rerun()
+st.success("Enviado a cotización")
+st.session_state.lista_procesos = []
+st.rerun()
 
 with col2:
 if st.button("🧹 Limpiar", use_container_width=True):
-    st.session_state.lista_procesos = []
-    st.rerun()
+st.session_state.lista_procesos = []
+st.rerun()
 
 # --- HISTORIAL ---
 with st.expander("📜 Historial de Procesos"):
 
 try:
 with conectar() as conn:
-    df_hist = pd.read_sql_query(
-        "SELECT * FROM historial_procesos ORDER BY fecha DESC",
-        conn
-    )
+df_hist = pd.read_sql_query(
+    "SELECT * FROM historial_procesos ORDER BY fecha DESC",
+    conn
+)
 
 if not df_hist.empty:
-    st.dataframe(df_hist, use_container_width=True)
+st.dataframe(df_hist, use_container_width=True)
 else:
-    st.info("Sin registros aún.")
+st.info("Sin registros aún.")
 
 except Exception as e:
 st.info("Historial no disponible.")
@@ -2456,36 +2456,36 @@ with st.form("venta_manual", clear_on_submit=True):
 st.subheader("Datos de la Venta")
 
 opciones_cli = {
-    row['nombre']: row['id']
-    for _, row in df_cli.iterrows()
+row['nombre']: row['id']
+for _, row in df_cli.iterrows()
 }
 
 col1, col2 = st.columns(2)
 
 cliente_nombre = col1.selectbox(
-    "Cliente:",
-    list(opciones_cli.keys())
+"Cliente:",
+list(opciones_cli.keys())
 )
 
 detalle_v = col2.text_input(
-    "Detalle de lo vendido:"
+"Detalle de lo vendido:"
 )
 
 col3, col4, col5 = st.columns(3)
 
 monto_venta = col3.number_input(
-    "Monto ($):",
-    min_value=0.01,
-    format="%.2f"
+"Monto ($):",
+min_value=0.01,
+format="%.2f"
 )
 
 metodo_pago = col4.selectbox(
-    "Método:",
-    ["Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)", "Pendiente"]
+"Método:",
+["Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)", "Pendiente"]
 )
 
 tasa_uso = t_bcv if "BCV" in metodo_pago else (
-    t_bin if "Binance" in metodo_pago else 1.0
+t_bin if "Binance" in metodo_pago else 1.0
 )
 
 monto_bs = monto_venta * tasa_uso
@@ -2497,26 +2497,26 @@ submit_venta = st.form_submit_button("🚀 Registrar Venta")
 if submit_venta:
 
 if not detalle_v.strip():
-    st.error("Debes indicar el detalle de la venta.")
-    st.stop()
+st.error("Debes indicar el detalle de la venta.")
+st.stop()
 
 consumos = {}
 
 exito, msg = registrar_venta_global(
-    id_cliente=opciones_cli[cliente_nombre],
-    nombre_cliente=cliente_nombre,
-    detalle=detalle_v.strip(),
-    monto_usd=float(monto_venta),
-    metodo=metodo_pago,
-    consumos=consumos,
-    usuario=st.session_state.get("usuario_nombre", "Sistema")
+id_cliente=opciones_cli[cliente_nombre],
+nombre_cliente=cliente_nombre,
+detalle=detalle_v.strip(),
+monto_usd=float(monto_venta),
+metodo=metodo_pago,
+consumos=consumos,
+usuario=st.session_state.get("usuario_nombre", "Sistema")
 )
 
 if exito:
-    st.success(msg)
-    st.rerun()
+st.success(msg)
+st.rerun()
 else:
-    st.error(msg)
+st.error(msg)
 # -----------------------------------
 # HISTORIAL
 # -----------------------------------
@@ -2526,20 +2526,20 @@ st.subheader("Historial de Ventas")
 
 try:
 with conectar() as conn:
-    df_historial = pd.read_sql_query("""
-        SELECT 
-            v.id,
-            v.fecha,
-            v.cliente,
-            v.detalle,
-            v.monto_total as total,
-            v.metodo,
-            e.tasa,
-            e.monto_bs
-        FROM ventas v
-        LEFT JOIN ventas_extra e ON v.id = e.venta_id
-        ORDER BY v.fecha DESC
-    """, conn)
+df_historial = pd.read_sql_query("""
+    SELECT 
+        v.id,
+        v.fecha,
+        v.cliente,
+        v.detalle,
+        v.monto_total as total,
+        v.metodo,
+        e.tasa,
+        e.monto_bs
+    FROM ventas v
+    LEFT JOIN ventas_extra e ON v.id = e.venta_id
+    ORDER BY v.fecha DESC
+""", conn)
 except Exception as e:
 st.error(f"Error cargando historial: {e}")
 st.stop()
@@ -2564,8 +2564,8 @@ busc = st.text_input("Buscar por cliente o detalle:")
 
 if busc:
 df_fil = df_fil[
-    df_fil['cliente'].str.contains(busc, case=False, na=False) |
-    df_fil['detalle'].str.contains(busc, case=False, na=False)
+df_fil['cliente'].str.contains(busc, case=False, na=False) |
+df_fil['detalle'].str.contains(busc, case=False, na=False)
 ]
 
 st.dataframe(df_fil, use_container_width=True)
@@ -2581,24 +2581,24 @@ for _, row in pendientes.iterrows():
 
 with st.container(border=True):
 
-    st.write(f"**{row['cliente']}** – ${row['total']:.2f}")
+st.write(f"**{row['cliente']}** – ${row['total']:.2f}")
 
-    if st.button(f"Marcar como pagada #{row['id']}"):
+if st.button(f"Marcar como pagada #{row['id']}"):
 
-        try:
-            with conectar() as conn:
-                conn.execute("""
-                    UPDATE ventas
-                    SET metodo = 'Pagado'
-                    WHERE id = ?
-                """, (int(row['id']),))
-                conn.commit()
+    try:
+        with conectar() as conn:
+            conn.execute("""
+                UPDATE ventas
+                SET metodo = 'Pagado'
+                WHERE id = ?
+            """, (int(row['id']),))
+            conn.commit()
 
-            st.success("Actualizado")
-            st.rerun()
+        st.success("Actualizado")
+        st.rerun()
 
-        except Exception as e:
-            st.error(str(e))
+    except Exception as e:
+        st.error(str(e))
 
 # --- EXPORTACIÓN ---
 buffer = io.BytesIO()
@@ -2620,7 +2620,7 @@ st.subheader("Resumen Comercial")
 
 try:
 with conectar() as conn:
-    df_v = pd.read_sql("SELECT * FROM ventas", conn)
+df_v = pd.read_sql("SELECT * FROM ventas", conn)
 except:
 st.info("Sin datos")
 st.stop()
@@ -2681,38 +2681,38 @@ with st.form("form_gastos_pro", clear_on_submit=True):
 col_d, col_c = st.columns([2, 1])
 
 desc = col_d.text_input(
-    "Descripción del Gasto",
-    placeholder="Ej: Pago de luz, resma de papel, repuesto..."
+"Descripción del Gasto",
+placeholder="Ej: Pago de luz, resma de papel, repuesto..."
 ).strip()
 
 categoria = col_c.selectbox("Categoría:", [
-    "Materia Prima",
-    "Mantenimiento de Equipos",
-    "Servicios (Luz/Internet)",
-    "Publicidad",
-    "Sueldos/Retiros",
-    "Logística",
-    "Otros"
+"Materia Prima",
+"Mantenimiento de Equipos",
+"Servicios (Luz/Internet)",
+"Publicidad",
+"Sueldos/Retiros",
+"Logística",
+"Otros"
 ])
 
 c1, c2, c3 = st.columns(3)
 
 monto_gasto = c1.number_input(
-    "Monto en Dólares ($):",
-    min_value=0.01,
-    format="%.2f"
+"Monto en Dólares ($):",
+min_value=0.01,
+format="%.2f"
 )
 
 metodo_pago = c2.selectbox("Método de Pago:", [
-    "Efectivo ($)",
-    "Pago Móvil (BCV)",
-    "Zelle",
-    "Binance (USDT)",
-    "Transferencia (Bs)"
+"Efectivo ($)",
+"Pago Móvil (BCV)",
+"Zelle",
+"Binance (USDT)",
+"Transferencia (Bs)"
 ])
 
 tasa_ref = t_bcv if "BCV" in metodo_pago or "Bs" in metodo_pago else (
-    t_bin if "Binance" in metodo_pago else 1.0
+t_bin if "Binance" in metodo_pago else 1.0
 )
 
 monto_bs = monto_gasto * tasa_ref
@@ -2723,52 +2723,52 @@ st.divider()
 
 if st.form_submit_button("📉 REGISTRAR EGRESO"):
 
-    if not desc:
-        st.error("⚠️ La descripción es obligatoria.")
-        st.stop()
+if not desc:
+    st.error("⚠️ La descripción es obligatoria.")
+    st.stop()
 
-    try:
-        with conectar() as conn:
+try:
+    with conectar() as conn:
 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS gastos_extra (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    gasto_id INTEGER,
-                    tasa REAL,
-                    monto_bs REAL,
-                    usuario TEXT
-                )
-            """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gastos_extra (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gasto_id INTEGER,
+                tasa REAL,
+                monto_bs REAL,
+                usuario TEXT
+            )
+        """)
 
-            cur = conn.cursor()
+        cur = conn.cursor()
 
-            cur.execute("""
-                INSERT INTO gastos 
-                (descripcion, monto, categoria, metodo) 
-                VALUES (?, ?, ?, ?)
-            """, (desc, float(monto_gasto), categoria, metodo_pago))
+        cur.execute("""
+            INSERT INTO gastos 
+            (descripcion, monto, categoria, metodo) 
+            VALUES (?, ?, ?, ?)
+        """, (desc, float(monto_gasto), categoria, metodo_pago))
 
-            gasto_id = cur.lastrowid
+        gasto_id = cur.lastrowid
 
-            cur.execute("""
-                INSERT INTO gastos_extra
-                (gasto_id, tasa, monto_bs, usuario)
-                VALUES (?, ?, ?, ?)
-            """, (
-                gasto_id,
-                float(tasa_ref),
-                float(monto_bs),
-                st.session_state.get("usuario_nombre", "Sistema")
-            ))
+        cur.execute("""
+            INSERT INTO gastos_extra
+            (gasto_id, tasa, monto_bs, usuario)
+            VALUES (?, ?, ?, ?)
+        """, (
+            gasto_id,
+            float(tasa_ref),
+            float(monto_bs),
+            st.session_state.get("usuario_nombre", "Sistema")
+        ))
 
-            conn.commit()
+        conn.commit()
 
-        st.success("📉 Gasto registrado correctamente.")
-        st.balloons()
-        st.rerun()
+    st.success("📉 Gasto registrado correctamente.")
+    st.balloons()
+    st.rerun()
 
-    except Exception as e:
-        st.error(f"❌ Error al guardar el gasto: {e}")
+except Exception as e:
+    st.error(f"❌ Error al guardar el gasto: {e}")
 
 # -----------------------------------
 # HISTORIAL DE GASTOS
@@ -2779,21 +2779,21 @@ st.subheader("📋 Historial de Gastos")
 
 try:
 with conectar() as conn:
-    df_g = pd.read_sql_query("""
-        SELECT 
-            g.id,
-            g.fecha,
-            g.descripcion,
-            g.categoria,
-            g.monto,
-            g.metodo,
-            e.tasa,
-            e.monto_bs,
-            e.usuario
-        FROM gastos g
-        LEFT JOIN gastos_extra e ON g.id = e.gasto_id
-        ORDER BY g.fecha DESC
-    """, conn)
+df_g = pd.read_sql_query("""
+    SELECT 
+        g.id,
+        g.fecha,
+        g.descripcion,
+        g.categoria,
+        g.monto,
+        g.metodo,
+        e.tasa,
+        e.monto_bs,
+        e.usuario
+    FROM gastos g
+    LEFT JOIN gastos_extra e ON g.id = e.gasto_id
+    ORDER BY g.fecha DESC
+""", conn)
 except Exception as e:
 st.error(f"Error cargando historial: {e}")
 st.stop()
@@ -2818,7 +2818,7 @@ busc = st.text_input("Buscar por descripción:")
 
 if busc:
 df_fil = df_fil[
-    df_fil['descripcion'].str.contains(busc, case=False, na=False)
+df_fil['descripcion'].str.contains(busc, case=False, na=False)
 ]
 
 st.dataframe(df_fil, use_container_width=True)
@@ -2838,27 +2838,27 @@ datos = df_fil[df_fil['descripcion'] == gasto_sel].iloc[0]
 with st.expander("✏️ Editar Gasto"):
 
 nuevo_monto = st.number_input(
-    "Monto $",
-    value=float(datos['monto']),
-    format="%.2f"
+"Monto $",
+value=float(datos['monto']),
+format="%.2f"
 )
 
 if st.button("💾 Guardar Cambios"):
 
-    try:
-        with conectar() as conn:
-            conn.execute("""
-                UPDATE gastos
-                SET monto = ?
-                WHERE id = ?
-            """, (float(nuevo_monto), int(datos['id'])))
-            conn.commit()
+try:
+    with conectar() as conn:
+        conn.execute("""
+            UPDATE gastos
+            SET monto = ?
+            WHERE id = ?
+        """, (float(nuevo_monto), int(datos['id'])))
+        conn.commit()
 
-        st.success("Actualizado correctamente")
-        st.rerun()
+    st.success("Actualizado correctamente")
+    st.rerun()
 
-    except Exception as e:
-        st.error(str(e))
+except Exception as e:
+    st.error(str(e))
 
 with st.expander("🗑️ Eliminar Gasto"):
 
@@ -2866,22 +2866,22 @@ confirmar = st.checkbox("Confirmo que deseo eliminar este gasto")
 
 if st.button("Eliminar definitivamente"):
 
-    if not confirmar:
-        st.warning("Debes confirmar para eliminar")
-    else:
-        try:
-            with conectar() as conn:
-                conn.execute(
-                    "DELETE FROM gastos WHERE id = ?",
-                    (int(datos['id']),)
-                )
-                conn.commit()
+if not confirmar:
+    st.warning("Debes confirmar para eliminar")
+else:
+    try:
+        with conectar() as conn:
+            conn.execute(
+                "DELETE FROM gastos WHERE id = ?",
+                (int(datos['id']),)
+            )
+            conn.commit()
 
-            st.warning("Gasto eliminado")
-            st.rerun()
+        st.warning("Gasto eliminado")
+        st.rerun()
 
-        except Exception as e:
-            st.error(str(e))
+    except Exception as e:
+        st.error(str(e))
 
 # --- EXPORTACIÓN ---
 buffer = io.BytesIO()
@@ -2903,7 +2903,7 @@ st.subheader("📊 Resumen de Egresos")
 
 try:
 with conectar() as conn:
-    df = pd.read_sql("SELECT * FROM gastos", conn)
+df = pd.read_sql("SELECT * FROM gastos", conn)
 except:
 st.info("Sin datos")
 st.stop()
@@ -2949,27 +2949,27 @@ with conectar() as conn:
 
 # Asegurar tabla de cierres
 conn.execute("""
-    CREATE TABLE IF NOT EXISTS cierres_caja (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT UNIQUE,
-        ingresos REAL,
-        egresos REAL,
-        neto REAL,
-        usuario TEXT,
-        creado DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
+CREATE TABLE IF NOT EXISTS cierres_caja (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT UNIQUE,
+    ingresos REAL,
+    egresos REAL,
+    neto REAL,
+    usuario TEXT,
+    creado DATETIME DEFAULT CURRENT_TIMESTAMP
+)
 """)
 
 df_v = pd.read_sql(
-    "SELECT * FROM ventas WHERE date(fecha) = ?",
-    conn,
-    params=(fecha_str,)
+"SELECT * FROM ventas WHERE date(fecha) = ?",
+conn,
+params=(fecha_str,)
 )
 
 df_g = pd.read_sql(
-    "SELECT * FROM gastos WHERE date(fecha) = ?",
-    conn,
-    params=(fecha_str,)
+"SELECT * FROM gastos WHERE date(fecha) = ?",
+conn,
+params=(fecha_str,)
 )
 
 except Exception as e:
@@ -3013,7 +3013,7 @@ st.subheader("💰 Ingresos por Método")
 if not cobradas.empty:
 resumen_v = cobradas.groupby('metodo')['monto_total'].sum()
 for metodo, monto in resumen_v.items():
-    st.write(f"✅ **{metodo}:** ${float(monto):,.2f}")
+st.write(f"✅ **{metodo}:** ${float(monto):,.2f}")
 else:
 st.info("No hubo ingresos cobrados.")
 
@@ -3023,7 +3023,7 @@ st.subheader("💸 Egresos por Método")
 if not df_g.empty:
 resumen_g = df_g.groupby('metodo')['monto'].sum()
 for metodo, monto in resumen_g.items():
-    st.write(f"❌ **{metodo}:** ${float(monto):,.2f}")
+st.write(f"❌ **{metodo}:** ${float(monto):,.2f}")
 else:
 st.info("No hubo gastos.")
 
@@ -3055,18 +3055,18 @@ if st.button("💾 Guardar Cierre del Día"):
 
 try:
 with conectar() as conn:
-    conn.execute("""
-        INSERT OR REPLACE INTO cierres_caja
-        (fecha, ingresos, egresos, neto, usuario)
-        VALUES (?, ?, ?, ?, ?)
-    """, (
-        fecha_str,
-        float(t_ventas_cobradas),
-        float(t_gastos),
-        float(balance_dia),
-        st.session_state.get("usuario_nombre", "Sistema")
-    ))
-    conn.commit()
+conn.execute("""
+    INSERT OR REPLACE INTO cierres_caja
+    (fecha, ingresos, egresos, neto, usuario)
+    VALUES (?, ?, ?, ?, ?)
+""", (
+    fecha_str,
+    float(t_ventas_cobradas),
+    float(t_gastos),
+    float(balance_dia),
+    st.session_state.get("usuario_nombre", "Sistema")
+))
+conn.commit()
 
 st.success("✅ Cierre registrado correctamente")
 
@@ -3080,8 +3080,8 @@ st.subheader("📜 Historial de Cierres")
 try:
 with conectar() as conn:
 df_cierres = pd.read_sql(
-    "SELECT * FROM cierres_caja ORDER BY fecha DESC",
-    conn
+"SELECT * FROM cierres_caja ORDER BY fecha DESC",
+conn
 )
 
 if not df_cierres.empty:
@@ -3090,12 +3090,12 @@ st.dataframe(df_cierres, use_container_width=True)
 # Exportación
 buffer = io.BytesIO()
 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-    df_cierres.to_excel(writer, index=False, sheet_name='Cierres')
+df_cierres.to_excel(writer, index=False, sheet_name='Cierres')
 
 st.download_button(
-    "📥 Descargar Historial de Cierres",
-    buffer.getvalue(),
-    "cierres_caja.xlsx"
+"📥 Descargar Historial de Cierres",
+buffer.getvalue(),
+"cierres_caja.xlsx"
 )
 else:
 st.info("Aún no hay cierres guardados.")
@@ -3118,28 +3118,28 @@ with conectar() as conn:
 
 # Verificamos si existe la tabla de movimientos
 conn.execute("""
-    CREATE TABLE IF NOT EXISTS inventario_movs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id INTEGER,
-        tipo TEXT,
-        cantidad REAL,
-        motivo TEXT,
-        usuario TEXT,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
+CREATE TABLE IF NOT EXISTS inventario_movs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER,
+    tipo TEXT,
+    cantidad REAL,
+    motivo TEXT,
+    usuario TEXT,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)
 """)
 
 df_movs = pd.read_sql_query("""
-    SELECT 
-        m.fecha,
-        i.item as Material,
-        m.tipo as Operacion,
-        m.cantidad as Cantidad,
-        i.unidad,
-        m.motivo
-    FROM inventario_movs m
-    JOIN inventario i ON m.item_id = i.id
-    ORDER BY m.fecha DESC
+SELECT 
+    m.fecha,
+    i.item as Material,
+    m.tipo as Operacion,
+    m.cantidad as Cantidad,
+    i.unidad,
+    m.motivo
+FROM inventario_movs m
+JOIN inventario i ON m.item_id = i.id
+ORDER BY m.fecha DESC
 """, conn)
 
 df_ventas = pd.read_sql("SELECT * FROM ventas", conn)
@@ -3173,7 +3173,7 @@ total_gastos = float(df_gastos['monto'].sum()) if not df_gastos.empty else 0.0
 # Solo comisiones en métodos bancarios
 if not df_ventas.empty:
 ventas_bancarias = df_ventas[
-    df_ventas['metodo'].str.contains("Pago|Transferencia", case=False, na=False)
+df_ventas['metodo'].str.contains("Pago|Transferencia", case=False, na=False)
 ]
 else:
 ventas_bancarias = pd.DataFrame()
@@ -3184,7 +3184,7 @@ comision_est = float(ventas_bancarias['monto_total'].sum() * (banco_perc / 100))
 
 deudas = float(
 df_ventas[
-    df_ventas['metodo'].str.contains("Pendiente", case=False, na=False)
+df_ventas['metodo'].str.contains("Pendiente", case=False, na=False)
 ]['monto_total'].sum()
 ) if not df_ventas.empty else 0.0
 
@@ -3214,12 +3214,12 @@ st.dataframe(df_movs, use_container_width=True)
 # Exportación
 buffer = io.BytesIO()
 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-    df_movs.to_excel(writer, index=False, sheet_name='Movimientos')
+df_movs.to_excel(writer, index=False, sheet_name='Movimientos')
 
 st.download_button(
-    "📥 Descargar Movimientos (Excel)",
-    buffer.getvalue(),
-    "auditoria_movimientos.xlsx"
+"📥 Descargar Movimientos (Excel)",
+buffer.getvalue(),
+"auditoria_movimientos.xlsx"
 )
 
 # ---------------------------------------
@@ -3235,20 +3235,20 @@ salidas = df_movs[df_movs['Operacion'] == 'SALIDA']
 
 if not salidas.empty:
 
-    resumen = salidas.groupby("Material")["Cantidad"].sum()
+resumen = salidas.groupby("Material")["Cantidad"].sum()
 
-    st.bar_chart(resumen)
+st.bar_chart(resumen)
 
-    top = resumen.sort_values(ascending=False).head(1)
+top = resumen.sort_values(ascending=False).head(1)
 
-    if not top.empty:
-        st.metric(
-            "Material más usado",
-            top.index[0],
-            f"{top.values[0]:.2f}"
-        )
+if not top.empty:
+    st.metric(
+        "Material más usado",
+        top.index[0],
+        f"{top.values[0]:.2f}"
+    )
 else:
-    st.info("No hay salidas registradas aún.")
+st.info("No hay salidas registradas aún.")
 else:
 st.info("No hay datos para graficar.")
 
@@ -3267,15 +3267,15 @@ else:
 criticos = df_inv[df_inv['cantidad'] <= df_inv['minimo']]
 
 if criticos.empty:
-    st.success("Niveles de inventario óptimos")
+st.success("Niveles de inventario óptimos")
 else:
-    st.error(f"⚠️ Hay {len(criticos)} productos en nivel crítico")
+st.error(f"⚠️ Hay {len(criticos)} productos en nivel crítico")
 
-    for _, r in criticos.iterrows():
-        st.warning(
-            f"**{r['item']}** bajo: {r['cantidad']} {r['unidad']} "
-            f"(mín: {r['minimo']})"
-        )
+for _, r in criticos.iterrows():
+    st.warning(
+        f"**{r['item']}** bajo: {r['cantidad']} {r['unidad']} "
+        f"(mín: {r['minimo']})"
+    )
 
 # ===========================================================
 # MÓDULO DE COTIZACIONES - INTEGRADO CON NÚCLEO GLOBAL
@@ -3368,26 +3368,26 @@ descr = datos_pre['trabajo']
 
 try:
 exito, msg = registrar_venta_global(
-    id_cliente=id_cliente,
-    nombre_cliente=cliente_sel,
-    detalle=descr,
-    monto_usd=precio_final,
-    metodo=metodo_pago,
-    consumos=consumos_reales,
-    usuario=st.session_state.get("usuario_nombre", "Sistema")
+id_cliente=id_cliente,
+nombre_cliente=cliente_sel,
+detalle=descr,
+monto_usd=precio_final,
+metodo=metodo_pago,
+consumos=consumos_reales,
+usuario=st.session_state.get("usuario_nombre", "Sistema")
 )
 
 if exito:
-    st.success(msg)
+st.success(msg)
 
-    # Limpiamos datos temporales de cotización
-    st.session_state.pop('datos_pre_cotizacion', None)
+# Limpiamos datos temporales de cotización
+st.session_state.pop('datos_pre_cotizacion', None)
 
-    cargar_datos()
-    st.rerun()
+cargar_datos()
+st.rerun()
 
 else:
-    st.error(msg)
+st.error(msg)
 
 except Exception as e:
 st.error(f"Error procesando venta: {e}")
@@ -3438,9 +3438,9 @@ st.subheader("Datos de la Venta")
 if not df_cli.empty:
 opciones_cli = {row['nombre']: row['id'] for _, row in df_cli.iterrows()}
 cliente_nombre = st.selectbox(
-    "Cliente:",
-    list(opciones_cli.keys()),
-    key="venta_directa_cliente"
+"Cliente:",
+list(opciones_cli.keys()),
+key="venta_directa_cliente"
 )
 id_cliente = opciones_cli[cliente_nombre]
 else:
@@ -3528,14 +3528,14 @@ usuario=usuario_actual
 if exito:
 st.success(mensaje)
 if stock_actual - cantidad <= minimo:
-    st.warning("⚠️ Producto quedó en nivel crítico")
+st.warning("⚠️ Producto quedó en nivel crítico")
 
 st.session_state.ultimo_ticket = {
-    "cliente": cliente_nombre,
-    "detalle": f"{cantidad} {unidad} de {prod_sel}",
-    "total": total_usd,
-    "metodo": metodo,
-    "usuario": usuario_actual
+"cliente": cliente_nombre,
+"detalle": f"{cantidad} {unidad} de {prod_sel}",
+"total": total_usd,
+"metodo": metodo,
+"usuario": usuario_actual
 }
 st.rerun()
 else:
@@ -3553,8 +3553,8 @@ MÉTODO: {t['metodo']}
 USUARIO: {t.get('usuario', 'N/D')}
 """)
 if st.button("Cerrar Ticket", key="cerrar_ticket_venta_directa"):
-    del st.session_state.ultimo_ticket
-    st.rerun()
+del st.session_state.ultimo_ticket
+st.rerun()
 
 
 # ===========================================================
@@ -3598,13 +3598,13 @@ conn.execute("BEGIN TRANSACTION")
 # ================================
 if id_cliente is not None:
 existe_cli = cursor.execute(
-    "SELECT id FROM clientes WHERE id = ?",
-    (id_cliente,)
+"SELECT id FROM clientes WHERE id = ?",
+(id_cliente,)
 ).fetchone()
 
 if not existe_cli:
-    conn.rollback()
-    return False, "❌ Cliente no encontrado"
+conn.rollback()
+return False, "❌ Cliente no encontrado"
 
 # ================================
 # VALIDAR STOCK Y CALCULAR COSTO
@@ -3614,27 +3614,27 @@ costo_total_real = 0.0
 for item_id, cant in consumos.items():
 
 if cant <= 0:
-    conn.rollback()
-    return False, f"⚠️ Cantidad inválida para insumo {item_id}"
+conn.rollback()
+return False, f"⚠️ Cantidad inválida para insumo {item_id}"
 
 data = cursor.execute(
-    "SELECT cantidad, precio_usd, item FROM inventario WHERE id = ?",
-    (item_id,)
+"SELECT cantidad, precio_usd, item FROM inventario WHERE id = ?",
+(item_id,)
 ).fetchone()
 
 if not data:
-    conn.rollback()
-    return False, f"❌ Insumo {item_id} no existe"
+conn.rollback()
+return False, f"❌ Insumo {item_id} no existe"
 
 cantidad_disponible, precio_unitario, nombre_item = data
 
 if cant > cantidad_disponible:
-    conn.rollback()
-    return False, f"⚠️ Stock insuficiente para {nombre_item}"
+conn.rollback()
+return False, f"⚠️ Stock insuficiente para {nombre_item}"
 
 # COSTO HISTÓRICO
 if precio_unitario:
-    costo_total_real += float(precio_unitario) * float(cant)
+costo_total_real += float(precio_unitario) * float(cant)
 
 # ================================
 # CALCULAR UTILIDAD REAL
@@ -3649,15 +3649,15 @@ margen_real = (utilidad_real / float(monto_usd) * 100) if monto_usd > 0 else 0.0
 for item_id, cant in consumos.items():
 
 cursor.execute("""
-    UPDATE inventario
-    SET cantidad = cantidad - ?
-    WHERE id = ?
+UPDATE inventario
+SET cantidad = cantidad - ?
+WHERE id = ?
 """, (cant, item_id))
 
 cursor.execute("""
-    INSERT INTO inventario_movs
-    (item_id, tipo, cantidad, motivo, usuario)
-    VALUES (?, 'SALIDA', ?, ?, ?)
+INSERT INTO inventario_movs
+(item_id, tipo, cantidad, motivo, usuario)
+VALUES (?, 'SALIDA', ?, ?, ?)
 """, (item_id, cant, f"Venta: {detalle}", usuario))
 
 # ================================
@@ -3666,8 +3666,8 @@ cursor.execute("""
 cursor.execute("""
 INSERT INTO ventas
 (cliente_id, cliente, detalle, monto_total,
- metodo, usuario,
- costo_total, utilidad, margen)
+metodo, usuario,
+costo_total, utilidad, margen)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 """, (
 id_cliente,
@@ -3695,6 +3695,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
