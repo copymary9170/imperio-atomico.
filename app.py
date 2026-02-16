@@ -57,7 +57,17 @@ def obtener_password_admin_inicial() -> str:
 def inicializar_sistema():
     with conectar() as conn:
         c = conn.cursor()
+       
+        # FORZAR CREACIÓN
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS costos_operativos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            monto_mensual REAL
+        )
+        """)
 
+        
         tablas = [
 
             
@@ -1755,10 +1765,16 @@ st.subheader("🏢 Costos Operativos Mensuales")
 
 with conectar() as conn:
 
+try:
     df_costos = pd.read_sql(
         "SELECT * FROM costos_operativos",
         conn
     )
+except:
+    df_costos = pd.DataFrame(
+        columns=["id","nombre","monto_mensual"]
+    )
+
 
 st.dataframe(df_costos, use_container_width=True)
 
@@ -3902,6 +3918,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
