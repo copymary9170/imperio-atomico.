@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -13,112 +12,203 @@ import hashlib
 import hmac
 import secrets
 
+
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
+
+st.set_page_config(
+    page_title="Imperio Atómico - ERP Pro",
+    layout="wide",
+    page_icon="⚛️"
+)
+
+
 
 # --- 2. MOTOR DE BASE DE DATOS ---
 
 def conectar():
-conn = sqlite3.connect("imperio_v2.db", check_same_thread=False)
-conn.execute("PRAGMA foreign_keys = ON")
-return conn
+
+    conn = sqlite3.connect(
+        "imperio_v2.db",
+        check_same_thread=False
+    )
+
+    conn.execute(
+        "PRAGMA foreign_keys = ON"
+    )
+
+    return conn
+
+
+
 
 # Conexión principal a la base de datos
 
-def hash_password(password: str, salt: str | None = None) -> str:
-"""Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
 
-salt = salt or secrets.token_hex(16)
+def hash_password(
+    password: str,
+    salt: str | None = None
+) -> str:
 
-iterations = 120_000
+    """Genera hash PBKDF2 para almacenar contraseñas"""
 
-digest = hashlib.pbkdf2_hmac(
-    'sha256',
-    password.encode('utf-8'),
-    salt.encode('utf-8'),
-    iterations
-).hex()
+    salt = salt or secrets.token_hex(16)
 
-return f"pbkdf2_sha256${iterations}${salt}${digest}"
+    iterations = 120_000
 
+    digest = hashlib.pbkdf2_hmac(
 
-def verify_password(password: str, password_hash: str | None) -> bool:
+        "sha256",
 
-if not password_hash:
-    return False
+        password.encode("utf-8"),
 
-try:
+        salt.encode("utf-8"),
 
-    algorithm, iterations, salt, digest = password_hash.split('$', 3)
+        iterations
 
-    if algorithm != 'pbkdf2_sha256':
-        return False
-
-    test_digest = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        int(iterations)
     ).hex()
 
-    return hmac.compare_digest(test_digest, digest)
+    return f"pbkdf2_sha256${iterations}${salt}${digest}"
 
-except (ValueError, TypeError):
 
-    return False
+
+
+def verify_password(
+    password: str,
+    password_hash: str | None
+) -> bool:
+
+
+
+    if not password_hash:
+
+        return False
+
+
+
+    try:
+
+        algorithm, iterations, salt, digest = password_hash.split(
+            "$",
+            3
+        )
+
+
+
+        if algorithm != "pbkdf2_sha256":
+
+            return False
+
+
+
+        test_digest = hashlib.pbkdf2_hmac(
+
+            "sha256",
+
+            password.encode("utf-8"),
+
+            salt.encode("utf-8"),
+
+            int(iterations)
+
+        ).hex()
+
+
+
+        return hmac.compare_digest(
+            test_digest,
+            digest
+        )
+
+
+
+    except:
+
+        return False
+
+
+
 
 
 def obtener_password_admin_inicial() -> str:
-"""Obtiene contraseña inicial desde entorno para evitar hardcode total en el código."""
 
-return os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
+    """Obtiene contraseña inicial"""
+
+    return os.getenv(
+        "IMPERIO_ADMIN_PASSWORD",
+        "atomica2026"
+    )
+
+
+
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
-# ===========================================================
-# 3. INICIALIZACIÓN DEL SISTEMA — IMPERIO ATÓMICO ERP PRO
-# ===========================================================
+
+
 def inicializar_sistema():
 
-with conectar() as conn:
 
-    c = conn.cursor()
+    with conectar() as conn:
 
-    # ===================================================
-    # CONFIGURACIÓN GENERAL
-    # ===================================================
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS configuracion (
-        parametro TEXT PRIMARY KEY,
-        valor REAL
-    )
-    """)
+        c = conn.cursor()
 
-    # ===================================================
-    # TASAS DE CAMBIO
-    # ===================================================
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS tasas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tasa_bcv REAL,
-        tasa_binance REAL,
-        fecha TEXT
-    )
-    """)
 
-    # ===================================================
-    # COSTOS OPERATIVOS
-    # ===================================================
+        # CONFIGURACIÓN
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS costos_operativos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT,
-        monto_mensual REAL
-    )
-    """)
+        c.execute("""
 
+            CREATE TABLE IF NOT EXISTS configuracion (
+
+                parametro TEXT PRIMARY KEY,
+
+                valor REAL
+
+            )
+
+        """)
+
+
+
+        # TASAS
+
+        c.execute("""
+
+            CREATE TABLE IF NOT EXISTS tasas (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                tasa_bcv REAL,
+
+                tasa_binance REAL,
+
+                fecha TEXT
+
+            )
+
+        """)
+
+
+
+        # COSTOS OPERATIVOS
+
+        c.execute("""
+
+            CREATE TABLE IF NOT EXISTS costos_operativos (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                nombre TEXT,
+
+                monto_mensual REAL
+
+            )
+
+        """)
+
+
+
+        conn.commit()
     # ===================================================
     # CLIENTES
     # ===================================================
@@ -3696,6 +3786,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
