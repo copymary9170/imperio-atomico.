@@ -405,11 +405,50 @@ if menu == "📊 Dashboard":
 
     ventas_total = float(df_ventas["monto_total"].sum()) if not df_ventas.empty else 0.0
     gastos_total = float(df_gastos["monto"].sum()) if not df_gastos.empty else 0.0
-    with conectar() as conn:
+    # Calcular utilidad real acumulada
+with conectar() as conn:
 
     utilidad = conn.execute(
-        "SELECT SUM(utilidad) FROM ventas"
-    ).fetchone()[0] or 0
+        "SELECT COALESCE(SUM(utilidad), 0) FROM ventas"
+    ).fetchone()[0]
+
+    st.divider()
+
+st.subheader("💎 Utilidad REAL acumulada")
+
+st.metric(
+    "Ganancia real del negocio",
+    f"${utilidad:,.2f}"
+)
+
+
+ventas_total = float(df_ventas["monto_total"].sum()) if not df_ventas.empty else 0.0
+gastos_total = float(df_gastos["monto"].sum()) if not df_gastos.empty else 0.0
+
+# UTILIDAD REAL
+with conectar() as conn:
+
+    utilidad = conn.execute(
+        "SELECT COALESCE(SUM(utilidad), 0) FROM ventas"
+    ).fetchone()[0]
+
+
+c1, c2, c3, c4, c5 = st.columns(5)
+
+c1.metric("💰 Ventas Acumuladas", f"${ventas_total:,.2f}")
+c2.metric("💸 Gastos Acumulados", f"${gastos_total:,.2f}")
+c3.metric("📈 Resultado Neto", f"${utilidad:,.2f}")
+c4.metric("👥 Clientes", total_clientes)
+c5.metric("🚨 Ítems en Mínimo", stock_bajo)
+
+st.divider()
+
+st.subheader("💎 Utilidad REAL acumulada")
+
+st.metric(
+    "Ganancia real del negocio",
+    f"${utilidad:,.2f}"
+)
 
     capital_inv = 0.0
     stock_bajo = 0
@@ -3875,6 +3914,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
