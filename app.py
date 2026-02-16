@@ -2570,71 +2570,85 @@ elif menu == "💰 Ventas":
 
         with st.form("venta_manual", clear_on_submit=True):
 
-            st.subheader("Datos de la Venta")
+    st.subheader("Datos de la Venta")
 
-            opciones_cli = {
-                row['nombre']: row['id']
-                for _, row in df_cli.iterrows()
-            }
+    opciones_cli = {
+        row['nombre']: row['id']
+        for _, row in df_cli.iterrows()
+    }
 
-            c1, c2 = st.columns(2)
+    c1, c2 = st.columns(2)
 
-            cliente_nombre = c1.selectbox(
-                "Cliente:", list(opciones_cli.keys())
-            )
+    cliente_nombre = c1.selectbox(
+        "Cliente:", list(opciones_cli.keys())
+    )
 
-            detalle_v = c2.text_input(
-                "Detalle de lo vendido:",
-                placeholder="Ej: 100 volantes, 2 banner..."
-            )
+    detalle_v = c2.text_input(
+        "Detalle de lo vendido:"
+    )
 
-            c3, c4, c5 = st.columns(3)
+    c3, c4, c5 = st.columns(3)
 
-            monto_venta = c3.number_input(
-                "Monto ($):",
-                min_value=0.01,
-                format="%.2f"
-            )
+    monto_venta = c3.number_input(
+        "Monto ($):",
+        min_value=0.01,
+        format="%.2f"
+    )
 
-            metodo_pago = c4.selectbox(
-                "Método:",
-                ["Efectivo ($)", "Pago Móvil (BCV)",
-                 "Zelle", "Binance (USDT)",
-                 "Transferencia (Bs)", "Pendiente"]
-            )
+    metodo_pago = c4.selectbox(
+        "Método:",
+        ["Efectivo ($)", "Pago Móvil (BCV)", "Zelle", "Binance (USDT)", "Transferencia (Bs)", "Pendiente"]
+    )
 
-            tasa_uso = t_bcv if "BCV" in metodo_pago else (
-                t_bin if "Binance" in metodo_pago else 1.0
-            )
+    tasa_uso = t_bcv if "BCV" in metodo_pago else (
+        t_bin if "Binance" in metodo_pago else 1.0
+    )
 
-            monto_bs = monto_venta * tasa_uso
+    monto_bs = monto_venta * tasa_uso
 
-            c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
+    c5.metric("Equivalente Bs", f"{monto_bs:,.2f}")
 
-if st.form_submit_button("🚀 Registrar Venta"):
+    # ✅ EL BOTÓN DEBE ESTAR AQUÍ ADENTRO
+    submit_venta = st.form_submit_button("🚀 Registrar Venta")
+
+
+# ✅ Y ESTO VA AFUERA DEL FORM
+if submit_venta:
 
     if not detalle_v.strip():
+
         st.error("Debes indicar el detalle de la venta.")
+
         st.stop()
 
-    # Sin consumo de inventario en venta manual
     consumos = {}
 
     exito, msg = registrar_venta_global(
+
         id_cliente=opciones_cli[cliente_nombre],
+
         nombre_cliente=cliente_nombre,
+
         detalle=detalle_v.strip(),
+
         monto_usd=float(monto_venta),
+
         metodo=metodo_pago,
+
         consumos=consumos,
+
         usuario=st.session_state.get("usuario_nombre", "Sistema")
+
     )
 
     if exito:
+
         st.success(msg)
-        st.balloons()
+
         st.rerun()
+
     else:
+
         st.error(msg)
 
     # -----------------------------------
@@ -3814,6 +3828,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
