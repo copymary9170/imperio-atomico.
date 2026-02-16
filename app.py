@@ -13,6 +13,7 @@ import hmac
 import secrets
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
+
 st.set_page_config(
     page_title="Imperio Atómico - ERP Pro",
     layout="wide",
@@ -20,13 +21,16 @@ st.set_page_config(
 )
 
 # --- 2. MOTOR DE BASE DE DATOS ---
+
 def conectar():
     """Conexión principal a la base de datos del Imperio."""
     conn = sqlite3.connect(
         "imperio_v2.db",
         check_same_thread=False
     )
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "PRAGMA foreign_keys = ON"
+    )
     return conn
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -59,66 +63,179 @@ def verify_password(password: str, password_hash: str | None) -> bool:
         return False
 
 def obtener_password_admin_inicial() -> str:
-    return os.getenv("IMPERIO_ADMIN_PASSWORD", "atomica2026")
+    """Obtiene contraseña inicial"""
+    return os.getenv(
+        "IMPERIO_ADMIN_PASSWORD",
+        "atomica2026"
+    )
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
+
 def inicializar_sistema():
     with conectar() as conn:
         c = conn.cursor()
-        
-        # CONFIGURACIÓN Y TASAS
-        c.execute("CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)")
-        c.execute("CREATE TABLE IF NOT EXISTS tasas (id INTEGER PRIMARY KEY AUTOINCREMENT, tasa_bcv REAL, tasa_binance REAL, fecha TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS costos_operativos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, monto_mensual REAL)")
-        
-        # ENTIDADES PRINCIPALES
-        c.execute("CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, password_hash TEXT, rol TEXT, nombre TEXT)")
-        
-        # INVENTARIO
-        c.execute("""CREATE TABLE IF NOT EXISTS inventario (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT UNIQUE, cantidad REAL, unidad TEXT, 
-            precio_usd REAL, minimo REAL DEFAULT 5.0, activo INTEGER DEFAULT 1, 
-            ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP)""")
-        
-        c.execute("""CREATE TABLE IF NOT EXISTS inventario_movs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, tipo TEXT, cantidad REAL, 
-            motivo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)""")
 
-        # COMPRAS Y PROVEEDORES
-        c.execute("CREATE TABLE IF NOT EXISTS proveedores (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE, telefono TEXT, rif TEXT, contacto TEXT, observaciones TEXT, fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS compras (id INTEGER PRIMARY KEY AUTOINCREMENT, proveedor TEXT, total REAL, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS compras_detalle (id INTEGER PRIMARY KEY AUTOINCREMENT, compra_id INTEGER, item TEXT, cantidad REAL, costo REAL)")
+        # CONFIGURACIÓN
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS configuracion (
+                parametro TEXT PRIMARY KEY,
+                valor REAL
+            )
+        """)
+
+        # TASAS
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS tasas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tasa_bcv REAL,
+                tasa_binance REAL,
+                fecha TEXT
+            )
+        """)
+
+        # COSTOS OPERATIVOS
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS costos_operativos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                monto_mensual REAL
+            )
+        """)
+
+        # CLIENTES
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS clientes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                whatsapp TEXT
+            )
+        """)
+
+        # USUARIOS
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                username TEXT PRIMARY KEY,
+                password TEXT,
+                password_hash TEXT,
+                rol TEXT,
+                nombre TEXT
+            )
+        """)
+
+        # INVENTARIO
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS inventario (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item TEXT UNIQUE,
+                cantidad REAL,
+                unidad TEXT,
+                precio_usd REAL,
+                minimo REAL DEFAULT 5.0,
+                activo INTEGER DEFAULT 1,
+                ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # MOVIMIENTOS INVENTARIO
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS inventario_movs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER,
+                tipo TEXT,
+                cantidad REAL,
+                motivo TEXT,
+                usuario TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # COMPRAS
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS compras (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                proveedor TEXT,
+                total REAL,
+                usuario TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS compras_detalle (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                compra_id INTEGER,
+                item TEXT,
+                cantidad REAL,
+                costo REAL
+            )
+        """)
+
+        # PROVEEDORES
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS proveedores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT UNIQUE,
+                telefono TEXT,
+                rif TEXT,
+                contacto TEXT,
+                observaciones TEXT,
+                fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
         # VENTAS
-        c.execute("""CREATE TABLE IF NOT EXISTS ventas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, cliente TEXT, monto_total REAL, 
-            costo_total REAL, utilidad REAL, margen REAL, metodo TEXT, usuario TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)""")
-        
-        c.execute("CREATE TABLE IF NOT EXISTS ventas_detalle (id INTEGER PRIMARY KEY AUTOINCREMENT, venta_id INTEGER, item TEXT, cantidad REAL, costo REAL, precio REAL)")
-        c.execute("CREATE TABLE IF NOT EXISTS ventas_extra (id INTEGER PRIMARY KEY AUTOINCREMENT, venta_id INTEGER, tasa REAL, monto_bs REAL)")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS ventas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cliente_id INTEGER,
+                cliente TEXT,
+                monto_total REAL,
+                costo_total REAL,
+                utilidad REAL,
+                margen REAL,
+                metodo TEXT,
+                usuario TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS ventas_detalle (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                venta_id INTEGER,
+                item TEXT,
+                cantidad REAL,
+                costo REAL,
+                precio REAL
+            )
+        """)
 
         # GASTOS
-        c.execute("CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS gastos_extra (id INTEGER PRIMARY KEY AUTOINCREMENT, gasto_id INTEGER, tasa REAL, monto_bs REAL, usuario TEXT)")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS gastos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                descripcion TEXT,
+                monto REAL,
+                categoria TEXT,
+                metodo TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
-        # OTROS
-        c.execute("CREATE TABLE IF NOT EXISTS activos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, costo REAL, vida_util_meses INTEGER, fecha_compra TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS cotizaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente TEXT, total REAL, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS cotizacion_detalle (id INTEGER PRIMARY KEY AUTOINCREMENT, cotizacion_id INTEGER, item TEXT, cantidad REAL, precio REAL)")
-        c.execute("CREATE TABLE IF NOT EXISTS cmyk_log (id INTEGER PRIMARY KEY AUTOINCREMENT, archivo TEXT, area REAL, costo REAL, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)")
-        c.execute("CREATE TABLE IF NOT EXISTS cierre_caja (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, ventas REAL, gastos REAL, utilidad REAL, usuario TEXT)")
-
-        # CREAR ADMIN INICIAL
+        # CREAR ADMIN POR DEFECTO
         try:
-            admin_pwd = obtener_password_admin_inicial()
-            c.execute("INSERT OR IGNORE INTO usuarios VALUES (?, ?, ?, ?, ?)", 
-                      ("jefa", "", hash_password(admin_pwd), "Admin", "Dueña del Imperio"))
-        except:
-            pass
+            admin_password = obtener_password_admin_inicial()
+            c.execute("""
+                INSERT OR IGNORE INTO usuarios (username, password, password_hash, rol, nombre)
+                VALUES (?, ?, ?, ?, ?)
+            """, ("jefa", "", hash_password(admin_password), "Admin", "Dueña del Imperio"))
+        except Exception as e:
+            print(f"Error creando admin: {e}")
+
         conn.commit()
 
-# --- 4. FUNCIONES DE APOYO Y CARGA ---
+# --- 4. FUNCIONES FINANCIERAS ---
+
 def calcular_costo_operativo_por_dia():
     with conectar() as conn:
         df = pd.read_sql("SELECT monto_mensual FROM costos_operativos", conn)
@@ -129,19 +246,16 @@ def calcular_costo_operativo_por_dia():
 def cargar_datos():
     with conectar() as conn:
         try:
-            columnas = {row[1] for row in conn.execute("PRAGMA table_info(inventario)").fetchall()}
-            query_inv = "SELECT * FROM inventario"
-            if 'activo' in columnas:
-                query_inv += " WHERE COALESCE(activo,1)=1"
-            st.session_state.df_inv = pd.read_sql(query_inv, conn)
+            st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario WHERE activo=1", conn)
             st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
             conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
             for _, row in conf_df.iterrows():
                 st.session_state[row['parametro']] = float(row['valor'])
-        except Exception as e:
-            st.warning(f"Aviso de carga: {e}")
+        except:
+            pass
 
 # --- 5. LÓGICA DE ACCESO ---
+
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
     inicializar_sistema()
@@ -153,25 +267,26 @@ def login():
         p = st.text_input("Contraseña", type="password")
         if st.button("Entrar", use_container_width=True):
             with conectar() as conn:
-                res = conn.execute("SELECT username, rol, nombre, password, password_hash FROM usuarios WHERE username=?", (u,)).fetchone()
-                if res:
-                    username, rol, nombre, p_plain, p_hash = res
-                    if verify_password(p, p_hash) or (p_plain and hmac.compare_digest(p_plain, p)):
-                        st.session_state.autenticado = True
-                        st.session_state.rol = rol
-                        st.session_state.usuario_nombre = nombre
-                        if p_plain: # Migrar a hash si era plano
-                            conn.execute("UPDATE usuarios SET password_hash=?, password='' WHERE username=?", (hash_password(p), u))
-                            conn.commit()
-                        cargar_datos()
-                        st.rerun()
-                st.error("Acceso denegado")
+                res = conn.execute(
+                    "SELECT username, rol, nombre, password_hash FROM usuarios WHERE username=?",
+                    (u,)
+                ).fetchone()
+                
+                if res and verify_password(p, res[3]):
+                    st.session_state.autenticado = True
+                    st.session_state.rol = res[1]
+                    st.session_state.usuario_nombre = res[2]
+                    cargar_datos()
+                    st.rerun()
+                else:
+                    st.error("Credenciales incorrectas")
 
 if not st.session_state.autenticado:
     login()
     st.stop()
 
-# --- 6. SIDEBAR Y NAVEGACIÓN ---
+# --- 6. SIDEBAR Y DASHBOARD ---
+
 cargar_datos()
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
@@ -179,7 +294,12 @@ t_bin = st.session_state.get('tasa_binance', 1.0)
 with st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
-    menu = st.radio("Secciones:", ["📊 Dashboard", "🛒 Venta Directa", "📦 Inventario", "👥 Clientes", "🎨 Análisis CMYK", "🏗️ Activos", "🛠️ Otros Procesos", "💰 Ventas", "📉 Gastos", "🏁 Cierre de Caja", "📊 Auditoría", "📝 Cotizaciones", "⚙️ Configuración"])
+    
+    menu = st.radio(
+        "Secciones:",
+        ["📊 Dashboard", "📦 Inventario", "💰 Ventas", "📉 Gastos", "⚙️ Configuración"]
+    )
+    
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state.clear()
         st.rerun()
@@ -3263,6 +3383,7 @@ except:
 pass
 
 return False, f"❌ Error interno: {str(e)}"
+
 
 
 
