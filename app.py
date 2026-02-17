@@ -400,13 +400,17 @@ def cargar_datos():
 
         try:
 
+            # ======================================================
             # INVENTARIO
+            # ======================================================
+
             existe = conn.execute("""
                 SELECT name FROM sqlite_master
                 WHERE type='table' AND name='inventario'
             """).fetchone()
 
             if existe:
+
                 columnas = {
                     row[1] for row in
                     conn.execute(
@@ -417,15 +421,19 @@ def cargar_datos():
                 query = "SELECT * FROM inventario"
 
                 if 'activo' in columnas:
+
                     query += " WHERE COALESCE(activo,1)=1"
 
                 st.session_state.df_inv = pd.read_sql(query, conn)
 
             else:
+
                 st.session_state.df_inv = pd.DataFrame()
 
 
+            # ======================================================
             # CLIENTES
+            # ======================================================
 
             existe_cli = conn.execute("""
                 SELECT name FROM sqlite_master
@@ -444,14 +452,85 @@ def cargar_datos():
                 st.session_state.df_cli = pd.DataFrame()
 
 
+            # ======================================================
+            # TASAS (NUEVO)
+            # ======================================================
+
+            existe_tasas = conn.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='tasas'
+            """).fetchone()
+
+            if existe_tasas:
+
+                df_tasas = pd.read_sql("""
+                    SELECT tasa_bcv, tasa_binance
+                    FROM tasas
+                    ORDER BY id DESC
+                    LIMIT 1
+                """, conn)
+
+                if not df_tasas.empty:
+
+                    st.session_state.tasa_bcv = float(
+                        df_tasas["tasa_bcv"].iloc[0]
+                    )
+
+                    st.session_state.tasa_binance = float(
+                        df_tasas["tasa_binance"].iloc[0]
+                    )
+
+                else:
+
+                    st.session_state.tasa_bcv = 1.0
+                    st.session_state.tasa_binance = 1.0
+
+            else:
+
+                st.session_state.tasa_bcv = 1.0
+                st.session_state.tasa_binance = 1.0
+
+
+            # ======================================================
+            # KONTIGO (NUEVO)
+            # ======================================================
+
+            existe_k = conn.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='kontigo_movs'
+            """).fetchone()
+
+            if existe_k:
+
+                df_k = pd.read_sql("""
+                    SELECT *
+                    FROM kontigo_movs
+                """, conn)
+
+                if not df_k.empty:
+
+                    st.session_state.kontigo_saldo = float(
+                        df_k["neto"].sum()
+                    )
+
+                else:
+
+                    st.session_state.kontigo_saldo = 0.0
+
+            else:
+
+                st.session_state.kontigo_saldo = 0.0
+
+
         except Exception as e:
 
             st.warning(f"Error cargando datos: {e}")
 
+
 # Alias de compatibilidad para módulos que lo usan
 def cargar_datos_seguros():
-    cargar_datos()
 
+    cargar_datos()
 # --- 5. LOGICA DE ACCESO ---
 
 # 🔥 SIEMPRE inicializar primero
@@ -4283,6 +4362,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
