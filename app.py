@@ -3743,7 +3743,7 @@ def registrar_venta_global(
 # 👥 MÓDULO PROFESIONAL DE CLIENTES — IMPERIO ATÓMICO ERP PRO
 # ===========================================================
 
-elif menu == "👥 Clientes":
+    elif menu == "👥 Clientes":
 
     st.title("👥 Gestión de Clientes")
 
@@ -3979,6 +3979,7 @@ elif menu == "👥 Clientes":
                 cargar_datos()
 
                 st.rerun()
+
 
 
 
