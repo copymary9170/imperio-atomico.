@@ -57,6 +57,7 @@ def obtener_password_admin_inicial() -> str:
 # ===========================================================
 # 3. INICIALIZACIÓN DEL SISTEMA — IMPERIO ATÓMICO ERP PRO
 # ===========================================================
+
 def inicializar_sistema():
 
     with conectar() as conn:
@@ -74,109 +75,43 @@ def inicializar_sistema():
         )
         """)
 
-
         # ===================================================
-# PROVEEDORES
-# ===================================================
-
-c.execute("""
-CREATE TABLE IF NOT EXISTS proveedores (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT UNIQUE,
-    telefono TEXT,
-    rif TEXT,
-    contacto TEXT,
-    observaciones TEXT,
-    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-
-# ===================================================
-# HISTORIAL DE COMPRAS
-# ===================================================
-
-c.execute("""
-CREATE TABLE IF NOT EXISTS historial_compras (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item TEXT,
-    proveedor_id INTEGER,
-    cantidad REAL,
-    unidad TEXT,
-    costo_total_usd REAL,
-    costo_unit_usd REAL,
-    impuestos REAL,
-    delivery REAL,
-    tasa_usada REAL,
-    moneda_pago TEXT,
-    usuario TEXT,
-    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-try:
-    c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
-except:
-    pass
-
-try:
-    c.execute("ALTER TABLE inventario ADD COLUMN area_por_pliego_cm2 REAL")
-except:
-    pass
-        # ===================================================
-        # TASAS DE CAMBIO
+        # PROVEEDORES
         # ===================================================
 
         c.execute("""
-        CREATE TABLE IF NOT EXISTS tasas (
+        CREATE TABLE IF NOT EXISTS proveedores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tasa_bcv REAL,
-            tasa_binance REAL,
-            fecha TEXT
+            nombre TEXT UNIQUE,
+            telefono TEXT,
+            rif TEXT,
+            contacto TEXT,
+            observaciones TEXT,
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
-
         # ===================================================
-        # COSTOS OPERATIVOS
+        # HISTORIAL DE COMPRAS
         # ===================================================
 
         c.execute("""
-        CREATE TABLE IF NOT EXISTS costos_operativos (
+        CREATE TABLE IF NOT EXISTS historial_compras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT,
-            monto_mensual REAL
+            item TEXT,
+            proveedor_id INTEGER,
+            cantidad REAL,
+            unidad TEXT,
+            costo_total_usd REAL,
+            costo_unit_usd REAL,
+            impuestos REAL,
+            delivery REAL,
+            tasa_usada REAL,
+            moneda_pago TEXT,
+            usuario TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
-
-
-        # ===================================================
-        # CLIENTES
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS clientes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT,
-            whatsapp TEXT
-        )
-        """)
-
-
-        # ===================================================
-        # USUARIOS
-        # ===================================================
-
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            username TEXT PRIMARY KEY,
-            password TEXT,
-            password_hash TEXT,
-            rol TEXT,
-            nombre TEXT
-        )
-        """)
-
 
         # ===================================================
         # INVENTARIO
@@ -195,6 +130,68 @@ except:
         )
         """)
 
+        # COLUMNAS EXTRA INVENTARIO
+
+        try:
+            c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
+        except:
+            pass
+
+        try:
+            c.execute("ALTER TABLE inventario ADD COLUMN area_por_pliego_cm2 REAL")
+        except:
+            pass
+
+        # ===================================================
+        # TASAS DE CAMBIO
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS tasas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tasa_bcv REAL,
+            tasa_binance REAL,
+            fecha TEXT
+        )
+        """)
+
+        # ===================================================
+        # COSTOS OPERATIVOS
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS costos_operativos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            monto_mensual REAL
+        )
+        """)
+
+        # ===================================================
+        # CLIENTES
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS clientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            whatsapp TEXT
+        )
+        """)
+
+        # ===================================================
+        # USUARIOS
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            username TEXT PRIMARY KEY,
+            password TEXT,
+            password_hash TEXT,
+            rol TEXT,
+            nombre TEXT
+        )
+        """)
 
         # ===================================================
         # MOVIMIENTOS INVENTARIO
@@ -211,7 +208,6 @@ except:
             fecha DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
-
 
         # ===================================================
         # COMPRAS
@@ -237,7 +233,6 @@ except:
         )
         """)
 
-
         # ===================================================
         # VENTAS
         # ===================================================
@@ -247,6 +242,7 @@ except:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cliente_id INTEGER,
             cliente TEXT,
+            detalle TEXT,
             monto_total REAL,
             costo_total REAL,
             utilidad REAL,
@@ -256,7 +252,6 @@ except:
             fecha DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
-
 
         c.execute("""
         CREATE TABLE IF NOT EXISTS ventas_detalle (
@@ -268,7 +263,6 @@ except:
             precio REAL
         )
         """)
-
 
         # ===================================================
         # GASTOS
@@ -285,7 +279,6 @@ except:
         )
         """)
 
-
         # ===================================================
         # ACTIVOS
         # ===================================================
@@ -300,7 +293,6 @@ except:
         )
         """)
 
-
         # ===================================================
         # COTIZACIONES
         # ===================================================
@@ -314,7 +306,6 @@ except:
         )
         """)
 
-
         c.execute("""
         CREATE TABLE IF NOT EXISTS cotizacion_detalle (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -324,7 +315,6 @@ except:
             precio REAL
         )
         """)
-
 
         # ===================================================
         # CMYK LOG
@@ -340,7 +330,6 @@ except:
         )
         """)
 
-
         # ===================================================
         # CIERRE DE CAJA
         # ===================================================
@@ -355,7 +344,6 @@ except:
             usuario TEXT
         )
         """)
-
 
         # ===================================================
         # CREAR ADMIN
@@ -379,9 +367,7 @@ except:
         except:
             pass
 
-
         conn.commit()
-
 # ===========================================================
 # 💰 FUNCIÓN FINANCIERA EMPRESARIAL
 # ===========================================================
@@ -3677,6 +3663,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
