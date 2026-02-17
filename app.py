@@ -1470,12 +1470,12 @@ elif menu == "📦 Inventario":
         c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
 # ===========================================================
-# 👥 MÓDULO PROFESIONAL DE CLIENTES — IMPERIO ATÓMICO ERP PRO
+# 👥 CLIENTES PRO MAX — IMPERIO ATÓMICO ERP
 # ===========================================================
 
 elif menu == "👥 Clientes":
 
-    st.title("👥 Gestión de Clientes")
+    st.title("👥 CRM Profesional de Clientes")
 
     with conectar() as conn:
 
@@ -1491,173 +1491,349 @@ elif menu == "👥 Clientes":
         )
         """)
 
-        df_cli = pd.read_sql(
-            "SELECT * FROM clientes ORDER BY nombre",
-            conn
-        )
+        df_cli = pd.read_sql("""
+            SELECT c.*,
+            COALESCE(SUM(v.monto_total),0) as total_compras,
+            COUNT(v.id) as pedidos
+            FROM clientes c
+            LEFT JOIN ventas v ON v.cliente_id = c.id
+            GROUP BY c.id
+            ORDER BY total_compras DESC
+        """, conn)
 
-    total = len(df_cli)
 
-    c1, c2 = st.columns(2)
+    # ============================================
+    # DASHBOARD
+    # ============================================
 
-    c1.metric("Total Clientes", total)
+    total_clientes = len(df_cli)
 
-    if not df_cli.empty:
+    total_facturado = df_cli["total_compras"].sum()
 
-        ultimo = df_cli.iloc[-1]['nombre']
+    cliente_top = df_cli.iloc[0]["nombre"] if not df_cli.empty else "-"
 
-        c2.metric("Último Cliente", ultimo)
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("Clientes", total_clientes)
+
+    c2.metric("Facturación Total", f"${total_facturado:,.2f}")
+
+    c3.metric("Mejor Cliente", cliente_top)
+
 
     st.divider()
 
+
     tabs = st.tabs([
+
         "📋 Directorio",
-        "➕ Registrar",
-        "✏️ Editar / Eliminar"
+
+        "➕ Nuevo",
+
+        "✏️ Editar",
+
+        "📊 Ranking"
+
     ])
 
+
+    # ============================================
     # DIRECTORIO
+    # ============================================
 
     with tabs[0]:
 
-        if df_cli.empty:
+        buscar = st.text_input("Buscar cliente")
 
-            st.info("No hay clientes registrados")
+        df_view = df_cli.copy()
 
-        else:
+        if buscar:
 
-            buscar = st.text_input("Buscar")
+            df_view = df_view[
+                df_view["nombre"].str.contains(buscar, case=False)
+            ]
 
-            df_v = df_cli.copy()
 
-            if buscar:
+        st.dataframe(
 
-                df_v = df_v[
-                    df_v['nombre'].str.contains(buscar, case=False)
-                ]
+            df_view,
 
-            st.dataframe(df_v, use_container_width=True, hide_index=True)
+            column_config={
 
-    # REGISTRAR
+                "nombre":"Cliente",
+
+                "whatsapp":"WhatsApp",
+
+                "total_compras": st.column_config.NumberColumn(
+
+                    "Total $",
+
+                    format="%.2f"
+
+                ),
+
+                "pedidos":"Pedidos"
+
+            },
+
+            use_container_width=True,
+
+            hide_index=True
+
+        )
+
+
+        # WHATSAPP DIRECTO
+
+        if not df_view.empty:
+
+            cli = st.selectbox(
+
+                "Seleccionar cliente",
+
+                df_view["nombre"]
+
+            )
+
+            tel = df_view[
+                df_view["nombre"] == cli
+
+            ]["whatsapp"].values[0]
+
+
+            if tel:
+
+                url = f"https://wa.me/{tel}"
+
+                st.link_button("💬 Abrir WhatsApp", url)
+
+
+
+    # ============================================
+    # NUEVO
+    # ============================================
 
     with tabs[1]:
 
         with st.form("nuevo_cliente"):
 
             nombre = st.text_input("Nombre")
+
             whatsapp = st.text_input("WhatsApp")
+
             email = st.text_input("Email")
+
             direccion = st.text_input("Dirección")
+
             notas = st.text_area("Notas")
 
-            guardar = st.form_submit_button("Guardar")
 
-        if guardar:
-
-            if not nombre:
-
-                st.error("Nombre obligatorio")
-
-            else:
-
-                try:
-
-                    with conectar() as conn:
-
-                        conn.execute("""
-                        INSERT INTO clientes
-                        (nombre, whatsapp, email, direccion, notas)
-                        VALUES (?,?,?,?,?)
-                        """, (
-                            nombre,
-                            whatsapp,
-                            email,
-                            direccion,
-                            notas
-                        ))
-
-                        conn.commit()
-
-                    st.success("Cliente registrado")
-
-                    cargar_datos()
-
-                    st.rerun()
-
-                except sqlite3.IntegrityError:
-
-                    st.error("Cliente ya existe")
-
-    # EDITAR
-
-    with tabs[2]:
-
-        if not df_cli.empty:
-
-            sel = st.selectbox(
-                "Seleccionar",
-                df_cli['nombre']
-            )
-
-            datos = df_cli[
-                df_cli['nombre'] == sel
-            ].iloc[0]
-
-            with st.form("editar_cliente"):
-
-                nombre = st.text_input("Nombre", value=datos['nombre'])
-                whatsapp = st.text_input("WhatsApp", value=datos['whatsapp'])
-                email = st.text_input("Email", value=datos.get('email', ''))
-                direccion = st.text_input("Dirección", value=datos.get('direccion', ''))
-                notas = st.text_area("Notas", value=datos.get('notas', ''))
-
-                col1, col2 = st.columns(2)
-
-                actualizar = col1.form_submit_button("Actualizar")
-                eliminar = col2.form_submit_button("Eliminar")
-
-            if actualizar:
+            if st.form_submit_button("Guardar"):
 
                 with conectar() as conn:
 
                     conn.execute("""
-                    UPDATE clientes
-                    SET nombre=?, whatsapp=?, email=?, direccion=?, notas=?
-                    WHERE id=?
-                    """, (
-                        nombre,
-                        whatsapp,
-                        email,
-                        direccion,
-                        notas,
-                        int(datos['id'])
-                    ))
+
+                    INSERT INTO clientes
+
+                    (nombre,whatsapp,email,direccion,notas)
+
+                    VALUES (?,?,?,?,?)
+
+                    """,(nombre,whatsapp,email,direccion,notas))
+
 
                     conn.commit()
 
-                st.success("Actualizado")
 
-                cargar_datos()
-
-                st.rerun()
-
-            if eliminar:
-
-                with conectar() as conn:
-
-                    conn.execute(
-                        "DELETE FROM clientes WHERE id=?",
-                        (int(datos['id']),)
-                    )
-
-                    conn.commit()
-
-                st.warning("Cliente eliminado")
-
-                cargar_datos()
+                st.success("Cliente creado")
 
                 st.rerun()
 
+
+
+    # ============================================
+    # EDITAR
+    # ============================================
+
+    with tabs[2]:
+
+
+        if not df_cli.empty:
+
+
+            sel = st.selectbox(
+
+                "Cliente",
+
+                df_cli["nombre"]
+
+            )
+
+
+            datos = df_cli[
+
+                df_cli["nombre"] == sel
+
+            ].iloc[0]
+
+
+            with st.form("edit"):
+
+
+                nombre = st.text_input(
+
+                    "Nombre",
+
+                    datos["nombre"]
+
+                )
+
+
+                whatsapp = st.text_input(
+
+                    "WhatsApp",
+
+                    datos["whatsapp"]
+
+                )
+
+
+                email = st.text_input(
+
+                    "Email",
+
+                    datos["email"]
+
+                )
+
+
+                direccion = st.text_input(
+
+                    "Dirección",
+
+                    datos["direccion"]
+
+                )
+
+
+                notas = st.text_area(
+
+                    "Notas",
+
+                    datos["notas"]
+
+                )
+
+
+                col1,col2 = st.columns(2)
+
+
+                if col1.form_submit_button("Actualizar"):
+
+
+                    with conectar() as conn:
+
+
+                        conn.execute("""
+
+                        UPDATE clientes
+
+                        SET nombre=?,
+
+                        whatsapp=?,
+
+                        email=?,
+
+                        direccion=?,
+
+                        notas=?
+
+                        WHERE id=?
+
+                        """,(
+
+                            nombre,
+
+                            whatsapp,
+
+                            email,
+
+                            direccion,
+
+                            notas,
+
+                            datos["id"]
+
+                        ))
+
+
+                        conn.commit()
+
+
+                    st.success("Actualizado")
+
+                    st.rerun()
+
+
+
+                if col2.form_submit_button("Eliminar"):
+
+
+                    with conectar() as conn:
+
+
+                        conn.execute(
+
+                            "DELETE FROM clientes WHERE id=?",
+
+                            (datos["id"],)
+
+                        )
+
+
+                        conn.commit()
+
+
+                    st.warning("Cliente eliminado")
+
+                    st.rerun()
+
+
+
+    # ============================================
+    # RANKING
+    # ============================================
+
+    with tabs[3]:
+
+
+        if not df_cli.empty:
+
+
+            st.subheader("🏆 Ranking Clientes")
+
+
+            fig = px.bar(
+
+                df_cli.head(10),
+
+                x="nombre",
+
+                y="total_compras",
+
+                text="total_compras"
+
+            )
+
+
+            st.plotly_chart(
+
+                fig,
+
+                use_container_width=True
+
+            )
 
 
 
@@ -3930,6 +4106,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
