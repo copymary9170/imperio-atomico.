@@ -627,7 +627,7 @@ with st.sidebar:
 
     saldo_usd = st.session_state.get("kontigo_saldo", 0.0)
 
-    tasa_k = t_bin  # puedes cambiar a tasa_kontigo si la creas
+    tasa_k = t_bin
 
     saldo_bs = saldo_usd * tasa_k
 
@@ -637,7 +637,6 @@ with st.sidebar:
         f"${saldo_usd:,.2f}"
     )
 
-
     st.metric(
         "Saldo Bs",
         f"Bs {saldo_bs:,.2f}"
@@ -645,7 +644,7 @@ with st.sidebar:
 
 
     # ===========================================================
-    # CALCULADORA ENTRADA
+    # CALCULADORA ENTRADA 1
     # ===========================================================
 
     st.caption("📥 Calcular monto para meter")
@@ -674,9 +673,43 @@ with st.sidebar:
     st.write(f"Debes pagar Bs: {total_bs_in:,.2f}")
 
 
-    # ===========================================================
-    # CALCULADORA SALIDA
-    # ===========================================================
+    # ======================================================
+    # CALCULADORA ENTRADA 2
+    # ======================================================
+
+    st.caption("📥 Meter dinero")
+
+    monto = st.number_input(
+        "Monto USD",
+        key="calc_k_in"
+    )
+
+    com_k = st.number_input(
+        "Comisión Kontigo %",
+        value=3.0,
+        key="calc_k_in_com"
+    )
+
+    com_pm2 = st.number_input(
+        "Comisión Pago móvil %",
+        value=2.0,
+        key="calc_k_pm"
+    )
+
+    total_com = com_k + com_pm2
+
+    monto_bs = monto * tasa_k
+
+    comision_bs = monto_bs * total_com / 100
+
+    total_bs = monto_bs + comision_bs
+
+    st.write(f"Debes pagar: Bs {total_bs:,.2f}")
+
+
+    # ======================================================
+    # CALCULADORA SALIDA 1
+    # ======================================================
 
     st.caption("📤 Calcular monto para sacar")
 
@@ -694,106 +727,38 @@ with st.sidebar:
     total_bs_out = monto_out * tasa_k * (1 - com_k_out / 100)
 
     st.write(f"Recibes Bs: {total_bs_out:,.2f}")
-# ======================================================
-# CALCULADORA ENTRADA
-# ======================================================
-
-st.caption("📥 Meter dinero")
 
 
-monto = st.number_input(
+    # ======================================================
+    # CALCULADORA SALIDA 2
+    # ======================================================
 
-    "Monto USD",
+    st.caption("📤 Sacar dinero")
 
-    key="calc_k_in"
+    monto_out2 = st.number_input(
+        "Monto USD retirar",
+        key="calc_k_out"
+    )
 
-)
+    com_out = st.number_input(
+        "Comisión retiro %",
+        value=3.0,
+        key="calc_k_out_com"
+    )
 
+    monto_bs_out = monto_out2 * tasa_k
 
-com_k = st.number_input(
+    comision_out_bs = monto_bs_out * com_out / 100
 
-    "Comisión Kontigo %",
+    total_out_bs = monto_bs_out - comision_out_bs
 
-    value=3.0,
-
-    key="calc_k_in_com"
-
-)
-
-
-com_pm = st.number_input(
-
-    "Comisión Pago móvil %",
-
-    value=2.0,
-
-    key="calc_k_pm"
-
-)
+    st.write(f"Recibes: Bs {total_out_bs:,.2f}")
 
 
-total_com = com_k + com_pm
+    # ======================================================
+    # MENU
+    # ======================================================
 
-
-monto_bs = monto * tasa_k
-
-
-comision_bs = monto_bs * total_com / 100
-
-
-total_bs = monto_bs + comision_bs
-
-
-st.write(
-
-    f"Debes pagar: Bs {total_bs:,.2f}"
-
-)
-
-
-# ======================================================
-# CALCULADORA SALIDA
-# ======================================================
-
-st.caption("📤 Sacar dinero")
-
-
-monto_out = st.number_input(
-
-    "Monto USD retirar",
-
-    key="calc_k_out"
-
-)
-
-
-com_out = st.number_input(
-
-    "Comisión retiro %",
-
-    value=3.0,
-
-    key="calc_k_out_com"
-
-)
-
-
-monto_bs_out = monto_out * tasa_k
-
-
-comision_out_bs = monto_bs_out * com_out / 100
-
-
-total_out_bs = monto_bs_out - comision_out_bs
-
-
-st.write(
-
-    f"Recibes: Bs {total_out_bs:,.2f}"
-
-)
-
-    # ✅ RADIO CORRECTAMENTE CERRADO
     menu = st.radio(
         "Secciones:",
         [
@@ -813,7 +778,11 @@ st.write(
         ]
     )
 
-    # ✅ DETECTAR BASES
+
+    # ======================================================
+    # BASES DETECTADAS
+    # ======================================================
+
     st.subheader("📁 Bases detectadas")
 
     import glob
@@ -830,7 +799,11 @@ st.write(
 
         st.write("No hay archivos .db detectados")
 
-    # BOTÓN LOGOUT
+
+    # ======================================================
+    # LOGOUT
+    # ======================================================
+
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
 
         st.session_state.clear()
@@ -4561,6 +4534,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
