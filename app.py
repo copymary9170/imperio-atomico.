@@ -3743,13 +3743,12 @@ def registrar_venta_global(
 # 👥 MÓDULO PROFESIONAL DE CLIENTES — IMPERIO ATÓMICO ERP PRO
 # ===========================================================
 
-    elif menu == "👥 Clientes":
+elif menu == "👥 Clientes":
 
     st.title("👥 Gestión de Clientes")
 
     with conectar() as conn:
 
-        # asegurar tabla
         conn.execute("""
         CREATE TABLE IF NOT EXISTS clientes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3766,10 +3765,6 @@ def registrar_venta_global(
             "SELECT * FROM clientes ORDER BY nombre",
             conn
         )
-
-    # ============================================
-    # DASHBOARD
-    # ============================================
 
     total = len(df_cli)
 
@@ -3791,9 +3786,7 @@ def registrar_venta_global(
         "✏️ Editar / Eliminar"
     ])
 
-    # ============================================
-    # TAB DIRECTORIO
-    # ============================================
+    # DIRECTORIO
 
     with tabs[0]:
 
@@ -3813,37 +3806,18 @@ def registrar_venta_global(
                     df_v['nombre'].str.contains(buscar, case=False)
                 ]
 
-            st.dataframe(
-                df_v,
-                column_config={
-                    "id": None,
-                    "nombre": "Cliente",
-                    "whatsapp": "WhatsApp",
-                    "email": "Email",
-                    "direccion": "Dirección",
-                    "notas": "Notas",
-                    "fecha": "Fecha"
-                },
-                use_container_width=True,
-                hide_index=True
-            )
+            st.dataframe(df_v, use_container_width=True, hide_index=True)
 
-    # ============================================
-    # TAB REGISTRAR
-    # ============================================
+    # REGISTRAR
 
     with tabs[1]:
 
         with st.form("nuevo_cliente"):
 
             nombre = st.text_input("Nombre")
-
             whatsapp = st.text_input("WhatsApp")
-
             email = st.text_input("Email")
-
             direccion = st.text_input("Dirección")
-
             notas = st.text_area("Notas")
 
             guardar = st.form_submit_button("Guardar")
@@ -3884,17 +3858,11 @@ def registrar_venta_global(
 
                     st.error("Cliente ya existe")
 
-    # ============================================
-    # TAB EDITAR
-    # ============================================
+    # EDITAR
 
     with tabs[2]:
 
-        if df_cli.empty:
-
-            st.info("No hay clientes")
-
-        else:
+        if not df_cli.empty:
 
             sel = st.selectbox(
                 "Seleccionar",
@@ -3907,35 +3875,15 @@ def registrar_venta_global(
 
             with st.form("editar_cliente"):
 
-                nombre = st.text_input(
-                    "Nombre",
-                    value=datos['nombre']
-                )
-
-                whatsapp = st.text_input(
-                    "WhatsApp",
-                    value=datos['whatsapp']
-                )
-
-                email = st.text_input(
-                    "Email",
-                    value=datos.get('email', '')
-                )
-
-                direccion = st.text_input(
-                    "Dirección",
-                    value=datos.get('direccion', '')
-                )
-
-                notas = st.text_area(
-                    "Notas",
-                    value=datos.get('notas', '')
-                )
+                nombre = st.text_input("Nombre", value=datos['nombre'])
+                whatsapp = st.text_input("WhatsApp", value=datos['whatsapp'])
+                email = st.text_input("Email", value=datos.get('email', ''))
+                direccion = st.text_input("Dirección", value=datos.get('direccion', ''))
+                notas = st.text_area("Notas", value=datos.get('notas', ''))
 
                 col1, col2 = st.columns(2)
 
                 actualizar = col1.form_submit_button("Actualizar")
-
                 eliminar = col2.form_submit_button("Eliminar")
 
             if actualizar:
@@ -3979,8 +3927,6 @@ def registrar_venta_global(
                 cargar_datos()
 
                 st.rerun()
-
-
 
 
 
