@@ -54,54 +54,45 @@ def obtener_password_admin_inicial() -> str:
     return os.getenv('IMPERIO_ADMIN_PASSWORD', 'atomica2026')
 
 # --- 3. INICIALIZACIÓN DEL SISTEMA ---
+# ===========================================================
+# 3. INICIALIZACIÓN DEL SISTEMA — IMPERIO ATÓMICO ERP PRO
+# ===========================================================
 def inicializar_sistema():
-    st.divider()
-st.subheader("🏢 Costos Operativos Mensuales")
 
-# Cargar costos operativos correctamente
-try:
     with conectar() as conn:
-        df_costos = pd.read_sql(
-            "SELECT * FROM costos_operativos",
-            conn
+
+        c = conn.cursor()
+
+        # ===================================================
+        # CONFIGURACIÓN GENERAL
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS configuracion (
+            parametro TEXT PRIMARY KEY,
+            valor REAL
         )
-except Exception:
-    df_costos = pd.DataFrame(
-        columns=["id", "nombre", "monto_mensual"]
-    )
+        """)
 
-st.dataframe(df_costos, use_container_width=True)
 
-# Formulario agregar costo
-with st.form("form_costos_operativos"):
+        # ===================================================
+        # TASAS DE CAMBIO
+        # ===================================================
 
-    nombre = st.text_input("Nombre del costo")
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS tasas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tasa_bcv REAL,
+            tasa_binance REAL,
+            fecha TEXT
+        )
+        """)
 
-    monto = st.number_input(
-        "Monto mensual ($)",
-        min_value=0.0
-    )
 
-    if st.form_submit_button("Guardar costo"):
+        # ===================================================
+        # COSTOS OPERATIVOS
+        # ===================================================
 
-        with conectar() as conn:
-
-            conn.execute(
-                """
-                INSERT INTO costos_operativos
-                (nombre, monto_mensual)
-                VALUES (?,?)
-                """,
-                (nombre, monto)
-            )
-
-            conn.commit()
-
-        st.success("Costo agregado")
-
-        st.rerun()
-        
-        # FORZAR CREACIÓN
         c.execute("""
         CREATE TABLE IF NOT EXISTS costos_operativos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,202 +101,236 @@ with st.form("form_costos_operativos"):
         )
         """)
 
-        
-        tablas = [
 
-            
-            # CLIENTES
-            "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
+        # ===================================================
+        # CLIENTES
+        # ===================================================
 
-            # INVENTARIO (MEJORADO)
-            """CREATE TABLE IF NOT EXISTS inventario (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item TEXT UNIQUE,
-                cantidad REAL,
-                unidad TEXT,
-                precio_usd REAL,
-                minimo REAL DEFAULT 5.0,
-                area_por_pliego_cm2 REAL,
-                activo INTEGER DEFAULT 1,
-                ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
-            )""",
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS clientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            whatsapp TEXT
+        )
+        """)
 
-            # CONFIGURACION
-            "CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor REAL)",
 
-            # USUARIOS
-            "CREATE TABLE IF NOT EXISTS usuarios (username TEXT PRIMARY KEY, password TEXT, password_hash TEXT, rol TEXT, nombre TEXT)",
+        # ===================================================
+        # USUARIOS
+        # ===================================================
 
-            # VENTAS
-            "CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER, cliente TEXT, detalle TEXT, monto_total REAL, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            username TEXT PRIMARY KEY,
+            password TEXT,
+            password_hash TEXT,
+            rol TEXT,
+            nombre TEXT
+        )
+        """)
 
-            # GASTOS
-            "CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY AUTOINCREMENT, descripcion TEXT, monto REAL, categoria TEXT, metodo TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP)",
 
-            # COSTOS OPERATIVOS FIJOS
-"""
-CREATE TABLE IF NOT EXISTS costos_operativos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT,
-    monto_mensual REAL
-)
-"""
+        # ===================================================
+        # INVENTARIO
+        # ===================================================
 
-            # MOVIMIENTOS DE INVENTARIO (MEJORADO)
-            """CREATE TABLE IF NOT EXISTS inventario_movs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_id INTEGER,
-                tipo TEXT,
-                cantidad REAL,
-                motivo TEXT,
-                usuario TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(item_id) REFERENCES inventario(id)
-            )""",
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS inventario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item TEXT UNIQUE,
+            cantidad REAL,
+            unidad TEXT,
+            precio_usd REAL,
+            minimo REAL DEFAULT 5.0,
+            activo INTEGER DEFAULT 1,
+            ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
 
-            # PROVEEDORES
-            """CREATE TABLE IF NOT EXISTS proveedores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT UNIQUE,
-                telefono TEXT,
-                rif TEXT,
-                contacto TEXT,
-                observaciones TEXT,
-                fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
-            )""",
 
-            # HISTORIAL DE COMPRAS
-            """CREATE TABLE IF NOT EXISTS historial_compras (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item TEXT,
-                proveedor_id INTEGER,
-                cantidad REAL,
-                unidad TEXT,
-                costo_total_usd REAL,
-                costo_unit_usd REAL,
-                impuestos REAL,
-                delivery REAL,
-                tasa_usada REAL,
-                moneda_pago TEXT,
-                usuario TEXT,
-                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-            )""",
+        # ===================================================
+        # MOVIMIENTOS INVENTARIO
+        # ===================================================
 
-            # NÓMINA Y COMISIONES
-"""
-CREATE TABLE IF NOT EXISTS nomina_movs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    venta_id INTEGER,
-    colaborador TEXT,
-    porcentaje REAL,
-    monto REAL,
-    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-""",
-        ]
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS inventario_movs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER,
+            tipo TEXT,
+            cantidad REAL,
+            motivo TEXT,
+            usuario TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
 
-        for tabla in tablas:
-            c.execute(tabla)
 
-        # MIGRACIONES LIGERAS
-        columnas_usuarios = {row[1] for row in c.execute("PRAGMA table_info(usuarios)").fetchall()}
-        if 'password_hash' not in columnas_usuarios:
-            c.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT")
+        # ===================================================
+        # COMPRAS
+        # ===================================================
 
-        columnas_movs = {row[1] for row in c.execute("PRAGMA table_info(inventario_movs)").fetchall()}
-        if 'item_id' not in columnas_movs:
-            c.execute("ALTER TABLE inventario_movs ADD COLUMN item_id INTEGER")
-        if 'item' in columnas_movs:
-            c.execute(
-                """
-                UPDATE inventario_movs
-                SET item_id = (
-                    SELECT i.id FROM inventario i WHERE i.item = inventario_movs.item LIMIT 1
-                )
-                WHERE item_id IS NULL
-                """
-            )
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS compras (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proveedor TEXT,
+            total REAL,
+            usuario TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
 
-        columnas_inventario = {row[1] for row in c.execute("PRAGMA table_info(inventario)").fetchall()}
-        if 'cantidad' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN cantidad REAL DEFAULT 0")
-        if 'unidad' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN unidad TEXT DEFAULT 'Unidad'")
-        if 'precio_usd' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN precio_usd REAL DEFAULT 0")
-        if 'minimo' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN minimo REAL DEFAULT 5.0")
-        if 'ultima_actualizacion' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN ultima_actualizacion DATETIME")
-            c.execute("UPDATE inventario SET ultima_actualizacion = CURRENT_TIMESTAMP WHERE ultima_actualizacion IS NULL")
-        if 'imprimible_cmyk' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
-        if 'area_por_pliego_cm2' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN area_por_pliego_cm2 REAL")
-        if 'activo' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN activo INTEGER DEFAULT 1")
-        c.execute("UPDATE inventario SET activo = 1 WHERE activo IS NULL")
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS compras_detalle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            compra_id INTEGER,
+            item TEXT,
+            cantidad REAL,
+            costo REAL
+        )
+        """)
 
-        c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
 
-        columnas_ventas = {row[1] for row in c.execute("PRAGMA table_info(ventas)").fetchall()}
-        if 'usuario' not in columnas_ventas:
-            c.execute("ALTER TABLE ventas ADD COLUMN usuario TEXT")
+        # ===================================================
+        # VENTAS
+        # ===================================================
 
-        # --- COLUMNAS FINANCIERAS PROFESIONALES ---
-        if 'costo_total' not in columnas_ventas:
-            c.execute("ALTER TABLE ventas ADD COLUMN costo_total REAL DEFAULT 0")
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS ventas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id INTEGER,
+            cliente TEXT,
+            monto_total REAL,
+            costo_total REAL,
+            utilidad REAL,
+            margen REAL,
+            metodo TEXT,
+            usuario TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
 
-        if 'utilidad' not in columnas_ventas:
-            c.execute("ALTER TABLE ventas ADD COLUMN utilidad REAL DEFAULT 0")
 
-        if 'margen' not in columnas_ventas:
-            c.execute("ALTER TABLE ventas ADD COLUMN margen REAL DEFAULT 0")
-        
-        columnas_proveedores = {row[1] for row in c.execute("PRAGMA table_info(proveedores)").fetchall()}
-        if "telefono" not in columnas_proveedores:
-            c.execute("ALTER TABLE proveedores ADD COLUMN telefono TEXT")
-        if "rif" not in columnas_proveedores:
-            c.execute("ALTER TABLE proveedores ADD COLUMN rif TEXT")
-        if "contacto" not in columnas_proveedores:
-            c.execute("ALTER TABLE proveedores ADD COLUMN contacto TEXT")
-        if "observaciones" not in columnas_proveedores:
-            c.execute("ALTER TABLE proveedores ADD COLUMN observaciones TEXT")
-        if "fecha_creacion" not in columnas_proveedores:
-            c.execute("ALTER TABLE proveedores ADD COLUMN fecha_creacion TEXT")
-            c.execute("UPDATE proveedores SET fecha_creacion = CURRENT_TIMESTAMP WHERE fecha_creacion IS NULL")
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS ventas_detalle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            venta_id INTEGER,
+            item TEXT,
+            cantidad REAL,
+            costo REAL,
+            precio REAL
+        )
+        """)
 
-        # USUARIO ADMIN POR DEFECTO
-        admin_password = obtener_password_admin_inicial()
-        c.execute(
-            """
-            INSERT OR IGNORE INTO usuarios (username, password, password_hash, rol, nombre)
+
+        # ===================================================
+        # GASTOS
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS gastos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            descripcion TEXT,
+            monto REAL,
+            categoria TEXT,
+            metodo TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+
+        # ===================================================
+        # ACTIVOS
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS activos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            costo REAL,
+            vida_util_meses INTEGER,
+            fecha_compra TEXT
+        )
+        """)
+
+
+        # ===================================================
+        # COTIZACIONES
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS cotizaciones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente TEXT,
+            total REAL,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS cotizacion_detalle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cotizacion_id INTEGER,
+            item TEXT,
+            cantidad REAL,
+            precio REAL
+        )
+        """)
+
+
+        # ===================================================
+        # CMYK LOG
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS cmyk_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            archivo TEXT,
+            area REAL,
+            costo REAL,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+
+        # ===================================================
+        # CIERRE DE CAJA
+        # ===================================================
+
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS cierre_caja (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT,
+            ventas REAL,
+            gastos REAL,
+            utilidad REAL,
+            usuario TEXT
+        )
+        """)
+
+
+        # ===================================================
+        # CREAR ADMIN
+        # ===================================================
+
+        try:
+
+            admin_password = obtener_password_admin_inicial()
+
+            c.execute("""
+            INSERT OR IGNORE INTO usuarios
             VALUES (?, ?, ?, ?, ?)
-            """,
-            ('jefa', '', hash_password(admin_password), 'Admin', 'Dueña del Imperio')
-        )
-        c.execute(
-            """
-            UPDATE usuarios
-            SET password_hash = ?, password = ''
-            WHERE username = 'jefa' AND (password_hash IS NULL OR password_hash = '')
-            """,
-            (hash_password(admin_password),)
-        )
+            """, (
+                "jefa",
+                "",
+                hash_password(admin_password),
+                "Admin",
+                "Dueña del Imperio"
+            ))
 
-        # CONFIGURACIÓN INICIAL
-        config_init = [
-            ('tasa_bcv', 36.50),
-            ('tasa_binance', 38.00),
-            ('costo_tinta_ml', 0.10),
-            ('iva_perc', 16.0),
-            ('igtf_perc', 3.0),
-            ('banco_perc', 0.5),
-            ('costo_tinta_auto', 1.0)
-        ]
+        except:
+            pass
 
-        for p, v in config_init:
-            c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
 
         conn.commit()
 
@@ -1342,6 +1367,28 @@ elif menu == "📦 Inventario":
 elif menu == "⚙️ Configuración":
 
     st.title("⚙️ Configuración del Sistema")
+
+    st.subheader("🏢 Costos Operativos")
+
+    with conectar() as conn:
+        df_costos = pd.read_sql("SELECT * FROM costos_operativos", conn)
+
+    st.dataframe(df_costos)
+
+    with st.form("form_costos_operativos_config"):
+        nombre = st.text_input("Nombre")
+        monto = st.number_input("Monto")
+
+        if st.form_submit_button("Guardar"):
+            with conectar() as conn:
+                conn.execute(
+                    "INSERT INTO costos_operativos (nombre, monto_mensual) VALUES (?,?)",
+                    (nombre, monto)
+                )
+                conn.commit()
+
+            st.rerun()
+            
     st.caption("Parámetros generales, tasas y costos operativos")
 
     # ===========================================================
@@ -1415,96 +1462,8 @@ elif menu == "⚙️ Configuración":
     st.divider()
 
 
-    # ===========================================================
-    # 🏢 COSTOS OPERATIVOS
-    # ===========================================================
-
-    st.subheader("🏢 Costos Operativos Mensuales")
-
-    # Crear tabla si no existe
-    with conectar() as conn:
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS costos_operativos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT,
-                monto_mensual REAL
-            )
-        """)
-
-        conn.commit()
-
-
-    # Cargar datos
-    try:
-
-        with conectar() as conn:
-
-            df_costos = pd.read_sql(
-                "SELECT * FROM costos_operativos ORDER BY nombre",
-                conn
-            )
-
-    except Exception:
-
-        df_costos = pd.DataFrame(
-            columns=["id", "nombre", "monto_mensual"]
-        )
-
-
-    st.dataframe(
-        df_costos,
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-    # Formulario nuevo costo
-    with st.form(key="form_costos_operativos_config"):
-
-        col1, col2 = st.columns(2)
-
-        nombre_costo = col1.text_input(
-            "Nombre del costo",
-            placeholder="Ej: Alquiler, Internet, Electricidad"
-        )
-
-        monto_costo = col2.number_input(
-            "Monto mensual ($)",
-            min_value=0.0,
-            format="%.2f"
-        )
-
-        guardar_costo = st.form_submit_button(
-            "💾 Guardar costo",
-            use_container_width=True
-        )
-
-
-    if guardar_costo:
-
-        if nombre_costo.strip() == "":
-
-            st.error("Debe escribir el nombre del costo")
-
-        else:
-
-            with conectar() as conn:
-
-                conn.execute(
-                    """
-                    INSERT INTO costos_operativos
-                    (nombre, monto_mensual)
-                    VALUES (?,?)
-                    """,
-                    (nombre_costo, monto_costo)
-                )
-
-                conn.commit()
-
-            st.success("Costo guardado correctamente")
-            st.rerun()
-
+   
+  
 
     # ===========================================================
     # 📊 RESUMEN COSTOS
@@ -3670,6 +3629,9 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
+
+
 
 
 
