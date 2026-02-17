@@ -2152,7 +2152,7 @@ elif menu == "⚙️ Configuración":
         conn.commit()
 
 
-   # ===========================================================
+# ===========================================================
 # 🏢 COSTOS OPERATIVOS PRO MAX — IMPERIO ATÓMICO
 # ===========================================================
 
@@ -2171,7 +2171,9 @@ with conectar() as conn:
     )
 
 
-# calcular costo real
+# ===========================================================
+# CALCULAR COSTO REAL
+# ===========================================================
 
 if not df_costos.empty:
 
@@ -2186,7 +2188,9 @@ if not df_costos.empty:
     )
 
 
-# mostrar tabla profesional
+# ===========================================================
+# MOSTRAR TABLA
+# ===========================================================
 
 st.dataframe(
 
@@ -2201,7 +2205,10 @@ st.dataframe(
             format="$%.2f"
         ),
 
-        "porcentaje_empresa": "% Empresa",
+        "porcentaje_empresa": st.column_config.NumberColumn(
+            "% Empresa",
+            format="%.0f %%"
+        ),
 
         "costo_real": st.column_config.NumberColumn(
             "Costo Real",
@@ -2218,40 +2225,38 @@ st.dataframe(
 
 
 # ===========================================================
-# FORMULARIO
+# FORMULARIOS
 # ===========================================================
 
 col1, col2 = st.columns(2)
 
 
+# ===========================================================
+# AGREGAR NUEVO
+# ===========================================================
+
 with col1:
+
+    st.markdown("### ➕ Agregar nuevo")
 
     with st.form("nuevo_costo"):
 
         nombre = st.text_input("Servicio")
 
         monto = st.number_input(
-
             "Monto mensual",
-
             format="%.2f"
-
         )
 
         porcentaje = st.slider(
-
             "% uso empresa",
-
             0,
-
             100,
-
             100
-
         )
 
 
-        if st.form_submit_button("Guardar"):
+        if st.form_submit_button("💾 Guardar"):
 
             if nombre:
 
@@ -2261,33 +2266,32 @@ with col1:
 
                         """
 
-                        INSERT OR REPLACE INTO costos_operativos
+                        INSERT INTO costos_operativos
 
-                        VALUES (
+                        (nombre, monto_mensual, porcentaje_empresa)
 
-                            (SELECT id FROM costos_operativos WHERE nombre=?),
+                        VALUES (?,?,?)
 
-                            ?,?,?
+                        ON CONFLICT(nombre)
 
-                        )
+                        DO UPDATE SET
+
+                        monto_mensual=excluded.monto_mensual,
+
+                        porcentaje_empresa=excluded.porcentaje_empresa
 
                         """,
 
                         (
-
                             nombre,
-
-                            nombre,
-
                             monto,
-
                             porcentaje
-
                         )
 
                     )
 
                     conn.commit()
+
 
                 st.success("Guardado")
 
@@ -2295,23 +2299,103 @@ with col1:
 
 
 # ===========================================================
-# ELIMINAR
+# EDITAR / ELIMINAR
 # ===========================================================
 
 with col2:
 
     if not df_costos.empty:
 
-        eliminar = st.selectbox(
+        st.markdown("### ✏️ Editar / eliminar")
 
-            "Eliminar",
+        servicio = st.selectbox(
+
+            "Servicio",
 
             df_costos["nombre"]
 
         )
 
 
-        if st.button("Eliminar"):
+        fila = df_costos[
+            df_costos["nombre"] == servicio
+        ].iloc[0]
+
+
+        nuevo_monto = st.number_input(
+
+            "Monto",
+
+            value=float(fila["monto_mensual"]),
+
+            key="edit_monto"
+
+        )
+
+
+        nuevo_porcentaje = st.slider(
+
+            "% empresa",
+
+            0,
+
+            100,
+
+            int(fila["porcentaje_empresa"]),
+
+            key="edit_porcentaje"
+
+        )
+
+
+        colA, colB = st.columns(2)
+
+
+        # ACTUALIZAR
+
+        if colA.button("💾 Actualizar"):
+
+            with conectar() as conn:
+
+                conn.execute(
+
+                    """
+
+                    UPDATE costos_operativos
+
+                    SET
+
+                    monto_mensual=?,
+
+                    porcentaje_empresa=?
+
+                    WHERE nombre=?
+
+                    """,
+
+                    (
+
+                        nuevo_monto,
+
+                        nuevo_porcentaje,
+
+                        servicio
+
+                    )
+
+                )
+
+                conn.commit()
+
+
+            st.success("Actualizado")
+
+            st.rerun()
+
+
+        # ELIMINAR
+
+        if colB.button("🗑 Eliminar"):
 
             with conectar() as conn:
 
@@ -2319,11 +2403,14 @@ with col2:
 
                     "DELETE FROM costos_operativos WHERE nombre=?",
 
-                    (eliminar,)
+                    (servicio,)
 
                 )
 
                 conn.commit()
+
+
+            st.warning("Eliminado")
 
             st.rerun()
 
@@ -2388,7 +2475,6 @@ if not df_costos.empty:
     # guardar para cotizaciones
 
     st.session_state.costo_operativo_minuto = minuto
-
 
     # ===========================================================
     # TASAS
@@ -4960,6 +5046,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
