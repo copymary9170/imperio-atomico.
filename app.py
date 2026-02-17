@@ -76,6 +76,54 @@ def inicializar_sistema():
 
 
         # ===================================================
+# PROVEEDORES
+# ===================================================
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS proveedores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT UNIQUE,
+    telefono TEXT,
+    rif TEXT,
+    contacto TEXT,
+    observaciones TEXT,
+    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+
+# ===================================================
+# HISTORIAL DE COMPRAS
+# ===================================================
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS historial_compras (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item TEXT,
+    proveedor_id INTEGER,
+    cantidad REAL,
+    unidad TEXT,
+    costo_total_usd REAL,
+    costo_unit_usd REAL,
+    impuestos REAL,
+    delivery REAL,
+    tasa_usada REAL,
+    moneda_pago TEXT,
+    usuario TEXT,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+try:
+    c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
+except:
+    pass
+
+try:
+    c.execute("ALTER TABLE inventario ADD COLUMN area_por_pliego_cm2 REAL")
+except:
+    pass
+        # ===================================================
         # TASAS DE CAMBIO
         # ===================================================
 
@@ -3629,6 +3677,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
