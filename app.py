@@ -1470,12 +1470,12 @@ elif menu == "📦 Inventario":
         c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
 # ===========================================================
-# 👥 CRM PRO MAX 7.5 — IMPERIO ATÓMICO (ULTRA MEJORADO)
+# 👥 CRM PRO MAX 8.1 — IMPERIO ATÓMICO (ULTRA COMPLETO + CORRECCIÓN)
 # ===========================================================
 
 elif menu == "👥 Clientes":
 
-    st.title("👥 CRM PRO MAX 7.5")
+    st.title("👥 CRM PRO MAX 8.1")
 
     # ===========================================================
     # BASE DE DATOS
@@ -1496,17 +1496,14 @@ elif menu == "👥 Clientes":
         )
         """)
 
-        # ACTUALIZACIÓN SEGURA
         columnas = [c[1] for c in conn.execute("PRAGMA table_info(clientes)")]
 
-        if "direccion" not in columnas:
-            conn.execute("ALTER TABLE clientes ADD COLUMN direccion TEXT")
+        for col in ["whatsapp","email","direccion","etiqueta","notas"]:
 
-        if "notas" not in columnas:
-            conn.execute("ALTER TABLE clientes ADD COLUMN notas TEXT")
+            if col not in columnas:
 
-        if "etiqueta" not in columnas:
-            conn.execute("ALTER TABLE clientes ADD COLUMN etiqueta TEXT")
+                conn.execute(f"ALTER TABLE clientes ADD COLUMN {col} TEXT")
+
 
         df_cli = pd.read_sql("""
 
@@ -1521,14 +1518,14 @@ elif menu == "👥 Clientes":
         MAX(v.fecha) ultima_compra,
 
         CASE 
-            WHEN COUNT(v.id) > 0 
+            WHEN COUNT(v.id)>0 
             THEN SUM(v.monto_total)/COUNT(v.id)
             ELSE 0
         END ticket_promedio
 
         FROM clientes c
 
-        LEFT JOIN ventas v ON v.cliente_id = c.id
+        LEFT JOIN ventas v ON v.cliente_id=c.id
 
         GROUP BY c.id
 
@@ -1536,112 +1533,85 @@ elif menu == "👥 Clientes":
 
         """, conn)
 
+
     # ===========================================================
-    # CLIENTE VACIO
+    # CALCULOS
+    # ===========================================================
+
+    df_cli["ultima_compra"]=pd.to_datetime(df_cli["ultima_compra"],errors="coerce")
+
+    df_cli["dias"]=(pd.Timestamp.now()-df_cli["ultima_compra"]).dt.days.fillna(999)
+
+
+    def estado(row):
+
+        if row.total>=1000:
+            return "🟣 VIP"
+
+        elif row.dias>90:
+            return "🔴 Perdido"
+
+        elif row.dias>30:
+            return "🟡 Riesgo"
+
+        else:
+            return "🟢 Activo"
+
+
+    df_cli["estado"]=df_cli.apply(estado,axis=1)
+
+
+    df_cli["score"]=(df_cli.total*0.5)+(df_cli.pedidos*30)-(df_cli.dias*2)
+
+
+    # ===========================================================
+    # DASHBOARD
     # ===========================================================
 
     if df_cli.empty:
 
         st.warning("No hay clientes registrados")
 
-        with st.form("nuevo_inicial"):
-
-            nombre = st.text_input("Nombre")
-            whatsapp = st.text_input("WhatsApp")
-
-            if st.form_submit_button("Crear"):
-
-                if nombre:
-
-                    with conectar() as conn:
-
-                        conn.execute(
-                            "INSERT INTO clientes (nombre,whatsapp) VALUES (?,?)",
-                            (nombre, whatsapp)
-                        )
-
-                        conn.commit()
-
-                    st.success("Cliente creado")
-
-                    st.rerun()
-
         st.stop()
 
-    # ===========================================================
-    # CALCULOS
-    # ===========================================================
 
-    df_cli["ultima_compra"] = pd.to_datetime(df_cli["ultima_compra"], errors="coerce")
+    top=df_cli.iloc[0]
 
-    df_cli["dias"] = (pd.Timestamp.now() - df_cli["ultima_compra"]).dt.days
+    c1,c2,c3,c4,c5=st.columns(5)
 
-    df_cli["dias"] = df_cli["dias"].fillna(999)
+    c1.metric("Clientes",len(df_cli))
 
-    def estado(row):
+    c2.metric("Facturación",f"${df_cli.total.sum():,.0f}")
 
-        if row.total >= 1000:
-            return "VIP"
+    c3.metric("VIP",len(df_cli[df_cli.estado.str.contains("VIP")]))
 
-        if row.dias > 90:
-            return "Perdido"
+    c4.metric("En riesgo",len(df_cli[df_cli.estado.str.contains("Riesgo")]))
 
-        if row.dias > 30:
-            return "Riesgo"
+    c5.metric("TOP",top.nombre)
 
-        return "Activo"
-
-    df_cli["estado"] = df_cli.apply(estado, axis=1)
-
-    # SCORE
-
-    df_cli["score"] = (
-
-        df_cli["total"] * 0.6 +
-
-        df_cli["pedidos"] * 40 -
-
-        df_cli["dias"] * 2
-
-    )
-
-    # ===========================================================
-    # DASHBOARD
-    # ===========================================================
-
-    mejor_cliente = df_cli.iloc[0]
-
-    c1,c2,c3,c4,c5 = st.columns(5)
-
-    c1.metric("Clientes", len(df_cli))
-
-    c2.metric("Facturación", f"${df_cli.total.sum():,.0f}")
-
-    c3.metric("VIP", len(df_cli[df_cli.estado=="VIP"]))
-
-    c4.metric("En riesgo", len(df_cli[df_cli.estado=="Riesgo"]))
-
-    c5.metric("🏆 Top Cliente", mejor_cliente.nombre)
 
     # ===========================================================
     # TABS
     # ===========================================================
 
-    tabs = st.tabs([
+    tabs=st.tabs([
 
         "📋 Directorio",
 
-        "📊 Perfil 360°",
+        "📊 Perfil",
+
+        "✏️ Editar",
 
         "🏆 Ranking",
 
         "📊 Pipeline",
 
-        "⏰ Seguimientos",
+        "⏰ Seguimiento",
 
         "➕ Nuevo"
 
     ])
+
 
     # ===========================================================
     # DIRECTORIO
@@ -1649,54 +1619,8 @@ elif menu == "👥 Clientes":
 
     with tabs[0]:
 
-        col1,col2 = st.columns(2)
+        st.dataframe(df_cli,use_container_width=True)
 
-        buscar = col1.text_input("Buscar")
-
-        filtro_estado = col2.selectbox(
-            "Estado",
-            ["Todos","Activo","VIP","Riesgo","Perdido"]
-        )
-
-        df_view = df_cli.copy()
-
-        if buscar:
-
-            df_view = df_view[
-                df_view.nombre.str.contains(buscar, case=False)
-            ]
-
-        if filtro_estado != "Todos":
-
-            df_view = df_view[df_view.estado == filtro_estado]
-
-        st.dataframe(
-
-            df_view,
-
-            column_config={
-
-                "nombre":"Cliente",
-
-                "total":st.column_config.NumberColumn("Total",format="$%.0f"),
-
-                "ticket_promedio":st.column_config.NumberColumn("Ticket Prom",format="$%.0f"),
-
-                "pedidos":"Pedidos",
-
-                "dias":"Días",
-
-                "estado":"Estado",
-
-                "score":"Score"
-
-            },
-
-            use_container_width=True,
-
-            hide_index=True
-
-        )
 
     # ===========================================================
     # PERFIL
@@ -1704,35 +1628,33 @@ elif menu == "👥 Clientes":
 
     with tabs[1]:
 
-        cliente = st.selectbox("Cliente", df_cli.nombre)
+        cliente=st.selectbox("Cliente",df_cli.nombre)
 
-        datos = df_cli[df_cli.nombre==cliente].iloc[0]
+        datos=df_cli[df_cli.nombre==cliente].iloc[0]
 
-        col1,col2,col3,col4,col5 = st.columns(5)
+        c1,c2,c3,c4=st.columns(4)
 
-        col1.metric("Total", f"${datos.total:,.0f}")
+        c1.metric("Total",datos.total)
 
-        col2.metric("Pedidos", datos.pedidos)
+        c2.metric("Pedidos",datos.pedidos)
 
-        col3.metric("Ticket Prom", f"${datos.ticket_promedio:,.0f}")
+        c3.metric("Score",int(datos.score))
 
-        col4.metric("Estado", datos.estado)
+        c4.metric("Estado",datos.estado)
 
-        col5.metric("Score", int(datos.score))
 
         if datos.whatsapp:
 
-            mensaje = f"Hola {datos.nombre}, gracias por confiar en Imperio Atómico"
+            mensaje=f"Hola {datos.nombre}, gracias por confiar en Imperio Atómico"
 
-            url = f"https://wa.me/{datos.whatsapp}?text={mensaje}"
+            url=f"https://wa.me/{datos.whatsapp}?text={mensaje}"
 
-            st.link_button("💬 WhatsApp", url)
+            st.link_button("💬 WhatsApp",url)
 
-        # HISTORIAL
 
         with conectar() as conn:
 
-            hist = pd.read_sql("""
+            hist=pd.read_sql("""
 
             SELECT fecha,detalle,monto_total
 
@@ -1742,87 +1664,153 @@ elif menu == "👥 Clientes":
 
             ORDER BY fecha DESC
 
-            """, conn, params=(datos.id,))
+            """,conn,params=(datos.id,))
+
 
         st.subheader("Historial")
 
-        st.dataframe(hist, use_container_width=True)
+        st.dataframe(hist,use_container_width=True)
+
+
+    # ===========================================================
+    # EDITAR CLIENTE (CORRECCIÓN)
+    # ===========================================================
+
+    with tabs[2]:
+
+        cliente=st.selectbox("Editar cliente",df_cli.nombre,key="edit")
+
+        datos=df_cli[df_cli.nombre==cliente].iloc[0]
+
+
+        nombre_actual=datos.nombre or ""
+        whatsapp_actual=datos.whatsapp or ""
+        email_actual=datos.email or ""
+        direccion_actual=datos.direccion or ""
+        etiqueta_actual=datos.etiqueta or ""
+        notas_actual=datos.notas or ""
+
+
+        etiquetas=["","VIP","Empresa","Revendedor"]
+
+        try:
+
+            index_etiqueta=etiquetas.index(etiqueta_actual)
+
+        except:
+
+            index_etiqueta=0
+
+
+        with st.form("form_editar_cliente"):
+
+            nombre=st.text_input("Nombre",nombre_actual)
+
+            whatsapp=st.text_input("WhatsApp",whatsapp_actual)
+
+            email=st.text_input("Email",email_actual)
+
+            direccion=st.text_input("Direccion",direccion_actual)
+
+            etiqueta=st.selectbox("Etiqueta",etiquetas,index=index_etiqueta)
+
+            notas=st.text_area("Notas",notas_actual)
+
+
+            col1,col2=st.columns(2)
+
+            guardar=col1.form_submit_button("💾 Guardar")
+
+            eliminar=col2.form_submit_button("🗑️ Eliminar")
+
+
+        if guardar:
+
+            with conectar() as conn:
+
+                conn.execute("""
+
+                UPDATE clientes
+
+                SET nombre=?,whatsapp=?,email=?,direccion=?,etiqueta=?,notas=?
+
+                WHERE id=?
+
+                """,(nombre,whatsapp,email,direccion,etiqueta,notas,int(datos.id)))
+
+                conn.commit()
+
+            st.success("Cliente actualizado")
+
+            st.rerun()
+
+
+        if eliminar:
+
+            with conectar() as conn:
+
+                conn.execute("DELETE FROM clientes WHERE id=?",(int(datos.id),))
+
+                conn.commit()
+
+            st.warning("Cliente eliminado")
+
+            st.rerun()
+
 
     # ===========================================================
     # RANKING
     # ===========================================================
 
-    with tabs[2]:
+    with tabs[3]:
 
-        fig = px.bar(
+        fig=px.bar(df_cli,x="nombre",y="total",color="estado")
 
-            df_cli.head(10),
+        st.plotly_chart(fig,use_container_width=True)
 
-            x="nombre",
-
-            y="total",
-
-            color="estado",
-
-            text="total"
-
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
 
     # ===========================================================
     # PIPELINE
     # ===========================================================
 
-    with tabs[3]:
-
-        fig = px.pie(df_cli, names="estado")
-
-        st.plotly_chart(fig, use_container_width=True)
-
-    # ===========================================================
-    # SEGUIMIENTOS
-    # ===========================================================
-
     with tabs[4]:
 
-        riesgo = df_cli[df_cli.estado.isin(["Riesgo","Perdido"])]
+        fig=px.pie(df_cli,names="estado")
 
-        st.dataframe(riesgo)
+        st.plotly_chart(fig,use_container_width=True)
 
-        if not riesgo.empty:
-
-            cliente = st.selectbox("Contactar", riesgo.nombre)
-
-            tel = riesgo[riesgo.nombre==cliente].iloc[0].whatsapp
-
-            if tel:
-
-                mensaje = f"Hola {cliente}, tenemos promociones activas"
-
-                url = f"https://wa.me/{tel}?text={mensaje}"
-
-                st.link_button("Contactar", url)
 
     # ===========================================================
-    # NUEVO
+    # SEGUIMIENTO
     # ===========================================================
 
     with tabs[5]:
 
-        with st.form("nuevo"):
+        riesgo=df_cli[df_cli.estado.str.contains("Riesgo|Perdido")]
 
-            nombre = st.text_input("Nombre")
+        st.dataframe(riesgo)
 
-            whatsapp = st.text_input("WhatsApp")
 
-            email = st.text_input("Email")
+    # ===========================================================
+    # NUEVO CLIENTE
+    # ===========================================================
 
-            direccion = st.text_input("Direccion")
+    with tabs[6]:
 
-            notas = st.text_area("Notas")
+        with st.form("nuevo_cliente"):
 
-            if st.form_submit_button("Guardar"):
+            nombre=st.text_input("Nombre")
+
+            whatsapp=st.text_input("WhatsApp")
+
+            email=st.text_input("Email")
+
+            direccion=st.text_input("Direccion")
+
+            notas=st.text_area("Notas")
+
+
+            if st.form_submit_button("Crear"):
 
                 with conectar() as conn:
 
@@ -1841,154 +1829,6 @@ elif menu == "👥 Clientes":
                 st.success("Cliente creado")
 
                 st.rerun()
-
-
-# ===========================================================
-# EDITAR CLIENTE (CORRECCIÓN DE DATOS MEJORADA)
-# ===========================================================
-
-with tabs[2]:
-
-    cliente = st.selectbox("Editar", df_cli.nombre, key="edit")
-
-    datos = df_cli[df_cli.nombre == cliente].iloc[0]
-
-
-    # valores seguros (evita None)
-    nombre_actual = datos.nombre or ""
-    whatsapp_actual = datos.whatsapp or ""
-    email_actual = datos.email or ""
-    direccion_actual = datos.direccion or ""
-    etiqueta_actual = datos.etiqueta or ""
-    notas_actual = datos.notas or ""
-
-
-    lista_etiquetas = ["","VIP","Empresa","Revendedor"]
-
-    try:
-        index_etiqueta = lista_etiquetas.index(etiqueta_actual)
-    except:
-        index_etiqueta = 0
-
-
-    with st.form("editar_cliente_form"):
-
-        nombre = st.text_input("Nombre", nombre_actual)
-
-        whatsapp = st.text_input("WhatsApp", whatsapp_actual)
-
-        email = st.text_input("Email", email_actual)
-
-        direccion = st.text_input("Direccion", direccion_actual)
-
-        etiqueta = st.selectbox(
-            "Etiqueta",
-            lista_etiquetas,
-            index=index_etiqueta
-        )
-
-        notas = st.text_area("Notas", notas_actual)
-
-
-        col1,col2,col3 = st.columns(3)
-
-        guardar = col1.form_submit_button("💾 Guardar cambios")
-
-        eliminar = col2.form_submit_button("🗑️ Eliminar cliente")
-
-        cancelar = col3.form_submit_button("❌ Cancelar")
-
-
-    # -------------------------------------------------------
-    # GUARDAR CAMBIOS
-    # -------------------------------------------------------
-
-    if guardar:
-
-        if not nombre.strip():
-
-            st.error("El nombre no puede estar vacío")
-
-        else:
-
-            with conectar() as conn:
-
-                conn.execute("""
-
-                UPDATE clientes
-
-                SET nombre=?,
-                    whatsapp=?,
-                    email=?,
-                    direccion=?,
-                    etiqueta=?,
-                    notas=?
-
-                WHERE id=?
-
-                """,(
-
-                    nombre.strip(),
-                    whatsapp.strip(),
-                    email.strip(),
-                    direccion.strip(),
-                    etiqueta,
-                    notas.strip(),
-                    int(datos.id)
-
-                ))
-
-                conn.commit()
-
-            st.success("✅ Datos corregidos correctamente")
-
-            st.rerun()
-
-
-    # -------------------------------------------------------
-    # ELIMINAR CLIENTE (CON CONFIRMACIÓN)
-    # -------------------------------------------------------
-
-    if eliminar:
-
-        confirmar = st.checkbox(
-            "Confirmar eliminación permanente",
-            key="confirmar_delete"
-        )
-
-        if confirmar:
-
-            with conectar() as conn:
-
-                conn.execute(
-                    "DELETE FROM clientes WHERE id=?",
-                    (int(datos.id),)
-                )
-
-                conn.commit()
-
-            st.warning("Cliente eliminado")
-
-            st.rerun()
-
-        else:
-
-            st.info("Marca la casilla para confirmar")
-
-
-    # -------------------------------------------------------
-    # BOTON WHATSAPP DIRECTO
-    # -------------------------------------------------------
-
-    if whatsapp_actual:
-
-        mensaje = f"Hola {nombre_actual}, te escribimos desde Imperio Atómico"
-
-        url = f"https://wa.me/{whatsapp_actual}?text={mensaje}"
-
-        st.link_button("💬 Contactar por WhatsApp", url)
-
-
 
  # ===========================================================
 # ⚙️ CONFIGURACIÓN GENERAL DEL SISTEMA
@@ -4258,6 +4098,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
