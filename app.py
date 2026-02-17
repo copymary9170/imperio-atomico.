@@ -602,6 +602,7 @@ cargar_datos()
 
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
+
 ROL = st.session_state.get('rol', "Produccion")
 
 
@@ -611,120 +612,114 @@ with st.sidebar:
 
     st.header(f"👋 {st.session_state.usuario_nombre}")
 
-    st.info(f"🏦 BCV: {t_bcv:,.2f}")
-
-    st.info(f"🔶 Binance: {t_bin:,.2f}")
+    st.caption(f"🏦 BCV: {t_bcv:,.2f}")
+    st.caption(f"🔶 Binance: {t_bin:,.2f}")
 
 
     # ===========================================================
-    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE REAL (CORRECTO)
+    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE COMPACTO PRO
     # ===========================================================
 
     saldo_usd = 0.0
-
     usd_bs_entrada = 0.0
-    bs_usd_entrada = 0.0
-
     usd_bs_salida = 0.0
-    bs_usd_salida = 0.0
 
     com_entrada = 0.0
     com_pm = 0.0
     com_salida = 0.0
 
 
-    with conectar() as conn:
+    try:
 
-        existe = conn.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='kontigo'
-        """).fetchone()
+        with conectar() as conn:
 
-
-        if existe:
-
-            df_k = pd.read_sql(
-                "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
-                conn
-            )
+            existe = conn.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='kontigo'
+            """).fetchone()
 
 
-            if not df_k.empty:
+            if existe:
 
-                columnas = df_k.columns
+                df_k = pd.read_sql(
+                    "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+                    conn
+                )
 
 
-                saldo_usd = float(df_k["saldo"].iloc[0]) if "saldo" in columnas else 0.0
+                if not df_k.empty:
 
-                usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if "usd_bs_entrada" in columnas else 0.0
-                bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if "bs_usd_entrada" in columnas else 0.0
+                    columnas = df_k.columns
 
-                usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if "usd_bs_salida" in columnas else 0.0
-                bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if "bs_usd_salida" in columnas else 0.0
 
-                com_entrada = float(df_k["comision_entrada"].iloc[0]) if "comision_entrada" in columnas else 0.0
-                com_pm = float(df_k["comision_pago_movil"].iloc[0]) if "comision_pago_movil" in columnas else 0.0
-                com_salida = float(df_k["comision_salida"].iloc[0]) if "comision_salida" in columnas else 0.0
+                    saldo_usd = float(df_k["saldo"].iloc[0]) if "saldo" in columnas else 0
+
+                    usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if "usd_bs_entrada" in columnas else 0
+
+                    usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if "usd_bs_salida" in columnas else 0
+
+
+                    com_entrada = float(df_k["comision_entrada"].iloc[0]) if "comision_entrada" in columnas else 0
+
+                    com_pm = float(df_k["comision_pago_movil"].iloc[0]) if "comision_pago_movil" in columnas else 0
+
+                    com_salida = float(df_k["comision_salida"].iloc[0]) if "comision_salida" in columnas else 0
+
+
+    except:
+
+        pass
 
 
 
     # ===========================================================
-    # CALCULOS REALES CON COMISIONES
+    # CALCULOS REALES
     # ===========================================================
-
-    # saldo real en Bs
 
     saldo_bs = saldo_usd * usd_bs_salida
 
 
-    # COSTO REAL DE COMPRAR 1 USD
-    # incluye comisión kontigo + pago móvil
+    # COSTO REAL COMPRAR 1 USD
 
     costo_real_bs = usd_bs_entrada * (
         1 + (com_entrada / 100) + (com_pm / 100)
     )
 
 
-    # VALOR REAL DE VENDER 1 USD
-    # incluye solo comisión kontigo
+    # VALOR REAL VENDER 1 USD
 
     valor_real_bs = usd_bs_salida * (
         1 - (com_salida / 100)
     )
 
 
+
     # ===========================================================
-    # MOSTRAR
+    # MOSTRAR COMPACTO
     # ===========================================================
 
     st.divider()
 
-    st.subheader("🏦 Kontigo")
+    st.markdown("### 🏦 Kontigo")
 
 
-    st.metric(
-        "Saldo USD",
-        f"${saldo_usd:,.2f}"
-    )
+    col1, col2 = st.columns(2)
+
+    col1.caption("Saldo USD")
+    col1.write(f"**${saldo_usd:,.2f}**")
+
+    col2.caption("Saldo Bs")
+    col2.write(f"**Bs {saldo_bs:,.2f}**")
 
 
-    st.metric(
-        "Saldo Bs",
-        f"Bs {saldo_bs:,.2f}"
-    )
 
+    col3, col4 = st.columns(2)
 
-    st.metric(
-        "Costo real 1 USD",
-        f"Bs {costo_real_bs:,.2f}"
-    )
+    col3.caption("Costo 1 USD")
+    col3.write(f"**Bs {costo_real_bs:,.2f}**")
 
-
-    st.metric(
-        "Valor real 1 USD",
-        f"Bs {valor_real_bs:,.2f}"
-    )
-
+    col4.caption("Valor 1 USD")
+    col4.write(f"**Bs {valor_real_bs:,.2f}**")
 
     # ======================================================
     # MENU
@@ -4650,6 +4645,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
