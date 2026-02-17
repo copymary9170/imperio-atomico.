@@ -2337,91 +2337,103 @@ elif menu == "⚙️ Configuración":
             st.rerun()
 
 
-    # ===========================================================
-    # KONTIGO
-    # ===========================================================
-
-    st.divider()
-
     st.subheader("🏦 Kontigo")
 
+with conectar() as conn:
+
+    df_k = pd.read_sql(
+        "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+        conn
+    )
+
+
+saldo_actual = float(df_k["saldo"].iloc[0]) if not df_k.empty else 0
+
+usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if not df_k.empty else 0
+
+bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if not df_k.empty else 0
+
+usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if not df_k.empty else 0
+
+bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if not df_k.empty else 0
+
+
+
+# FORMULARIO
+
+with st.form("form_kontigo"):
+
+
+    saldo = st.number_input(
+        "Saldo actual USD",
+        value=saldo_actual,
+        key="cfg_k_saldo"
+    )
+
+
+    usd_bs_ent = st.number_input(
+        "Bs que pagas por 1 USD",
+        value=usd_bs_entrada,
+        key="cfg_k_usd_bs_ent"
+    )
+
+
+    bs_usd_ent = st.number_input(
+        "USD que recibes por 1 Bs",
+        value=bs_usd_entrada,
+        key="cfg_k_bs_usd_ent"
+    )
+
+
+    usd_bs_sal = st.number_input(
+        "Bs que recibes por 1 USD",
+        value=usd_bs_salida,
+        key="cfg_k_usd_bs_sal"
+    )
+
+
+    bs_usd_sal = st.number_input(
+        "USD que recibes por 1 Bs (Salida)",
+        value=bs_usd_salida,
+        key="cfg_k_bs_usd_sal"
+    )
+
+
+    guardar = st.form_submit_button("💾 Guardar Kontigo")
+
+
+
+if guardar:
 
     with conectar() as conn:
 
-        df_k = pd.read_sql(
-            "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
-            conn
+        conn.execute(
+            """
+            INSERT INTO kontigo
+            (
+                saldo,
+                usd_bs_entrada,
+                bs_usd_entrada,
+                usd_bs_salida,
+                bs_usd_salida
+            )
+            VALUES (?,?,?,?,?)
+            """,
+            (
+                saldo,
+                usd_bs_ent,
+                bs_usd_ent,
+                usd_bs_sal,
+                bs_usd_sal
+            )
         )
 
-
-    saldo = float(df_k.saldo.iloc[0]) if not df_k.empty else 0
-
-    usd_bs_entrada = float(df_k.usd_bs_entrada.iloc[0]) if not df_k.empty else 0
-
-    bs_usd_entrada = float(df_k.bs_usd_entrada.iloc[0]) if not df_k.empty else 0
-
-    usd_bs_salida = float(df_k.usd_bs_salida.iloc[0]) if not df_k.empty else 0
-
-    bs_usd_salida = float(df_k.bs_usd_salida.iloc[0]) if not df_k.empty else 0
+        conn.commit()
 
 
-    with st.form("kontigo_form"):
+    st.success("Kontigo guardado correctamente")
 
-        saldo_nuevo = st.number_input(
-            "Saldo USD",
-            value=saldo
-        )
-
-        st.markdown("### Entrada")
-
-        usd_bs_ent = st.number_input(
-            "Costo real 1 USD en Bs",
-            value=usd_bs_entrada
-        )
-
-        bs_usd_ent = st.number_input(
-            "Cuantos USD recibes por 1 Bs",
-            value=bs_usd_entrada
-        )
-
-
-        st.markdown("### Salida")
-
-        usd_bs_sal = st.number_input(
-            "Valor real 1 USD en Bs",
-            value=usd_bs_salida
-        )
-
-        bs_usd_sal = st.number_input(
-            "Cuantos USD recibes por 1 Bs",
-            value=bs_usd_salida
-        )
-
-
-        if st.form_submit_button("Guardar Kontigo"):
-
-            with conectar() as conn:
-
-                conn.execute(
-                    """
-                    INSERT INTO kontigo
-                    VALUES
-                    (NULL,?,?,?,?,?,datetime('now'))
-                    """,
-                    (
-                        saldo_nuevo,
-                        usd_bs_ent,
-                        bs_usd_ent,
-                        usd_bs_sal,
-                        bs_usd_sal
-                    )
-                )
-
-                conn.commit()
-
-            st.success("Guardado")
-
-            st.rerun()
+    st.rerun()
 
 
     # ===========================================================
@@ -4577,6 +4589,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
