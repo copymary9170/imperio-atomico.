@@ -1470,15 +1470,15 @@ elif menu == "📦 Inventario":
         c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
 # ===========================================================
-# 👥 CRM DIOS TOTAL 7.0 — IMPERIO ATÓMICO
+# 👥 CRM PRO MAX 6.1 — IMPERIO ATÓMICO (ANTI-ERRORES)
 # ===========================================================
 
 elif menu == "👥 Clientes":
 
-    st.title("👥 CRM DIOS TOTAL 7.0")
+    st.title("👥 CRM PRO MAX 6.1")
 
     # ===========================================================
-    # CREAR TABLA
+    # CREAR / CARGAR BASE
     # ===========================================================
 
     with conectar() as conn:
@@ -1488,17 +1488,27 @@ elif menu == "👥 Clientes":
         CREATE TABLE IF NOT EXISTS clientes (
 
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+
             nombre TEXT UNIQUE,
+
             whatsapp TEXT,
+
             email TEXT,
+
             direccion TEXT,
+
             etiqueta TEXT,
+
             notas TEXT,
+
+            estado TEXT DEFAULT 'Activo',
+
             fecha DATETIME DEFAULT CURRENT_TIMESTAMP
 
         )
 
         """)
+
 
         df_cli = pd.read_sql("""
 
@@ -1523,8 +1533,57 @@ elif menu == "👥 Clientes":
         """, conn)
 
 
+
     # ===========================================================
-    # PROCESAMIENTO IA
+    # SI NO HAY CLIENTES
+    # ===========================================================
+
+    if df_cli.empty:
+
+        st.warning("⚠️ No hay clientes registrados")
+
+        tab1 = st.tabs(["➕ Crear Cliente"])
+
+        with tab1[0]:
+
+            with st.form("nuevo_cliente_vacio"):
+
+                nombre = st.text_input("Nombre")
+                whatsapp = st.text_input("WhatsApp")
+                email = st.text_input("Email")
+
+                if st.form_submit_button("Guardar"):
+
+                    if nombre:
+
+                        with conectar() as conn:
+
+                            conn.execute("""
+
+                            INSERT INTO clientes
+
+                            (nombre,whatsapp,email)
+
+                            VALUES (?,?,?)
+
+                            """,(nombre,whatsapp,email))
+
+                            conn.commit()
+
+                        st.success("Cliente creado")
+
+                        st.rerun()
+
+                    else:
+
+                        st.error("Nombre obligatorio")
+
+        st.stop()
+
+
+
+    # ===========================================================
+    # CALCULOS
     # ===========================================================
 
     df_cli["ultima_compra"] = pd.to_datetime(
@@ -1533,79 +1592,30 @@ elif menu == "👥 Clientes":
     )
 
     df_cli["dias"] = (
-        pd.Timestamp.now() - df_cli["ultima_compra"]
-    ).dt.days
+        pd.Timestamp.now() -
+        df_cli["ultima_compra"]
+    ).dt.days.fillna(999)
 
 
-    def estado(row):
+    def estado_cliente(row):
 
         if row.total >= 500:
-            return "🟣 VIP"
+            return "VIP"
 
         if row.dias > 90:
-            return "🔴 Perdido"
+            return "Perdido"
 
         if row.dias > 30:
-            return "🟡 Riesgo"
+            return "Riesgo"
 
-        return "🟢 Activo"
-
-
-    df_cli["estado"] = df_cli.apply(estado, axis=1)
+        return "Activo"
 
 
-    df_cli["prioridad"] = (
-
-        df_cli["dias"].fillna(999) * 0.7 +
-
-        (1/(df_cli["total"]+1))*300 +
-
-        (1/(df_cli["pedidos"]+1))*200
-
+    df_cli["estado_calc"] = df_cli.apply(
+        estado_cliente,
+        axis=1
     )
 
-
-    # ===========================================================
-    # PANEL IA
-    # ===========================================================
-
-    st.subheader("🧠 Cliente más urgente")
-
-
-    if not df_cli.empty:
-
-        urgente = df_cli.sort_values(
-            "prioridad",
-            ascending=False
-        ).iloc[0]
-
-
-        col1,col2,col3,col4 = st.columns(4)
-
-
-        col1.metric("Cliente", urgente.nombre)
-
-        col2.metric("Estado", urgente.estado)
-
-        col3.metric("Días", int(urgente.dias))
-
-        col4.metric("Valor", f"${urgente.total:,.0f}")
-
-
-        if urgente.whatsapp:
-
-            mensaje = f"Hola {urgente.nombre}, tenemos promociones nuevas para ti ⚛️"
-
-            url = f"https://wa.me/{urgente.whatsapp}?text={mensaje}"
-
-            st.link_button(
-                "🚀 Contactar ahora",
-                url,
-                use_container_width=True
-            )
-
-
-    st.divider()
 
 
     # ===========================================================
@@ -1618,22 +1628,26 @@ elif menu == "👥 Clientes":
 
     c2.metric("Facturación", f"${df_cli.total.sum():,.0f}")
 
-    c3.metric("VIP", len(df_cli[df_cli.estado=="🟣 VIP"]))
+    c3.metric("VIP", len(df_cli[df_cli.estado_calc=="VIP"]))
 
-    c4.metric("Perdidos", len(df_cli[df_cli.estado=="🔴 Perdido"]))
+    c4.metric("En riesgo", len(df_cli[df_cli.estado_calc=="Riesgo"]))
 
 
-    # ===========================================================
-    # TABS
-    # ===========================================================
 
     tabs = st.tabs([
+
         "📋 Directorio",
+
         "📊 Perfil",
+
         "📊 Pipeline",
+
         "➕ Nuevo",
-        "⏰ Seguimiento IA"
+
+        "⏰ Seguimientos"
+
     ])
+
 
 
     # ===========================================================
@@ -1650,13 +1664,13 @@ elif menu == "👥 Clientes":
 
                 "nombre":"Cliente",
 
-                "estado":"Estado",
+                "total":"Valor $",
+
+                "pedidos":"Pedidos",
 
                 "dias":"Días",
 
-                "total":"Valor $",
-
-                "pedidos":"Pedidos"
+                "estado_calc":"Estado"
 
             },
 
@@ -1667,36 +1681,78 @@ elif menu == "👥 Clientes":
         )
 
 
+
     # ===========================================================
-    # PERFIL
+    # PERFIL (ANTI INDEX ERROR)
     # ===========================================================
 
     with tabs[1]:
 
-        cliente = st.selectbox(
-            "Seleccionar cliente",
-            df_cli.nombre
-        )
+        lista_clientes = df_cli["nombre"].dropna().tolist()
 
-        datos = df_cli[df_cli.nombre==cliente].iloc[0]
+        if not lista_clientes:
 
+            st.warning("No hay clientes disponibles")
 
-        col1,col2,col3,col4 = st.columns(4)
+        else:
 
-        col1.metric("Valor", f"${datos.total:,.0f}")
+            cliente = st.selectbox(
 
-        col2.metric("Pedidos", datos.pedidos)
+                "Seleccionar Cliente",
 
-        col3.metric("Estado", datos.estado)
+                lista_clientes
 
-        col4.metric("Días", int(datos.dias))
+            )
 
 
-        if datos.whatsapp:
+            df_filtrado = df_cli[
 
-            url = f"https://wa.me/{datos.whatsapp}"
+                df_cli["nombre"] == cliente
 
-            st.link_button("WhatsApp", url)
+            ]
+
+
+            if df_filtrado.empty:
+
+                st.error("Cliente no encontrado")
+
+            else:
+
+                datos = df_filtrado.iloc[0]
+
+
+                col1,col2,col3,col4 = st.columns(4)
+
+                col1.metric(
+                    "Valor",
+                    f"${datos.total:,.0f}"
+                )
+
+                col2.metric(
+                    "Pedidos",
+                    int(datos.pedidos)
+                )
+
+                col3.metric(
+                    "Estado",
+                    datos.estado_calc
+                )
+
+                col4.metric(
+                    "Días",
+                    int(datos.dias)
+                )
+
+
+                if datos.whatsapp:
+
+                    url = f"https://wa.me/{datos.whatsapp}"
+
+                    st.link_button(
+                        "💬 WhatsApp",
+                        url
+                    )
+
 
 
     # ===========================================================
@@ -1706,12 +1762,17 @@ elif menu == "👥 Clientes":
     with tabs[2]:
 
         fig = px.bar(
+
             df_cli,
-            x="estado",
-            color="estado"
+
+            x="estado_calc",
+
+            color="estado_calc"
+
         )
 
         st.plotly_chart(fig, use_container_width=True)
+
 
 
     # ===========================================================
@@ -1720,48 +1781,54 @@ elif menu == "👥 Clientes":
 
     with tabs[3]:
 
-        with st.form("nuevo"):
+        with st.form("nuevo_cliente"):
 
             nombre = st.text_input("Nombre")
-
             whatsapp = st.text_input("WhatsApp")
-
             email = st.text_input("Email")
 
-            guardar = st.form_submit_button("Guardar")
+            if st.form_submit_button("Guardar"):
 
-        if guardar:
+                if nombre:
 
-            with conectar() as conn:
+                    with conectar() as conn:
 
-                conn.execute("""
+                        conn.execute("""
 
-                INSERT INTO clientes
+                        INSERT INTO clientes
 
-                (nombre,whatsapp,email)
+                        (nombre,whatsapp,email)
 
-                VALUES (?,?,?)
+                        VALUES (?,?,?)
 
-                """,(nombre,whatsapp,email))
+                        """,(nombre,whatsapp,email))
 
-                conn.commit()
+                        conn.commit()
 
-            st.success("Cliente creado")
+                    st.success("Cliente creado")
 
-            st.rerun()
+                    st.rerun()
+
+                else:
+
+                    st.error("Nombre obligatorio")
+
 
 
     # ===========================================================
-    # SEGUIMIENTO IA
+    # SEGUIMIENTOS
     # ===========================================================
 
     with tabs[4]:
 
         riesgo = df_cli[
-            df_cli.estado.isin(
-                ["🟡 Riesgo","🔴 Perdido"]
+
+            df_cli.estado_calc.isin(
+                ["Riesgo","Perdido"]
             )
+
         ]
+
 
         st.dataframe(riesgo)
 
@@ -1769,9 +1836,13 @@ elif menu == "👥 Clientes":
         if not riesgo.empty:
 
             cliente = st.selectbox(
+
                 "Contactar",
+
                 riesgo.nombre
+
             )
+
 
             tel = riesgo[
                 riesgo.nombre==cliente
@@ -1783,8 +1854,11 @@ elif menu == "👥 Clientes":
                 url = f"https://wa.me/{tel}"
 
                 st.link_button(
-                    "Enviar WhatsApp",
+
+                    "Enviar mensaje",
+
                     url
+
                 )
  # ===========================================================
 # ⚙️ CONFIGURACIÓN GENERAL DEL SISTEMA
@@ -4054,6 +4128,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
