@@ -618,9 +618,9 @@ with st.sidebar:
 # 🏦 PANEL KONTIGO — PROFESIONAL
 # ===========================================================
 
-st.divider()
+    st.divider()
 
-st.subheader("🏦 Kontigo")
+    st.subheader("🏦 Kontigo")
 
 
 # SALDO ACTUAL
@@ -638,7 +638,7 @@ tasa_k = tasa_bin
 saldo_bs = saldo_usd * tasa_k
 
 
-st.metric(
+    st.metric(
 
     "Saldo USD",
 
@@ -4523,6 +4523,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
