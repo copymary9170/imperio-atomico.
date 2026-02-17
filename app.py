@@ -2617,39 +2617,44 @@ if guardar:
     st.rerun()
 
 
-    # ===========================================================
-    # BACKUP
-    # ===========================================================
+   # ===========================================================
+# BACKUP
+# ===========================================================
 
-    st.divider()
+st.divider()
 
-    if st.button("Crear Backup"):
+st.subheader("💾 Backup")
 
-        import shutil
+if st.button("Crear Backup"):
 
-        nombre = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+    import shutil
 
-        shutil.copy(
-            "data/imperio.db",
-            nombre
-        )
+    nombre = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
 
-        st.success(nombre)
+    shutil.copy(
+        "data/imperio.db",
+        nombre
+    )
+
+    st.success(f"Backup creado: {nombre}")
 
 
-    # ===========================================================
-    # VERIFICAR
-    # ===========================================================
+# ===========================================================
+# VERIFICAR
+# ===========================================================
 
-    st.divider()
+st.divider()
 
-    if st.button("Verificar Sistema"):
+st.subheader("🔧 Sistema")
 
-        inicializar_sistema()
+if st.button("Verificar Sistema"):
 
-        st.success("OK")
+    inicializar_sistema()
 
-        st.rerun()
+    st.success("Sistema verificado")
+
+    st.rerun()
+
 
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
@@ -4770,6 +4775,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
