@@ -614,14 +614,21 @@ with st.sidebar:
     st.info(f"🔶 Binance: {t_bin:,.2f}")
 
 
-    # ===========================================================
-    # 🏦 KONTIGO — SOLO RECORDATORIO
+        # ===========================================================
+    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE
     # ===========================================================
 
     with conectar() as conn:
 
         df_k = pd.read_sql(
-            "SELECT saldo FROM kontigo ORDER BY id DESC LIMIT 1",
+            """
+            SELECT saldo,
+                   comision_entrada,
+                   comision_salida,
+                   comision_pago_movil
+            FROM kontigo
+            ORDER BY id DESC LIMIT 1
+            """,
             conn
         )
 
@@ -629,26 +636,60 @@ with st.sidebar:
 
         saldo_usd = float(df_k["saldo"].iloc[0])
 
+        com_entrada = float(df_k["comision_entrada"].iloc[0])
+        com_salida = float(df_k["comision_salida"].iloc[0])
+        com_pm = float(df_k["comision_pago_movil"].iloc[0])
+
     else:
 
         saldo_usd = 0.0
+        com_entrada = 0.0
+        com_salida = 0.0
+        com_pm = 0.0
 
 
-    saldo_bs = saldo_usd * t_bin
+    tasa_k = t_bin
+
+
+    saldo_bs = saldo_usd * tasa_k
+
+
+    # COSTO REAL DE 1 USD AL ENTRAR
+
+    costo_entrada_bs = tasa_k * (1 + (com_entrada + com_pm) / 100)
+
+
+    # VALOR REAL DE 1 USD AL SALIR
+
+    valor_salida_bs = tasa_k * (1 - com_salida / 100)
 
 
     st.divider()
 
     st.subheader("🏦 Kontigo")
 
+
     st.metric(
         "Saldo USD",
         f"${saldo_usd:,.2f}"
     )
 
+
     st.metric(
         "Saldo Bs",
         f"Bs {saldo_bs:,.2f}"
+    )
+
+
+    st.metric(
+        "Costo real 1 USD",
+        f"Bs {costo_entrada_bs:,.2f}"
+    )
+
+
+    st.metric(
+        "Valor real 1 USD",
+        f"Bs {valor_salida_bs:,.2f}"
     )
 
 
@@ -4424,6 +4465,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
