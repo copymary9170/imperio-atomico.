@@ -2336,8 +2336,12 @@ elif menu == "⚙️ Configuración":
 
             st.rerun()
 
+# ===========================================================
+# 🏦 KONTIGO CONFIGURACIÓN COMPLETA CON COMISIONES
+# ===========================================================
 
-    st.subheader("🏦 Kontigo")
+st.subheader("🏦 Kontigo")
+
 
 with conectar() as conn:
 
@@ -2346,6 +2350,8 @@ with conectar() as conn:
         conn
     )
 
+
+# valores actuales
 
 saldo_actual = float(df_k["saldo"].iloc[0]) if not df_k.empty else 0
 
@@ -2358,11 +2364,22 @@ usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if not df_k.empty else 0
 bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if not df_k.empty else 0
 
 
+com_entrada = float(df_k["comision_entrada"].iloc[0]) if not df_k.empty else 0
 
+com_pm = float(df_k["comision_pago_movil"].iloc[0]) if not df_k.empty else 0
+
+com_salida = float(df_k["comision_salida"].iloc[0]) if not df_k.empty else 0
+
+
+
+# ===========================================================
 # FORMULARIO
+# ===========================================================
 
 with st.form("form_kontigo"):
 
+
+    st.markdown("### 💰 Saldo")
 
     saldo = st.number_input(
         "Saldo actual USD",
@@ -2370,6 +2387,8 @@ with st.form("form_kontigo"):
         key="cfg_k_saldo"
     )
 
+
+    st.markdown("### 💱 Tasas")
 
     usd_bs_ent = st.number_input(
         "Bs que pagas por 1 USD",
@@ -2393,15 +2412,42 @@ with st.form("form_kontigo"):
 
 
     bs_usd_sal = st.number_input(
-        "USD que recibes por 1 Bs (Salida)",
+        "USD que recibes por 1 Bs (salida)",
         value=bs_usd_salida,
         key="cfg_k_bs_usd_sal"
+    )
+
+
+    st.markdown("### 💸 Comisiones")
+
+    ce = st.number_input(
+        "Comisión entrada %",
+        value=com_entrada,
+        key="cfg_k_com_ent"
+    )
+
+
+    cpm = st.number_input(
+        "Comisión pago móvil %",
+        value=com_pm,
+        key="cfg_k_com_pm"
+    )
+
+
+    cs = st.number_input(
+        "Comisión salida %",
+        value=com_salida,
+        key="cfg_k_com_sal"
     )
 
 
     guardar = st.form_submit_button("💾 Guardar Kontigo")
 
 
+
+# ===========================================================
+# GUARDAR
+# ===========================================================
 
 if guardar:
 
@@ -2415,16 +2461,22 @@ if guardar:
                 usd_bs_entrada,
                 bs_usd_entrada,
                 usd_bs_salida,
-                bs_usd_salida
+                bs_usd_salida,
+                comision_entrada,
+                comision_pago_movil,
+                comision_salida
             )
-            VALUES (?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?)
             """,
             (
                 saldo,
                 usd_bs_ent,
                 bs_usd_ent,
                 usd_bs_sal,
-                bs_usd_sal
+                bs_usd_sal,
+                ce,
+                cpm,
+                cs
             )
         )
 
@@ -4589,6 +4641,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
