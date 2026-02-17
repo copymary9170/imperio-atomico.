@@ -527,6 +527,18 @@ with st.sidebar:
             "📝 Cotizaciones",
             "⚙️ Configuración"
         ]
+
+        st.sidebar.subheader("📁 Bases detectadas")
+
+import glob
+
+archivos = glob.glob("**/*.db", recursive=True)
+
+if archivos:
+    for f in archivos:
+        st.sidebar.write(f)
+else:
+    st.sidebar.write("No hay archivos .db detectados")
     )
 
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
@@ -3711,6 +3723,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
