@@ -2013,7 +2013,7 @@ elif menu == "👥 Clientes":
                 st.rerun()
 
 # ===========================================================
-# ⚙️ CONFIGURACIÓN PRO MAX — IMPERIO ATÓMICO (FINAL)
+# ⚙️ CONFIGURACIÓN PRO MAX — IMPERIO ATÓMICO (FINAL REAL)
 # ===========================================================
 
 elif menu == "⚙️ Configuración":
@@ -2051,16 +2051,16 @@ elif menu == "⚙️ Configuración":
         )
         """)
 
-        # TABLA KONTIGO PROFESIONAL
+        # ======================================================
+        # NUEVA TABLA KONTIGO CON DOBLE TASA
+        # ======================================================
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS kontigo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             saldo REAL,
-            tasa_base REAL,
-            comision_entrada REAL,
-            comision_pago_movil REAL,
-            comision_salida REAL,
+            tasa_entrada REAL,
+            tasa_salida REAL,
             fecha TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """)
@@ -2116,10 +2116,7 @@ elif menu == "⚙️ Configuración":
 
         if not df_costos.empty:
 
-            eliminar = st.selectbox(
-                "Eliminar",
-                df_costos.nombre
-            )
+            eliminar = st.selectbox("Eliminar", df_costos.nombre)
 
             if st.button("🗑️ Eliminar"):
 
@@ -2149,7 +2146,7 @@ elif menu == "⚙️ Configuración":
 
 
     # ===========================================================
-    # TASAS
+    # TASAS BCV Y BINANCE
     # ===========================================================
 
     st.divider()
@@ -2163,9 +2160,7 @@ elif menu == "⚙️ Configuración":
             conn
         )
 
-
     bcv = float(df_tasa.tasa_bcv.iloc[0]) if not df_tasa.empty else 0
-
     binance = float(df_tasa.tasa_binance.iloc[0]) if not df_tasa.empty else 0
 
 
@@ -2174,9 +2169,7 @@ elif menu == "⚙️ Configuración":
         c1, c2 = st.columns(2)
 
         tasa_bcv = c1.number_input("BCV", value=bcv)
-
         tasa_bin = c2.number_input("Binance", value=binance)
-
 
         if st.form_submit_button("Guardar tasas"):
 
@@ -2214,13 +2207,9 @@ elif menu == "⚙️ Configuración":
         c1, c2 = st.columns(2)
 
         iva = c1.number_input("IVA %", value=conf.get("iva",16))
-
         igtf = c1.number_input("IGTF %", value=conf.get("igtf",3))
-
         banco = c2.number_input("Banco %", value=conf.get("banco",2))
-
         ganancia = c2.number_input("Ganancia %", value=conf.get("ganancia",35))
-
 
         if st.form_submit_button("Guardar"):
 
@@ -2239,13 +2228,12 @@ elif menu == "⚙️ Configuración":
 
 
     # ===========================================================
-    # KONTIGO PROFESIONAL
+    # KONTIGO DOBLE TASA
     # ===========================================================
 
     st.divider()
 
     st.subheader("🏦 Kontigo")
-
 
     with conectar() as conn:
 
@@ -2254,16 +2242,9 @@ elif menu == "⚙️ Configuración":
             conn
         )
 
-
     saldo = float(df_k.saldo.iloc[0]) if not df_k.empty else 0
-
-    tasa_base = float(df_k.tasa_base.iloc[0]) if not df_k.empty else 0
-
-    ce = float(df_k.comision_entrada.iloc[0]) if not df_k.empty else 0
-
-    cpm = float(df_k.comision_pago_movil.iloc[0]) if not df_k.empty else 0
-
-    cs = float(df_k.comision_salida.iloc[0]) if not df_k.empty else 0
+    tasa_entrada = float(df_k.tasa_entrada.iloc[0]) if not df_k.empty else 0
+    tasa_salida = float(df_k.tasa_salida.iloc[0]) if not df_k.empty else 0
 
 
     with st.form("kontigo"):
@@ -2271,34 +2252,22 @@ elif menu == "⚙️ Configuración":
         st.markdown("### 💰 Saldo")
 
         saldo_nuevo = st.number_input(
-            "Saldo actual en USD",
+            "Saldo actual USD",
             value=saldo
         )
 
 
-        st.markdown("### 💱 Tasa USD → Bs")
+        st.markdown("### 💱 Tasas Kontigo")
 
-        tasa_nueva = st.number_input(
-            "Tasa Kontigo USD → Bs (SIN comisiones)",
-            value=tasa_base
+        tasa_entrada_nueva = st.number_input(
+            "USD → Bs (Tasa para METER dinero)",
+            value=tasa_entrada
         )
 
 
-        st.markdown("### 💸 Comisiones")
-
-        ce_nueva = st.number_input(
-            "Comisión entrada %",
-            value=ce
-        )
-
-        cpm_nueva = st.number_input(
-            "Comisión pago móvil %",
-            value=cpm
-        )
-
-        cs_nueva = st.number_input(
-            "Comisión salida %",
-            value=cs
+        tasa_salida_nueva = st.number_input(
+            "USD → Bs (Tasa para SACAR dinero)",
+            value=tasa_salida
         )
 
 
@@ -2309,14 +2278,12 @@ elif menu == "⚙️ Configuración":
                 conn.execute(
                     """
                     INSERT INTO kontigo
-                    VALUES (NULL,?,?,?,?,?,datetime('now'))
+                    VALUES (NULL,?,?,?,datetime('now'))
                     """,
                     (
                         saldo_nuevo,
-                        tasa_nueva,
-                        ce_nueva,
-                        cpm_nueva,
-                        cs_nueva
+                        tasa_entrada_nueva,
+                        tasa_salida_nueva
                     )
                 )
 
@@ -4476,6 +4443,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
