@@ -1336,512 +1336,221 @@ elif menu == "📦 Inventario":
         c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
         c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
- # --- configuracion --- #
+ # ===========================================================
+# ⚙️ CONFIGURACIÓN GENERAL DEL SISTEMA
+# ===========================================================
 elif menu == "⚙️ Configuración":
 
-    # --- SEGURIDAD DE ACCESO ---
-    if ROL not in ["Admin", "Administracion"]:
-        st.error("🚫 Acceso Denegado. Solo la Jefa o Administración pueden cambiar tasas y costos.")
-        st.stop()
-
     st.title("⚙️ Configuración del Sistema")
-    st.info("💡 Estos valores afectan globalmente a cotizaciones, inventario y reportes financieros.")
+    st.caption("Parámetros generales, tasas y costos operativos")
 
-    usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
+    # ===========================================================
+    # 💱 TASAS DE CAMBIO
+    # ===========================================================
 
-    # --- CARGA SEGURA DE CONFIGURACIÓN ---
-    try:
-        with conectar() as conn:
-            conf_df = pd.read_sql("SELECT * FROM configuracion", conn).set_index('parametro')
-    except Exception as e:
-        st.error(f"Error al cargar configuración: {e}")
-        st.stop()
+    st.subheader("💱 Tasas de Cambio")
 
-    # Función auxiliar para obtener valores seguros
-    def get_conf(key, default):
-        try:
-            return float(conf_df.loc[key, 'valor'])
-        except Exception:
-            return default
+    with conectar() as conn:
 
-    costo_tinta_detectado = None
-    try:
-        with conectar() as conn:
-            df_tintas_cfg = pd.read_sql(
-                """
-                SELECT item, precio_usd
-                FROM inventario
-                WHERE item LIKE '%tinta%' AND precio_usd IS NOT NULL
-                """,
-                conn
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tasas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tasa_bcv REAL,
+                tasa_binance REAL,
+                fecha TEXT
             )
-        if not df_tintas_cfg.empty:
-            df_tintas_cfg = df_tintas_cfg[df_tintas_cfg['precio_usd'] > 0]
-            if not df_tintas_cfg.empty:
-                costo_tinta_detectado = float(df_tintas_cfg['precio_usd'].mean())
-    except Exception:
-        costo_tinta_detectado = None
+        """)
 
-    with st.form("config_general"):
+        conn.commit()
 
-        st.subheader("💵 Tasas de Cambio (Actualización Diaria)")
-        c1, c2 = st.columns(2)
-
-        nueva_bcv = c1.number_input(
-            "Tasa BCV (Bs/$)",
-            value=get_conf('tasa_bcv', 36.5),
-            format="%.2f",
-            help="Usada para pagos en bolívares de cuentas nacionales."
+        df_tasas = pd.read_sql(
+            "SELECT * FROM tasas ORDER BY id DESC LIMIT 1",
+            conn
         )
 
-        nueva_bin = c2.number_input(
-            "Tasa Binance (Bs/$)",
-            value=get_conf('tasa_binance', 38.0),
-            format="%.2f",
-            help="Usada para pagos mediante USDT o mercado paralelo."
+    tasa_bcv_actual = float(df_tasas["tasa_bcv"].iloc[0]) if not df_tasas.empty else 0.0
+    tasa_binance_actual = float(df_tasas["tasa_binance"].iloc[0]) if not df_tasas.empty else 0.0
+
+
+    with st.form(key="form_tasas"):
+
+        col1, col2 = st.columns(2)
+
+        tasa_bcv = col1.number_input(
+            "Tasa BCV",
+            value=tasa_bcv_actual,
+            format="%.4f"
         )
 
-        st.divider()
-
-        st.subheader("🎨 Costos Operativos Base")
-
-        costo_tinta_auto = st.checkbox(
-            "Calcular costo de tinta automáticamente desde Inventario",
-            value=bool(get_conf('costo_tinta_auto', 1.0))
+        tasa_binance = col2.number_input(
+            "Tasa Binance",
+            value=tasa_binance_actual,
+            format="%.4f"
         )
 
-        if costo_tinta_auto:
-            if costo_tinta_detectado is not None:
-                costo_tinta = float(costo_tinta_detectado)
-                st.success(f"💧 Costo detectado desde inventario: ${costo_tinta:.4f}/ml")
-            else:
-                costo_tinta = float(get_conf('costo_tinta_ml', 0.10))
-                st.warning("No se detectaron tintas válidas en inventario; se mantendrá el último costo guardado.")
-        else:
-            costo_tinta = st.number_input(
-                "Costo de Tinta por ml ($)",
-                value=get_conf('costo_tinta_ml', 0.10),
-                format="%.4f",
-                step=0.0001
-            )
-
-        st.divider()
-
-        st.subheader("🛡️ Impuestos y Comisiones")
-        st.caption("Define los porcentajes numéricos (Ej: 16 para 16%)")
-
-        c3, c4, c5 = st.columns(3)
-
-        n_iva = c3.number_input(
-            "IVA (%)",
-            value=get_conf('iva_perc', 16.0),
-            format="%.2f"
+        guardar_tasa = st.form_submit_button(
+            "💾 Guardar tasas",
+            use_container_width=True
         )
 
-        n_igtf = c4.number_input(
-            "IGTF (%)",
-            value=get_conf('igtf_perc', 3.0),
-            format="%.2f"
-        )
-
-        n_banco = c5.number_input(
-            "Comisión Bancaria (%)",
-            value=get_conf('banco_perc', 0.5),
-            format="%.3f"
-        )
-
-        st.divider()
-
-        # --- GUARDADO CON HISTORIAL ---
-        if st.form_submit_button("💾 GUARDAR CAMBIOS ATÓMICOS", use_container_width=True):
-
-            actualizaciones = [
-                ('tasa_bcv', nueva_bcv),
-                ('tasa_binance', nueva_bin),
-                ('costo_tinta_ml', costo_tinta),
-                ('costo_tinta_auto', 1.0 if costo_tinta_auto else 0.0),
-                ('iva_perc', n_iva),
-                ('igtf_perc', n_igtf),
-                ('banco_perc', n_banco)
-            ]
-
-            try:
-                with conectar() as conn:
-                    cur = conn.cursor()
-
-                    # Crear tabla de historial si no existe
-                    cur.execute("""
-                        CREATE TABLE IF NOT EXISTS historial_config (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            parametro TEXT,
-                            valor_anterior REAL,
-                            valor_nuevo REAL,
-                            usuario TEXT,
-                            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-                        )
-                    """)
-
-                    # Guardar cambios y registrar historial
-                    for param, val in actualizaciones:
-
-                        try:
-                            val_anterior = float(conf_df.loc[param, 'valor'])
-                        except Exception:
-                            val_anterior = None
-
-                        cur.execute(
-                            "UPDATE configuracion SET valor = ? WHERE parametro = ?",
-                            (val, param)
-                        )
-
-                        if val_anterior != val:
-                            cur.execute("""
-                                INSERT INTO historial_config
-                                (parametro, valor_anterior, valor_nuevo, usuario)
-                                VALUES (?,?,?,?)
-                            """, (param, val_anterior, val, usuario_actual))
-
-                    conn.commit()
-
-                # Actualización inmediata en memoria
-                st.session_state.tasa_bcv = nueva_bcv
-                st.session_state.tasa_binance = nueva_bin
-                st.session_state.costo_tinta_ml = costo_tinta
-                st.session_state.costo_tinta_auto = 1.0 if costo_tinta_auto else 0.0
-                st.session_state.iva_perc = n_iva
-                st.session_state.igtf_perc = n_igtf
-                st.session_state.banco_perc = n_banco
-
-                st.success("✅ ¡Configuración actualizada y registrada en historial!")
-                st.balloons()
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"❌ Error al guardar: {e}")
-
-    # --- VISUALIZAR HISTORIAL DE CAMBIOS ---
-    with st.expander("📜 Ver Historial de Cambios"):
-
-        try:
-            with conectar() as conn:
-                df_hist = pd.read_sql("""
-                    SELECT fecha, parametro, valor_anterior, valor_nuevo, usuario
-                    FROM historial_config
-                    ORDER BY fecha DESC
-                    LIMIT 50
-                """, conn)
-
-            if not df_hist.empty:
-                st.dataframe(df_hist, use_container_width=True)
-            else:
-                st.info("Aún no hay cambios registrados.")
-
-        except Exception:
-            st.info("Historial aún no disponible.")
-
-
-# --- 8. MÓDULO PROFESIONAL DE CLIENTES (VERSIÓN 2.0 MEJORADA) ---
-elif menu == "👥 Clientes":
-
-    st.title("👥 Gestión Integral de Clientes")
-    st.caption("Directorio inteligente con análisis comercial y control de deudas")
-
-    # --- CARGA SEGURA DE DATOS ---
-    try:
-        with conectar() as conn:
-            df_clientes = pd.read_sql("SELECT * FROM clientes", conn)
-            df_ventas = pd.read_sql("SELECT cliente_id, cliente, monto_total, metodo, fecha FROM ventas", conn)
-    except Exception as e:
-        st.error(f"Error al cargar datos: {e}")
-        st.stop()
-
-    # --- BUSCADOR AVANZADO ---
-    col_b1, col_b2 = st.columns([3, 1])
-
-    busqueda = col_b1.text_input(
-        "🔍 Buscar cliente (nombre o teléfono)...",
-        placeholder="Escribe nombre, apellido o número..."
-    )
-
-    filtro_deudores = col_b2.checkbox("Solo con deudas")
-
-    # --- FORMULARIO DE REGISTRO Y EDICIÓN ---
-    with st.expander("➕ Registrar / Editar Cliente"):
-
-        modo = st.radio("Acción:", ["Registrar Nuevo", "Editar Existente"], horizontal=True)
-
-        if modo == "Registrar Nuevo":
-
-            with st.form("form_nuevo_cliente"):
-
-                col1, col2 = st.columns(2)
-
-                nombre_cli = col1.text_input("Nombre del Cliente o Negocio").strip()
-                whatsapp_cli = col2.text_input("WhatsApp").strip()
-
-                if st.form_submit_button("✅ Guardar Cliente"):
-
-                    if not nombre_cli:
-                        st.error("⚠️ El nombre es obligatorio.")
-                        st.stop()
-
-                    wa_limpio = "".join(filter(str.isdigit, whatsapp_cli))
-
-                    if whatsapp_cli and len(wa_limpio) < 10:
-                        st.error("⚠️ Número de WhatsApp inválido.")
-                        st.stop()
-
-                    try:
-                        with conectar() as conn:
-
-                            existe = conn.execute(
-                                "SELECT COUNT(*) FROM clientes WHERE lower(nombre) = ?",
-                                (nombre_cli.lower(),)
-                            ).fetchone()[0]
-
-                            if existe:
-                                st.error("⚠️ Ya existe un cliente con ese nombre.")
-                            else:
-                                conn.execute(
-                                    "INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)",
-                                    (nombre_cli, wa_limpio)
-                                )
-                                conn.commit()
-
-                                st.success(f"✅ Cliente '{nombre_cli}' registrado correctamente.")
-                                cargar_datos()
-                                st.rerun()
-
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
-
-        else:
-            # --- EDICIÓN DE CLIENTE ---
-            if df_clientes.empty:
-                st.info("No hay clientes para editar.")
-            else:
-                cliente_sel = st.selectbox(
-                    "Seleccionar Cliente:",
-                    df_clientes['nombre'].tolist()
-                )
-
-                datos = df_clientes[df_clientes['nombre'] == cliente_sel].iloc[0]
-
-                with st.form("form_editar_cliente"):
-
-                    col1, col2 = st.columns(2)
-
-                    nuevo_nombre = col1.text_input("Nombre", value=datos['nombre'])
-                    nuevo_wa = col2.text_input("WhatsApp", value=datos['whatsapp'])
-
-                    if st.form_submit_button("💾 Actualizar Cliente"):
-
-                        wa_limpio = "".join(filter(str.isdigit, nuevo_wa))
-
-                        try:
-                            with conectar() as conn:
-                                conn.execute("""
-                                    UPDATE clientes
-                                    SET nombre = ?, whatsapp = ?
-                                    WHERE id = ?
-                                """, (nuevo_nombre, wa_limpio, int(datos['id'])))
-
-                                conn.commit()
-
-                            st.success("✅ Cliente actualizado.")
-                            cargar_datos()
-                            st.rerun()
-
-                        except Exception as e:
-                            st.error(f"Error al actualizar: {e}")
-
-    st.divider()
-
-    # --- ANÁLISIS COMERCIAL ---
-    if df_clientes.empty:
-        st.info("No hay clientes para analizar.")
-    else:
-        st.write("Módulo de análisis comercial activo.")
-
-    resumen = []
-
-    for _, cli in df_clientes.iterrows():
-
-        compras = df_ventas[df_ventas['cliente_id'] == cli['id']]
-
-        total_comprado = compras['monto_total'].sum() if not compras.empty else 0
-
-        deudas = compras[
-            compras['metodo'].str.contains("Pendiente|Deuda", case=False, na=False)
-        ]['monto_total'].sum() if not compras.empty else 0
-
-        ultima_compra = None
-        if not compras.empty and 'fecha' in compras.columns:
-            fechas_validas = pd.to_datetime(compras['fecha'], errors='coerce').dropna()
-            if not fechas_validas.empty:
-                ultima_compra = fechas_validas.max().strftime('%Y-%m-%d')
-
-        resumen.append({
-            "id": cli['id'],
-            "nombre": cli['nombre'],
-            "whatsapp": cli['whatsapp'],
-            "total_comprado": total_comprado,
-            "deudas": deudas,
-            "operaciones": len(compras),
-            "ultima_compra": ultima_compra or "Sin compras"
-        })
-
-    df_resumen = pd.DataFrame(resumen)
-
-    # --- FILTROS ---
-    if busqueda:
-        df_resumen = df_resumen[
-            df_resumen['nombre'].str.contains(busqueda, case=False, na=False) |
-            df_resumen['whatsapp'].str.contains(busqueda, case=False, na=False)
-        ]
-
-    if filtro_deudores:
-        df_resumen = df_resumen[df_resumen['deudas'] > 0]
-
-    # --- DASHBOARD DE CLIENTES ---
-    if not df_resumen.empty:
-
-        st.subheader("📊 Resumen Comercial")
-
-        ticket_promedio = (df_resumen['total_comprado'].sum() / df_resumen['operaciones'].sum()) if df_resumen['operaciones'].sum() > 0 else 0
-        mayor_deudor = df_resumen.sort_values('deudas', ascending=False).iloc[0]
-
-        m1, m2, m3, m4 = st.columns(4)
-
-        m1.metric("Clientes Totales", len(df_resumen))
-        m2.metric("Ventas Totales", f"$ {df_resumen['total_comprado'].sum():,.2f}")
-        m3.metric("Cuentas por Cobrar", f"$ {df_resumen['deudas'].sum():,.2f}")
-        m4.metric("Ticket Promedio", f"$ {ticket_promedio:,.2f}")
-
-        st.caption(f"Mayor deudor actual: {mayor_deudor['nombre']} (${mayor_deudor['deudas']:,.2f})")
-
-        st.divider()
-
-        ctop, cgraf = st.columns([1, 2])
-        with ctop:
-            st.subheader("🏆 Top Clientes")
-            top = df_resumen.sort_values("total_comprado", ascending=False).head(5)
-            st.dataframe(
-                top[['nombre', 'total_comprado', 'operaciones']],
-                column_config={
-                    'nombre': 'Cliente',
-                    'total_comprado': st.column_config.NumberColumn('Comprado ($)', format='%.2f'),
-                    'operaciones': 'Operaciones'
-                },
-                use_container_width=True,
-                hide_index=True
-            )
-
-        with cgraf:
-            st.subheader("📈 Facturación por cliente")
-            top10 = df_resumen.sort_values("total_comprado", ascending=False).head(10)
-            fig_top = px.bar(top10, x='nombre', y='total_comprado')
-            fig_top.update_layout(xaxis_title='Cliente', yaxis_title='Comprado ($)')
-            st.plotly_chart(fig_top, use_container_width=True)
-
-        st.divider()
-
-        st.subheader(f"📋 Directorio ({len(df_resumen)} clientes)")
-
-        # --- EXPORTACIÓN ---
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_resumen.to_excel(writer, index=False, sheet_name='Clientes')
-
-        st.download_button(
-            "📥 Descargar Lista de Clientes (Excel)",
-            data=buffer.getvalue(),
-            file_name="clientes_imperio.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-        st.dataframe(
-            df_resumen.sort_values(['deudas', 'total_comprado'], ascending=[False, False]),
-            column_config={
-                'id': None,
-                'nombre': 'Cliente',
-                'whatsapp': 'WhatsApp',
-                'total_comprado': st.column_config.NumberColumn('Total Comprado ($)', format='%.2f'),
-                'deudas': st.column_config.NumberColumn('Deudas ($)', format='%.2f'),
-                'operaciones': 'Operaciones',
-                'ultima_compra': 'Última compra'
-            },
-            use_container_width=True,
-            hide_index=True
-        )
-
-        with st.expander("⚙️ Acciones rápidas por cliente"):
-            cliente_accion = st.selectbox("Selecciona cliente", df_resumen['nombre'].tolist(), key='cli_accion')
-            cli_row = df_resumen[df_resumen['nombre'] == cliente_accion].iloc[0]
-            a1, a2 = st.columns(2)
-            if cli_row['whatsapp']:
-                wa_num = str(cli_row['whatsapp'])
-                if not wa_num.startswith('58'):
-                    wa_num = '58' + wa_num.lstrip('0')
-                a1.link_button("💬 Abrir chat WhatsApp", f"https://wa.me/{wa_num}")
-            else:
-                a1.info("Cliente sin número de WhatsApp")
-
-            if a2.button("🗑 Eliminar cliente", type='secondary'):
-                with conectar() as conn:
-                    tiene_ventas = conn.execute("SELECT COUNT(*) FROM ventas WHERE cliente_id = ?", (int(cli_row['id']),)).fetchone()[0]
-                    if tiene_ventas > 0:
-                        st.error("No se puede eliminar: el cliente tiene ventas asociadas.")
-                    else:
-                        conn.execute("DELETE FROM clientes WHERE id = ?", (int(cli_row['id']),))
-                        conn.commit()
-                        st.success("Cliente eliminado correctamente.")
-                        cargar_datos()
-                        st.rerun()
-
-
-    else:
-        st.info("No hay clientes que coincidan con los filtros.")
-
-st.divider()
-st.subheader("🏢 Costos Operativos Mensuales")
-
-with conectar() as conn:
-
-try:
-    df_costos = pd.read_sql(
-        "SELECT * FROM costos_operativos",
-        conn
-    )
-except:
-    df_costos = pd.DataFrame(
-        columns=["id","nombre","monto_mensual"]
-    )
-
-
-st.dataframe(df_costos, use_container_width=True)
-
-with st.form("form_costos_operativos"):
-
-    nombre = st.text_input("Nombre del costo")
-
-    monto = st.number_input("Monto mensual ($)", min_value=0.0)
-
-    if st.form_submit_button("Guardar costo"):
+    if guardar_tasa:
 
         with conectar() as conn:
 
             conn.execute(
-                "INSERT INTO costos_operativos (nombre, monto_mensual) VALUES (?,?)",
-                (nombre, monto)
+                """
+                INSERT INTO tasas
+                (tasa_bcv, tasa_binance, fecha)
+                VALUES (?, ?, datetime('now'))
+                """,
+                (tasa_bcv, tasa_binance)
             )
 
             conn.commit()
 
-        st.success("Costo agregado")
-
+        st.success("Tasas actualizadas correctamente")
         st.rerun()
 
+
+    st.divider()
+
+
+    # ===========================================================
+    # 🏢 COSTOS OPERATIVOS
+    # ===========================================================
+
+    st.subheader("🏢 Costos Operativos Mensuales")
+
+    # Crear tabla si no existe
+    with conectar() as conn:
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS costos_operativos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                monto_mensual REAL
+            )
+        """)
+
+        conn.commit()
+
+
+    # Cargar datos
+    try:
+
+        with conectar() as conn:
+
+            df_costos = pd.read_sql(
+                "SELECT * FROM costos_operativos ORDER BY nombre",
+                conn
+            )
+
+    except Exception:
+
+        df_costos = pd.DataFrame(
+            columns=["id", "nombre", "monto_mensual"]
+        )
+
+
+    st.dataframe(
+        df_costos,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+    # Formulario nuevo costo
+    with st.form(key="form_costos_operativos_config"):
+
+        col1, col2 = st.columns(2)
+
+        nombre_costo = col1.text_input(
+            "Nombre del costo",
+            placeholder="Ej: Alquiler, Internet, Electricidad"
+        )
+
+        monto_costo = col2.number_input(
+            "Monto mensual ($)",
+            min_value=0.0,
+            format="%.2f"
+        )
+
+        guardar_costo = st.form_submit_button(
+            "💾 Guardar costo",
+            use_container_width=True
+        )
+
+
+    if guardar_costo:
+
+        if nombre_costo.strip() == "":
+
+            st.error("Debe escribir el nombre del costo")
+
+        else:
+
+            with conectar() as conn:
+
+                conn.execute(
+                    """
+                    INSERT INTO costos_operativos
+                    (nombre, monto_mensual)
+                    VALUES (?,?)
+                    """,
+                    (nombre_costo, monto_costo)
+                )
+
+                conn.commit()
+
+            st.success("Costo guardado correctamente")
+            st.rerun()
+
+
+    # ===========================================================
+    # 📊 RESUMEN COSTOS
+    # ===========================================================
+
+    if not df_costos.empty:
+
+        total = df_costos["monto_mensual"].sum()
+
+        costo_diario = total / 30
+
+        col1, col2 = st.columns(2)
+
+        col1.metric(
+            "Total mensual",
+            f"${total:,.2f}"
+        )
+
+        col2.metric(
+            "Costo operativo diario",
+            f"${costo_diario:,.2f}"
+        )
+
+    else:
+
+        st.info("No hay costos operativos registrados")
+
+
+    st.divider()
+
+
+    # ===========================================================
+    # 🧹 OPCIONES DEL SISTEMA
+    # ===========================================================
+
+    st.subheader("🧹 Sistema")
+
+    if st.button(
+        "🔄 Reinicializar Sistema (NO borra datos)",
+        use_container_width=True
+    ):
+
+        inicializar_sistema()
+
+        st.success("Sistema verificado correctamente")
+        st.rerun()
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
 # ===========================================================
@@ -3961,6 +3670,8 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
+
 
 
 
