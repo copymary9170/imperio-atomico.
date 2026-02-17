@@ -161,26 +161,48 @@ def inicializar_sistema():
         )
         """)
 
-      # COSTOS OPERATIVOS PRO
+              # ===================================================
+        # COSTOS OPERATIVOS PRO
+        # ===================================================
 
-c.execute("""
-CREATE TABLE IF NOT EXISTS costos_operativos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT UNIQUE,
-    monto_mensual REAL,
-    porcentaje_empresa REAL DEFAULT 100
-)
-""")
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS costos_operativos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE,
+            monto_mensual REAL,
+            porcentaje_empresa REAL DEFAULT 100
+        )
+        """)
 
-# actualizar si es tabla vieja
 
-columnas = [col[1] for col in c.execute("PRAGMA table_info(costos_operativos)")]
+        # actualizar tabla vieja
 
-if "porcentaje_empresa" not in columnas:
+        columnas = [
 
-    c.execute(
-        "ALTER TABLE costos_operativos ADD COLUMN porcentaje_empresa REAL DEFAULT 100"
-    )
+            col[1]
+
+            for col in c.execute(
+
+                "PRAGMA table_info(costos_operativos)"
+
+            )
+
+        ]
+
+
+        if "porcentaje_empresa" not in columnas:
+
+            c.execute(
+
+                """
+
+                ALTER TABLE costos_operativos
+
+                ADD COLUMN porcentaje_empresa REAL DEFAULT 100
+
+                """
+
+            )
 
 
 
@@ -4938,6 +4960,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
