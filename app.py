@@ -612,6 +612,149 @@ with st.sidebar:
 
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
 
+
+
+    # ===========================================================
+# 🏦 PANEL KONTIGO — PROFESIONAL
+# ===========================================================
+
+st.divider()
+
+st.subheader("🏦 Kontigo")
+
+
+# SALDO ACTUAL
+
+saldo_usd = st.session_state.get("kontigo_saldo",0)
+
+tasa_bcv = st.session_state.get("tasa_bcv",0)
+
+tasa_bin = st.session_state.get("tasa_binance",0)
+
+# tasa kontigo (puedes cambiarla si deseas)
+tasa_k = tasa_bin
+
+
+saldo_bs = saldo_usd * tasa_k
+
+
+st.metric(
+
+    "Saldo USD",
+
+    f"${saldo_usd:,.2f}"
+
+)
+
+
+st.metric(
+
+    "Saldo Bs",
+
+    f"Bs {saldo_bs:,.2f}"
+
+)
+
+
+# ======================================================
+# CALCULADORA ENTRADA
+# ======================================================
+
+st.caption("📥 Meter dinero")
+
+
+monto = st.number_input(
+
+    "Monto USD",
+
+    key="calc_k_in"
+
+)
+
+
+com_k = st.number_input(
+
+    "Comisión Kontigo %",
+
+    value=3.0,
+
+    key="calc_k_in_com"
+
+)
+
+
+com_pm = st.number_input(
+
+    "Comisión Pago móvil %",
+
+    value=2.0,
+
+    key="calc_k_pm"
+
+)
+
+
+total_com = com_k + com_pm
+
+
+monto_bs = monto * tasa_k
+
+
+comision_bs = monto_bs * total_com / 100
+
+
+total_bs = monto_bs + comision_bs
+
+
+st.write(
+
+    f"Debes pagar: Bs {total_bs:,.2f}"
+
+)
+
+
+# ======================================================
+# CALCULADORA SALIDA
+# ======================================================
+
+st.caption("📤 Sacar dinero")
+
+
+monto_out = st.number_input(
+
+    "Monto USD retirar",
+
+    key="calc_k_out"
+
+)
+
+
+com_out = st.number_input(
+
+    "Comisión retiro %",
+
+    value=3.0,
+
+    key="calc_k_out_com"
+
+)
+
+
+monto_bs_out = monto_out * tasa_k
+
+
+comision_out_bs = monto_bs_out * com_out / 100
+
+
+total_out_bs = monto_bs_out - comision_out_bs
+
+
+st.write(
+
+    f"Recibes: Bs {total_out_bs:,.2f}"
+
+)
+
     # ✅ RADIO CORRECTAMENTE CERRADO
     menu = st.radio(
         "Secciones:",
@@ -4380,6 +4523,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
