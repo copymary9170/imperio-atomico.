@@ -18,7 +18,7 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
 
-    ruta = "data/imperio.db"
+    ruta = "imperio.db"
 
     conn = sqlite3.connect(
         ruta,
@@ -28,7 +28,6 @@ def conectar():
     conn.execute("PRAGMA foreign_keys = ON")
 
     return conn
-
 
 def hash_password(password: str, salt: str | None = None) -> str:
     """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
@@ -507,6 +506,7 @@ t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "Produccion")
 
 with st.sidebar:
+    st.sidebar.write("DB usada:", os.path.abspath("data/imperio.db"))
     st.header(f"👋 {st.session_state.usuario_nombre}")
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
 
@@ -3711,6 +3711,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
