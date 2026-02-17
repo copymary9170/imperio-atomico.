@@ -396,29 +396,70 @@ def calcular_costo_operativo_por_dia():
 
 # --- 4. CARGA DE DATOS ---
 def cargar_datos():
-    with conectar() as conn:
-        try:
-            columnas_inventario = {row[1] for row in conn.execute("PRAGMA table_info(inventario)").fetchall()}
-            query_inv = "SELECT * FROM inventario"
-            if 'activo' in columnas_inventario:
-                query_inv += " WHERE COALESCE(activo,1)=1"
 
-            st.session_state.df_inv = pd.read_sql(query_inv, conn)
-            st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-            conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
-            for _, row in conf_df.iterrows():
-                st.session_state[row['parametro']] = float(row['valor'])
-        except (sqlite3.DatabaseError, ValueError, KeyError) as e:
-            st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")
+    with conectar() as conn:
+
+        try:
+
+            # INVENTARIO
+            existe = conn.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='inventario'
+            """).fetchone()
+
+            if existe:
+                columnas = {
+                    row[1] for row in
+                    conn.execute(
+                        "PRAGMA table_info(inventario)"
+                    ).fetchall()
+                }
+
+                query = "SELECT * FROM inventario"
+
+                if 'activo' in columnas:
+                    query += " WHERE COALESCE(activo,1)=1"
+
+                st.session_state.df_inv = pd.read_sql(query, conn)
+
+            else:
+                st.session_state.df_inv = pd.DataFrame()
+
+
+            # CLIENTES
+
+            existe_cli = conn.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='clientes'
+            """).fetchone()
+
+            if existe_cli:
+
+                st.session_state.df_cli = pd.read_sql(
+                    "SELECT * FROM clientes",
+                    conn
+                )
+
+            else:
+
+                st.session_state.df_cli = pd.DataFrame()
+
+
+        except Exception as e:
+
+            st.warning(f"Error cargando datos: {e}")
 
 # Alias de compatibilidad para módulos que lo usan
 def cargar_datos_seguros():
     cargar_datos()
 
 # --- 5. LOGICA DE ACCESO ---
+
+# 🔥 SIEMPRE inicializar primero
+inicializar_sistema()
+
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
-    inicializar_sistema()
 
 def login():
     st.title("⚛️ Acceso al Imperio Atómico")
@@ -3670,6 +3711,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
