@@ -614,89 +614,64 @@ with st.sidebar:
     st.info(f"🔶 Binance: {t_bin}")
 
 
+
     # ===========================================================
-    # 🏦 PANEL KONTIGO — PROFESIONAL
+    # 🏦 PANEL KONTIGO — REAL DESDE BASE DE DATOS
     # ===========================================================
 
-    st.divider()
+    with conectar() as conn:
 
-    st.subheader("🏦 Kontigo")
+        df_k = pd.read_sql(
+            "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+            conn
+        )
 
+    if not df_k.empty:
 
-    # SALDO ACTUAL
+        saldo_usd = float(df_k["saldo"].iloc[0])
 
-    saldo_usd = st.session_state.get("kontigo_saldo", 0.0)
+        comision_entrada = float(df_k["comision_entrada"].iloc[0])
+
+        comision_salida = float(df_k["comision_salida"].iloc[0])
+
+        comision_pm = float(df_k["comision_pago_movil"].iloc[0])
+
+    else:
+
+        saldo_usd = 0
+
+        comision_entrada = 3
+
+        comision_salida = 3
+
+        comision_pm = 2
+
 
     tasa_k = t_bin
 
     saldo_bs = saldo_usd * tasa_k
 
 
-    st.metric(
-        "Saldo USD",
-        f"${saldo_usd:,.2f}"
-    )
+    st.divider()
 
-    st.metric(
-        "Saldo Bs",
-        f"Bs {saldo_bs:,.2f}"
-    )
+    st.subheader("🏦 Kontigo")
 
 
-    # ===========================================================
-    # CALCULADORA ENTRADA 1
-    # ===========================================================
+    st.metric("Saldo USD", f"${saldo_usd:,.2f}")
 
-    st.caption("📥 Calcular monto para meter")
+    st.metric("Saldo Bs", f"Bs {saldo_bs:,.2f}")
 
-    monto_in = st.number_input(
-        "Monto USD a ingresar",
-        key="sb_k_in"
-    )
-
-    com_k_in = st.number_input(
-        "Comisión Kontigo %",
-        value=3.0,
-        key="sb_k_in_com"
-    )
-
-    com_pm = st.number_input(
-        "Comisión Pago Móvil %",
-        value=2.0,
-        key="sb_k_pm"
-    )
-
-    total_com_in = com_k_in + com_pm
-
-    total_bs_in = monto_in * tasa_k * (1 + total_com_in / 100)
-
-    st.write(f"Debes pagar Bs: {total_bs_in:,.2f}")
 
 
     # ======================================================
-    # CALCULADORA ENTRADA 2
+    # CALCULADORA ENTRADA
     # ======================================================
 
     st.caption("📥 Meter dinero")
 
-    monto = st.number_input(
-        "Monto USD",
-        key="calc_k_in"
-    )
+    monto = st.number_input("Monto USD", key="calc_k_in")
 
-    com_k = st.number_input(
-        "Comisión Kontigo %",
-        value=3.0,
-        key="calc_k_in_com"
-    )
-
-    com_pm2 = st.number_input(
-        "Comisión Pago móvil %",
-        value=2.0,
-        key="calc_k_pm"
-    )
-
-    total_com = com_k + com_pm2
+    total_com = comision_entrada + comision_pm
 
     monto_bs = monto * tasa_k
 
@@ -707,52 +682,23 @@ with st.sidebar:
     st.write(f"Debes pagar: Bs {total_bs:,.2f}")
 
 
-    # ======================================================
-    # CALCULADORA SALIDA 1
-    # ======================================================
-
-    st.caption("📤 Calcular monto para sacar")
-
-    monto_out = st.number_input(
-        "Monto USD a retirar",
-        key="sb_k_out"
-    )
-
-    com_k_out = st.number_input(
-        "Comisión Kontigo retiro %",
-        value=3.0,
-        key="sb_k_out_com"
-    )
-
-    total_bs_out = monto_out * tasa_k * (1 - com_k_out / 100)
-
-    st.write(f"Recibes Bs: {total_bs_out:,.2f}")
-
 
     # ======================================================
-    # CALCULADORA SALIDA 2
+    # CALCULADORA SALIDA
     # ======================================================
 
     st.caption("📤 Sacar dinero")
 
-    monto_out2 = st.number_input(
-        "Monto USD retirar",
-        key="calc_k_out"
-    )
+    monto_out = st.number_input("Monto USD retirar", key="calc_k_out")
 
-    com_out = st.number_input(
-        "Comisión retiro %",
-        value=3.0,
-        key="calc_k_out_com"
-    )
+    monto_bs_out = monto_out * tasa_k
 
-    monto_bs_out = monto_out2 * tasa_k
-
-    comision_out_bs = monto_bs_out * com_out / 100
+    comision_out_bs = monto_bs_out * comision_salida / 100
 
     total_out_bs = monto_bs_out - comision_out_bs
 
     st.write(f"Recibes: Bs {total_out_bs:,.2f}")
+
 
 
     # ======================================================
@@ -779,9 +725,8 @@ with st.sidebar:
     )
 
 
-    # ======================================================
-    # BASES DETECTADAS
-    # ======================================================
+
+    # BASES
 
     st.subheader("📁 Bases detectadas")
 
@@ -789,27 +734,19 @@ with st.sidebar:
 
     archivos = glob.glob("**/*.db", recursive=True)
 
-    if archivos:
+    for f in archivos:
 
-        for f in archivos:
-
-            st.write(f)
-
-    else:
-
-        st.write("No hay archivos .db detectados")
+        st.write(f)
 
 
-    # ======================================================
+
     # LOGOUT
-    # ======================================================
 
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
 
         st.session_state.clear()
 
         st.rerun()
-
         
 # ===========================================================
 # 📊 DASHBOARD GENERAL
@@ -4534,6 +4471,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
