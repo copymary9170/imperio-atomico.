@@ -1470,15 +1470,15 @@ elif menu == "📦 Inventario":
         c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
 # ===========================================================
-# 👥 CRM PRO MAX 6.1 — IMPERIO ATÓMICO (ANTI-ERRORES)
+# 👥 CRM PRO MAX 7.0 — IMPERIO ATÓMICO (VERSIÓN COMPLETA)
 # ===========================================================
 
 elif menu == "👥 Clientes":
 
-    st.title("👥 CRM PRO MAX 6.1")
+    st.title("👥 CRM PRO MAX 7.0")
 
     # ===========================================================
-    # CREAR / CARGAR BASE
+    # BASE DE DATOS
     # ===========================================================
 
     with conectar() as conn:
@@ -1500,8 +1500,6 @@ elif menu == "👥 Clientes":
             etiqueta TEXT,
 
             notas TEXT,
-
-            estado TEXT DEFAULT 'Activo',
 
             fecha DATETIME DEFAULT CURRENT_TIMESTAMP
 
@@ -1533,53 +1531,42 @@ elif menu == "👥 Clientes":
         """, conn)
 
 
-
     # ===========================================================
     # SI NO HAY CLIENTES
     # ===========================================================
 
     if df_cli.empty:
 
-        st.warning("⚠️ No hay clientes registrados")
+        st.warning("No hay clientes")
 
-        tab1 = st.tabs(["➕ Crear Cliente"])
+        with st.form("crear_cliente_inicial"):
 
-        with tab1[0]:
+            nombre = st.text_input("Nombre")
+            whatsapp = st.text_input("WhatsApp")
+            email = st.text_input("Email")
 
-            with st.form("nuevo_cliente_vacio"):
+            if st.form_submit_button("Crear"):
 
-                nombre = st.text_input("Nombre")
-                whatsapp = st.text_input("WhatsApp")
-                email = st.text_input("Email")
+                if nombre:
 
-                if st.form_submit_button("Guardar"):
+                    with conectar() as conn:
 
-                    if nombre:
+                        conn.execute("""
 
-                        with conectar() as conn:
+                        INSERT INTO clientes
+                        (nombre,whatsapp,email)
 
-                            conn.execute("""
+                        VALUES (?,?,?)
 
-                            INSERT INTO clientes
+                        """,(nombre,whatsapp,email))
 
-                            (nombre,whatsapp,email)
+                        conn.commit()
 
-                            VALUES (?,?,?)
+                    st.success("Cliente creado")
 
-                            """,(nombre,whatsapp,email))
-
-                            conn.commit()
-
-                        st.success("Cliente creado")
-
-                        st.rerun()
-
-                    else:
-
-                        st.error("Nombre obligatorio")
+                    st.rerun()
 
         st.stop()
-
 
 
     # ===========================================================
@@ -1594,12 +1581,15 @@ elif menu == "👥 Clientes":
     df_cli["dias"] = (
         pd.Timestamp.now() -
         df_cli["ultima_compra"]
-    ).dt.days.fillna(999)
+    ).dt.days
 
 
-    def estado_cliente(row):
+    df_cli["dias"] = df_cli["dias"].fillna(999)
 
-        if row.total >= 500:
+
+    def estado(row):
+
+        if row.total >= 1000:
             return "VIP"
 
         if row.dias > 90:
@@ -1611,26 +1601,24 @@ elif menu == "👥 Clientes":
         return "Activo"
 
 
-    df_cli["estado_calc"] = df_cli.apply(
-        estado_cliente,
-        axis=1
-    )
-
+    df_cli["estado"] = df_cli.apply(estado, axis=1)
 
 
     # ===========================================================
     # DASHBOARD
     # ===========================================================
 
-    c1,c2,c3,c4 = st.columns(4)
+    c1,c2,c3,c4,c5 = st.columns(5)
 
     c1.metric("Clientes", len(df_cli))
 
     c2.metric("Facturación", f"${df_cli.total.sum():,.0f}")
 
-    c3.metric("VIP", len(df_cli[df_cli.estado_calc=="VIP"]))
+    c3.metric("VIP", len(df_cli[df_cli.estado=="VIP"]))
 
-    c4.metric("En riesgo", len(df_cli[df_cli.estado_calc=="Riesgo"]))
+    c4.metric("En riesgo", len(df_cli[df_cli.estado=="Riesgo"]))
+
+    c5.metric("Perdidos", len(df_cli[df_cli.estado=="Perdido"]))
 
 
 
@@ -1638,39 +1626,57 @@ elif menu == "👥 Clientes":
 
         "📋 Directorio",
 
-        "📊 Perfil",
+        "📊 Perfil 360°",
+
+        "🏆 Ranking",
 
         "📊 Pipeline",
 
-        "➕ Nuevo",
+        "⏰ Seguimientos",
 
-        "⏰ Seguimientos"
+        "➕ Nuevo"
 
     ])
 
 
 
-    # ===========================================================
-    # DIRECTORIO
-    # ===========================================================
+# ===========================================================
+# DIRECTORIO
+# ===========================================================
 
     with tabs[0]:
 
+        buscar = st.text_input("Buscar cliente")
+
+        df_view = df_cli.copy()
+
+        if buscar:
+
+            df_view = df_view[
+
+                df_view.nombre.str.contains(
+                    buscar,
+                    case=False
+                )
+
+            ]
+
+
         st.dataframe(
 
-            df_cli,
+            df_view,
 
             column_config={
 
                 "nombre":"Cliente",
 
-                "total":"Valor $",
+                "total":"Total $",
 
                 "pedidos":"Pedidos",
 
                 "dias":"Días",
 
-                "estado_calc":"Estado"
+                "estado":"Estado"
 
             },
 
@@ -1682,66 +1688,39 @@ elif menu == "👥 Clientes":
 
 
 
-    # ===========================================================
-    # PERFIL (ANTI INDEX ERROR)
-    # ===========================================================
+# ===========================================================
+# PERFIL
+# ===========================================================
 
     with tabs[1]:
 
-        lista_clientes = df_cli["nombre"].dropna().tolist()
+        nombres = df_cli.nombre.dropna().tolist()
 
-        if not lista_clientes:
-
-            st.warning("No hay clientes disponibles")
-
-        else:
+        if nombres:
 
             cliente = st.selectbox(
-
-                "Seleccionar Cliente",
-
-                lista_clientes
-
+                "Seleccionar cliente",
+                nombres
             )
 
-
-            df_filtrado = df_cli[
-
-                df_cli["nombre"] == cliente
-
+            filtro = df_cli[
+                df_cli.nombre == cliente
             ]
 
+            if not filtro.empty:
 
-            if df_filtrado.empty:
-
-                st.error("Cliente no encontrado")
-
-            else:
-
-                datos = df_filtrado.iloc[0]
+                datos = filtro.iloc[0]
 
 
                 col1,col2,col3,col4 = st.columns(4)
 
-                col1.metric(
-                    "Valor",
-                    f"${datos.total:,.0f}"
-                )
+                col1.metric("Total", f"${datos.total:,.0f}")
 
-                col2.metric(
-                    "Pedidos",
-                    int(datos.pedidos)
-                )
+                col2.metric("Pedidos", datos.pedidos)
 
-                col3.metric(
-                    "Estado",
-                    datos.estado_calc
-                )
+                col3.metric("Estado", datos.estado)
 
-                col4.metric(
-                    "Días",
-                    int(datos.dias)
-                )
+                col4.metric("Días", int(datos.dias))
 
 
                 if datos.whatsapp:
@@ -1749,82 +1728,102 @@ elif menu == "👥 Clientes":
                     url = f"https://wa.me/{datos.whatsapp}"
 
                     st.link_button(
-                        "💬 WhatsApp",
+                        "WhatsApp",
                         url
                     )
 
 
+                # HISTORIAL
 
-    # ===========================================================
-    # PIPELINE
-    # ===========================================================
+                with conectar() as conn:
+
+                    hist = pd.read_sql("""
+
+                    SELECT fecha,
+                    detalle,
+                    monto_total
+
+                    FROM ventas
+
+                    WHERE cliente_id=?
+
+                    ORDER BY fecha DESC
+
+                    """,conn,params=(datos.id,))
+
+
+                st.subheader("Historial")
+
+                st.dataframe(
+                    hist,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+
+
+# ===========================================================
+# RANKING
+# ===========================================================
 
     with tabs[2]:
 
+        top = df_cli.head(10)
+
         fig = px.bar(
 
-            df_cli,
+            top,
 
-            x="estado_calc",
+            x="nombre",
 
-            color="estado_calc"
+            y="total",
+
+            color="estado",
+
+            text="total"
 
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
 
 
 
-    # ===========================================================
-    # NUEVO
-    # ===========================================================
+# ===========================================================
+# PIPELINE
+# ===========================================================
 
     with tabs[3]:
 
-        with st.form("nuevo_cliente"):
+        fig = px.pie(
 
-            nombre = st.text_input("Nombre")
-            whatsapp = st.text_input("WhatsApp")
-            email = st.text_input("Email")
+            df_cli,
 
-            if st.form_submit_button("Guardar"):
+            names="estado"
 
-                if nombre:
+        )
 
-                    with conectar() as conn:
-
-                        conn.execute("""
-
-                        INSERT INTO clientes
-
-                        (nombre,whatsapp,email)
-
-                        VALUES (?,?,?)
-
-                        """,(nombre,whatsapp,email))
-
-                        conn.commit()
-
-                    st.success("Cliente creado")
-
-                    st.rerun()
-
-                else:
-
-                    st.error("Nombre obligatorio")
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
 
 
 
-    # ===========================================================
-    # SEGUIMIENTOS
-    # ===========================================================
+# ===========================================================
+# SEGUIMIENTOS
+# ===========================================================
 
     with tabs[4]:
 
         riesgo = df_cli[
 
-            df_cli.estado_calc.isin(
+            df_cli.estado.isin(
+
                 ["Riesgo","Perdido"]
+
             )
 
         ]
@@ -1836,30 +1835,80 @@ elif menu == "👥 Clientes":
         if not riesgo.empty:
 
             cliente = st.selectbox(
-
                 "Contactar",
-
                 riesgo.nombre
-
             )
 
-
-            tel = riesgo[
+            telefono = riesgo[
                 riesgo.nombre==cliente
             ].iloc[0].whatsapp
 
 
-            if tel:
+            if telefono:
 
-                url = f"https://wa.me/{tel}"
+                mensaje = f"Hola {cliente}, tenemos promociones nuevas para ti"
+
+                url = f"https://wa.me/{telefono}?text={mensaje}"
 
                 st.link_button(
-
-                    "Enviar mensaje",
-
+                    "Enviar WhatsApp",
                     url
-
                 )
+
+
+
+# ===========================================================
+# NUEVO CLIENTE
+# ===========================================================
+
+    with tabs[5]:
+
+        with st.form("nuevo_cliente"):
+
+            nombre = st.text_input("Nombre")
+
+            whatsapp = st.text_input("WhatsApp")
+
+            email = st.text_input("Email")
+
+            direccion = st.text_input("Direccion")
+
+            notas = st.text_area("Notas")
+
+
+            if st.form_submit_button("Guardar"):
+
+                if nombre:
+
+                    with conectar() as conn:
+
+                        conn.execute("""
+
+                        INSERT INTO clientes
+
+                        (nombre,whatsapp,email,direccion,notas)
+
+                        VALUES (?,?,?,?,?)
+
+                        """,(
+
+                        nombre,
+                        whatsapp,
+                        email,
+                        direccion,
+                        notas
+
+                        ))
+
+                        conn.commit()
+
+                    st.success("Cliente creado")
+
+                    st.rerun()
+
+                else:
+
+                    st.error("Nombre obligatorio")
  # ===========================================================
 # ⚙️ CONFIGURACIÓN GENERAL DEL SISTEMA
 # ===========================================================
@@ -4128,6 +4177,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
