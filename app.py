@@ -610,19 +610,18 @@ with st.sidebar:
 
     st.header(f"👋 {st.session_state.usuario_nombre}")
 
-    st.info(f"🏦 BCV: {t_bcv}")
-    st.info(f"🔶 Binance: {t_bin}")
-
+    st.info(f"🏦 BCV: {t_bcv:,.2f}")
+    st.info(f"🔶 Binance: {t_bin:,.2f}")
 
 
     # ===========================================================
-    # 🏦 PANEL KONTIGO — REAL DESDE BASE DE DATOS
+    # 🏦 KONTIGO — SOLO RECORDATORIO
     # ===========================================================
 
     with conectar() as conn:
 
         df_k = pd.read_sql(
-            "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+            "SELECT saldo FROM kontigo ORDER BY id DESC LIMIT 1",
             conn
         )
 
@@ -630,75 +629,27 @@ with st.sidebar:
 
         saldo_usd = float(df_k["saldo"].iloc[0])
 
-        comision_entrada = float(df_k["comision_entrada"].iloc[0])
-
-        comision_salida = float(df_k["comision_salida"].iloc[0])
-
-        comision_pm = float(df_k["comision_pago_movil"].iloc[0])
-
     else:
 
-        saldo_usd = 0
-
-        comision_entrada = 3
-
-        comision_salida = 3
-
-        comision_pm = 2
+        saldo_usd = 0.0
 
 
-    tasa_k = t_bin
-
-    saldo_bs = saldo_usd * tasa_k
+    saldo_bs = saldo_usd * t_bin
 
 
     st.divider()
 
     st.subheader("🏦 Kontigo")
 
+    st.metric(
+        "Saldo USD",
+        f"${saldo_usd:,.2f}"
+    )
 
-    st.metric("Saldo USD", f"${saldo_usd:,.2f}")
-
-    st.metric("Saldo Bs", f"Bs {saldo_bs:,.2f}")
-
-
-
-    # ======================================================
-    # CALCULADORA ENTRADA
-    # ======================================================
-
-    st.caption("📥 Meter dinero")
-
-    monto = st.number_input("Monto USD", key="calc_k_in")
-
-    total_com = comision_entrada + comision_pm
-
-    monto_bs = monto * tasa_k
-
-    comision_bs = monto_bs * total_com / 100
-
-    total_bs = monto_bs + comision_bs
-
-    st.write(f"Debes pagar: Bs {total_bs:,.2f}")
-
-
-
-    # ======================================================
-    # CALCULADORA SALIDA
-    # ======================================================
-
-    st.caption("📤 Sacar dinero")
-
-    monto_out = st.number_input("Monto USD retirar", key="calc_k_out")
-
-    monto_bs_out = monto_out * tasa_k
-
-    comision_out_bs = monto_bs_out * comision_salida / 100
-
-    total_out_bs = monto_bs_out - comision_out_bs
-
-    st.write(f"Recibes: Bs {total_out_bs:,.2f}")
-
+    st.metric(
+        "Saldo Bs",
+        f"Bs {saldo_bs:,.2f}"
+    )
 
 
     # ======================================================
@@ -725,8 +676,9 @@ with st.sidebar:
     )
 
 
-
-    # BASES
+    # ======================================================
+    # BASES DETECTADAS
+    # ======================================================
 
     st.subheader("📁 Bases detectadas")
 
@@ -739,8 +691,9 @@ with st.sidebar:
         st.write(f)
 
 
-
+    # ======================================================
     # LOGOUT
+    # ======================================================
 
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
 
@@ -4471,6 +4424,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
