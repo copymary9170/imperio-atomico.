@@ -1841,6 +1841,155 @@ elif menu == "👥 Clientes":
                 st.success("Cliente creado")
 
                 st.rerun()
+
+
+# ===========================================================
+# EDITAR CLIENTE (CORRECCIÓN DE DATOS MEJORADA)
+# ===========================================================
+
+with tabs[2]:
+
+    cliente = st.selectbox("Editar", df_cli.nombre, key="edit")
+
+    datos = df_cli[df_cli.nombre == cliente].iloc[0]
+
+
+    # valores seguros (evita None)
+    nombre_actual = datos.nombre or ""
+    whatsapp_actual = datos.whatsapp or ""
+    email_actual = datos.email or ""
+    direccion_actual = datos.direccion or ""
+    etiqueta_actual = datos.etiqueta or ""
+    notas_actual = datos.notas or ""
+
+
+    lista_etiquetas = ["","VIP","Empresa","Revendedor"]
+
+    try:
+        index_etiqueta = lista_etiquetas.index(etiqueta_actual)
+    except:
+        index_etiqueta = 0
+
+
+    with st.form("editar_cliente_form"):
+
+        nombre = st.text_input("Nombre", nombre_actual)
+
+        whatsapp = st.text_input("WhatsApp", whatsapp_actual)
+
+        email = st.text_input("Email", email_actual)
+
+        direccion = st.text_input("Direccion", direccion_actual)
+
+        etiqueta = st.selectbox(
+            "Etiqueta",
+            lista_etiquetas,
+            index=index_etiqueta
+        )
+
+        notas = st.text_area("Notas", notas_actual)
+
+
+        col1,col2,col3 = st.columns(3)
+
+        guardar = col1.form_submit_button("💾 Guardar cambios")
+
+        eliminar = col2.form_submit_button("🗑️ Eliminar cliente")
+
+        cancelar = col3.form_submit_button("❌ Cancelar")
+
+
+    # -------------------------------------------------------
+    # GUARDAR CAMBIOS
+    # -------------------------------------------------------
+
+    if guardar:
+
+        if not nombre.strip():
+
+            st.error("El nombre no puede estar vacío")
+
+        else:
+
+            with conectar() as conn:
+
+                conn.execute("""
+
+                UPDATE clientes
+
+                SET nombre=?,
+                    whatsapp=?,
+                    email=?,
+                    direccion=?,
+                    etiqueta=?,
+                    notas=?
+
+                WHERE id=?
+
+                """,(
+
+                    nombre.strip(),
+                    whatsapp.strip(),
+                    email.strip(),
+                    direccion.strip(),
+                    etiqueta,
+                    notas.strip(),
+                    int(datos.id)
+
+                ))
+
+                conn.commit()
+
+            st.success("✅ Datos corregidos correctamente")
+
+            st.rerun()
+
+
+    # -------------------------------------------------------
+    # ELIMINAR CLIENTE (CON CONFIRMACIÓN)
+    # -------------------------------------------------------
+
+    if eliminar:
+
+        confirmar = st.checkbox(
+            "Confirmar eliminación permanente",
+            key="confirmar_delete"
+        )
+
+        if confirmar:
+
+            with conectar() as conn:
+
+                conn.execute(
+                    "DELETE FROM clientes WHERE id=?",
+                    (int(datos.id),)
+                )
+
+                conn.commit()
+
+            st.warning("Cliente eliminado")
+
+            st.rerun()
+
+        else:
+
+            st.info("Marca la casilla para confirmar")
+
+
+    # -------------------------------------------------------
+    # BOTON WHATSAPP DIRECTO
+    # -------------------------------------------------------
+
+    if whatsapp_actual:
+
+        mensaje = f"Hola {nombre_actual}, te escribimos desde Imperio Atómico"
+
+        url = f"https://wa.me/{whatsapp_actual}?text={mensaje}"
+
+        st.link_button("💬 Contactar por WhatsApp", url)
+
+
+
  # ===========================================================
 # ⚙️ CONFIGURACIÓN GENERAL DEL SISTEMA
 # ===========================================================
@@ -4109,6 +4258,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
