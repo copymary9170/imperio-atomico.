@@ -610,52 +610,90 @@ with st.sidebar:
 
     st.header(f"👋 {st.session_state.usuario_nombre}")
 
-    st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
-
+    st.info(f"🏦 BCV: {t_bcv}")
+    st.info(f"🔶 Binance: {t_bin}")
 
 
     # ===========================================================
-# 🏦 PANEL KONTIGO — PROFESIONAL
-# ===========================================================
+    # 🏦 PANEL KONTIGO — PROFESIONAL
+    # ===========================================================
 
     st.divider()
 
     st.subheader("🏦 Kontigo")
 
 
-# SALDO ACTUAL
+    # SALDO ACTUAL
 
-saldo_usd = st.session_state.get("kontigo_saldo",0)
+    saldo_usd = st.session_state.get("kontigo_saldo", 0.0)
 
-tasa_bcv = st.session_state.get("tasa_bcv",0)
+    tasa_k = t_bin  # puedes cambiar a tasa_kontigo si la creas
 
-tasa_bin = st.session_state.get("tasa_binance",0)
-
-# tasa kontigo (puedes cambiarla si deseas)
-tasa_k = tasa_bin
-
-
-saldo_bs = saldo_usd * tasa_k
+    saldo_bs = saldo_usd * tasa_k
 
 
     st.metric(
-
-    "Saldo USD",
-
-    f"${saldo_usd:,.2f}"
-
-)
+        "Saldo USD",
+        f"${saldo_usd:,.2f}"
+    )
 
 
-st.metric(
-
-    "Saldo Bs",
-
-    f"Bs {saldo_bs:,.2f}"
-
-)
+    st.metric(
+        "Saldo Bs",
+        f"Bs {saldo_bs:,.2f}"
+    )
 
 
+    # ===========================================================
+    # CALCULADORA ENTRADA
+    # ===========================================================
+
+    st.caption("📥 Calcular monto para meter")
+
+    monto_in = st.number_input(
+        "Monto USD a ingresar",
+        key="sb_k_in"
+    )
+
+    com_k_in = st.number_input(
+        "Comisión Kontigo %",
+        value=3.0,
+        key="sb_k_in_com"
+    )
+
+    com_pm = st.number_input(
+        "Comisión Pago Móvil %",
+        value=2.0,
+        key="sb_k_pm"
+    )
+
+    total_com_in = com_k_in + com_pm
+
+    total_bs_in = monto_in * tasa_k * (1 + total_com_in / 100)
+
+    st.write(f"Debes pagar Bs: {total_bs_in:,.2f}")
+
+
+    # ===========================================================
+    # CALCULADORA SALIDA
+    # ===========================================================
+
+    st.caption("📤 Calcular monto para sacar")
+
+    monto_out = st.number_input(
+        "Monto USD a retirar",
+        key="sb_k_out"
+    )
+
+    com_k_out = st.number_input(
+        "Comisión Kontigo retiro %",
+        value=3.0,
+        key="sb_k_out_com"
+    )
+
+    total_bs_out = monto_out * tasa_k * (1 - com_k_out / 100)
+
+    st.write(f"Recibes Bs: {total_bs_out:,.2f}")
 # ======================================================
 # CALCULADORA ENTRADA
 # ======================================================
@@ -4523,6 +4561,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
