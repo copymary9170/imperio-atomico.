@@ -617,7 +617,7 @@ with st.sidebar:
 
 
     # ===========================================================
-    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE REAL (VERSIÓN SEGURA)
+    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE REAL (CORRECTO)
     # ===========================================================
 
     saldo_usd = 0.0
@@ -634,8 +634,6 @@ with st.sidebar:
 
 
     with conectar() as conn:
-
-        # verificar si tabla existe
 
         existe = conn.execute("""
             SELECT name FROM sqlite_master
@@ -671,16 +669,28 @@ with st.sidebar:
 
 
     # ===========================================================
-    # CALCULOS REALES
+    # CALCULOS REALES CON COMISIONES
     # ===========================================================
+
+    # saldo real en Bs
 
     saldo_bs = saldo_usd * usd_bs_salida
 
 
-    costo_real_bs = usd_bs_entrada
+    # COSTO REAL DE COMPRAR 1 USD
+    # incluye comisión kontigo + pago móvil
+
+    costo_real_bs = usd_bs_entrada * (
+        1 + (com_entrada / 100) + (com_pm / 100)
+    )
 
 
-    valor_real_bs = usd_bs_salida
+    # VALOR REAL DE VENDER 1 USD
+    # incluye solo comisión kontigo
+
+    valor_real_bs = usd_bs_salida * (
+        1 - (com_salida / 100)
+    )
 
 
     # ===========================================================
@@ -714,7 +724,6 @@ with st.sidebar:
         "Valor real 1 USD",
         f"Bs {valor_real_bs:,.2f}"
     )
-
 
 
     # ======================================================
@@ -4641,6 +4650,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
