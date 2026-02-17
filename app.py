@@ -412,10 +412,10 @@ def cargar_datos():
             if existe:
 
                 columnas = {
-                    row[1] for row in
-                    conn.execute(
+                    row[1]
+                    for row in conn.execute(
                         "PRAGMA table_info(inventario)"
-                    ).fetchall()
+                    )
                 }
 
                 query = "SELECT * FROM inventario"
@@ -453,37 +453,34 @@ def cargar_datos():
 
 
             # ======================================================
-            # TASAS (NUEVO)
+            # TASAS
             # ======================================================
 
-            existe_tasas = conn.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='tasas'
-            """).fetchone()
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS tasas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tasa_bcv REAL,
+                tasa_binance REAL,
+                fecha TEXT
+            )
+            """)
 
-            if existe_tasas:
+            df_tasas = pd.read_sql("""
+                SELECT tasa_bcv, tasa_binance
+                FROM tasas
+                ORDER BY id DESC
+                LIMIT 1
+            """, conn)
 
-                df_tasas = pd.read_sql("""
-                    SELECT tasa_bcv, tasa_binance
-                    FROM tasas
-                    ORDER BY id DESC
-                    LIMIT 1
-                """, conn)
+            if not df_tasas.empty:
 
-                if not df_tasas.empty:
+                st.session_state.tasa_bcv = float(
+                    df_tasas.iloc[0]["tasa_bcv"]
+                )
 
-                    st.session_state.tasa_bcv = float(
-                        df_tasas["tasa_bcv"].iloc[0]
-                    )
-
-                    st.session_state.tasa_binance = float(
-                        df_tasas["tasa_binance"].iloc[0]
-                    )
-
-                else:
-
-                    st.session_state.tasa_bcv = 1.0
-                    st.session_state.tasa_binance = 1.0
+                st.session_state.tasa_binance = float(
+                    df_tasas.iloc[0]["tasa_binance"]
+                )
 
             else:
 
@@ -492,34 +489,55 @@ def cargar_datos():
 
 
             # ======================================================
-            # KONTIGO (NUEVO)
+            # KONTIGO TABLA
             # ======================================================
 
-            existe_k = conn.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='kontigo_movs'
-            """).fetchone()
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS kontigo_movs (
 
-            if existe_k:
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-                df_k = pd.read_sql("""
-                    SELECT *
-                    FROM kontigo_movs
-                """, conn)
+                tipo TEXT,
 
-                if not df_k.empty:
+                monto REAL,
 
-                    st.session_state.kontigo_saldo = float(
-                        df_k["neto"].sum()
-                    )
+                comision REAL,
 
-                else:
+                neto REAL,
 
-                    st.session_state.kontigo_saldo = 0.0
+                fecha TEXT
+
+            )
+            """)
+
+
+            # ======================================================
+            # CARGAR HISTORIAL KONTIGO
+            # ======================================================
+
+            df_kontigo = pd.read_sql(
+                "SELECT * FROM kontigo_movs ORDER BY id DESC",
+                conn
+            )
+
+
+            st.session_state.df_kontigo = df_kontigo
+
+
+            # ======================================================
+            # CALCULAR SALDO KONTIGO
+            # ======================================================
+
+            if not df_kontigo.empty:
+
+                saldo = float(df_kontigo["neto"].sum())
 
             else:
 
-                st.session_state.kontigo_saldo = 0.0
+                saldo = 0.0
+
+
+            st.session_state.kontigo_saldo = saldo
 
 
         except Exception as e:
@@ -527,7 +545,7 @@ def cargar_datos():
             st.warning(f"Error cargando datos: {e}")
 
 
-# Alias de compatibilidad para módulos que lo usan
+# Alias compatibilidad
 def cargar_datos_seguros():
 
     cargar_datos()
@@ -4362,6 +4380,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
