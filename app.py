@@ -500,16 +500,22 @@ if not st.session_state.autenticado:
     st.stop()
 
 # --- 6. SIDEBAR Y VARIABLES ---
+
 cargar_datos()
+
 t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "Produccion")
 
 with st.sidebar:
-    st.sidebar.write("DB usada:", os.path.abspath("data/imperio.db"))
+
+    st.write("DB usada:", os.path.abspath("data/imperio.db"))
+
     st.header(f"👋 {st.session_state.usuario_nombre}")
+
     st.info(f"🏦 BCV: {t_bcv} | 🔶 Bin: {t_bin}")
 
+    # ✅ RADIO CORRECTAMENTE CERRADO
     menu = st.radio(
         "Secciones:",
         [
@@ -527,22 +533,30 @@ with st.sidebar:
             "📝 Cotizaciones",
             "⚙️ Configuración"
         ]
-
-        st.sidebar.subheader("📁 Bases detectadas")
-
-import glob
-
-archivos = glob.glob("**/*.db", recursive=True)
-
-if archivos:
-    for f in archivos:
-        st.sidebar.write(f)
-else:
-    st.sidebar.write("No hay archivos .db detectados")
     )
 
+    # ✅ DETECTAR BASES
+    st.subheader("📁 Bases detectadas")
+
+    import glob
+
+    archivos = glob.glob("**/*.db", recursive=True)
+
+    if archivos:
+
+        for f in archivos:
+
+            st.write(f)
+
+    else:
+
+        st.write("No hay archivos .db detectados")
+
+    # BOTÓN LOGOUT
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
+
         st.session_state.clear()
+
         st.rerun()
 
         
@@ -3723,6 +3737,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
