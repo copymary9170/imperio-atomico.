@@ -379,42 +379,75 @@ elif menu == "📦 Inventario":
                       delta_color="inverse")
             c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
 
-    # =======================================================
+  # =======================================================
 # 📥 TAB 2 — REGISTRAR COMPRA
 # =======================================================
-    with tabs[1]:
-        st.subheader("📥 Registrar Nueva Compra")
 
-        with conectar() as conn:
-            try:
-                proveedores_existentes = pd.read_sql(
-                    "SELECT nombre FROM proveedores ORDER BY nombre ASC",
-                    conn
-                )["nombre"].dropna().astype(str).tolist()
-            except (sqlite3.DatabaseError, pd.errors.DatabaseError):
-                proveedores_existentes = []
+with tabs[1]:
 
-        col_base1, col_base2 = st.columns(2)
-        nombre_c = col_base1.text_input("Nombre del Insumo")
-        proveedor_sel = col_base2.selectbox(
-            "Proveedor",
-            ["(Sin proveedor)", "➕ Nuevo proveedor"] + proveedores_existentes,
-            key="inv_proveedor_compra"
+    st.subheader("📥 Registrar Nueva Compra")
+
+
+    with conectar() as conn:
+
+        try:
+
+            proveedores_existentes = pd.read_sql(
+                "SELECT nombre FROM proveedores ORDER BY nombre ASC",
+                conn
+            )["nombre"].dropna().astype(str).tolist()
+
+        except (sqlite3.DatabaseError, pd.errors.DatabaseError):
+
+            proveedores_existentes = []
+
+
+
+    col_base1, col_base2 = st.columns(2)
+
+
+    nombre_c = col_base1.text_input(
+        "Nombre del Insumo"
+    )
+
+
+    proveedor_sel = col_base2.selectbox(
+        "Proveedor",
+        ["(Sin proveedor)", "➕ Nuevo proveedor"] + proveedores_existentes,
+        key="inv_proveedor_compra"
+    )
+
+
+
+    proveedor = ""
+
+
+    if proveedor_sel == "➕ Nuevo proveedor":
+
+        proveedor = st.text_input(
+            "Nombre del nuevo proveedor",
+            key="inv_proveedor_nuevo"
         )
 
-        proveedor = ""
-        if proveedor_sel == "➕ Nuevo proveedor":
-            proveedor = st.text_input("Nombre del nuevo proveedor", key="inv_proveedor_nuevo")
-        elif proveedor_sel != "(Sin proveedor)":
-            proveedor = proveedor_sel
 
-        minimo_stock = st.number_input("Stock mínimo", min_value=0.0)
-        imprimible_cmyk = st.checkbox(
-            "✅ Se puede imprimir (mostrar en módulo CMYK)",
-            value=False,
-            help="Marca solo los insumos que sí participan en impresión."
-        )
+    elif proveedor_sel != "(Sin proveedor)":
 
+        proveedor = proveedor_sel
+
+
+
+    minimo_stock = st.number_input(
+        "Stock mínimo",
+        min_value=0.0
+    )
+
+
+
+    imprimible_cmyk = st.checkbox(
+        "✅ Se puede imprimir (mostrar en módulo CMYK)",
+        value=False,
+        help="Marca solo los insumos que sí participan en impresión."
+    )
         # ------------------------------
         # TIPO DE UNIDAD
         # ------------------------------
@@ -1947,6 +1980,7 @@ def registrar_venta_global(id_cliente=None, nombre_cliente="Consumidor Final", d
         return False, f"Error: {str(e)}"
     finally:
         if conn: conn.close()
+
 
 
 
