@@ -2477,62 +2477,84 @@ if not df_costos.empty:
     st.session_state.costo_operativo_minuto = minuto
 
     # ===========================================================
-    # TASAS
-    # ===========================================================
+# 💱 TASAS DE CAMBIO (BCV y Binance) — BLOQUE INDEPENDIENTE
+# ===========================================================
 
-    st.divider()
+st.divider()
 
-    st.subheader("💱 Tasas de Cambio")
+st.subheader("💱 Tasas de Cambio")
+
+
+# LEER TASAS ACTUALES
+
+tasa_bcv_actual = 0.0
+tasa_binance_actual = 0.0
+
+
+with conectar() as conn:
+
+    df_tasa = pd.read_sql(
+        "SELECT * FROM tasas ORDER BY id DESC LIMIT 1",
+        conn
+    )
+
+    if not df_tasa.empty:
+
+        tasa_bcv_actual = float(df_tasa["tasa_bcv"].iloc[0])
+
+        tasa_binance_actual = float(df_tasa["tasa_binance"].iloc[0])
+
+
+
+# FORMULARIO
+
+with st.form("form_tasas"):
+
+    col1, col2 = st.columns(2)
+
+    tasa_bcv = col1.number_input(
+        "Tasa BCV",
+        value=tasa_bcv_actual,
+        format="%.4f"
+    )
+
+    tasa_binance = col2.number_input(
+        "Tasa Binance",
+        value=tasa_binance_actual,
+        format="%.4f"
+    )
+
+
+    guardar_tasas = st.form_submit_button("💾 Guardar tasas")
+
+
+if guardar_tasas:
 
     with conectar() as conn:
 
-        df_tasa = pd.read_sql(
-            "SELECT * FROM tasas ORDER BY id DESC LIMIT 1",
-            conn
+        conn.execute(
+            """
+            INSERT INTO tasas
+            (tasa_bcv, tasa_binance, fecha)
+            VALUES (?,?,datetime('now'))
+            """,
+            (tasa_bcv, tasa_binance)
         )
 
-
-    tasa_bcv_actual = float(
-        df_tasa["tasa_bcv"].iloc[0]
-    ) if not df_tasa.empty else 0
+        conn.commit()
 
 
-    tasa_binance_actual = float(
-        df_tasa["tasa_binance"].iloc[0]
-    ) if not df_tasa.empty else 0
+    # actualizar sesión
+
+    st.session_state.tasa_bcv = tasa_bcv
+
+    st.session_state.tasa_binance = tasa_binance
 
 
-    with st.form("form_tasas"):
+    st.success("✅ Tasas actualizadas")
 
-        c1, c2 = st.columns(2)
+    st.rerun()
 
-        tasa_bcv = c1.number_input(
-            "BCV",
-            value=tasa_bcv_actual
-        )
-
-        tasa_binance = c2.number_input(
-            "Binance",
-            value=tasa_binance_actual
-        )
-
-        if st.form_submit_button("Guardar tasas"):
-
-            with conectar() as conn:
-
-                conn.execute(
-                    """
-                    INSERT INTO tasas
-                    VALUES (NULL,?,?,datetime('now'))
-                    """,
-                    (tasa_bcv, tasa_binance)
-                )
-
-                conn.commit()
-
-            st.success("Guardado")
-
-            st.rerun()
 
 
     # ===========================================================
@@ -5046,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
