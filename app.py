@@ -2515,13 +2515,13 @@ with st.form("form_tasas"):
     tasa_bcv = col1.number_input(
         "Tasa BCV",
         value=tasa_bcv_actual,
-        format="%.4f"
+        format="%.2f"
     )
 
     tasa_binance = col2.number_input(
         "Tasa Binance",
         value=tasa_binance_actual,
-        format="%.4f"
+        format="%.2f"
     )
 
 
@@ -5068,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
