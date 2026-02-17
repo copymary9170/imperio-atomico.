@@ -2341,38 +2341,73 @@ elif menu == "⚙️ Configuración":
             st.rerun()
 
 # ===========================================================
-# 🏦 KONTIGO CONFIGURACIÓN COMPLETA CON COMISIONES
+# 🏦 KONTIGO CONFIGURACIÓN COMPLETA CON COMISIONES (PRO REAL)
 # ===========================================================
 
 st.subheader("🏦 Kontigo")
 
 
-with conectar() as conn:
+# ===========================================================
+# LEER DATOS ACTUALES SEGURO
+# ===========================================================
 
-    df_k = pd.read_sql(
-        "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
-        conn
-    )
+saldo_actual = 0.0
 
+usd_bs_entrada = 0.0
+bs_usd_entrada = 0.0
 
-# valores actuales
+usd_bs_salida = 0.0
+bs_usd_salida = 0.0
 
-saldo_actual = float(df_k["saldo"].iloc[0]) if not df_k.empty else 0
-
-usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if not df_k.empty else 0
-
-bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if not df_k.empty else 0
-
-usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if not df_k.empty else 0
-
-bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if not df_k.empty else 0
+com_entrada = 0.0
+com_pm = 0.0
+com_salida = 0.0
 
 
-com_entrada = float(df_k["comision_entrada"].iloc[0]) if not df_k.empty else 0
+try:
 
-com_pm = float(df_k["comision_pago_movil"].iloc[0]) if not df_k.empty else 0
+    with conectar() as conn:
 
-com_salida = float(df_k["comision_salida"].iloc[0]) if not df_k.empty else 0
+        existe = conn.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='kontigo'
+        """).fetchone()
+
+
+        if existe:
+
+            df_k = pd.read_sql(
+                "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+                conn
+            )
+
+
+            if not df_k.empty:
+
+                columnas = df_k.columns
+
+
+                saldo_actual = float(df_k["saldo"].iloc[0]) if "saldo" in columnas else 0
+
+                usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if "usd_bs_entrada" in columnas else 0
+
+                bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if "bs_usd_entrada" in columnas else 0
+
+
+                usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if "usd_bs_salida" in columnas else 0
+
+                bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if "bs_usd_salida" in columnas else 0
+
+
+                com_entrada = float(df_k["comision_entrada"].iloc[0]) if "comision_entrada" in columnas else 0
+
+                com_pm = float(df_k["comision_pago_movil"].iloc[0]) if "comision_pago_movil" in columnas else 0
+
+                com_salida = float(df_k["comision_salida"].iloc[0]) if "comision_salida" in columnas else 0
+
+except:
+
+    pass
 
 
 
@@ -2392,58 +2427,138 @@ with st.form("form_kontigo"):
     )
 
 
-    st.markdown("### 💱 Tasas")
+
+    # =======================================================
+    # TASAS REALES
+    # =======================================================
+
+    st.markdown("### 💱 Tasas REALES sin comisiones")
+
 
     usd_bs_ent = st.number_input(
-        "Bs que pagas por 1 USD",
+
+        "Bs que pagas por 1 USD (ANTES de comisiones)",
+
         value=usd_bs_entrada,
+
         key="cfg_k_usd_bs_ent"
+
     )
 
 
     bs_usd_ent = st.number_input(
-        "USD que recibes por 1 Bs",
+
+        "USD que recibes por 1 Bs (entrada)",
+
         value=bs_usd_entrada,
+
         key="cfg_k_bs_usd_ent"
+
     )
 
 
+
     usd_bs_sal = st.number_input(
-        "Bs que recibes por 1 USD",
+
+        "Bs que recibes por 1 USD (ANTES de comisión salida)",
+
         value=usd_bs_salida,
+
         key="cfg_k_usd_bs_sal"
+
     )
 
 
     bs_usd_sal = st.number_input(
+
         "USD que recibes por 1 Bs (salida)",
+
         value=bs_usd_salida,
+
         key="cfg_k_bs_usd_sal"
+
     )
 
 
+
+    # =======================================================
+    # COMISIONES
+    # =======================================================
+
     st.markdown("### 💸 Comisiones")
 
+
     ce = st.number_input(
-        "Comisión entrada %",
+
+        "Comisión Kontigo entrada %",
+
         value=com_entrada,
+
         key="cfg_k_com_ent"
+
     )
 
 
     cpm = st.number_input(
-        "Comisión pago móvil %",
+
+        "Comisión Pago Móvil %",
+
         value=com_pm,
+
         key="cfg_k_com_pm"
+
     )
 
 
     cs = st.number_input(
-        "Comisión salida %",
+
+        "Comisión Kontigo salida %",
+
         value=com_salida,
+
         key="cfg_k_com_sal"
+
     )
 
+
+
+    # =======================================================
+    # PREVIEW AUTOMÁTICO
+    # =======================================================
+
+    st.markdown("### 📊 Vista previa automática")
+
+
+    costo_real = usd_bs_ent * (1 + ce/100 + cpm/100)
+
+    valor_real = usd_bs_sal * (1 - cs/100)
+
+
+    col1, col2 = st.columns(2)
+
+
+    col1.metric(
+
+        "Costo real 1 USD",
+
+        f"Bs {costo_real:,.2f}"
+
+    )
+
+
+    col2.metric(
+
+        "Valor real 1 USD",
+
+        f"Bs {valor_real:,.2f}"
+
+    )
+
+
+
+    # =======================================================
+    # BOTON GUARDAR
+    # =======================================================
 
     guardar = st.form_submit_button("💾 Guardar Kontigo")
 
@@ -2457,37 +2572,47 @@ if guardar:
 
     with conectar() as conn:
 
-        conn.execute(
-            """
-            INSERT INTO kontigo
-            (
-                saldo,
-                usd_bs_entrada,
-                bs_usd_entrada,
-                usd_bs_salida,
-                bs_usd_salida,
-                comision_entrada,
-                comision_pago_movil,
-                comision_salida
-            )
-            VALUES (?,?,?,?,?,?,?,?)
-            """,
-            (
-                saldo,
-                usd_bs_ent,
-                bs_usd_ent,
-                usd_bs_sal,
-                bs_usd_sal,
-                ce,
-                cpm,
-                cs
-            )
+        conn.execute("""
+
+        INSERT INTO kontigo (
+
+            saldo,
+
+            usd_bs_entrada,
+            bs_usd_entrada,
+
+            usd_bs_salida,
+            bs_usd_salida,
+
+            comision_entrada,
+            comision_pago_movil,
+            comision_salida
+
         )
+
+        VALUES (?,?,?,?,?,?,?,?)
+
+        """, (
+
+            saldo,
+
+            usd_bs_ent,
+            bs_usd_ent,
+
+            usd_bs_sal,
+            bs_usd_sal,
+
+            ce,
+            cpm,
+            cs
+
+        ))
+
 
         conn.commit()
 
 
-    st.success("Kontigo guardado correctamente")
+    st.success("✅ Kontigo guardado correctamente")
 
     st.rerun()
 
@@ -4645,6 +4770,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
