@@ -1844,135 +1844,34 @@ elif menu == "👥 Clientes":
 
         st.plotly_chart(
 
-            fig,
-
-            use_container_width=True
-
-        )
-
-
-        # EXPORTAR
-
-        csv = df_cli.to_csv(index=False)
-
-
-        st.download_button(
-
-            "Exportar CRM",
-
-            csv,
-
-            "clientes.csv"
-
-        )
-# ============================================
-# RECORDATORIOS AUTOMÁTICOS
+          # ============================================
+# RECORDATORIOS
 # ============================================
 
 with tabs[4]:
 
     st.subheader("⏰ Clientes Inactivos")
 
-    if df_cli.empty:
+    df_cli["ultima_compra"] = pd.to_datetime(
+        df_cli["ultima_compra"],
+        errors="coerce"
+    )
 
-        st.info("No hay clientes")
+    df_cli["dias"] = (
+        pd.Timestamp.now() -
+        df_cli["ultima_compra"]
+    ).dt.days
 
-    else:
+    alerta = st.selectbox(
+        "Mostrar desde:",
+        [15,30,60,90]
+    )
 
-        df_cli["ultima_compra"] = pd.to_datetime(
-            df_cli["ultima_compra"],
-            errors="coerce"
-        )
+    df_riesgo = df_cli[
+        df_cli["dias"] >= alerta
+    ]
 
-        df_cli["dias"] = (
-            pd.Timestamp.now() -
-            df_cli["ultima_compra"]
-        ).dt.days
-
-
-        alerta = st.selectbox(
-
-            "Mostrar clientes inactivos desde:",
-
-            [15,30,60,90],
-
-            index=1
-
-        )
-
-
-        df_riesgo = df_cli[
-            df_cli["dias"] >= alerta
-        ]
-
-
-        if df_riesgo.empty:
-
-            st.success("No hay clientes inactivos")
-
-        else:
-
-            st.error(
-
-                f"{len(df_riesgo)} clientes sin comprar"
-
-            )
-
-
-            st.dataframe(
-
-                df_riesgo[[
-                    "nombre",
-                    "whatsapp",
-                    "dias",
-                    "total"
-                ]],
-
-                column_config={
-
-                    "nombre":"Cliente",
-
-                    "dias":"Días sin comprar",
-
-                    "total":"Total $"
-
-                },
-
-                hide_index=True,
-
-                use_container_width=True
-
-            )
-
-
-            cliente_sel = st.selectbox(
-
-                "Contactar cliente",
-
-                df_riesgo["nombre"]
-
-            )
-
-
-            telefono = df_riesgo[
-                df_riesgo.nombre == cliente_sel
-            ].iloc[0]["whatsapp"]
-
-
-            if telefono:
-
-                mensaje = f"Hola {cliente_sel}, tenemos nuevas promociones para ti"
-
-                url = f"https://wa.me/{telefono}?text={mensaje}"
-
-                st.link_button(
-
-                    "💬 Enviar WhatsApp",
-
-                    url
-
-                )
-
+    st.dataframe(df_riesgo)
 
  # ===========================================================
 # ⚙️ CONFIGURACIÓN GENERAL DEL SISTEMA
@@ -4242,6 +4141,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
