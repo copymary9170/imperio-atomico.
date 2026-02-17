@@ -604,6 +604,7 @@ t_bcv = st.session_state.get('tasa_bcv', 1.0)
 t_bin = st.session_state.get('tasa_binance', 1.0)
 ROL = st.session_state.get('rol', "Produccion")
 
+
 with st.sidebar:
 
     st.write("DB usada:", os.path.abspath("data/imperio.db"))
@@ -611,58 +612,84 @@ with st.sidebar:
     st.header(f"👋 {st.session_state.usuario_nombre}")
 
     st.info(f"🏦 BCV: {t_bcv:,.2f}")
+
     st.info(f"🔶 Binance: {t_bin:,.2f}")
 
 
-        # ===========================================================
-    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE
+    # ===========================================================
+    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE REAL
     # ===========================================================
 
     with conectar() as conn:
 
         df_k = pd.read_sql(
             """
-            SELECT saldo,
-                   comision_entrada,
-                   comision_salida,
-                   comision_pago_movil
+            SELECT 
+                saldo,
+
+                usd_bs_entrada,
+                bs_usd_entrada,
+
+                usd_bs_salida,
+                bs_usd_salida,
+
+                comision_entrada,
+                comision_pago_movil,
+                comision_salida
+
             FROM kontigo
+
             ORDER BY id DESC LIMIT 1
             """,
             conn
         )
 
+
     if not df_k.empty:
 
         saldo_usd = float(df_k["saldo"].iloc[0])
 
+        usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0])
+        bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0])
+
+        usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0])
+        bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0])
+
         com_entrada = float(df_k["comision_entrada"].iloc[0])
-        com_salida = float(df_k["comision_salida"].iloc[0])
         com_pm = float(df_k["comision_pago_movil"].iloc[0])
+        com_salida = float(df_k["comision_salida"].iloc[0])
 
     else:
 
         saldo_usd = 0.0
+
+        usd_bs_entrada = 0.0
+        bs_usd_entrada = 0.0
+
+        usd_bs_salida = 0.0
+        bs_usd_salida = 0.0
+
         com_entrada = 0.0
-        com_salida = 0.0
         com_pm = 0.0
+        com_salida = 0.0
 
 
-    tasa_k = t_bin
+    # ===========================================================
+    # CALCULOS REALES
+    # ===========================================================
+
+    saldo_bs = saldo_usd * usd_bs_salida
 
 
-    saldo_bs = saldo_usd * tasa_k
+    costo_real_bs = usd_bs_entrada
 
 
-    # COSTO REAL DE 1 USD AL ENTRAR
-
-    costo_entrada_bs = tasa_k * (1 + (com_entrada + com_pm) / 100)
+    valor_real_bs = usd_bs_salida
 
 
-    # VALOR REAL DE 1 USD AL SALIR
-
-    valor_salida_bs = tasa_k * (1 - com_salida / 100)
-
+    # ===========================================================
+    # MOSTRAR
+    # ===========================================================
 
     st.divider()
 
@@ -683,14 +710,15 @@ with st.sidebar:
 
     st.metric(
         "Costo real 1 USD",
-        f"Bs {costo_entrada_bs:,.2f}"
+        f"Bs {costo_real_bs:,.2f}"
     )
 
 
     st.metric(
         "Valor real 1 USD",
-        f"Bs {valor_salida_bs:,.2f}"
+        f"Bs {valor_real_bs:,.2f}"
     )
+
 
 
     # ======================================================
@@ -4563,6 +4591,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
