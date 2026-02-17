@@ -2041,7 +2041,7 @@ elif menu == "👥 Clientes":
                 st.rerun()
 
 # ===========================================================
-# ⚙️ CONFIGURACIÓN PRO MAX — IMPERIO ATÓMICO (COMPLETA REAL)
+# ⚙️ CONFIGURACIÓN PRO MAX — IMPERIO ATÓMICO (FINAL COMPLETO)
 # ===========================================================
 
 elif menu == "⚙️ Configuración":
@@ -2050,11 +2050,12 @@ elif menu == "⚙️ Configuración":
 
 
     # ===========================================================
-    # CREAR TABLAS
+    # CREAR Y ACTUALIZAR TABLAS
     # ===========================================================
 
     with conectar() as conn:
 
+        # COSTOS
         conn.execute("""
         CREATE TABLE IF NOT EXISTS costos_operativos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2063,7 +2064,7 @@ elif menu == "⚙️ Configuración":
         )
         """)
 
-
+        # TASAS
         conn.execute("""
         CREATE TABLE IF NOT EXISTS tasas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2073,7 +2074,7 @@ elif menu == "⚙️ Configuración":
         )
         """)
 
-
+        # CONFIG GENERAL
         conn.execute("""
         CREATE TABLE IF NOT EXISTS configuracion (
             parametro TEXT PRIMARY KEY,
@@ -2081,32 +2082,41 @@ elif menu == "⚙️ Configuración":
         )
         """)
 
+        # ======================================================
+        # TABLA KONTIGO NUEVA
+        # ======================================================
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS kontigo (
-
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            saldo REAL,
-
-            usd_bs_entrada REAL,
-            bs_usd_entrada REAL,
-
-            usd_bs_salida REAL,
-            bs_usd_salida REAL,
-
-            comision_entrada REAL,
-            comision_pago_movil REAL,
-            comision_salida REAL,
-
+            saldo REAL DEFAULT 0,
+            usd_bs_entrada REAL DEFAULT 0,
+            bs_usd_entrada REAL DEFAULT 0,
+            usd_bs_salida REAL DEFAULT 0,
+            bs_usd_salida REAL DEFAULT 0,
             fecha TEXT DEFAULT CURRENT_TIMESTAMP
-
         )
         """)
 
+        # ======================================================
+        # ACTUALIZAR TABLA KONTIGO SI ES ANTIGUA
+        # ======================================================
+
+        columnas = [c[1] for c in conn.execute("PRAGMA table_info(kontigo)")]
+
+        if "usd_bs_entrada" not in columnas:
+            conn.execute("ALTER TABLE kontigo ADD COLUMN usd_bs_entrada REAL DEFAULT 0")
+
+        if "bs_usd_entrada" not in columnas:
+            conn.execute("ALTER TABLE kontigo ADD COLUMN bs_usd_entrada REAL DEFAULT 0")
+
+        if "usd_bs_salida" not in columnas:
+            conn.execute("ALTER TABLE kontigo ADD COLUMN usd_bs_salida REAL DEFAULT 0")
+
+        if "bs_usd_salida" not in columnas:
+            conn.execute("ALTER TABLE kontigo ADD COLUMN bs_usd_salida REAL DEFAULT 0")
 
         conn.commit()
-
 
 
     # ===========================================================
@@ -2115,7 +2125,6 @@ elif menu == "⚙️ Configuración":
 
     st.subheader("🏢 Costos Operativos")
 
-
     with conectar() as conn:
 
         df_costos = pd.read_sql(
@@ -2123,14 +2132,10 @@ elif menu == "⚙️ Configuración":
             conn
         )
 
-
     st.dataframe(df_costos, use_container_width=True, hide_index=True)
 
 
-
     col1, col2 = st.columns(2)
-
-
 
     with col1:
 
@@ -2138,30 +2143,30 @@ elif menu == "⚙️ Configuración":
 
             nombre = st.text_input("Nombre")
 
-            monto = st.number_input("Monto mensual", format="%.2f")
+            monto = st.number_input(
+                "Monto mensual",
+                format="%.2f"
+            )
 
-            guardar = st.form_submit_button("Guardar")
+            if st.form_submit_button("Guardar costo"):
 
-        if guardar:
+                if nombre:
 
-            if nombre:
+                    with conectar() as conn:
 
-                with conectar() as conn:
+                        conn.execute(
+                            """
+                            INSERT OR REPLACE INTO costos_operativos
+                            VALUES (NULL,?,?)
+                            """,
+                            (nombre, monto)
+                        )
 
-                    conn.execute("""
+                        conn.commit()
 
-                    INSERT OR REPLACE INTO costos_operativos
+                    st.success("Guardado")
 
-                    VALUES (NULL,?,?)
-
-                    """,(nombre,monto))
-
-                    conn.commit()
-
-                st.success("Costo guardado")
-
-                st.rerun()
-
+                    st.rerun()
 
 
     with col2:
@@ -2170,10 +2175,10 @@ elif menu == "⚙️ Configuración":
 
             eliminar = st.selectbox(
                 "Eliminar costo",
-                df_costos.nombre
+                df_costos["nombre"]
             )
 
-            if st.button("Eliminar costo"):
+            if st.button("Eliminar"):
 
                 with conectar() as conn:
 
@@ -2184,24 +2189,20 @@ elif menu == "⚙️ Configuración":
 
                     conn.commit()
 
-                st.warning("Eliminado")
-
                 st.rerun()
-
 
 
     if not df_costos.empty:
 
-        total = df_costos.monto_mensual.sum()
+        total = df_costos["monto_mensual"].sum()
 
         diario = total / 30
 
         c1, c2 = st.columns(2)
 
-        c1.metric("Total mensual",f"${total:,.2f}")
+        c1.metric("Total mensual", f"${total:,.2f}")
 
-        c2.metric("Costo diario",f"${diario:,.2f}")
-
+        c2.metric("Costo diario", f"${diario:,.2f}")
 
 
     # ===========================================================
@@ -2210,9 +2211,7 @@ elif menu == "⚙️ Configuración":
 
     st.divider()
 
-    st.subheader("💱 Tasas BCV y Binance")
-
-
+    st.subheader("💱 Tasas de Cambio")
 
     with conectar() as conn:
 
@@ -2222,124 +2221,211 @@ elif menu == "⚙️ Configuración":
         )
 
 
-
-    tasa_bcv_actual = float(df_tasa.tasa_bcv.iloc[0]) if not df_tasa.empty else 0
-
-    tasa_bin_actual = float(df_tasa.tasa_binance.iloc[0]) if not df_tasa.empty else 0
-
+    tasa_bcv_actual = float(
+        df_tasa["tasa_bcv"].iloc[0]
+    ) if not df_tasa.empty else 0
 
 
-    with st.form("tasas"):
+    tasa_binance_actual = float(
+        df_tasa["tasa_binance"].iloc[0]
+    ) if not df_tasa.empty else 0
 
-        col1,col2 = st.columns(2)
 
-        tasa_bcv = col1.number_input(
+    with st.form("form_tasas"):
+
+        c1, c2 = st.columns(2)
+
+        tasa_bcv = c1.number_input(
             "BCV",
             value=tasa_bcv_actual
         )
 
-        tasa_bin = col2.number_input(
+        tasa_binance = c2.number_input(
             "Binance",
-            value=tasa_bin_actual
+            value=tasa_binance_actual
         )
 
-        guardar_tasa = st.form_submit_button("Guardar tasas")
+        if st.form_submit_button("Guardar tasas"):
 
+            with conectar() as conn:
 
+                conn.execute(
+                    """
+                    INSERT INTO tasas
+                    VALUES (NULL,?,?,datetime('now'))
+                    """,
+                    (tasa_bcv, tasa_binance)
+                )
 
-    if guardar_tasa:
+                conn.commit()
 
-        with conectar() as conn:
+            st.success("Guardado")
 
-            conn.execute("""
-
-            INSERT INTO tasas
-
-            VALUES(NULL,?,?,datetime('now'))
-
-            """,(tasa_bcv,tasa_bin))
-
-            conn.commit()
-
-        st.success("Tasas guardadas")
-
-        st.rerun()
-
+            st.rerun()
 
 
     # ===========================================================
-    # IMPUESTOS Y GANANCIA
+    # IMPUESTOS
     # ===========================================================
 
     st.divider()
 
-    st.subheader("💸 Impuestos y Ganancia")
+    st.subheader("💸 Impuestos")
 
+    with conectar() as conn:
+
+        df_conf = pd.read_sql(
+            "SELECT * FROM configuracion",
+            conn
+        )
+
+    conf = dict(zip(
+        df_conf.parametro,
+        df_conf.valor
+    ))
+
+
+    with st.form("config"):
+
+        c1, c2 = st.columns(2)
+
+        iva = c1.number_input(
+            "IVA %",
+            value=conf.get("iva", 16)
+        )
+
+        igtf = c1.number_input(
+            "IGTF %",
+            value=conf.get("igtf", 3)
+        )
+
+        banco = c2.number_input(
+            "Banco %",
+            value=conf.get("banco", 2)
+        )
+
+        ganancia = c2.number_input(
+            "Ganancia %",
+            value=conf.get("ganancia", 35)
+        )
+
+
+        if st.form_submit_button("Guardar impuestos"):
+
+            with conectar() as conn:
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO configuracion VALUES ('iva',?)",
+                    (iva,)
+                )
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO configuracion VALUES ('igtf',?)",
+                    (igtf,)
+                )
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO configuracion VALUES ('banco',?)",
+                    (banco,)
+                )
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO configuracion VALUES ('ganancia',?)",
+                    (ganancia,)
+                )
+
+                conn.commit()
+
+            st.success("Guardado")
+
+            st.rerun()
+
+
+    # ===========================================================
+    # KONTIGO
+    # ===========================================================
+
+    st.divider()
+
+    st.subheader("🏦 Kontigo")
 
 
     with conectar() as conn:
 
-        df_conf = pd.read_sql("SELECT * FROM configuracion", conn)
+        df_k = pd.read_sql(
+            "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+            conn
+        )
 
 
+    saldo = float(df_k.saldo.iloc[0]) if not df_k.empty else 0
 
-    config = dict(zip(df_conf.parametro, df_conf.valor))
+    usd_bs_entrada = float(df_k.usd_bs_entrada.iloc[0]) if not df_k.empty else 0
 
+    bs_usd_entrada = float(df_k.bs_usd_entrada.iloc[0]) if not df_k.empty else 0
 
+    usd_bs_salida = float(df_k.usd_bs_salida.iloc[0]) if not df_k.empty else 0
 
-    with st.form("config_general"):
-
-        col1,col2 = st.columns(2)
-
-        iva = col1.number_input("IVA %",value=config.get("iva",16))
-
-        igtf = col1.number_input("IGTF %",value=config.get("igtf",3))
-
-        banco = col2.number_input("Banco %",value=config.get("banco",2))
-
-        ganancia = col2.number_input("Ganancia %",value=config.get("ganancia",35))
-
-        guardar_conf = st.form_submit_button("Guardar configuración")
+    bs_usd_salida = float(df_k.bs_usd_salida.iloc[0]) if not df_k.empty else 0
 
 
+    with st.form("kontigo_form"):
 
-    if guardar_conf:
+        saldo_nuevo = st.number_input(
+            "Saldo USD",
+            value=saldo
+        )
 
-        with conectar() as conn:
+        st.markdown("### Entrada")
 
-            conn.execute("INSERT OR REPLACE INTO configuracion VALUES('iva',?)",(iva,))
-            conn.execute("INSERT OR REPLACE INTO configuracion VALUES('igtf',?)",(igtf,))
-            conn.execute("INSERT OR REPLACE INTO configuracion VALUES('banco',?)",(banco,))
-            conn.execute("INSERT OR REPLACE INTO configuracion VALUES('ganancia',?)",(ganancia,))
+        usd_bs_ent = st.number_input(
+            "Costo real 1 USD en Bs",
+            value=usd_bs_entrada
+        )
 
-            conn.commit()
-
-        st.success("Configuración guardada")
-
-        st.rerun()
-
+        bs_usd_ent = st.number_input(
+            "Cuantos USD recibes por 1 Bs",
+            value=bs_usd_entrada
+        )
 
 
-    # ======================================================
-# ACTUALIZAR TABLA KONTIGO
-# ======================================================
+        st.markdown("### Salida")
 
-columnas = [c[1] for c in conn.execute("PRAGMA table_info(kontigo)")]
+        usd_bs_sal = st.number_input(
+            "Valor real 1 USD en Bs",
+            value=usd_bs_salida
+        )
 
-if "usd_bs_entrada" not in columnas:
-    conn.execute("ALTER TABLE kontigo ADD COLUMN usd_bs_entrada REAL DEFAULT 0")
+        bs_usd_sal = st.number_input(
+            "Cuantos USD recibes por 1 Bs",
+            value=bs_usd_salida
+        )
 
-if "bs_usd_entrada" not in columnas:
-    conn.execute("ALTER TABLE kontigo ADD COLUMN bs_usd_entrada REAL DEFAULT 0")
 
-if "usd_bs_salida" not in columnas:
-    conn.execute("ALTER TABLE kontigo ADD COLUMN usd_bs_salida REAL DEFAULT 0")
+        if st.form_submit_button("Guardar Kontigo"):
 
-if "bs_usd_salida" not in columnas:
-    conn.execute("ALTER TABLE kontigo ADD COLUMN bs_usd_salida REAL DEFAULT 0")
+            with conectar() as conn:
 
-conn.commit()
+                conn.execute(
+                    """
+                    INSERT INTO kontigo
+                    VALUES
+                    (NULL,?,?,?,?,?,datetime('now'))
+                    """,
+                    (
+                        saldo_nuevo,
+                        usd_bs_ent,
+                        bs_usd_ent,
+                        usd_bs_sal,
+                        bs_usd_sal
+                    )
+                )
 
+                conn.commit()
+
+            st.success("Guardado")
+
+            st.rerun()
 
 
     # ===========================================================
@@ -2348,31 +2434,31 @@ conn.commit()
 
     st.divider()
 
-    st.subheader("Backup")
-
-    if st.button("Crear backup"):
+    if st.button("Crear Backup"):
 
         import shutil
 
-        nombre=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        nombre = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
 
-        shutil.copy("data/imperio.db",nombre)
+        shutil.copy(
+            "data/imperio.db",
+            nombre
+        )
 
         st.success(nombre)
 
 
-
     # ===========================================================
-    # VERIFICAR SISTEMA
+    # VERIFICAR
     # ===========================================================
 
     st.divider()
 
-    if st.button("Verificar sistema"):
+    if st.button("Verificar Sistema"):
 
         inicializar_sistema()
 
-        st.success("Sistema OK")
+        st.success("OK")
 
         st.rerun()
 
@@ -4495,6 +4581,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
