@@ -1507,7 +1507,34 @@ elif menu == "👥 Clientes":
 
         """)
 
+# ============================================
+# ACTUALIZAR TABLA CLIENTES SI ES ANTIGUA
+# ============================================
 
+try:
+    conn.execute("ALTER TABLE clientes ADD COLUMN direccion TEXT")
+except:
+    pass
+
+try:
+    conn.execute("ALTER TABLE clientes ADD COLUMN notas TEXT")
+except:
+    pass
+
+try:
+    conn.execute("ALTER TABLE clientes ADD COLUMN etiqueta TEXT")
+except:
+    pass
+
+try:
+    conn.execute("ALTER TABLE clientes ADD COLUMN email TEXT")
+except:
+    pass
+
+try:
+    conn.execute("ALTER TABLE clientes ADD COLUMN whatsapp TEXT")
+except:
+    pass
         df_cli = pd.read_sql("""
 
         SELECT 
@@ -4177,6 +4204,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
