@@ -2320,121 +2320,25 @@ elif menu == "⚙️ Configuración":
 
 
 
-    # ===========================================================
-    # KONTIGO COMPLETO
-    # ===========================================================
+    # ======================================================
+# ACTUALIZAR TABLA KONTIGO
+# ======================================================
 
-    st.divider()
+columnas = [c[1] for c in conn.execute("PRAGMA table_info(kontigo)")]
 
-    st.subheader("🏦 Kontigo Profesional")
+if "usd_bs_entrada" not in columnas:
+    conn.execute("ALTER TABLE kontigo ADD COLUMN usd_bs_entrada REAL DEFAULT 0")
 
+if "bs_usd_entrada" not in columnas:
+    conn.execute("ALTER TABLE kontigo ADD COLUMN bs_usd_entrada REAL DEFAULT 0")
 
+if "usd_bs_salida" not in columnas:
+    conn.execute("ALTER TABLE kontigo ADD COLUMN usd_bs_salida REAL DEFAULT 0")
 
-    with conectar() as conn:
+if "bs_usd_salida" not in columnas:
+    conn.execute("ALTER TABLE kontigo ADD COLUMN bs_usd_salida REAL DEFAULT 0")
 
-        df_k = pd.read_sql(
-            "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
-            conn
-        )
-
-
-
-    if not df_k.empty:
-
-        saldo = df_k.saldo.iloc[0]
-
-        usd_bs_e = df_k.usd_bs_entrada.iloc[0]
-        bs_usd_e = df_k.bs_usd_entrada.iloc[0]
-
-        usd_bs_s = df_k.usd_bs_salida.iloc[0]
-        bs_usd_s = df_k.bs_usd_salida.iloc[0]
-
-        com_e = df_k.comision_entrada.iloc[0]
-        com_pm = df_k.comision_pago_movil.iloc[0]
-        com_s = df_k.comision_salida.iloc[0]
-
-    else:
-
-        saldo=0
-        usd_bs_e=0
-        bs_usd_e=0
-        usd_bs_s=0
-        bs_usd_s=0
-        com_e=0
-        com_pm=0
-        com_s=0
-
-
-
-    with st.form("kontigo_form"):
-
-        st.markdown("### Saldo")
-
-        saldo_n = st.number_input("Saldo USD",value=saldo)
-
-
-
-        st.markdown("### Tasas Entrada")
-
-        usd_bs_e_n = st.number_input("USD → Bs entrada",value=usd_bs_e)
-
-        bs_usd_e_n = st.number_input("Bs → USD entrada",value=bs_usd_e)
-
-
-
-        st.markdown("### Tasas Salida")
-
-        usd_bs_s_n = st.number_input("USD → Bs salida",value=usd_bs_s)
-
-        bs_usd_s_n = st.number_input("Bs → USD salida",value=bs_usd_s)
-
-
-
-        st.markdown("### Comisiones")
-
-        com_e_n = st.number_input("Comisión entrada %",value=com_e)
-
-        com_pm_n = st.number_input("Comisión pago móvil %",value=com_pm)
-
-        com_s_n = st.number_input("Comisión salida %",value=com_s)
-
-
-
-        guardar_k = st.form_submit_button("Guardar Kontigo")
-
-
-
-    if guardar_k:
-
-        with conectar() as conn:
-
-            conn.execute("""
-
-            INSERT INTO kontigo
-
-            VALUES(NULL,?,?,?,?,?,?,?,?,datetime('now'))
-
-            """,(
-
-                saldo_n,
-
-                usd_bs_e_n,
-                bs_usd_e_n,
-
-                usd_bs_s_n,
-                bs_usd_s_n,
-
-                com_e_n,
-                com_pm_n,
-                com_s_n
-
-            ))
-
-            conn.commit()
-
-        st.success("Kontigo actualizado")
-
-        st.rerun()
+conn.commit()
 
 
 
@@ -4591,6 +4495,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
