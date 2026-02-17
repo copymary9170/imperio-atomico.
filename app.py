@@ -617,61 +617,57 @@ with st.sidebar:
 
 
     # ===========================================================
-    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE REAL
+    # 🏦 KONTIGO — RECORDATORIO INTELIGENTE REAL (VERSIÓN SEGURA)
     # ===========================================================
+
+    saldo_usd = 0.0
+
+    usd_bs_entrada = 0.0
+    bs_usd_entrada = 0.0
+
+    usd_bs_salida = 0.0
+    bs_usd_salida = 0.0
+
+    com_entrada = 0.0
+    com_pm = 0.0
+    com_salida = 0.0
+
 
     with conectar() as conn:
 
-        df_k = pd.read_sql(
-            """
-            SELECT 
-                saldo,
+        # verificar si tabla existe
 
-                usd_bs_entrada,
-                bs_usd_entrada,
-
-                usd_bs_salida,
-                bs_usd_salida,
-
-                comision_entrada,
-                comision_pago_movil,
-                comision_salida
-
-            FROM kontigo
-
-            ORDER BY id DESC LIMIT 1
-            """,
-            conn
-        )
+        existe = conn.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='kontigo'
+        """).fetchone()
 
 
-    if not df_k.empty:
+        if existe:
 
-        saldo_usd = float(df_k["saldo"].iloc[0])
+            df_k = pd.read_sql(
+                "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+                conn
+            )
 
-        usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0])
-        bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0])
 
-        usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0])
-        bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0])
+            if not df_k.empty:
 
-        com_entrada = float(df_k["comision_entrada"].iloc[0])
-        com_pm = float(df_k["comision_pago_movil"].iloc[0])
-        com_salida = float(df_k["comision_salida"].iloc[0])
+                columnas = df_k.columns
 
-    else:
 
-        saldo_usd = 0.0
+                saldo_usd = float(df_k["saldo"].iloc[0]) if "saldo" in columnas else 0.0
 
-        usd_bs_entrada = 0.0
-        bs_usd_entrada = 0.0
+                usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if "usd_bs_entrada" in columnas else 0.0
+                bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if "bs_usd_entrada" in columnas else 0.0
 
-        usd_bs_salida = 0.0
-        bs_usd_salida = 0.0
+                usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if "usd_bs_salida" in columnas else 0.0
+                bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if "bs_usd_salida" in columnas else 0.0
 
-        com_entrada = 0.0
-        com_pm = 0.0
-        com_salida = 0.0
+                com_entrada = float(df_k["comision_entrada"].iloc[0]) if "comision_entrada" in columnas else 0.0
+                com_pm = float(df_k["comision_pago_movil"].iloc[0]) if "comision_pago_movil" in columnas else 0.0
+                com_salida = float(df_k["comision_salida"].iloc[0]) if "comision_salida" in columnas else 0.0
+
 
 
     # ===========================================================
@@ -4581,6 +4577,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
