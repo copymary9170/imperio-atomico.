@@ -161,17 +161,28 @@ def inicializar_sistema():
         )
         """)
 
-        # ===================================================
-        # COSTOS OPERATIVOS
-        # ===================================================
+      # COSTOS OPERATIVOS PRO
 
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS costos_operativos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT,
-            monto_mensual REAL
-        )
-        """)
+c.execute("""
+CREATE TABLE IF NOT EXISTS costos_operativos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT UNIQUE,
+    monto_mensual REAL,
+    porcentaje_empresa REAL DEFAULT 100
+)
+""")
+
+# actualizar si es tabla vieja
+
+columnas = [col[1] for col in c.execute("PRAGMA table_info(costos_operativos)")]
+
+if "porcentaje_empresa" not in columnas:
+
+    c.execute(
+        "ALTER TABLE costos_operativos ADD COLUMN porcentaje_empresa REAL DEFAULT 100"
+    )
+
+
 
         # ===================================================
         # CLIENTES
@@ -2119,90 +2130,242 @@ elif menu == "⚙️ Configuración":
         conn.commit()
 
 
-    # ===========================================================
-    # COSTOS OPERATIVOS
-    # ===========================================================
+   # ===========================================================
+# 🏢 COSTOS OPERATIVOS PRO MAX — IMPERIO ATÓMICO
+# ===========================================================
 
-    st.subheader("🏢 Costos Operativos")
+st.subheader("🏢 Costos Operativos")
 
-    with conectar() as conn:
 
-        df_costos = pd.read_sql(
-            "SELECT * FROM costos_operativos ORDER BY nombre",
-            conn
+# ===========================================================
+# CARGAR DATOS
+# ===========================================================
+
+with conectar() as conn:
+
+    df_costos = pd.read_sql(
+        "SELECT * FROM costos_operativos ORDER BY nombre",
+        conn
+    )
+
+
+# calcular costo real
+
+if not df_costos.empty:
+
+    df_costos["costo_real"] = (
+
+        df_costos["monto_mensual"]
+
+        * df_costos["porcentaje_empresa"]
+
+        / 100
+
+    )
+
+
+# mostrar tabla profesional
+
+st.dataframe(
+
+    df_costos,
+
+    column_config={
+
+        "nombre": "Servicio",
+
+        "monto_mensual": st.column_config.NumberColumn(
+            "Monto mensual",
+            format="$%.2f"
+        ),
+
+        "porcentaje_empresa": "% Empresa",
+
+        "costo_real": st.column_config.NumberColumn(
+            "Costo Real",
+            format="$%.2f"
+        ),
+
+    },
+
+    use_container_width=True,
+
+    hide_index=True
+
+)
+
+
+# ===========================================================
+# FORMULARIO
+# ===========================================================
+
+col1, col2 = st.columns(2)
+
+
+with col1:
+
+    with st.form("nuevo_costo"):
+
+        nombre = st.text_input("Servicio")
+
+        monto = st.number_input(
+
+            "Monto mensual",
+
+            format="%.2f"
+
         )
 
-    st.dataframe(df_costos, use_container_width=True, hide_index=True)
+        porcentaje = st.slider(
+
+            "% uso empresa",
+
+            0,
+
+            100,
+
+            100
+
+        )
 
 
-    col1, col2 = st.columns(2)
+        if st.form_submit_button("Guardar"):
 
-    with col1:
-
-        with st.form("nuevo_costo"):
-
-            nombre = st.text_input("Nombre")
-
-            monto = st.number_input(
-                "Monto mensual",
-                format="%.2f"
-            )
-
-            if st.form_submit_button("Guardar costo"):
-
-                if nombre:
-
-                    with conectar() as conn:
-
-                        conn.execute(
-                            """
-                            INSERT OR REPLACE INTO costos_operativos
-                            VALUES (NULL,?,?)
-                            """,
-                            (nombre, monto)
-                        )
-
-                        conn.commit()
-
-                    st.success("Guardado")
-
-                    st.rerun()
-
-
-    with col2:
-
-        if not df_costos.empty:
-
-            eliminar = st.selectbox(
-                "Eliminar costo",
-                df_costos["nombre"]
-            )
-
-            if st.button("Eliminar"):
+            if nombre:
 
                 with conectar() as conn:
 
                     conn.execute(
-                        "DELETE FROM costos_operativos WHERE nombre=?",
-                        (eliminar,)
+
+                        """
+
+                        INSERT OR REPLACE INTO costos_operativos
+
+                        VALUES (
+
+                            (SELECT id FROM costos_operativos WHERE nombre=?),
+
+                            ?,?,?
+
+                        )
+
+                        """,
+
+                        (
+
+                            nombre,
+
+                            nombre,
+
+                            monto,
+
+                            porcentaje
+
+                        )
+
                     )
 
                     conn.commit()
 
+                st.success("Guardado")
+
                 st.rerun()
 
 
+# ===========================================================
+# ELIMINAR
+# ===========================================================
+
+with col2:
+
     if not df_costos.empty:
 
-        total = df_costos["monto_mensual"].sum()
+        eliminar = st.selectbox(
 
-        diario = total / 30
+            "Eliminar",
 
-        c1, c2 = st.columns(2)
+            df_costos["nombre"]
 
-        c1.metric("Total mensual", f"${total:,.2f}")
+        )
 
-        c2.metric("Costo diario", f"${diario:,.2f}")
+
+        if st.button("Eliminar"):
+
+            with conectar() as conn:
+
+                conn.execute(
+
+                    "DELETE FROM costos_operativos WHERE nombre=?",
+
+                    (eliminar,)
+
+                )
+
+                conn.commit()
+
+            st.rerun()
+
+
+# ===========================================================
+# CALCULOS AUTOMATICOS
+# ===========================================================
+
+if not df_costos.empty:
+
+    total = df_costos["costo_real"].sum()
+
+    diario = total / 30
+
+    hora = diario / 8
+
+    minuto = hora / 60
+
+
+    st.divider()
+
+
+    c1, c2, c3, c4 = st.columns(4)
+
+
+    c1.metric(
+
+        "Mensual",
+
+        f"${total:,.2f}"
+
+    )
+
+
+    c2.metric(
+
+        "Diario",
+
+        f"${diario:,.2f}"
+
+    )
+
+
+    c3.metric(
+
+        "Hora",
+
+        f"${hora:,.4f}"
+
+    )
+
+
+    c4.metric(
+
+        "Minuto",
+
+        f"${minuto:,.5f}"
+
+    )
+
+
+    # guardar para cotizaciones
+
+    st.session_state.costo_operativo_minuto = minuto
 
 
     # ===========================================================
@@ -4775,6 +4938,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
