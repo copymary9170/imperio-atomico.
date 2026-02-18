@@ -2165,7 +2165,7 @@ st.subheader("🏢 Costos Operativos")
 
 with conectar() as conn:
 
-df_costos = pd.read_sql(
+    df_costos = pd.read_sql(
     "SELECT * FROM costos_operativos ORDER BY nombre",
     conn
 )
@@ -5068,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
