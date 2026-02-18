@@ -2298,113 +2298,93 @@ with col2:
 
     if not df_costos.empty:
 
-        st.  markdown("### ✏️ Editar / eliminar")
+        st.markdown("### ✏️ Editar / eliminar")
 
-    servicio = st.selectbox(
+        servicio = st.selectbox(
+            "Servicio",
+            df_costos["nombre"].tolist()
+        )
 
-        "Servicio",
+        fila_filtrada = df_costos[
+            df_costos["nombre"] == servicio
+        ]
 
-        df_costos["nombre"]
+        if fila_filtrada.empty:
 
-    )
+            st.warning("Servicio no válido")
+            st.stop()
 
-
-    fila = df_costos[
-        df_costos["nombre"] == servicio
-    ].iloc[0]
-
-
-    nuevo_monto = st.number_input(
-
-        "Monto",
-
-        value=float(fila["monto_mensual"]),
-
-        key="edit_monto"
-
-    )
+        fila = fila_filtrada.iloc[0]
 
 
-    nuevo_porcentaje = st.slider(
-
-        "% empresa",
-
-        0,
-
-        100,
-
-        int(fila["porcentaje_empresa"]),
-
-        key="edit_porcentaje"
-
-    )
+        nuevo_monto = st.number_input(
+            "Monto",
+            value=float(fila["monto_mensual"]),
+            key="edit_monto"
+        )
 
 
-    colA, colB = st.columns(2)
+        nuevo_porcentaje = st.slider(
+            "% empresa",
+            0,
+            100,
+            int(fila["porcentaje_empresa"]),
+            key="edit_porcentaje"
+        )
 
 
-    # ACTUALIZAR
+        colA, colB = st.columns(2)
 
-    if colA.button("💾 Actualizar"):
 
-        with conectar() as conn:
+        # ===================================================
+        # ACTUALIZAR
+        # ===================================================
 
-            conn.execute(
+        if colA.button("💾 Actualizar"):
 
-                """
+            with conectar() as conn:
 
-                UPDATE costos_operativos
-
-                SET
-
-                monto_mensual=?,
-
-                porcentaje_empresa=?
-
-                WHERE nombre=?
-
-                """,
-
-                (
-
-                    nuevo_monto,
-
-                    nuevo_porcentaje,
-
-                    servicio
-
+                conn.execute(
+                    """
+                    UPDATE costos_operativos
+                    SET monto_mensual=?, porcentaje_empresa=?
+                    WHERE nombre=?
+                    """,
+                    (
+                        nuevo_monto,
+                        nuevo_porcentaje,
+                        servicio
+                    )
                 )
 
-            )
+                conn.commit()
 
-            conn.commit()
-
-
-        st.success("Actualizado")
-
-        st.rerun()
+            st.success("✅ Actualizado")
+            st.rerun()
 
 
-    # ELIMINAR
+        # ===================================================
+        # ELIMINAR
+        # ===================================================
 
-    if colB.button("🗑 Eliminar"):
+        if colB.button("🗑 Eliminar"):
 
-        with conectar() as conn:
+            with conectar() as conn:
 
-            conn.execute(
+                conn.execute(
+                    "DELETE FROM costos_operativos WHERE nombre=?",
+                    (servicio,)
+                )
 
-                "DELETE FROM costos_operativos WHERE nombre=?",
+                conn.commit()
 
-                (servicio,)
-
-            )
-
-            conn.commit()
+            st.warning("🗑 Eliminado")
+            st.rerun()
 
 
-        st.warning("Eliminado")
+    else:
 
-        st.rerun()
+        st.info("No hay costos operativos aún")
 
 
     # ===========================================================
@@ -5175,6 +5155,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
