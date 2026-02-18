@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pdin
+import pandas as pd
 import sqlite3
 import numpy as np
 import io
@@ -5851,6 +5851,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
