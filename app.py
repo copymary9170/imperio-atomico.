@@ -1366,38 +1366,6 @@ elif menu == "📦 Inventario":
 
         st.caption(f"Sugerencia de impuesto total para compras: {st.session_state.get('inv_impuesto_default', 16.0):.2f}%")
 
-# ------------------------------
-# 🚚 GASTOS LOGÍSTICA / DELIVERY
-# ------------------------------
-
-st.markdown("### 🚚 Gastos Logística / Delivery")
-
-delivery = st.number_input(
-    "Costo de Delivery ($)",
-    min_value=0.0,
-    value=float(st.session_state.get("inv_delivery_default", 0.0)),
-    step=0.01
-)
-    
-    delivery_monto = col_d1.number_input(
-    "Monto delivery",
-    min_value=0.0,
-    value=float(st.session_state.get("inv_delivery_default", 0.0)),
-    format="%.2f",
-    key="delivery_monto"
-    )
-
-    delivery_tipo = col_d2.selectbox(
-    "Moneda delivery",
-    [
-        "USD $",
-        "Bs (BCV)",
-        "Bs (Binance)",
-        "Bs (Personalizada)"
-    ],
-    key="delivery_tipo"
-)
-
         # ===========================================================
         # 🚚 DELIVERY PROFESIONAL MULTIMONEDA
         # ===========================================================
@@ -1425,10 +1393,6 @@ delivery = st.number_input(
             key="delivery_tipo"
         )
 
-        # ===========================================================
-        # CONVERSION AUTOMATICA A USD
-        # ===========================================================
-
         delivery = 0.0
 
         if delivery_tipo == "USD $":
@@ -1455,8 +1419,6 @@ delivery = st.number_input(
 
             delivery = delivery_monto / tasa_delivery
 
-
-        # mostrar referencia
 
         st.caption(f"Delivery equivalente: ${delivery:,.4f} USD")
 
@@ -5780,6 +5742,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
