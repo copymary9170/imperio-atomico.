@@ -2306,7 +2306,7 @@ with col2:
 
     if not df_costos.empty:
 
-    st.markdown("### ✏️ Editar / eliminar")
+        st.  markdown("### ✏️ Editar / eliminar")
 
     servicio = st.selectbox(
 
@@ -5068,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
