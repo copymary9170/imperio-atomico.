@@ -1366,15 +1366,18 @@ elif menu == "📦 Inventario":
 
         st.caption(f"Sugerencia de impuesto total para compras: {st.session_state.get('inv_impuesto_default', 16.0):.2f}%")
 
+# ------------------------------
+# 🚚 GASTOS LOGÍSTICA / DELIVERY
+# ------------------------------
 
-        # ===========================================================
-# 🚚 DELIVERY PROFESIONAL MULTIMONEDA
-# ===========================================================
+st.markdown("### 🚚 Gastos Logística / Delivery")
 
-with st.container():
-
-    st.markdown("### 🚚 Gastos Logística / Delivery")
-    col_d1, col_d2 = st.columns(2)
+delivery = st.number_input(
+    "Costo de Delivery ($)",
+    min_value=0.0,
+    value=float(st.session_state.get("inv_delivery_default", 0.0)),
+    step=0.01
+)
     
     delivery_monto = col_d1.number_input(
     "Monto delivery",
@@ -5777,6 +5780,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
