@@ -2165,10 +2165,10 @@ st.subheader("🏢 Costos Operativos")
 
 with conectar() as conn:
 
-    df_costos = pd.read_sql(
-        "SELECT * FROM costos_operativos ORDER BY nombre",
-        conn
-    )
+df_costos = pd.read_sql(
+    "SELECT * FROM costos_operativos ORDER BY nombre",
+    conn
+)
 
 
 # ===========================================================
@@ -2177,15 +2177,15 @@ with conectar() as conn:
 
 if not df_costos.empty:
 
-    df_costos["costo_real"] = (
+df_costos["costo_real"] = (
 
-        df_costos["monto_mensual"]
+    df_costos["monto_mensual"]
 
-        * df_costos["porcentaje_empresa"]
+    * df_costos["porcentaje_empresa"]
 
-        / 100
+    / 100
 
-    )
+)
 
 
 # ===========================================================
@@ -2194,32 +2194,32 @@ if not df_costos.empty:
 
 st.dataframe(
 
-    df_costos,
+df_costos,
 
-    column_config={
+column_config={
 
-        "nombre": "Servicio",
+    "nombre": "Servicio",
 
-        "monto_mensual": st.column_config.NumberColumn(
-            "Monto mensual",
-            format="$%.2f"
-        ),
+    "monto_mensual": st.column_config.NumberColumn(
+        "Monto mensual",
+        format="$%.2f"
+    ),
 
-        "porcentaje_empresa": st.column_config.NumberColumn(
-            "% Empresa",
-            format="%.0f %%"
-        ),
+    "porcentaje_empresa": st.column_config.NumberColumn(
+        "% Empresa",
+        format="%.0f %%"
+    ),
 
-        "costo_real": st.column_config.NumberColumn(
-            "Costo Real",
-            format="$%.2f"
-        ),
+    "costo_real": st.column_config.NumberColumn(
+        "Costo Real",
+        format="$%.2f"
+    ),
 
-    },
+},
 
-    use_container_width=True,
+use_container_width=True,
 
-    hide_index=True
+hide_index=True
 
 )
 
@@ -2237,65 +2237,65 @@ col1, col2 = st.columns(2)
 
 with col1:
 
-    st.markdown("### ➕ Agregar nuevo")
+st.markdown("### ➕ Agregar nuevo")
 
-    with st.form("nuevo_costo"):
+with st.form("nuevo_costo"):
 
-        nombre = st.text_input("Servicio")
+    nombre = st.text_input("Servicio")
 
-        monto = st.number_input(
-            "Monto mensual",
-            format="%.2f"
-        )
+    monto = st.number_input(
+        "Monto mensual",
+        format="%.2f"
+    )
 
-        porcentaje = st.slider(
-            "% uso empresa",
-            0,
-            100,
-            100
-        )
+    porcentaje = st.slider(
+        "% uso empresa",
+        0,
+        100,
+        100
+    )
 
 
-        if st.form_submit_button("💾 Guardar"):
+    if st.form_submit_button("💾 Guardar"):
 
-            if nombre:
+        if nombre:
 
-                with conectar() as conn:
+            with conectar() as conn:
 
-                    conn.execute(
+                conn.execute(
 
-                        """
+                    """
 
-                        INSERT INTO costos_operativos
+                    INSERT INTO costos_operativos
 
-                        (nombre, monto_mensual, porcentaje_empresa)
+                    (nombre, monto_mensual, porcentaje_empresa)
 
-                        VALUES (?,?,?)
+                    VALUES (?,?,?)
 
-                        ON CONFLICT(nombre)
+                    ON CONFLICT(nombre)
 
-                        DO UPDATE SET
+                    DO UPDATE SET
 
-                        monto_mensual=excluded.monto_mensual,
+                    monto_mensual=excluded.monto_mensual,
 
-                        porcentaje_empresa=excluded.porcentaje_empresa
+                    porcentaje_empresa=excluded.porcentaje_empresa
 
-                        """,
+                    """,
 
-                        (
-                            nombre,
-                            monto,
-                            porcentaje
-                        )
-
+                    (
+                        nombre,
+                        monto,
+                        porcentaje
                     )
 
-                    conn.commit()
+                )
+
+                conn.commit()
 
 
-                st.success("Guardado")
+            st.success("Guardado")
 
-                st.rerun()
+            st.rerun()
 
 
 # ===========================================================
@@ -2304,115 +2304,115 @@ with col1:
 
 with col2:
 
-    if not df_costos.empty:
+if not df_costos.empty:
 
-        st.markdown("### ✏️ Editar / eliminar")
+    st.markdown("### ✏️ Editar / eliminar")
 
-        servicio = st.selectbox(
+    servicio = st.selectbox(
 
-            "Servicio",
+        "Servicio",
 
-            df_costos["nombre"]
+        df_costos["nombre"]
 
-        )
-
-
-        fila = df_costos[
-            df_costos["nombre"] == servicio
-        ].iloc[0]
+    )
 
 
-        nuevo_monto = st.number_input(
-
-            "Monto",
-
-            value=float(fila["monto_mensual"]),
-
-            key="edit_monto"
-
-        )
+    fila = df_costos[
+        df_costos["nombre"] == servicio
+    ].iloc[0]
 
 
-        nuevo_porcentaje = st.slider(
+    nuevo_monto = st.number_input(
 
-            "% empresa",
+        "Monto",
 
-            0,
+        value=float(fila["monto_mensual"]),
 
-            100,
+        key="edit_monto"
 
-            int(fila["porcentaje_empresa"]),
-
-            key="edit_porcentaje"
-
-        )
+    )
 
 
-        colA, colB = st.columns(2)
+    nuevo_porcentaje = st.slider(
+
+        "% empresa",
+
+        0,
+
+        100,
+
+        int(fila["porcentaje_empresa"]),
+
+        key="edit_porcentaje"
+
+    )
 
 
-        # ACTUALIZAR
+    colA, colB = st.columns(2)
 
-        if colA.button("💾 Actualizar"):
 
-            with conectar() as conn:
+    # ACTUALIZAR
 
-                conn.execute(
+    if colA.button("💾 Actualizar"):
 
-                    """
+        with conectar() as conn:
 
-                    UPDATE costos_operativos
+            conn.execute(
 
-                    SET
+                """
 
-                    monto_mensual=?,
+                UPDATE costos_operativos
 
-                    porcentaje_empresa=?
+                SET
 
-                    WHERE nombre=?
+                monto_mensual=?,
 
-                    """,
+                porcentaje_empresa=?
 
-                    (
+                WHERE nombre=?
 
-                        nuevo_monto,
+                """,
 
-                        nuevo_porcentaje,
+                (
 
-                        servicio
+                    nuevo_monto,
 
-                    )
+                    nuevo_porcentaje,
+
+                    servicio
 
                 )
 
-                conn.commit()
+            )
+
+            conn.commit()
 
 
-            st.success("Actualizado")
+        st.success("Actualizado")
 
-            st.rerun()
-
-
-        # ELIMINAR
-
-        if colB.button("🗑 Eliminar"):
-
-            with conectar() as conn:
-
-                conn.execute(
-
-                    "DELETE FROM costos_operativos WHERE nombre=?",
-
-                    (servicio,)
-
-                )
-
-                conn.commit()
+        st.rerun()
 
 
-            st.warning("Eliminado")
+    # ELIMINAR
 
-            st.rerun()
+    if colB.button("🗑 Eliminar"):
+
+        with conectar() as conn:
+
+            conn.execute(
+
+                "DELETE FROM costos_operativos WHERE nombre=?",
+
+                (servicio,)
+
+            )
+
+            conn.commit()
+
+
+        st.warning("Eliminado")
+
+        st.rerun()
 
 
 # ===========================================================
@@ -2421,62 +2421,62 @@ with col2:
 
 if not df_costos.empty:
 
-    total = df_costos["costo_real"].sum()
+total = df_costos["costo_real"].sum()
 
-    diario = total / 30
+diario = total / 30
 
-    hora = diario / 8
+hora = diario / 8
 
-    minuto = hora / 60
-
-
-    st.divider()
+minuto = hora / 60
 
 
-    c1, c2, c3, c4 = st.columns(4)
+st.divider()
 
 
-    c1.metric(
-
-        "Mensual",
-
-        f"${total:,.2f}"
-
-    )
+c1, c2, c3, c4 = st.columns(4)
 
 
-    c2.metric(
+c1.metric(
 
-        "Diario",
+    "Mensual",
 
-        f"${diario:,.2f}"
+    f"${total:,.2f}"
 
-    )
-
-
-    c3.metric(
-
-        "Hora",
-
-        f"${hora:,.4f}"
-
-    )
+)
 
 
-    c4.metric(
+c2.metric(
 
-        "Minuto",
+    "Diario",
 
-        f"${minuto:,.5f}"
+    f"${diario:,.2f}"
 
-    )
+)
 
 
-    # guardar para cotizaciones
+c3.metric(
 
-    st.session_state.costo_operativo_minuto = minuto
+    "Hora",
 
-    # ===========================================================
+    f"${hora:,.4f}"
+
+)
+
+
+c4.metric(
+
+    "Minuto",
+
+    f"${minuto:,.5f}"
+
+)
+
+
+# guardar para cotizaciones
+
+st.session_state.costo_operativo_minuto = minuto
+
+# ===========================================================
 # 💱 TASAS DE CAMBIO (BCV y Binance) — BLOQUE INDEPENDIENTE
 # ===========================================================
 
@@ -2493,16 +2493,16 @@ tasa_binance_actual = 0.0
 
 with conectar() as conn:
 
-    df_tasa = pd.read_sql(
-        "SELECT * FROM tasas ORDER BY id DESC LIMIT 1",
-        conn
-    )
+df_tasa = pd.read_sql(
+    "SELECT * FROM tasas ORDER BY id DESC LIMIT 1",
+    conn
+)
 
-    if not df_tasa.empty:
+if not df_tasa.empty:
 
-        tasa_bcv_actual = float(df_tasa["tasa_bcv"].iloc[0])
+    tasa_bcv_actual = float(df_tasa["tasa_bcv"].iloc[0])
 
-        tasa_binance_actual = float(df_tasa["tasa_binance"].iloc[0])
+    tasa_binance_actual = float(df_tasa["tasa_binance"].iloc[0])
 
 
 
@@ -2510,128 +2510,128 @@ with conectar() as conn:
 
 with st.form("form_tasas"):
 
-    col1, col2 = st.columns(2)
+col1, col2 = st.columns(2)
 
-    tasa_bcv = col1.number_input(
-        "Tasa BCV",
-        value=tasa_bcv_actual,
-        format="%.2f"
-    )
+tasa_bcv = col1.number_input(
+    "Tasa BCV",
+    value=tasa_bcv_actual,
+    format="%.2f"
+)
 
-    tasa_binance = col2.number_input(
-        "Tasa Binance",
-        value=tasa_binance_actual,
-        format="%.2f"
-    )
+tasa_binance = col2.number_input(
+    "Tasa Binance",
+    value=tasa_binance_actual,
+    format="%.2f"
+)
 
 
-    guardar_tasas = st.form_submit_button("💾 Guardar tasas")
+guardar_tasas = st.form_submit_button("💾 Guardar tasas")
 
 
 if guardar_tasas:
 
-    with conectar() as conn:
+with conectar() as conn:
 
-        conn.execute(
-            """
-            INSERT INTO tasas
-            (tasa_bcv, tasa_binance, fecha)
-            VALUES (?,?,datetime('now'))
-            """,
-            (tasa_bcv, tasa_binance)
-        )
+    conn.execute(
+        """
+        INSERT INTO tasas
+        (tasa_bcv, tasa_binance, fecha)
+        VALUES (?,?,datetime('now'))
+        """,
+        (tasa_bcv, tasa_binance)
+    )
 
-        conn.commit()
-
-
-    # actualizar sesión
-
-    st.session_state.tasa_bcv = tasa_bcv
-
-    st.session_state.tasa_binance = tasa_binance
+    conn.commit()
 
 
-    st.success("✅ Tasas actualizadas")
+# actualizar sesión
 
-    st.rerun()
+st.session_state.tasa_bcv = tasa_bcv
 
-
-
-    # ===========================================================
-    # IMPUESTOS
-    # ===========================================================
-
-    st.divider()
-
-    st.subheader("💸 Impuestos")
-
-    with conectar() as conn:
-
-        df_conf = pd.read_sql(
-            "SELECT * FROM configuracion",
-            conn
-        )
-
-    conf = dict(zip(
-        df_conf.parametro,
-        df_conf.valor
-    ))
+st.session_state.tasa_binance = tasa_binance
 
 
-    with st.form("config"):
+st.success("✅ Tasas actualizadas")
 
-        c1, c2 = st.columns(2)
-
-        iva = c1.number_input(
-            "IVA %",
-            value=conf.get("iva", 16)
-        )
-
-        igtf = c1.number_input(
-            "IGTF %",
-            value=conf.get("igtf", 3)
-        )
-
-        banco = c2.number_input(
-            "Banco %",
-            value=conf.get("banco", 2)
-        )
-
-        ganancia = c2.number_input(
-            "Ganancia %",
-            value=conf.get("ganancia", 35)
-        )
+st.rerun()
 
 
-        if st.form_submit_button("Guardar impuestos"):
 
-            with conectar() as conn:
+# ===========================================================
+# IMPUESTOS
+# ===========================================================
 
-                conn.execute(
-                    "INSERT OR REPLACE INTO configuracion VALUES ('iva',?)",
-                    (iva,)
-                )
+st.divider()
 
-                conn.execute(
-                    "INSERT OR REPLACE INTO configuracion VALUES ('igtf',?)",
-                    (igtf,)
-                )
+st.subheader("💸 Impuestos")
 
-                conn.execute(
-                    "INSERT OR REPLACE INTO configuracion VALUES ('banco',?)",
-                    (banco,)
-                )
+with conectar() as conn:
 
-                conn.execute(
-                    "INSERT OR REPLACE INTO configuracion VALUES ('ganancia',?)",
-                    (ganancia,)
-                )
+    df_conf = pd.read_sql(
+        "SELECT * FROM configuracion",
+        conn
+    )
 
-                conn.commit()
+conf = dict(zip(
+    df_conf.parametro,
+    df_conf.valor
+))
 
-            st.success("Guardado")
 
-            st.rerun()
+with st.form("config"):
+
+    c1, c2 = st.columns(2)
+
+    iva = c1.number_input(
+        "IVA %",
+        value=conf.get("iva", 16)
+    )
+
+    igtf = c1.number_input(
+        "IGTF %",
+        value=conf.get("igtf", 3)
+    )
+
+    banco = c2.number_input(
+        "Banco %",
+        value=conf.get("banco", 2)
+    )
+
+    ganancia = c2.number_input(
+        "Ganancia %",
+        value=conf.get("ganancia", 35)
+    )
+
+
+    if st.form_submit_button("Guardar impuestos"):
+
+        with conectar() as conn:
+
+            conn.execute(
+                "INSERT OR REPLACE INTO configuracion VALUES ('iva',?)",
+                (iva,)
+            )
+
+            conn.execute(
+                "INSERT OR REPLACE INTO configuracion VALUES ('igtf',?)",
+                (igtf,)
+            )
+
+            conn.execute(
+                "INSERT OR REPLACE INTO configuracion VALUES ('banco',?)",
+                (banco,)
+            )
+
+            conn.execute(
+                "INSERT OR REPLACE INTO configuracion VALUES ('ganancia',?)",
+                (ganancia,)
+            )
+
+            conn.commit()
+
+        st.success("Guardado")
+
+        st.rerun()
 
 # ===========================================================
 # 🏦 KONTIGO CONFIGURACIÓN COMPLETA CON COMISIONES (PRO REAL)
@@ -2659,48 +2659,48 @@ com_salida = 0.0
 
 try:
 
-    with conectar() as conn:
+with conectar() as conn:
 
-        existe = conn.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='kontigo'
-        """).fetchone()
-
-
-        if existe:
-
-            df_k = pd.read_sql(
-                "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
-                conn
-            )
+    existe = conn.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='kontigo'
+    """).fetchone()
 
 
-            if not df_k.empty:
+    if existe:
 
-                columnas = df_k.columns
-
-
-                saldo_actual = float(df_k["saldo"].iloc[0]) if "saldo" in columnas else 0
-
-                usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if "usd_bs_entrada" in columnas else 0
-
-                bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if "bs_usd_entrada" in columnas else 0
+        df_k = pd.read_sql(
+            "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+            conn
+        )
 
 
-                usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if "usd_bs_salida" in columnas else 0
+        if not df_k.empty:
 
-                bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if "bs_usd_salida" in columnas else 0
+            columnas = df_k.columns
 
 
-                com_entrada = float(df_k["comision_entrada"].iloc[0]) if "comision_entrada" in columnas else 0
+            saldo_actual = float(df_k["saldo"].iloc[0]) if "saldo" in columnas else 0
 
-                com_pm = float(df_k["comision_pago_movil"].iloc[0]) if "comision_pago_movil" in columnas else 0
+            usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if "usd_bs_entrada" in columnas else 0
 
-                com_salida = float(df_k["comision_salida"].iloc[0]) if "comision_salida" in columnas else 0
+            bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if "bs_usd_entrada" in columnas else 0
+
+
+            usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if "usd_bs_salida" in columnas else 0
+
+            bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if "bs_usd_salida" in columnas else 0
+
+
+            com_entrada = float(df_k["comision_entrada"].iloc[0]) if "comision_entrada" in columnas else 0
+
+            com_pm = float(df_k["comision_pago_movil"].iloc[0]) if "comision_pago_movil" in columnas else 0
+
+            com_salida = float(df_k["comision_salida"].iloc[0]) if "comision_salida" in columnas else 0
 
 except:
 
-    pass
+pass
 
 
 
@@ -2711,149 +2711,149 @@ except:
 with st.form("form_kontigo"):
 
 
-    st.markdown("### 💰 Saldo")
+st.markdown("### 💰 Saldo")
 
-    saldo = st.number_input(
-        "Saldo actual USD",
-        value=saldo_actual,
-        key="cfg_k_saldo"
-    )
+saldo = st.number_input(
+    "Saldo actual USD",
+    value=saldo_actual,
+    key="cfg_k_saldo"
+)
 
 
 
-    # =======================================================
-    # TASAS REALES
-    # =======================================================
+# =======================================================
+# TASAS REALES
+# =======================================================
 
-    st.markdown("### 💱 Tasas REALES sin comisiones")
+st.markdown("### 💱 Tasas REALES sin comisiones")
 
 
-    usd_bs_ent = st.number_input(
+usd_bs_ent = st.number_input(
 
-        "Bs que pagas por 1 USD (ANTES de comisiones)",
+    "Bs que pagas por 1 USD (ANTES de comisiones)",
 
-        value=usd_bs_entrada,
+    value=usd_bs_entrada,
 
-        key="cfg_k_usd_bs_ent"
+    key="cfg_k_usd_bs_ent"
 
-    )
+)
 
 
-    bs_usd_ent = st.number_input(
+bs_usd_ent = st.number_input(
 
-        "USD que recibes por 1 Bs (entrada)",
+    "USD que recibes por 1 Bs (entrada)",
 
-        value=bs_usd_entrada,
+    value=bs_usd_entrada,
 
-        key="cfg_k_bs_usd_ent"
+    key="cfg_k_bs_usd_ent"
 
-    )
+)
 
 
 
-    usd_bs_sal = st.number_input(
+usd_bs_sal = st.number_input(
 
-        "Bs que recibes por 1 USD (ANTES de comisión salida)",
+    "Bs que recibes por 1 USD (ANTES de comisión salida)",
 
-        value=usd_bs_salida,
+    value=usd_bs_salida,
 
-        key="cfg_k_usd_bs_sal"
+    key="cfg_k_usd_bs_sal"
 
-    )
+)
 
 
-    bs_usd_sal = st.number_input(
+bs_usd_sal = st.number_input(
 
-        "USD que recibes por 1 Bs (salida)",
+    "USD que recibes por 1 Bs (salida)",
 
-        value=bs_usd_salida,
+    value=bs_usd_salida,
 
-        key="cfg_k_bs_usd_sal"
+    key="cfg_k_bs_usd_sal"
 
-    )
+)
 
 
 
-    # =======================================================
-    # COMISIONES
-    # =======================================================
+# =======================================================
+# COMISIONES
+# =======================================================
 
-    st.markdown("### 💸 Comisiones")
+st.markdown("### 💸 Comisiones")
 
 
-    ce = st.number_input(
+ce = st.number_input(
 
-        "Comisión Kontigo entrada %",
+    "Comisión Kontigo entrada %",
 
-        value=com_entrada,
+    value=com_entrada,
 
-        key="cfg_k_com_ent"
+    key="cfg_k_com_ent"
 
-    )
+)
 
 
-    cpm = st.number_input(
+cpm = st.number_input(
 
-        "Comisión Pago Móvil %",
+    "Comisión Pago Móvil %",
 
-        value=com_pm,
+    value=com_pm,
 
-        key="cfg_k_com_pm"
+    key="cfg_k_com_pm"
 
-    )
+)
 
 
-    cs = st.number_input(
+cs = st.number_input(
 
-        "Comisión Kontigo salida %",
+    "Comisión Kontigo salida %",
 
-        value=com_salida,
+    value=com_salida,
 
-        key="cfg_k_com_sal"
+    key="cfg_k_com_sal"
 
-    )
+)
 
 
 
-    # =======================================================
-    # PREVIEW AUTOMÁTICO
-    # =======================================================
+# =======================================================
+# PREVIEW AUTOMÁTICO
+# =======================================================
 
-    st.markdown("### 📊 Vista previa automática")
+st.markdown("### 📊 Vista previa automática")
 
 
-    costo_real = usd_bs_ent * (1 + ce/100 + cpm/100)
+costo_real = usd_bs_ent * (1 + ce/100 + cpm/100)
 
-    valor_real = usd_bs_sal * (1 - cs/100)
+valor_real = usd_bs_sal * (1 - cs/100)
 
 
-    col1, col2 = st.columns(2)
+col1, col2 = st.columns(2)
 
 
-    col1.metric(
+col1.metric(
 
-        "Costo real 1 USD",
+    "Costo real 1 USD",
 
-        f"Bs {costo_real:,.2f}"
+    f"Bs {costo_real:,.2f}"
 
-    )
+)
 
 
-    col2.metric(
+col2.metric(
 
-        "Valor real 1 USD",
+    "Valor real 1 USD",
 
-        f"Bs {valor_real:,.2f}"
+    f"Bs {valor_real:,.2f}"
 
-    )
+)
 
 
 
-    # =======================================================
-    # BOTON GUARDAR
-    # =======================================================
+# =======================================================
+# BOTON GUARDAR
+# =======================================================
 
-    guardar = st.form_submit_button("💾 Guardar Kontigo")
+guardar = st.form_submit_button("💾 Guardar Kontigo")
 
 
 
@@ -2863,54 +2863,54 @@ with st.form("form_kontigo"):
 
 if guardar:
 
-    with conectar() as conn:
+with conectar() as conn:
 
-        conn.execute("""
+    conn.execute("""
 
-        INSERT INTO kontigo (
+    INSERT INTO kontigo (
 
-            saldo,
+        saldo,
 
-            usd_bs_entrada,
-            bs_usd_entrada,
+        usd_bs_entrada,
+        bs_usd_entrada,
 
-            usd_bs_salida,
-            bs_usd_salida,
+        usd_bs_salida,
+        bs_usd_salida,
 
-            comision_entrada,
-            comision_pago_movil,
-            comision_salida
+        comision_entrada,
+        comision_pago_movil,
+        comision_salida
 
-        )
+    )
 
-        VALUES (?,?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?)
 
-        """, (
+    """, (
 
-            saldo,
+        saldo,
 
-            usd_bs_ent,
-            bs_usd_ent,
+        usd_bs_ent,
+        bs_usd_ent,
 
-            usd_bs_sal,
-            bs_usd_sal,
+        usd_bs_sal,
+        bs_usd_sal,
 
-            ce,
-            cpm,
-            cs
+        ce,
+        cpm,
+        cs
 
-        ))
-
-
-        conn.commit()
+    ))
 
 
-    st.success("✅ Kontigo guardado correctamente")
-
-    st.rerun()
+    conn.commit()
 
 
-   # ===========================================================
+st.success("✅ Kontigo guardado correctamente")
+
+st.rerun()
+
+
+# ===========================================================
 # BACKUP
 # ===========================================================
 
@@ -2920,16 +2920,16 @@ st.subheader("💾 Backup")
 
 if st.button("Crear Backup"):
 
-    import shutil
+import shutil
 
-    nombre = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+nombre = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
 
-    shutil.copy(
-        "data/imperio.db",
-        nombre
-    )
+shutil.copy(
+    "data/imperio.db",
+    nombre
+)
 
-    st.success(f"Backup creado: {nombre}")
+st.success(f"Backup creado: {nombre}")
 
 
 # ===========================================================
@@ -2942,11 +2942,11 @@ st.subheader("🔧 Sistema")
 
 if st.button("Verificar Sistema"):
 
-    inicializar_sistema()
+inicializar_sistema()
 
-    st.success("Sistema verificado")
+st.success("Sistema verificado")
 
-    st.rerun()
+st.rerun()
 
 
 # ===========================================================
@@ -5068,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
