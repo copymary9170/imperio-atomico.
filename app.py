@@ -2018,7 +2018,7 @@ elif menu == "📦 Inventario":
 
             delivery_default = st.number_input(
 
-                "Delivery por defecto por compra ($)",
+                "Delivery sugerido por defecto (en USD equivalente)",
 
                 min_value=0.0,
 
@@ -5851,6 +5851,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
