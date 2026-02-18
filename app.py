@@ -2415,195 +2415,213 @@ with col2:
         st.rerun()
 
 
-# ===========================================================
-# CALCULOS AUTOMATICOS
-# ===========================================================
+    # ===========================================================
+    # CALCULOS AUTOMATICOS
+    # ===========================================================
 
     if not df_costos.empty:
 
-total = df_costos["costo_real"].sum()
+        total = df_costos["costo_real"].sum()
 
-diario = total / 30
+        diario = total / 30
 
-hora = diario / 8
+        hora = diario / 8
 
-minuto = hora / 60
-
-
-st.divider()
+        minuto = hora / 60
 
 
-c1, c2, c3, c4 = st.columns(4)
+        st.divider()
 
 
-c1.metric(
-
-    "Mensual",
-
-    f"${total:,.2f}"
-
-)
+        c1, c2, c3, c4 = st.columns(4)
 
 
-c2.metric(
+        c1.metric(
 
-    "Diario",
+            "Mensual",
 
-    f"${diario:,.2f}"
+            f"${total:,.2f}"
 
-)
-
-
-c3.metric(
-
-    "Hora",
-
-    f"${hora:,.4f}"
-
-)
+        )
 
 
-c4.metric(
+        c2.metric(
 
-    "Minuto",
+            "Diario",
 
-    f"${minuto:,.5f}"
+            f"${diario:,.2f}"
 
-)
-
-
-# guardar para cotizaciones
-
-st.session_state.costo_operativo_minuto = minuto
-
-# ===========================================================
-# 💱 TASAS DE CAMBIO (BCV y Binance) — BLOQUE INDEPENDIENTE
-# ===========================================================
-
-st.divider()
-
-st.subheader("💱 Tasas de Cambio")
+        )
 
 
-# LEER TASAS ACTUALES
+        c3.metric(
 
-tasa_bcv_actual = 0.0
-tasa_binance_actual = 0.0
+            "Hora",
 
+            f"${hora:,.4f}"
 
-with conectar() as conn:
-
-    df_tasa = pd.read_sql(
-    "SELECT * FROM tasas ORDER BY id DESC LIMIT 1",
-    conn
-)
-
-    if not df_tasa.empty:
-
-    tasa_bcv_actual = float(df_tasa["tasa_bcv"].iloc[0])
-
-    tasa_binance_actual = float(df_tasa["tasa_binance"].iloc[0])
+        )
 
 
+        c4.metric(
 
-# FORMULARIO
+            "Minuto",
 
-with st.form("form_tasas"):
+            f"${minuto:,.5f}"
 
-col1, col2 = st.columns(2)
-
-tasa_bcv = col1.number_input(
-    "Tasa BCV",
-    value=tasa_bcv_actual,
-    format="%.2f"
-)
-
-tasa_binance = col2.number_input(
-    "Tasa Binance",
-    value=tasa_binance_actual,
-    format="%.2f"
-)
+        )
 
 
-guardar_tasas = st.form_submit_button("💾 Guardar tasas")
+        # guardar para cotizaciones
 
+        st.session_state.costo_operativo_minuto = minuto
+
+    # ===========================================================
+    # 💱 TASAS DE CAMBIO (BCV y Binance) — BLOQUE INDEPENDIENTE
+    # ===========================================================
+
+    st.divider()
+
+    st.subheader("💱 Tasas de Cambio")
+
+
+    # LEER TASAS ACTUALES
+
+    tasa_bcv_actual = 0.0
+    tasa_binance_actual = 0.0
+
+
+    with conectar() as conn:
+
+        df_tasa = pd.read_sql(
+            "SELECT * FROM tasas ORDER BY id DESC LIMIT 1",
+            conn
+        )
+
+        if not df_tasa.empty:
+
+            tasa_bcv_actual = float(df_tasa["tasa_bcv"].iloc[0])
+
+            tasa_binance_actual = float(df_tasa["tasa_binance"].iloc[0])
+
+
+
+    # ===========================================================
+    # FORMULARIO
+    # ===========================================================
+
+    with st.form("form_tasas"):
+
+        col1, col2 = st.columns(2)
+
+        tasa_bcv = col1.number_input(
+            "Tasa BCV",
+            value=tasa_bcv_actual,
+            format="%.2f"
+        )
+
+        tasa_binance = col2.number_input(
+            "Tasa Binance",
+            value=tasa_binance_actual,
+            format="%.2f"
+        )
+
+
+        guardar_tasas = st.form_submit_button("💾 Guardar tasas")
+
+
+
+    # ===========================================================
+    # GUARDAR
+    # ===========================================================
 
     if guardar_tasas:
 
-with conectar() as conn:
+        with conectar() as conn:
 
-    conn.execute(
-        """
-        INSERT INTO tasas
-        (tasa_bcv, tasa_binance, fecha)
-        VALUES (?,?,datetime('now'))
-        """,
-        (tasa_bcv, tasa_binance)
-    )
+            conn.execute(
+                """
+                INSERT INTO tasas
+                (tasa_bcv, tasa_binance, fecha)
+                VALUES (?,?,datetime('now'))
+                """,
+                (tasa_bcv, tasa_binance)
+            )
 
-    conn.commit()
-
-
-# actualizar sesión
-
-st.session_state.tasa_bcv = tasa_bcv
-
-st.session_state.tasa_binance = tasa_binance
+            conn.commit()
 
 
-st.success("✅ Tasas actualizadas")
+        # actualizar sesión
 
-st.rerun()
+        st.session_state.tasa_bcv = tasa_bcv
 
-
-
-# ===========================================================
-# IMPUESTOS
-# ===========================================================
-
-st.divider()
-
-st.subheader("💸 Impuestos")
-
-with conectar() as conn:
-
-    df_conf = pd.read_sql(
-        "SELECT * FROM configuracion",
-        conn
-    )
-
-conf = dict(zip(
-    df_conf.parametro,
-    df_conf.valor
-))
+        st.session_state.tasa_binance = tasa_binance
 
 
-with st.form("config"):
+        st.success("✅ Tasas actualizadas")
 
-    c1, c2 = st.columns(2)
-
-    iva = c1.number_input(
-        "IVA %",
-        value=conf.get("iva", 16)
-    )
-
-    igtf = c1.number_input(
-        "IGTF %",
-        value=conf.get("igtf", 3)
-    )
-
-    banco = c2.number_input(
-        "Banco %",
-        value=conf.get("banco", 2)
-    )
-
-    ganancia = c2.number_input(
-        "Ganancia %",
-        value=conf.get("ganancia", 35)
-    )
+        st.rerun()
 
 
-    if st.form_submit_button("Guardar impuestos"):
+
+    # ===========================================================
+    # IMPUESTOS
+    # ===========================================================
+
+    st.divider()
+
+    st.subheader("💸 Impuestos")
+
+
+    with conectar() as conn:
+
+        df_conf = pd.read_sql(
+            "SELECT * FROM configuracion",
+            conn
+        )
+
+
+    conf = dict(zip(
+        df_conf.parametro,
+        df_conf.valor
+    ))
+
+
+
+    with st.form("config"):
+
+        c1, c2 = st.columns(2)
+
+        iva = c1.number_input(
+            "IVA %",
+            value=conf.get("iva", 16),
+            format="%.2f"
+        )
+
+        igtf = c1.number_input(
+            "IGTF %",
+            value=conf.get("igtf", 3),
+            format="%.2f"
+        )
+
+        banco = c2.number_input(
+            "Banco %",
+            value=conf.get("banco", 2),
+            format="%.2f"
+        )
+
+        ganancia = c2.number_input(
+            "Ganancia %",
+            value=conf.get("ganancia", 35),
+            format="%.2f"
+        )
+
+
+        guardar_imp = st.form_submit_button("💾 Guardar impuestos")
+
+
+
+    if guardar_imp:
 
         with conectar() as conn:
 
@@ -2629,324 +2647,421 @@ with st.form("config"):
 
             conn.commit()
 
-        st.success("Guardado")
+
+        st.success("✅ Impuestos guardados")
 
         st.rerun()
 
-# ===========================================================
-# 🏦 KONTIGO CONFIGURACIÓN COMPLETA CON COMISIONES (PRO REAL)
-# ===========================================================
+    # ===========================================================
+    # 🏦 KONTIGO CONFIGURACIÓN COMPLETA CON COMISIONES (PRO REAL)
+    # ===========================================================
 
-st.subheader("🏦 Kontigo")
-
-
-# ===========================================================
-# LEER DATOS ACTUALES SEGURO
-# ===========================================================
-
-saldo_actual = 0.0
-
-usd_bs_entrada = 0.0
-bs_usd_entrada = 0.0
-
-usd_bs_salida = 0.0
-bs_usd_salida = 0.0
-
-com_entrada = 0.0
-com_pm = 0.0
-com_salida = 0.0
+    st.subheader("🏦 Kontigo")
 
 
-try:
+    # ===========================================================
+    # LEER DATOS ACTUALES SEGURO
+    # ===========================================================
 
-with conectar() as conn:
+    saldo_actual = 0.0
 
-    existe = conn.execute("""
-        SELECT name FROM sqlite_master
-        WHERE type='table' AND name='kontigo'
-    """).fetchone()
+    usd_bs_entrada = 0.0
+    bs_usd_entrada = 0.0
+
+    usd_bs_salida = 0.0
+    bs_usd_salida = 0.0
+
+    com_entrada = 0.0
+    com_pm = 0.0
+    com_salida = 0.0
 
 
-    if existe:
+    try:
 
-        df_k = pd.read_sql(
-            "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
-            conn
+        with conectar() as conn:
+
+            existe = conn.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='kontigo'
+            """).fetchone()
+
+
+            if existe:
+
+                df_k = pd.read_sql(
+                    "SELECT * FROM kontigo ORDER BY id DESC LIMIT 1",
+                    conn
+                )
+
+
+                if not df_k.empty:
+
+                    columnas = df_k.columns
+
+
+                    saldo_actual = float(df_k["saldo"].iloc[0]) if "saldo" in columnas else 0
+
+                    usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if "usd_bs_entrada" in columnas else 0
+
+                    bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if "bs_usd_entrada" in columnas else 0
+
+
+                    usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if "usd_bs_salida" in columnas else 0
+
+                    bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if "bs_usd_salida" in columnas else 0
+
+
+                    com_entrada = float(df_k["comision_entrada"].iloc[0]) if "comision_entrada" in columnas else 0
+
+                    com_pm = float(df_k["comision_pago_movil"].iloc[0]) if "comision_pago_movil" in columnas else 0
+
+                    com_salida = float(df_k["comision_salida"].iloc[0]) if "comision_salida" in columnas else 0
+
+    except:
+
+        pass
+
+
+
+    # ===========================================================
+    # FORMULARIO
+    # ===========================================================
+
+    with st.form("form_kontigo"):
+
+
+        st.markdown("### 💰 Saldo")
+
+        saldo = st.number_input(
+            "Saldo actual USD",
+            value=saldo_actual,
+            key="cfg_k_saldo"
         )
 
 
-        if not df_k.empty:
+        st.markdown("### 💱 Tasas REALES")
 
-            columnas = df_k.columns
+        usd_bs_ent = st.number_input(
+            "Bs que pagas por 1 USD",
+            value=usd_bs_entrada,
+            key="cfg_k_usd_bs_ent"
+        )
 
 
-            saldo_actual = float(df_k["saldo"].iloc[0]) if "saldo" in columnas else 0
+        bs_usd_ent = st.number_input(
+            "USD que recibes por 1 Bs",
+            value=bs_usd_entrada,
+            key="cfg_k_bs_usd_ent"
+        )
 
-            usd_bs_entrada = float(df_k["usd_bs_entrada"].iloc[0]) if "usd_bs_entrada" in columnas else 0
 
-            bs_usd_entrada = float(df_k["bs_usd_entrada"].iloc[0]) if "bs_usd_entrada" in columnas else 0
+        usd_bs_sal = st.number_input(
+            "Bs que recibes por 1 USD",
+            value=usd_bs_salida,
+            key="cfg_k_usd_bs_sal"
+        )
 
 
-            usd_bs_salida = float(df_k["usd_bs_salida"].iloc[0]) if "usd_bs_salida" in columnas else 0
+        bs_usd_sal = st.number_input(
+            "USD que recibes por 1 Bs salida",
+            value=bs_usd_salida,
+            key="cfg_k_bs_usd_sal"
+        )
 
-            bs_usd_salida = float(df_k["bs_usd_salida"].iloc[0]) if "bs_usd_salida" in columnas else 0
 
+        st.markdown("### 💸 Comisiones")
 
-            com_entrada = float(df_k["comision_entrada"].iloc[0]) if "comision_entrada" in columnas else 0
+        ce = st.number_input(
+            "Comisión entrada %",
+            value=com_entrada,
+            key="cfg_k_com_ent"
+        )
 
-            com_pm = float(df_k["comision_pago_movil"].iloc[0]) if "comision_pago_movil" in columnas else 0
 
-            com_salida = float(df_k["comision_salida"].iloc[0]) if "comision_salida" in columnas else 0
+        cpm = st.number_input(
+            "Comisión pago móvil %",
+            value=com_pm,
+            key="cfg_k_com_pm"
+        )
 
-except:
 
-pass
+        cs = st.number_input(
+            "Comisión salida %",
+            value=com_salida,
+            key="cfg_k_com_sal"
+        )
 
 
+        # =======================================================
+        # PREVIEW
+        # =======================================================
 
-# ===========================================================
-# FORMULARIO
-# ===========================================================
+        costo_real = usd_bs_ent * (1 + ce/100 + cpm/100)
 
-with st.form("form_kontigo"):
+        valor_real = usd_bs_sal * (1 - cs/100)
 
 
-    st.markdown("### 💰 Saldo")
+        col1, col2 = st.columns(2)
 
-saldo = st.number_input(
-    "Saldo actual USD",
-    value=saldo_actual,
-    key="cfg_k_saldo"
-)
+        col1.metric(
+            "Costo real USD",
+            f"Bs {costo_real:,.2f}"
+        )
 
+        col2.metric(
+            "Valor real USD",
+            f"Bs {valor_real:,.2f}"
+        )
 
 
-# =======================================================
-# TASAS REALES
-# =======================================================
+        guardar = st.form_submit_button("💾 Guardar Kontigo")
 
-st.markdown("### 💱 Tasas REALES sin comisiones")
 
 
-usd_bs_ent = st.number_input(
+    # ===========================================================
+    # GUARDAR
+    # ===========================================================
 
-    "Bs que pagas por 1 USD (ANTES de comisiones)",
+    if guardar:
 
-    value=usd_bs_entrada,
+        with conectar() as conn:
 
-    key="cfg_k_usd_bs_ent"
+            conn.execute("""
 
-)
+            INSERT INTO kontigo (
 
+                saldo,
 
-bs_usd_ent = st.number_input(
+                usd_bs_entrada,
+                bs_usd_entrada,
 
-    "USD que recibes por 1 Bs (entrada)",
+                usd_bs_salida,
+                bs_usd_salida,
 
-    value=bs_usd_entrada,
+                comision_entrada,
+                comision_pago_movil,
+                comision_salida
 
-    key="cfg_k_bs_usd_ent"
+            )
 
-)
+            VALUES (?,?,?,?,?,?,?,?)
 
+            """, (
 
+                saldo,
 
-usd_bs_sal = st.number_input(
+                usd_bs_ent,
+                bs_usd_ent,
 
-    "Bs que recibes por 1 USD (ANTES de comisión salida)",
+                usd_bs_sal,
+                bs_usd_sal,
 
-    value=usd_bs_salida,
+                ce,
+                cpm,
+                cs
 
-    key="cfg_k_usd_bs_sal"
+            ))
 
-)
 
+            conn.commit()
 
-bs_usd_sal = st.number_input(
 
-    "USD que recibes por 1 Bs (salida)",
+        st.success("✅ Kontigo guardado")
 
-    value=bs_usd_salida,
+        st.rerun()
 
-    key="cfg_k_bs_usd_sal"
 
-)
 
+    # =======================================================
+    # TASAS REALES
+    # =======================================================
 
+    st.markdown("### 💱 Tasas REALES sin comisiones")
 
-# =======================================================
-# COMISIONES
-# =======================================================
 
-st.markdown("### 💸 Comisiones")
-
-
-ce = st.number_input(
-
-    "Comisión Kontigo entrada %",
-
-    value=com_entrada,
-
-    key="cfg_k_com_ent"
-
-)
-
-
-cpm = st.number_input(
-
-    "Comisión Pago Móvil %",
-
-    value=com_pm,
-
-    key="cfg_k_com_pm"
-
-)
-
-
-cs = st.number_input(
-
-    "Comisión Kontigo salida %",
-
-    value=com_salida,
-
-    key="cfg_k_com_sal"
-
-)
-
-
-
-# =======================================================
-# PREVIEW AUTOMÁTICO
-# =======================================================
-
-st.markdown("### 📊 Vista previa automática")
-
-
-costo_real = usd_bs_ent * (1 + ce/100 + cpm/100)
-
-valor_real = usd_bs_sal * (1 - cs/100)
-
-
-col1, col2 = st.columns(2)
-
-
-col1.metric(
-
-    "Costo real 1 USD",
-
-    f"Bs {costo_real:,.2f}"
-
-)
-
-
-col2.metric(
-
-    "Valor real 1 USD",
-
-    f"Bs {valor_real:,.2f}"
-
-)
-
-
-
-# =======================================================
-# BOTON GUARDAR
-# =======================================================
-
-guardar = st.form_submit_button("💾 Guardar Kontigo")
-
-
-
-# ===========================================================
-# GUARDAR
-# ===========================================================
-
-if guardar:
-
-with conectar() as conn:
-
-    conn.execute("""
-
-    INSERT INTO kontigo (
-
-        saldo,
-
-        usd_bs_entrada,
-        bs_usd_entrada,
-
-        usd_bs_salida,
-        bs_usd_salida,
-
-        comision_entrada,
-        comision_pago_movil,
-        comision_salida
-
+    usd_bs_ent = st.number_input(
+        "Bs que pagas por 1 USD (ANTES de comisiones)",
+        value=usd_bs_entrada,
+        key="cfg_k_usd_bs_ent"
     )
 
-    VALUES (?,?,?,?,?,?,?,?)
 
-    """, (
-
-        saldo,
-
-        usd_bs_ent,
-        bs_usd_ent,
-
-        usd_bs_sal,
-        bs_usd_sal,
-
-        ce,
-        cpm,
-        cs
-
-    ))
+    bs_usd_ent = st.number_input(
+        "USD que recibes por 1 Bs (entrada)",
+        value=bs_usd_entrada,
+        key="cfg_k_bs_usd_ent"
+    )
 
 
-    conn.commit()
+    usd_bs_sal = st.number_input(
+        "Bs que recibes por 1 USD (ANTES de comisión salida)",
+        value=usd_bs_salida,
+        key="cfg_k_usd_bs_sal"
+    )
 
 
-st.success("✅ Kontigo guardado correctamente")
-
-st.rerun()
-
-
-# ===========================================================
-# BACKUP
-# ===========================================================
-
-st.divider()
-
-st.subheader("💾 Backup")
-
-if st.button("Crear Backup"):
-
-import shutil
-
-nombre = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-
-shutil.copy(
-    "data/imperio.db",
-    nombre
-)
-
-st.success(f"Backup creado: {nombre}")
+    bs_usd_sal = st.number_input(
+        "USD que recibes por 1 Bs (salida)",
+        value=bs_usd_salida,
+        key="cfg_k_bs_usd_sal"
+    )
 
 
-# ===========================================================
-# VERIFICAR
-# ===========================================================
+    # =======================================================
+    # COMISIONES
+    # =======================================================
 
-st.divider()
+    st.markdown("### 💸 Comisiones")
 
-st.subheader("🔧 Sistema")
 
-if st.button("Verificar Sistema"):
+    ce = st.number_input(
+        "Comisión Kontigo entrada %",
+        value=com_entrada,
+        key="cfg_k_com_ent"
+    )
 
-inicializar_sistema()
 
-st.success("Sistema verificado")
+    cpm = st.number_input(
+        "Comisión Pago Móvil %",
+        value=com_pm,
+        key="cfg_k_com_pm"
+    )
 
-st.rerun()
+
+    cs = st.number_input(
+        "Comisión Kontigo salida %",
+        value=com_salida,
+        key="cfg_k_com_sal"
+    )
+
+
+    # =======================================================
+    # PREVIEW
+    # =======================================================
+
+    st.markdown("### 📊 Vista previa automática")
+
+
+    costo_real = usd_bs_ent * (1 + ce/100 + cpm/100)
+
+    valor_real = usd_bs_sal * (1 - cs/100)
+
+
+    col1, col2 = st.columns(2)
+
+
+    col1.metric(
+        "Costo real 1 USD",
+        f"Bs {costo_real:,.2f}"
+    )
+
+
+    col2.metric(
+        "Valor real 1 USD",
+        f"Bs {valor_real:,.2f}"
+    )
+
+
+    # =======================================================
+    # BOTON GUARDAR
+    # =======================================================
+
+    guardar = st.form_submit_button("💾 Guardar Kontigo")
+
+
+
+    # ===========================================================
+    # GUARDAR
+    # ===========================================================
+
+    if guardar:
+
+        with conectar() as conn:
+
+            conn.execute("""
+
+            INSERT INTO kontigo (
+
+                saldo,
+
+                usd_bs_entrada,
+                bs_usd_entrada,
+
+                usd_bs_salida,
+                bs_usd_salida,
+
+                comision_entrada,
+                comision_pago_movil,
+                comision_salida
+
+            )
+
+            VALUES (?,?,?,?,?,?,?,?)
+
+            """, (
+
+                saldo,
+
+                usd_bs_ent,
+                bs_usd_ent,
+
+                usd_bs_sal,
+                bs_usd_sal,
+
+                ce,
+                cpm,
+                cs
+
+            ))
+
+
+            conn.commit()
+
+
+        st.success("✅ Kontigo guardado correctamente")
+
+        st.rerun()
+
+
+
+    # ===========================================================
+    # BACKUP
+    # ===========================================================
+
+    st.divider()
+
+    st.subheader("💾 Backup")
+
+    if st.button("Crear Backup"):
+
+        import shutil
+
+        nombre = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+
+        shutil.copy(
+            "data/imperio.db",
+            nombre
+        )
+
+        st.success(f"Backup creado: {nombre}")
+
+
+
+    # ===========================================================
+    # VERIFICAR
+    # ===========================================================
+
+    st.divider()
+
+    st.subheader("🔧 Sistema")
+
+    if st.button("Verificar Sistema"):
+
+        inicializar_sistema()
+
+        st.success("Sistema verificado")
+
+        st.rerun()
 
 
 # ===========================================================
@@ -5068,6 +5183,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
