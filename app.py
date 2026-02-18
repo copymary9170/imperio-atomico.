@@ -2237,7 +2237,7 @@ col1, col2 = st.columns(2)
 
 with col1:
 
-st.markdown("### ➕ Agregar nuevo")
+    st.markdown("### ➕ Agregar nuevo")
 
 with st.form("nuevo_costo"):
 
@@ -5068,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
