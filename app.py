@@ -2177,7 +2177,7 @@ with conectar() as conn:
 
 if not df_costos.empty:
 
-df_costos["costo_real"] = (
+    df_costos["costo_real"] = (
 
     df_costos["monto_mensual"]
 
@@ -5068,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
