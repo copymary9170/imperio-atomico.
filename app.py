@@ -2107,7 +2107,7 @@ elif menu == "📦 Inventario":
 
         c3.metric(
 
-            "🚚 Delivery sugerido",
+            "🚚 Delivery sugerido por defecto (en USD equivalente)",
 
             f"${cfg_map.get('inv_delivery_default', 0.0):.2f}"
         )
@@ -5851,6 +5851,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
