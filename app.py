@@ -2093,9 +2093,11 @@ elif menu == "⚙️ Configuración":
         CREATE TABLE IF NOT EXISTS costos_operativos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT UNIQUE,
-            monto_mensual REAL
+            monto_mensual REAL,
+            porcentaje_empresa REAL DEFAULT 100
         )
         """)
+
 
         # TASAS
         conn.execute("""
@@ -2107,6 +2109,7 @@ elif menu == "⚙️ Configuración":
         )
         """)
 
+
         # CONFIG GENERAL
         conn.execute("""
         CREATE TABLE IF NOT EXISTS configuracion (
@@ -2115,10 +2118,8 @@ elif menu == "⚙️ Configuración":
         )
         """)
 
-        # ======================================================
-        # TABLA KONTIGO NUEVA
-        # ======================================================
 
+        # KONTIGO
         conn.execute("""
         CREATE TABLE IF NOT EXISTS kontigo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2127,108 +2128,99 @@ elif menu == "⚙️ Configuración":
             bs_usd_entrada REAL DEFAULT 0,
             usd_bs_salida REAL DEFAULT 0,
             bs_usd_salida REAL DEFAULT 0,
+            comision_entrada REAL DEFAULT 0,
+            comision_pago_movil REAL DEFAULT 0,
+            comision_salida REAL DEFAULT 0,
             fecha TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
-        # ======================================================
-        # ACTUALIZAR TABLA KONTIGO SI ES ANTIGUA
-        # ======================================================
-
-        columnas = [c[1] for c in conn.execute("PRAGMA table_info(kontigo)")]
-
-        if "usd_bs_entrada" not in columnas:
-            conn.execute("ALTER TABLE kontigo ADD COLUMN usd_bs_entrada REAL DEFAULT 0")
-
-        if "bs_usd_entrada" not in columnas:
-            conn.execute("ALTER TABLE kontigo ADD COLUMN bs_usd_entrada REAL DEFAULT 0")
-
-        if "usd_bs_salida" not in columnas:
-            conn.execute("ALTER TABLE kontigo ADD COLUMN usd_bs_salida REAL DEFAULT 0")
-
-        if "bs_usd_salida" not in columnas:
-            conn.execute("ALTER TABLE kontigo ADD COLUMN bs_usd_salida REAL DEFAULT 0")
-
         conn.commit()
 
 
-# ===========================================================
-# 🏢 COSTOS OPERATIVOS PRO MAX — IMPERIO ATÓMICO
-# ===========================================================
 
-st.subheader("🏢 Costos Operativos")
+    # ===========================================================
+    # 🏢 COSTOS OPERATIVOS
+    # ===========================================================
 
-
-# ===========================================================
-# CARGAR DATOS
-# ===========================================================
-
-with conectar() as conn:
-
-    df_costos = pd.read_sql(
-    "SELECT * FROM costos_operativos ORDER BY nombre",
-    conn
-)
+    st.subheader("🏢 Costos Operativos")
 
 
-# ===========================================================
-# CALCULAR COSTO REAL
-# ===========================================================
 
-if not df_costos.empty:
+    # ===========================================================
+    # CARGAR DATOS
+    # ===========================================================
 
-    df_costos["costo_real"] = (
+    with conectar() as conn:
 
-    df_costos["monto_mensual"]
-
-    * df_costos["porcentaje_empresa"]
-
-    / 100
-
-)
+        df_costos = pd.read_sql(
+            "SELECT * FROM costos_operativos ORDER BY nombre",
+            conn
+        )
 
 
-# ===========================================================
-# MOSTRAR TABLA
-# ===========================================================
 
-st.dataframe(
+    # ===========================================================
+    # CALCULAR COSTO REAL
+    # ===========================================================
 
-df_costos,
+    if not df_costos.empty:
 
-column_config={
+        df_costos["costo_real"] = (
 
-    "nombre": "Servicio",
+            df_costos["monto_mensual"]
 
-    "monto_mensual": st.column_config.NumberColumn(
-        "Monto mensual",
-        format="$%.2f"
-    ),
+            * df_costos["porcentaje_empresa"]
 
-    "porcentaje_empresa": st.column_config.NumberColumn(
-        "% Empresa",
-        format="%.0f %%"
-    ),
+            / 100
 
-    "costo_real": st.column_config.NumberColumn(
-        "Costo Real",
-        format="$%.2f"
-    ),
-
-},
-
-use_container_width=True,
-
-hide_index=True
-
-)
+        )
 
 
-# ===========================================================
-# FORMULARIOS
-# ===========================================================
 
-col1, col2 = st.columns(2)
+    # ===========================================================
+    # MOSTRAR TABLA
+    # ===========================================================
+
+    st.dataframe(
+
+        df_costos,
+
+        column_config={
+
+            "nombre": "Servicio",
+
+            "monto_mensual": st.column_config.NumberColumn(
+                "Monto mensual",
+                format="$%.2f"
+            ),
+
+            "porcentaje_empresa": st.column_config.NumberColumn(
+                "% Empresa",
+                format="%.0f %%"
+            ),
+
+            "costo_real": st.column_config.NumberColumn(
+                "Costo Real",
+                format="$%.2f"
+            ),
+
+        },
+
+        use_container_width=True,
+
+        hide_index=True
+
+    )
+
+
+
+    # ===========================================================
+    # FORMULARIOS
+    # ===========================================================
+
+    col1, col2 = st.columns(2)
+
 
 
 # ===========================================================
@@ -5183,6 +5175,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
