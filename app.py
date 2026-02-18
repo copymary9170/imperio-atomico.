@@ -2304,7 +2304,7 @@ with st.form("nuevo_costo"):
 
 with col2:
 
-if not df_costos.empty:
+    if not df_costos.empty:
 
     st.markdown("### ✏️ Editar / eliminar")
 
@@ -2493,7 +2493,7 @@ tasa_binance_actual = 0.0
 
 with conectar() as conn:
 
-df_tasa = pd.read_sql(
+    df_tasa = pd.read_sql(
     "SELECT * FROM tasas ORDER BY id DESC LIMIT 1",
     conn
 )
@@ -2711,7 +2711,7 @@ pass
 with st.form("form_kontigo"):
 
 
-st.markdown("### 💰 Saldo")
+    st.markdown("### 💰 Saldo")
 
 saldo = st.number_input(
     "Saldo actual USD",
@@ -5068,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
