@@ -975,9 +975,17 @@ elif menu == "📦 Inventario":
         if df_inv.empty:
             st.info("Inventario vacío.")
         else:
+
             col1, col2, col3 = st.columns([2, 1, 1])
+
             filtro = col1.text_input("🔍 Buscar insumo")
-            moneda_vista = col2.selectbox("Moneda", ["USD ($)", "BCV (Bs)", "Binance (Bs)"], key="inv_moneda_vista")
+
+            moneda_vista = col2.selectbox(
+                "Moneda",
+                ["USD ($)", "BCV (Bs)", "Binance (Bs)"],
+                key="inv_moneda_vista"
+            )
+
             solo_bajo = col3.checkbox("🚨 Solo stock bajo")
 
             tasa_vista = 1.0
@@ -986,6 +994,7 @@ elif menu == "📦 Inventario":
             if "BCV" in moneda_vista:
                 tasa_vista = t_ref
                 simbolo = "Bs"
+
             elif "Binance" in moneda_vista:
                 tasa_vista = t_bin
                 simbolo = "Bs"
@@ -999,118 +1008,257 @@ elif menu == "📦 Inventario":
                 df_v = df_v[df_v["cantidad"] <= df_v["minimo"]]
 
             df_v["Costo Unitario"] = df_v["precio_usd"] * tasa_vista
+
             df_v["Valor Total"] = df_v["cantidad"] * df_v["Costo Unitario"]
 
 
             def resaltar_critico(row):
+
                 if row["cantidad"] <= row["minimo"]:
+
                     return ['background-color: rgba(255,0,0,0.15)'] * len(row)
+
                 return [''] * len(row)
-          
+
+
             st.dataframe(
-               df_v.style.apply(resaltar_critico, axis=1),
+
+                df_v.style.apply(resaltar_critico, axis=1),
+
                 column_config={
+
                     "item": "Insumo",
+
                     "cantidad": "Stock",
+
                     "unidad": "Unidad",
+
                     "Costo Unitario": st.column_config.NumberColumn(
-                        f"Costo ({simbolo})", format="%.4f"
+                        f"Costo ({simbolo})",
+                        format="%.4f"
                     ),
+
                     "Valor Total": st.column_config.NumberColumn(
-                        f"Valor Total ({simbolo})", format="%.2f"
+                        f"Valor Total ({simbolo})",
+                        format="%.2f"
                     ),
+
                     "minimo": "Mínimo",
-                    "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión en Análisis CMYK"),
-                    "area_por_pliego_cm2": st.column_config.NumberColumn("cm²/pliego", format="%.2f"),
+
+                    "imprimible_cmyk": st.column_config.CheckboxColumn(
+                        "CMYK",
+                        help="Disponible para impresión en Análisis CMYK"
+                    ),
+
+                    "area_por_pliego_cm2": st.column_config.NumberColumn(
+                        "cm²/pliego",
+                        format="%.2f"
+                    ),
+
                     "precio_usd": None,
+
                     "id": None,
+
                     "activo": None,
+
                     "ultima_actualizacion": None
+
                 },
+
                 use_container_width=True,
+
                 hide_index=True
+
             )
 
+
         st.divider()
+
         st.subheader("🛠 Gestión de Insumo Existente")
+
 
         if not df_inv.empty:
 
-            insumo_sel = st.selectbox("Seleccionar Insumo", df_inv["item"].tolist())
-            fila_sel = df_inv[df_inv["item"] == insumo_sel].iloc[0]
-            colA, colB, colC = st.columns(3)
-            nuevo_min = colA.number_input("Nuevo Stock Mínimo", min_value=0.0, value=float(fila_sel.get('minimo', 0)))
-            flag_cmyk = colB.checkbox("Visible en CMYK", value=bool(fila_sel.get('imprimible_cmyk', 0)))
 
-            if colA.button("Actualizar Mínimo"):
-                with conectar() as conn:
-                    conn.execute(
-                        "UPDATE inventario SET minimo=?, imprimible_cmyk=? WHERE item=?",
-                        (nuevo_min, 1 if flag_cmyk else 0, insumo_sel)
-                    )
-                    conn.commit()
-                cargar_datos()
-                st.success("Stock mínimo actualizado.")
-                st.rerun()
+            insumo_sel = st.selectbox(
 
-          # Conversión para inventarios viejos cargados como cm2
-if str(fila_sel.get('unidad', '')).lower() == 'cm2':
+                "Seleccionar Insumo",
 
-    st.warning("Este insumo aún está en cm². Conviene convertirlo a pliegos para control real de stock.")
+                df_inv["item"].tolist()
 
-    ref_default = float(
-        fila_sel.get('area_por_pliego_cm2')
-        or fila_sel.get('cantidad', 1)
-        or 1
-    )
-
-    cm2_por_hoja = colC.number_input(
-        "cm² por pliego",
-        min_value=1.0,
-        value=ref_default
-    )
-
-    if colC.button("🔄 Convertir stock cm2 → pliegos"):
-
-        pliegos = float(
-            fila_sel.get('cantidad', 0)
-        ) / float(cm2_por_hoja)
-
-        with conectar() as conn:
-
-            conn.execute(
-                """
-                UPDATE inventario
-                SET cantidad=?, unidad='pliegos',
-                area_por_pliego_cm2=?, activo=1
-                WHERE item=?
-                """,
-                (
-                    pliegos,
-                    cm2_por_hoja,
-                    insumo_sel
-                )
             )
 
-            conn.commit()
 
-        st.success(f"Convertido a {pliegos:.3f} pliegos.")
+            fila_sel = df_inv[
 
-        cargar_datos()
+                df_inv["item"] == insumo_sel
 
-        st.rerun()
+            ].iloc[0]
 
 
-# 👇 ESTA LINEA ES LA CLAVE
+            colA, colB, colC = st.columns(3)
 
-# NO DEBE TENER MAS INDENTACION
-# debe quedar alineada al mismo nivel que:
 
-# with tabs[0]:
+            nuevo_min = colA.number_input(
+
+                "Nuevo Stock Mínimo",
+
+                min_value=0.0,
+
+                value=float(
+
+                    fila_sel.get('minimo', 0)
+
+                )
+
+            )
+
+
+            flag_cmyk = colB.checkbox(
+
+                "Visible en CMYK",
+
+                value=bool(
+
+                    fila_sel.get('imprimible_cmyk', 0)
+
+                )
+
+            )
+
+
+            if colA.button("Actualizar Mínimo"):
+
+
+                with conectar() as conn:
+
+
+                    conn.execute(
+
+                        "UPDATE inventario SET minimo=?, imprimible_cmyk=? WHERE item=?",
+
+                        (
+
+                            nuevo_min,
+
+                            1 if flag_cmyk else 0,
+
+                            insumo_sel
+
+                        )
+
+                    )
+
+
+                    conn.commit()
+
+
+                cargar_datos()
+
+                st.success("Stock mínimo actualizado.")
+
+                st.rerun()
+
+
+
+            # Conversión para inventarios viejos cargados como cm2
+            if str(
+
+                fila_sel.get(
+
+                    'unidad',
+
+                    ''
+
+                )
+
+            ).lower() == 'cm2':
+
+
+                st.warning(
+
+                    "Este insumo aún está en cm². Conviene convertirlo a pliegos para control real de stock."
+
+                )
+
+
+                ref_default = float(
+
+                    fila_sel.get('area_por_pliego_cm2')
+
+                    or fila_sel.get('cantidad', 1)
+
+                    or 1
+
+                )
+
+
+                cm2_por_hoja = colC.number_input(
+
+                    "cm² por pliego",
+
+                    min_value=1.0,
+
+                    value=ref_default
+
+                )
+
+
+                if colC.button("🔄 Convertir stock cm2 → pliegos"):
+
+
+                    pliegos = float(
+
+                        fila_sel.get('cantidad', 0)
+
+                    ) / float(cm2_por_hoja)
+
+
+                    with conectar() as conn:
+
+
+                        conn.execute(
+
+                            """
+                            UPDATE inventario
+                            SET cantidad=?, unidad='pliegos',
+                            area_por_pliego_cm2=?, activo=1
+                            WHERE item=?
+                            """,
+
+                            (
+
+                                pliegos,
+
+                                cm2_por_hoja,
+
+                                insumo_sel
+
+                            )
+
+                        )
+
+
+                        conn.commit()
+
+
+                    st.success(
+
+                        f"Convertido a {pliegos:.3f} pliegos."
+
+                    )
+
+
+                    cargar_datos()
+
+                    st.rerun()
+
+
 
 # =======================================================
 # FIN TAB EXISTENCIAS
 # =======================================================
+
 
 
     # =======================================================
@@ -5518,6 +5666,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
