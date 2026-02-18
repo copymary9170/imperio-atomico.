@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+import pandas as pdin
 import sqlite3
 import numpy as np
 import io
@@ -1936,7 +1936,7 @@ elif menu == "📦 Inventario":
                         st.success("Proveedor eliminado.")
                         st.rerun()
 
-    # =======================================================
+        # =======================================================
     # 🔧 TAB 5 — AJUSTES
     # =======================================================
     with tabs[4]:
@@ -1944,65 +1944,174 @@ elif menu == "📦 Inventario":
         st.subheader("🔧 Ajustes del módulo de inventario")
         st.caption("Estos parámetros precargan valores al registrar compras y ayudan al control de inventario.")
 
+        # ---------------------------------------------------
+        # ASEGURAR TABLA CONFIGURACION
+        # ---------------------------------------------------
+
         with conectar() as conn:
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS configuracion(
+                    parametro TEXT PRIMARY KEY,
+                    valor REAL
+                )
+            """)
+
+            conn.commit()
+
             cfg_inv = pd.read_sql(
                 """
                 SELECT parametro, valor
                 FROM configuracion
-                WHERE parametro IN ('inv_alerta_dias', 'inv_impuesto_default', 'inv_delivery_default')
+                WHERE parametro IN (
+                    'inv_alerta_dias',
+                    'inv_impuesto_default',
+                    'inv_delivery_default'
+                )
                 """,
                 conn
             )
 
-        cfg_map = {row["parametro"]: float(row["valor"]) for _, row in cfg_inv.iterrows()}
+
+        cfg_map = {
+
+            row["parametro"]: float(row["valor"])
+
+            for _, row in cfg_inv.iterrows()
+
+        }
+
+
+        # ---------------------------------------------------
+        # FORMULARIO
+        # ---------------------------------------------------
 
         with st.form("form_ajustes_inventario"):
+
             alerta_dias = st.number_input(
+
                 "Días para alerta de reposición",
+
                 min_value=1,
+
                 max_value=120,
-                value=int(cfg_map.get("inv_alerta_dias", 14)),
-                help="Referencia para revisar proveedores y planificar compras preventivas."
-            )
-            impuesto_default = st.number_input(
-                "Impuesto por defecto en compras (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=float(cfg_map.get("inv_impuesto_default", 16.0)),
-                format="%.2f"
-            )
-            delivery_default = st.number_input(
-                "Delivery por defecto por compra ($)",
-                min_value=0.0,
-                value=float(cfg_map.get("inv_delivery_default", 0.0)),
-                format="%.2f"
+
+                value=int(cfg_map.get("inv_alerta_dias", 14))
+
             )
 
-            guardar_ajustes = st.form_submit_button("💾 Guardar ajustes", use_container_width=True)
+
+            impuesto_default = st.number_input(
+
+                "Impuesto por defecto en compras (%)",
+
+                min_value=0.0,
+
+                max_value=100.0,
+
+                value=float(cfg_map.get("inv_impuesto_default", 16.0)),
+
+                format="%.2f"
+
+            )
+
+
+            delivery_default = st.number_input(
+
+                "Delivery por defecto por compra ($)",
+
+                min_value=0.0,
+
+                value=float(cfg_map.get("inv_delivery_default", 0.0)),
+
+                format="%.2f"
+
+            )
+
+
+            guardar_ajustes = st.form_submit_button(
+
+                "💾 Guardar ajustes",
+
+                use_container_width=True
+
+            )
+
+
+        # ---------------------------------------------------
+        # GUARDAR
+        # ---------------------------------------------------
 
         if guardar_ajustes:
+
             with conectar() as conn:
+
                 ajustes = [
+
                     ("inv_alerta_dias", float(alerta_dias)),
+
                     ("inv_impuesto_default", float(impuesto_default)),
+
                     ("inv_delivery_default", float(delivery_default))
+
                 ]
+
+
                 for parametro, valor in ajustes:
+
                     conn.execute(
-                        "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES (?, ?)",
+
+                        """
+                        INSERT OR REPLACE INTO configuracion
                         (parametro, valor)
+                        VALUES (?, ?)
+                        """,
+
+                        (parametro, valor)
+
                     )
+
+
                 conn.commit()
 
-            st.session_state["inv_alerta_dias"] = float(alerta_dias)
-            st.session_state["inv_impuesto_default"] = float(impuesto_default)
-            st.session_state["inv_delivery_default"] = float(delivery_default)
+
             st.success("Ajustes de inventario actualizados.")
 
+            st.rerun()
+
+
+        # ---------------------------------------------------
+        # METRICS
+        # ---------------------------------------------------
+
         c1, c2, c3 = st.columns(3)
-        c1.metric("⏱️ Alerta reposición", f"{int(cfg_map.get('inv_alerta_dias', 14))} días")
-        c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
-        c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
+
+
+        c1.metric(
+
+            "⏱️ Alerta reposición",
+
+            f"{int(cfg_map.get('inv_alerta_dias', 14))} días"
+
+        )
+
+
+        c2.metric(
+
+            "🛡️ Impuesto sugerido",
+
+            f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%"
+
+        )
+
+
+        c3.metric(
+
+            "🚚 Delivery sugerido",
+
+            f"${cfg_map.get('inv_delivery_default', 0.0):.2f}"
+        )
+
 
 # ===========================================================
 # 👥 CRM PRO MAX 8.1 — IMPERIO ATÓMICO (ULTRA COMPLETO + CORRECCIÓN)
@@ -5742,6 +5851,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
