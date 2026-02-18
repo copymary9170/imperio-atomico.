@@ -205,6 +205,27 @@ def inicializar_sistema():
             )
 
 
+        # ===========================================================
+# ASEGURAR cliente_id EN VENTAS
+# ===========================================================
+
+with conectar() as conn:
+
+    columnas_ventas = [c[1] for c in conn.execute("PRAGMA table_info(ventas)")]
+
+    if "cliente_id" not in columnas_ventas:
+
+        conn.execute("""
+
+        ALTER TABLE ventas
+
+        ADD COLUMN cliente_id INTEGER
+
+        """)
+
+        conn.commit()
+
+
 
         # ===================================================
         # CLIENTES
@@ -2214,9 +2235,8 @@ elif menu == "👥 Clientes":
 
     if df_cli.empty:
 
-        st.warning("No hay clientes registrados")
+        st.warning("No hay clientes registrados aún. Puedes crearlo en la pestaña ➕ Nuevo.")
 
-        st.stop()
 
 
     top=df_cli.iloc[0]
@@ -2454,25 +2474,49 @@ elif menu == "👥 Clientes":
             notas=st.text_area("Notas")
 
 
-            if st.form_submit_button("Crear"):
+            crear = st.form_submit_button("Crear")
 
-                with conectar() as conn:
+if crear:
 
-                    conn.execute("""
+    if not nombre.strip():
 
-                    INSERT INTO clientes
+        st.error("El nombre es obligatorio")
 
-                    (nombre,whatsapp,email,direccion,notas)
+    else:
 
-                    VALUES (?,?,?,?,?)
+        with conectar() as conn:
 
-                    """,(nombre,whatsapp,email,direccion,notas))
+            conn.execute("""
 
-                    conn.commit()
+            INSERT INTO clientes
 
-                st.success("Cliente creado")
+            (nombre,whatsapp,email,direccion,notas)
 
-                st.rerun()
+            VALUES (?,?,?,?,?)
+
+            """,
+
+            (
+
+            nombre.strip(),
+
+            whatsapp.strip(),
+
+            email.strip(),
+
+            direccion.strip(),
+
+            notas.strip()
+
+            )
+
+            )
+
+            conn.commit()
+
+        st.success("Cliente creado correctamente")
+
+        st.rerun()
 
 # ===========================================================
 # ⚙️ CONFIGURACIÓN PRO MAX — IMPERIO ATÓMICO (FINAL COMPLETO)
@@ -5851,6 +5895,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
