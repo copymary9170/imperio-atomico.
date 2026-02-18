@@ -1371,19 +1371,20 @@ elif menu == "📦 Inventario":
 # 🚚 DELIVERY PROFESIONAL MULTIMONEDA
 # ===========================================================
 
-st.markdown("### 🚚 Gastos Logística / Delivery")
+with st.container():
 
-col_d1, col_d2 = st.columns(2)
-
-delivery_monto = col_d1.number_input(
+    st.markdown("### 🚚 Gastos Logística / Delivery")
+    col_d1, col_d2 = st.columns(2)
+    
+    delivery_monto = col_d1.number_input(
     "Monto delivery",
     min_value=0.0,
     value=float(st.session_state.get("inv_delivery_default", 0.0)),
     format="%.2f",
     key="delivery_monto"
-)
+    )
 
-delivery_tipo = col_d2.selectbox(
+    delivery_tipo = col_d2.selectbox(
     "Moneda delivery",
     [
         "USD $",
@@ -5776,6 +5777,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
