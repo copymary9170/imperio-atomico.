@@ -1394,245 +1394,272 @@ delivery_tipo = col_d2.selectbox(
     key="delivery_tipo"
 )
 
-# ===========================================================
-# CONVERSION AUTOMATICA A USD
-# ===========================================================
+        # ===========================================================
+        # 🚚 DELIVERY PROFESIONAL MULTIMONEDA
+        # ===========================================================
 
-delivery = 0.0
+        st.markdown("### 🚚 Gastos Logística / Delivery")
 
-if delivery_tipo == "USD $":
+        col_d1, col_d2 = st.columns(2)
 
-    delivery = delivery_monto
+        delivery_monto = col_d1.number_input(
+            "Monto delivery",
+            min_value=0.0,
+            value=float(st.session_state.get("inv_delivery_default", 0.0)),
+            format="%.2f",
+            key="delivery_monto"
+        )
 
-elif delivery_tipo == "Bs (BCV)":
+        delivery_tipo = col_d2.selectbox(
+            "Moneda delivery",
+            [
+                "USD $",
+                "Bs (BCV)",
+                "Bs (Binance)",
+                "Bs (Personalizada)"
+            ],
+            key="delivery_tipo"
+        )
 
-    delivery = delivery_monto / t_ref
+        # ===========================================================
+        # CONVERSION AUTOMATICA A USD
+        # ===========================================================
 
-elif delivery_tipo == "Bs (Binance)":
+        delivery = 0.0
 
-    delivery = delivery_monto / t_bin
+        if delivery_tipo == "USD $":
 
-elif delivery_tipo == "Bs (Personalizada)":
+            delivery = delivery_monto
 
-    tasa_delivery = st.number_input(
-        "Tasa usada para delivery",
-        min_value=0.0001,
-        value=t_ref,
-        format="%.4f",
-        key="delivery_tasa_manual"
-    )
+        elif delivery_tipo == "Bs (BCV)":
 
-    delivery = delivery_monto / tasa_delivery
+            delivery = delivery_monto / t_ref
 
+        elif delivery_tipo == "Bs (Binance)":
 
-# mostrar referencia
+            delivery = delivery_monto / t_bin
 
-st.caption(f"Delivery equivalente: ${delivery:,.4f} USD")
+        elif delivery_tipo == "Bs (Personalizada)":
 
-
-# ------------------------------
-# BOTÓN GUARDAR
-# ------------------------------
-
-if st.button("💾 Guardar Compra", use_container_width=True):
-
-    if not nombre_c:
-
-        st.error("Debe indicar nombre del insumo.")
-
-        st.stop()
-
-    if stock_real <= 0:
-
-        st.error("Cantidad inválida.")
-
-        st.stop()
-
-    if "BCV" in moneda_pago:
-
-        tasa_usada = t_ref
-
-    elif "Binance" in moneda_pago:
-
-        tasa_usada = t_bin
-
-    else:
-
-        tasa_usada = 1.0
-
-
-    porc_impuestos = 0
-
-    if iva_activo:
-
-        porc_impuestos += st.session_state.get("iva_perc", 16)
-
-    if igtf_activo:
-
-        porc_impuestos += st.session_state.get("igtf_perc", 3)
-
-    if banco_activo:
-
-        porc_impuestos += st.session_state.get("banco_perc", 0.5)
-
-
-    costo_total_usd = (
-        (monto_factura / tasa_usada)
-        * (1 + (porc_impuestos / 100))
-    ) + delivery
-
-
-    costo_unitario = costo_total_usd / stock_real
-
-
-    with conectar() as conn:
-
-        cur = conn.cursor()
-
-
-        proveedor_id = None
-
-
-        if proveedor:
-
-            cur.execute(
-                "SELECT id FROM proveedores WHERE nombre=?",
-                (proveedor,)
+            tasa_delivery = st.number_input(
+                "Tasa usada para delivery",
+                min_value=0.0001,
+                value=t_ref,
+                format="%.4f",
+                key="delivery_tasa_manual"
             )
 
-            prov = cur.fetchone()
+            delivery = delivery_monto / tasa_delivery
 
 
-            if not prov:
+        # mostrar referencia
 
-                cur.execute(
-                    "INSERT INTO proveedores (nombre) VALUES (?)",
-                    (proveedor,)
-                )
+        st.caption(f"Delivery equivalente: ${delivery:,.4f} USD")
 
-                proveedor_id = cur.lastrowid
+
+        # ------------------------------
+        # BOTÓN GUARDAR
+        # ------------------------------
+
+        if st.button("💾 Guardar Compra", use_container_width=True):
+
+            if not nombre_c:
+
+                st.error("Debe indicar nombre del insumo.")
+
+                st.stop()
+
+            if stock_real <= 0:
+
+                st.error("Cantidad inválida.")
+
+                st.stop()
+
+            if "BCV" in moneda_pago:
+
+                tasa_usada = t_ref
+
+            elif "Binance" in moneda_pago:
+
+                tasa_usada = t_bin
 
             else:
 
-                proveedor_id = prov[0]
+                tasa_usada = 1.0
 
 
-        old = cur.execute(
-            "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
-            (nombre_c,)
-        ).fetchone()
+            porc_impuestos = 0
+
+            if iva_activo:
+
+                porc_impuestos += st.session_state.get("iva_perc", 16)
+
+            if igtf_activo:
+
+                porc_impuestos += st.session_state.get("igtf_perc", 3)
+
+            if banco_activo:
+
+                porc_impuestos += st.session_state.get("banco_perc", 0.5)
 
 
-        if old:
-
-            nueva_cant = old[0] + stock_real
-
-            precio_ponderado = (
-                (old[0] * old[1] + stock_real * costo_unitario)
-                / nueva_cant
-            )
-
-        else:
-
-            nueva_cant = stock_real
-
-            precio_ponderado = costo_unitario
+            costo_total_usd = (
+                (monto_factura / tasa_usada)
+                * (1 + (porc_impuestos / 100))
+            ) + delivery
 
 
-        if old:
+            costo_unitario = costo_total_usd / stock_real
 
-            cur.execute(
-                """
-                UPDATE inventario
-                SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, area_por_pliego_cm2=?, activo=1, ultima_actualizacion=CURRENT_TIMESTAMP
-                WHERE item=?
-                """,
-                (
-                    nueva_cant,
-                    unidad_final,
-                    precio_ponderado,
-                    minimo_stock,
-                    1 if imprimible_cmyk else 0,
-                    area_por_pliego_val,
-                    nombre_c
+
+            with conectar() as conn:
+
+                cur = conn.cursor()
+
+
+                proveedor_id = None
+
+
+                if proveedor:
+
+                    cur.execute(
+                        "SELECT id FROM proveedores WHERE nombre=?",
+                        (proveedor,)
+                    )
+
+                    prov = cur.fetchone()
+
+
+                    if not prov:
+
+                        cur.execute(
+                            "INSERT INTO proveedores (nombre) VALUES (?)",
+                            (proveedor,)
+                        )
+
+                        proveedor_id = cur.lastrowid
+
+                    else:
+
+                        proveedor_id = prov[0]
+
+
+                old = cur.execute(
+                    "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
+                    (nombre_c,)
+                ).fetchone()
+
+
+                if old:
+
+                    nueva_cant = old[0] + stock_real
+
+                    precio_ponderado = (
+                        (old[0] * old[1] + stock_real * costo_unitario)
+                        / nueva_cant
+                    )
+
+                else:
+
+                    nueva_cant = stock_real
+
+                    precio_ponderado = costo_unitario
+
+
+                if old:
+
+                    cur.execute(
+                        """
+                        UPDATE inventario
+                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, area_por_pliego_cm2=?, activo=1, ultima_actualizacion=CURRENT_TIMESTAMP
+                        WHERE item=?
+                        """,
+                        (
+                            nueva_cant,
+                            unidad_final,
+                            precio_ponderado,
+                            minimo_stock,
+                            1 if imprimible_cmyk else 0,
+                            area_por_pliego_val,
+                            nombre_c
+                        )
+                    )
+
+                else:
+
+                    cur.execute(
+                        """
+                        INSERT INTO inventario
+                        (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, area_por_pliego_cm2, activo, ultima_actualizacion)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (
+                            nombre_c,
+                            nueva_cant,
+                            unidad_final,
+                            precio_ponderado,
+                            minimo_stock,
+                            1 if imprimible_cmyk else 0,
+                            area_por_pliego_val,
+                            1
+                        )
+                    )
+
+
+                cur.execute(
+                    """
+                    INSERT INTO historial_compras
+                    (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        nombre_c,
+                        proveedor_id,
+                        stock_real,
+                        unidad_final,
+                        costo_total_usd,
+                        costo_unitario,
+                        porc_impuestos,
+                        delivery,
+                        tasa_usada,
+                        moneda_pago,
+                        usuario_actual
+                    )
                 )
-            )
-
-        else:
-
-            cur.execute(
-                """
-                INSERT INTO inventario
-                (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, area_por_pliego_cm2, activo, ultima_actualizacion)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                (
-                    nombre_c,
-                    nueva_cant,
-                    unidad_final,
-                    precio_ponderado,
-                    minimo_stock,
-                    1 if imprimible_cmyk else 0,
-                    area_por_pliego_val,
-                    1
-                )
-            )
 
 
-        cur.execute(
-            """
-            INSERT INTO historial_compras
-            (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                nombre_c,
-                proveedor_id,
-                stock_real,
-                unidad_final,
-                costo_total_usd,
-                costo_unitario,
-                porc_impuestos,
-                delivery,
-                tasa_usada,
-                moneda_pago,
-                usuario_actual
-            )
-        )
+                item_id_row = cur.execute(
+                    "SELECT id FROM inventario WHERE item = ?",
+                    (nombre_c,)
+                ).fetchone()
 
 
-        item_id_row = cur.execute(
-            "SELECT id FROM inventario WHERE item = ?",
-            (nombre_c,)
-        ).fetchone()
+                if item_id_row:
+
+                    cur.execute(
+                        """
+                        INSERT INTO inventario_movs
+                        (item_id, tipo, cantidad, motivo, usuario)
+                        VALUES (?,?,?,?,?)
+                        """,
+                        (
+                            item_id_row[0],
+                            "ENTRADA",
+                            stock_real,
+                            "Compra registrada",
+                            usuario_actual
+                        )
+                    )
 
 
-        if item_id_row:
-
-            cur.execute(
-                """
-                INSERT INTO inventario_movs
-                (item_id, tipo, cantidad, motivo, usuario)
-                VALUES (?,?,?,?,?)
-                """,
-                (
-                    item_id_row[0],
-                    "ENTRADA",
-                    stock_real,
-                    "Compra registrada",
-                    usuario_actual
-                )
-            )
+                conn.commit()
 
 
-        conn.commit()
+            cargar_datos()
 
+            st.success("Compra registrada correctamente.")
 
-    cargar_datos()
-
-    st.success("Compra registrada correctamente.")
-
-    st.rerun()
+            st.rerun()
 
 
     # =======================================================
@@ -5749,6 +5776,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
