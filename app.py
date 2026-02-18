@@ -1366,6 +1366,7 @@ elif menu == "📦 Inventario":
 
         st.caption(f"Sugerencia de impuesto total para compras: {st.session_state.get('inv_impuesto_default', 16.0):.2f}%")
 
+
         # ===========================================================
 # 🚚 DELIVERY PROFESIONAL MULTIMONEDA
 # ===========================================================
@@ -1632,7 +1633,6 @@ if st.button("💾 Guardar Compra", use_container_width=True):
     st.success("Compra registrada correctamente.")
 
     st.rerun()
-
 
 
     # =======================================================
@@ -5749,6 +5749,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
