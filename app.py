@@ -1053,58 +1053,65 @@ elif menu == "📦 Inventario":
                 st.success("Stock mínimo actualizado.")
                 st.rerun()
 
-            # Conversión para inventarios viejos cargados como cm2
-            if str(fila_sel.get('unidad', '')).lower() == 'cm2':
-                st.warning("Este insumo aún está en cm². Conviene convertirlo a pliegos para control real de stock.")
-                ref_default = float(fila_sel.get('area_por_pliego_cm2') or fila_sel.get('cantidad', 1) or 1)
-                cm2_por_hoja = colC.number_input("cm² por pliego", min_value=1.0, value=ref_default)
-                if colC.button("🔄 Convertir stock cm2 → pliegos"):
-                    pliegos = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
-                    with conectar() as conn:
-                        conn.execute(
-                            "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE item=?",
-                            (pliegos, cm2_por_hoja, insumo_sel)
-                        )
-                        conn.commit()
-                    st.success(f"Convertido a {pliegos:.3f} pliegos.")
-                    cargar_datos()
-                    st.rerun()
-            if colB.button("🗑 Eliminar Insumo"):
-                with conectar() as conn:
-                    existe_historial = conn.execute(
-                        "SELECT COUNT(*) FROM historial_compras WHERE item=?",
-                        (insumo_sel,)
-                    ).fetchone()[0]
-                    if existe_historial > 0:
-                        conn.execute(
-                            "UPDATE inventario SET activo=0, cantidad=0 WHERE item=?",
-                            (insumo_sel,)
-                        )
-                        conn.commit()
-                        st.success("Insumo archivado (tiene historial y no se elimina físicamente).")
-                        cargar_datos()
-                        st.rerun()
-                    else:
-                        st.session_state.confirmar_borrado = True
+          # Conversión para inventarios viejos cargados como cm2
+if str(fila_sel.get('unidad', '')).lower() == 'cm2':
 
-            if st.session_state.get("confirmar_borrado", False):
-                st.warning(f"⚠ Confirmar eliminación de '{insumo_sel}'")
-                colC, colD = st.columns(2)
+    st.warning("Este insumo aún está en cm². Conviene convertirlo a pliegos para control real de stock.")
 
-                if colC.button("✅ Confirmar"):
-                    with conectar() as conn:
-                        conn.execute(
-                            "DELETE FROM inventario WHERE item=?",
-                            (insumo_sel,)
-                        )
-                        conn.commit()
-                    st.session_state.confirmar_borrado = False
-                    cargar_datos()
-                    st.success("Insumo eliminado.")
-                    st.rerun()
+    ref_default = float(
+        fila_sel.get('area_por_pliego_cm2')
+        or fila_sel.get('cantidad', 1)
+        or 1
+    )
 
-                if colD.button("❌ Cancelar"):
-                    st.session_state.confirmar_borrado = False
+    cm2_por_hoja = colC.number_input(
+        "cm² por pliego",
+        min_value=1.0,
+        value=ref_default
+    )
+
+    if colC.button("🔄 Convertir stock cm2 → pliegos"):
+
+        pliegos = float(
+            fila_sel.get('cantidad', 0)
+        ) / float(cm2_por_hoja)
+
+        with conectar() as conn:
+
+            conn.execute(
+                """
+                UPDATE inventario
+                SET cantidad=?, unidad='pliegos',
+                area_por_pliego_cm2=?, activo=1
+                WHERE item=?
+                """,
+                (
+                    pliegos,
+                    cm2_por_hoja,
+                    insumo_sel
+                )
+            )
+
+            conn.commit()
+
+        st.success(f"Convertido a {pliegos:.3f} pliegos.")
+
+        cargar_datos()
+
+        st.rerun()
+
+
+# 👇 ESTA LINEA ES LA CLAVE
+
+# NO DEBE TENER MAS INDENTACION
+# debe quedar alineada al mismo nivel que:
+
+# with tabs[0]:
+
+# =======================================================
+# FIN TAB EXISTENCIAS
+# =======================================================
+
 
     # =======================================================
     # 📥 TAB 2 — REGISTRAR COMPRA
@@ -5511,6 +5518,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
