@@ -2419,7 +2419,7 @@ with col2:
 # CALCULOS AUTOMATICOS
 # ===========================================================
 
-if not df_costos.empty:
+    if not df_costos.empty:
 
 total = df_costos["costo_real"].sum()
 
@@ -2498,7 +2498,7 @@ with conectar() as conn:
     conn
 )
 
-if not df_tasa.empty:
+    if not df_tasa.empty:
 
     tasa_bcv_actual = float(df_tasa["tasa_bcv"].iloc[0])
 
@@ -2528,7 +2528,7 @@ tasa_binance = col2.number_input(
 guardar_tasas = st.form_submit_button("💾 Guardar tasas")
 
 
-if guardar_tasas:
+    if guardar_tasas:
 
 with conectar() as conn:
 
@@ -5068,6 +5068,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
