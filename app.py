@@ -2353,7 +2353,7 @@ elif menu == "👥 Clientes":
 
 
     # ===========================================================
-    # EDITAR CLIENTE (CORRECCIÓN)
+    # EDITAR CLIENTE
     # ===========================================================
 
     with tabs[2]:
@@ -2409,13 +2409,9 @@ elif menu == "👥 Clientes":
             with conectar() as conn:
 
                 conn.execute("""
-
                 UPDATE clientes
-
                 SET nombre=?,whatsapp=?,email=?,direccion=?,etiqueta=?,notas=?
-
                 WHERE id=?
-
                 """,(nombre,whatsapp,email,direccion,etiqueta,notas,int(datos.id)))
 
                 conn.commit()
@@ -2461,81 +2457,76 @@ elif menu == "👥 Clientes":
 
 
     # ===========================================================
-# SEGUIMIENTO
-# ===========================================================
+    # SEGUIMIENTO (CORREGIDO)
+    # ===========================================================
 
-with tabs[5]:
+    with tabs[5]:
 
-    riesgo = df_cli[
-        df_cli.estado.astype(str).str.contains("Riesgo|Perdido", na=False)
-    ]
+        riesgo = df_cli[
+            df_cli.estado.astype(str).str.contains("Riesgo|Perdido", na=False)
+        ]
 
-    st.dataframe(riesgo)
-
-
-# ===========================================================
-# NUEVO CLIENTE
-# ===========================================================
-
-with tabs[6]:
-
-    with st.form("nuevo_cliente"):
-
-        nombre = st.text_input("Nombre")
-
-        whatsapp = st.text_input("WhatsApp")
-
-        email = st.text_input("Email")
-
-        direccion = st.text_input("Direccion")
-
-        notas = st.text_area("Notas")
-
-        crear = st.form_submit_button("Crear")
+        st.dataframe(riesgo)
 
 
-    # ✅ ESTE IF VA DENTRO DEL TAB
-    if crear:
+    # ===========================================================
+    # NUEVO CLIENTE (CORREGIDO)
+    # ===========================================================
 
-        if not nombre.strip():
+    with tabs[6]:
 
-            st.error("El nombre es obligatorio")
+        with st.form("nuevo_cliente"):
 
-        else:
+            nombre = st.text_input("Nombre")
 
-            with conectar() as conn:
+            whatsapp = st.text_input("WhatsApp")
 
-                conn.execute("""
+            email = st.text_input("Email")
 
-                INSERT INTO clientes
+            direccion = st.text_input("Direccion")
 
-                (nombre, whatsapp, email, direccion, notas)
+            notas = st.text_area("Notas")
 
-                VALUES (?, ?, ?, ?, ?)
+            crear = st.form_submit_button("Crear")
 
-                """,
 
-                (
+        if crear:
 
-                    nombre.strip(),
+            if not nombre.strip():
 
-                    whatsapp.strip(),
+                st.error("El nombre es obligatorio")
 
-                    email.strip(),
+            else:
 
-                    direccion.strip(),
+                with conectar() as conn:
 
-                    notas.strip()
+                    conn.execute("""
+                    INSERT INTO clientes
+                    (nombre, whatsapp, email, direccion, notas)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
 
-                )
+                    (
 
-                )
+                        nombre.strip(),
 
-                conn.commit()
+                        whatsapp.strip(),
 
-            st.success("Cliente creado correctamente")
+                        email.strip(),
 
-            st.rerun()
+                        direccion.strip(),
+
+                        notas.strip()
+
+                    )
+
+                    )
+
+                    conn.commit()
+
+                st.success("Cliente creado correctamente")
+
+                st.rerun()
 
 # ===========================================================
 # ⚙️ CONFIGURACIÓN PRO MAX — IMPERIO ATÓMICO (FINAL COMPLETO)
@@ -5914,6 +5905,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
