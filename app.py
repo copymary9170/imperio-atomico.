@@ -3777,17 +3777,53 @@ def registrar_venta_global(
         ))
 
         conn.commit()
-        conn.close()
 
         cargar_datos()
 
         return True, "✅ Venta procesada correctamente"
 
-    except Exception as e:
-        try:
-            conn.rollback()
-        except:
-            pass
+    except (sqlite3.DatabaseError, ValueError, TypeError) as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        return False, f"❌ Error de datos al procesar la venta: {str(e)}"
 
+    except Exception as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
         return False, f"❌ Error interno al procesar la venta: {str(e)}"
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
