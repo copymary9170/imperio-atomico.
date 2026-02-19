@@ -3906,30 +3906,142 @@ if menu == "🎨 Análisis CMYK":
                         ml_m = m_media * ml_base_pagina * factor
                         ml_y = y_media * ml_base_pagina * factor
 
-                        ml_k_base = k_media * ml_base_pagina * factor * factor_k
-                        k_extra_ml = 0.0
+                        # ===========================================================
+# NEGRO AUTOMÁTICO PROFESIONAL INDUSTRIAL REAL
+# ===========================================================
 
-                        if auto_negro_inteligente:
-                            cobertura_cmy = (c_chan + m_chan + y_chan) / 3.0
-                            neutral_mask = (
-                                (np.abs(c_chan - m_chan) < 0.08)
-                                & (np.abs(m_chan - y_chan) < 0.08)
-                            )
-                            shadow_mask = (k_chan > 0.45) | (cobertura_cmy > 0.60)
-                            rich_black_mask = shadow_mask & (cobertura_cmy > 0.35)
+# consumo base real del canal negro
+ml_k_base = k_media * ml_base_pagina * factor * factor_k
 
-                            ratio_extra = (
-                                float(np.mean(shadow_mask)) * 0.12
-                                + float(np.mean(neutral_mask)) * 0.10
-                                + float(np.mean(rich_black_mask)) * 0.18
-                            )
-                            k_extra_ml = ml_base_pagina * factor * ratio_extra
-                        else:
-                            promedio_color = (c_media + m_media + y_media) / 3
-                            if promedio_color > 0.55:
-                                k_extra_ml = promedio_color * refuerzo_negro * factor
+k_extra_ml = 0.0
 
-                        ml_k = ml_k_base + k_extra_ml
+
+if auto_negro_inteligente:
+
+    # promedio real de color
+    cobertura_cmy = (c_chan + m_chan + y_chan) / 3.0
+
+
+    # gris neutro profesional
+    neutral_mask = (
+
+        (np.abs(c_chan - m_chan) < 0.06)
+
+        &
+
+        (np.abs(m_chan - y_chan) < 0.06)
+
+    )
+
+
+    # sombra real
+    shadow_mask = (
+
+        (k_chan > 0.35)
+
+        |
+
+        (cobertura_cmy > 0.65)
+
+    )
+
+
+    # rich black profesional
+    rich_black_mask = (
+
+        (k_chan > 0.20)
+
+        &
+
+        (cobertura_cmy > 0.40)
+
+    )
+
+
+    # sombra profunda fotográfica
+    deep_shadow_mask = (
+
+        cobertura_cmy > 0.75
+
+    )
+
+
+    # mezcla compleja fotográfica
+    complex_dark_mask = (
+
+        (cobertura_cmy > 0.50)
+
+        &
+
+        (k_chan > 0.15)
+
+    )
+
+
+    # ratio profesional final
+    ratio_extra = (
+
+        float(np.mean(neutral_mask)) * 0.15
+
+        +
+
+        float(np.mean(shadow_mask)) * 0.20
+
+        +
+
+        float(np.mean(rich_black_mask)) * 0.25
+
+        +
+
+        float(np.mean(deep_shadow_mask)) * 0.35
+
+        +
+
+        float(np.mean(complex_dark_mask)) * 0.18
+
+    )
+
+
+    k_extra_ml = ml_base_pagina * factor * ratio_extra
+
+
+else:
+
+    promedio_color = (
+
+        c_media
+
+        +
+
+        m_media
+
+        +
+
+        y_media
+
+    ) / 3
+
+
+    if promedio_color > 0.55:
+
+        k_extra_ml = (
+
+            promedio_color
+
+            *
+
+            refuerzo_negro
+
+            *
+
+            factor
+
+        )
+
+
+# consumo final real
+ml_k = ml_k_base + k_extra_ml
+
                         consumo_total_f = ml_c + ml_m + ml_y + ml_k
 
                         costo_f = (consumo_total_f * precio_tinta_ml) + costo_desgaste
@@ -5782,6 +5894,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
