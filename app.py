@@ -18,7 +18,10 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
 
-    ruta = "imperio.db"
+    ruta = os.getenv("IMPERIO_DB_PATH", os.path.join("data", "imperio.db"))
+    carpeta_db = os.path.dirname(ruta)
+    if carpeta_db:
+        os.makedirs(carpeta_db, exist_ok=True)
 
     conn = sqlite3.connect(
         ruta,
@@ -662,7 +665,7 @@ ROL = st.session_state.get('rol', "Produccion")
 
 with st.sidebar:
 
-    st.write("DB usada:", os.path.abspath("data/imperio.db"))
+    st.write("DB usada:", os.path.abspath(os.getenv("IMPERIO_DB_PATH", os.path.join("data", "imperio.db"))))
 
     st.header(f"👋 {st.session_state.usuario_nombre}")
 
