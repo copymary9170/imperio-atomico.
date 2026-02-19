@@ -2171,32 +2171,32 @@ elif menu == "👥 Clientes":
 
 
         df_cli = pd.read_sql("""
-
         SELECT 
-
         c.*,
-
         COALESCE(SUM(v.monto_total),0) total,
-
         COUNT(v.id) pedidos,
-
         MAX(v.fecha) ultima_compra,
-
         CASE 
             WHEN COUNT(v.id)>0 
             THEN SUM(v.monto_total)/COUNT(v.id)
             ELSE 0
         END ticket_promedio
-
         FROM clientes c
-
         LEFT JOIN ventas v ON v.cliente_id=c.id
-
         GROUP BY c.id
-
         ORDER BY total DESC
-
         """, conn)
+
+
+    # ===========================================================
+    # PROTECCIÓN CRÍTICA
+    # ===========================================================
+
+    if df_cli.empty:
+
+        st.warning("No hay clientes registrados.")
+
+        st.stop()
 
 
     # ===========================================================
@@ -2233,19 +2233,7 @@ elif menu == "👥 Clientes":
     # DASHBOARD
     # ===========================================================
 
-    if "estado" not in df_cli.columns:
-
-        df_cli["estado"] = ""
-
-    if df_cli.empty:
-
-        st.warning("No hay clientes registrados.")
-
-        top_nombre = "—"
-
-    else:
-
-        top_nombre = df_cli.iloc[0]["nombre"]
+    top_nombre = df_cli.iloc[0]["nombre"]
 
     c1, c2, c3, c4, c5 = st.columns(5)
 
@@ -2274,23 +2262,14 @@ elif menu == "👥 Clientes":
     # ===========================================================
 
     tabs = st.tabs([
-
         "📋 Directorio",
-
         "📊 Perfil",
-
         "✏️ Editar",
-
         "🏆 Ranking",
-
         "📊 Pipeline",
-
         "⏰ Seguimiento",
-
         "➕ Nuevo"
-
     ])
-
 
 
     # ===========================================================
@@ -2303,14 +2282,22 @@ elif menu == "👥 Clientes":
 
 
     # ===========================================================
-    # PERFIL
+    # PERFIL (CORREGIDO)
     # ===========================================================
 
     with tabs[1]:
 
         cliente=st.selectbox("Cliente",df_cli.nombre)
 
-        datos=df_cli[df_cli.nombre==cliente].iloc[0]
+        filtro = df_cli[df_cli.nombre==cliente]
+
+        if filtro.empty:
+
+            st.warning("Cliente no encontrado")
+
+            st.stop()
+
+        datos=filtro.iloc[0]
 
         c1,c2,c3,c4=st.columns(4)
 
@@ -2335,15 +2322,10 @@ elif menu == "👥 Clientes":
         with conectar() as conn:
 
             hist=pd.read_sql("""
-
             SELECT fecha,detalle,monto_total
-
             FROM ventas
-
             WHERE cliente_id=?
-
             ORDER BY fecha DESC
-
             """,conn,params=(datos.id,))
 
 
@@ -2353,14 +2335,22 @@ elif menu == "👥 Clientes":
 
 
     # ===========================================================
-    # EDITAR CLIENTE
+    # EDITAR CLIENTE (CORREGIDO)
     # ===========================================================
 
     with tabs[2]:
 
         cliente=st.selectbox("Editar cliente",df_cli.nombre,key="edit")
 
-        datos=df_cli[df_cli.nombre==cliente].iloc[0]
+        filtro=df_cli[df_cli.nombre==cliente]
+
+        if filtro.empty:
+
+            st.warning("Cliente no encontrado")
+
+            st.stop()
+
+        datos=filtro.iloc[0]
 
 
         nombre_actual=datos.nombre or ""
@@ -2374,11 +2364,8 @@ elif menu == "👥 Clientes":
         etiquetas=["","VIP","Empresa","Revendedor"]
 
         try:
-
             index_etiqueta=etiquetas.index(etiqueta_actual)
-
         except:
-
             index_etiqueta=0
 
 
@@ -2457,7 +2444,7 @@ elif menu == "👥 Clientes":
 
 
     # ===========================================================
-    # SEGUIMIENTO (CORREGIDO)
+    # SEGUIMIENTO
     # ===========================================================
 
     with tabs[5]:
@@ -2470,7 +2457,7 @@ elif menu == "👥 Clientes":
 
 
     # ===========================================================
-    # NUEVO CLIENTE (CORREGIDO)
+    # NUEVO CLIENTE
     # ===========================================================
 
     with tabs[6]:
@@ -2505,28 +2492,20 @@ elif menu == "👥 Clientes":
                     (nombre, whatsapp, email, direccion, notas)
                     VALUES (?, ?, ?, ?, ?)
                     """,
-
                     (
-
                         nombre.strip(),
-
                         whatsapp.strip(),
-
                         email.strip(),
-
                         direccion.strip(),
-
                         notas.strip()
-
-                    )
-
-                    )
+                    ))
 
                     conn.commit()
 
                 st.success("Cliente creado correctamente")
 
                 st.rerun()
+
 
 # ===========================================================
 # ⚙️ CONFIGURACIÓN PRO MAX — IMPERIO ATÓMICO (FINAL COMPLETO)
@@ -5905,6 +5884,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
