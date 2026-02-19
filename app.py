@@ -2229,52 +2229,51 @@ elif menu == "👥 Clientes":
     df_cli["score"]=(df_cli.total*0.5)+(df_cli.pedidos*30)-(df_cli.dias*2)
 
 
-      # ===========================================================
-# DASHBOARD
-# ===========================================================
+    # ===========================================================
+    # DASHBOARD
+    # ===========================================================
 
-if "estado" not in df_cli.columns:
+    if "estado" not in df_cli.columns:
 
-    df_cli["estado"] = ""
+        df_cli["estado"] = ""
 
-if df_cli.empty:
+    if df_cli.empty:
 
-    st.warning("No hay clientes registrados.")
+        st.warning("No hay clientes registrados.")
 
-    top_nombre = "—"
+        top_nombre = "—"
 
-else:
+    else:
 
-    top_nombre = df_cli.iloc[0]["nombre"]
+        top_nombre = df_cli.iloc[0]["nombre"]
 
-c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5 = st.columns(5)
 
-c1.metric("Clientes", len(df_cli))
+    c1.metric("Clientes", len(df_cli))
 
-c2.metric(
-    "Facturación",
-    f"${df_cli['total'].sum():,.0f}"
-)
+    c2.metric(
+        "Facturación",
+        f"${df_cli['total'].sum():,.0f}"
+    )
 
-c3.metric(
-    "VIP",
-    len(df_cli[df_cli["estado"].astype(str).str.contains("VIP", na=False)])
-)
+    c3.metric(
+        "VIP",
+        len(df_cli[df_cli["estado"].astype(str).str.contains("VIP", na=False)])
+    )
 
-c4.metric(
-    "En riesgo",
-    len(df_cli[df_cli["estado"].astype(str).str.contains("Riesgo", na=False)])
-)
+    c4.metric(
+        "En riesgo",
+        len(df_cli[df_cli["estado"].astype(str).str.contains("Riesgo", na=False)])
+    )
 
-c5.metric("TOP", top_nombre)
-
+    c5.metric("TOP", top_nombre)
 
 
     # ===========================================================
     # TABS
     # ===========================================================
 
-    tabs=st.tabs([
+    tabs = st.tabs([
 
         "📋 Directorio",
 
@@ -2291,6 +2290,7 @@ c5.metric("TOP", top_nombre)
         "➕ Nuevo"
 
     ])
+
 
 
     # ===========================================================
@@ -5914,6 +5914,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
