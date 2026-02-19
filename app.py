@@ -3904,7 +3904,7 @@ if menu == "🎨 Análisis CMYK":
 
                         ml_c = c_media * ml_base_pagina * factor
                         ml_m = m_media * ml_base_pagina * factor
-                                               ml_y = y_media * ml_base_pagina * factor
+                        ml_y = y_media * ml_base_pagina * factor
 
 
                         # ===========================================================
@@ -5860,6 +5860,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
