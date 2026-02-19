@@ -2229,44 +2229,44 @@ elif menu == "👥 Clientes":
     df_cli["score"]=(df_cli.total*0.5)+(df_cli.pedidos*30)-(df_cli.dias*2)
 
 
-        # ===========================================================
-    # DASHBOARD
-    # ===========================================================
+      # ===========================================================
+# DASHBOARD
+# ===========================================================
 
-    if df_cli.empty:
+if "estado" not in df_cli.columns:
 
-        st.warning("No hay clientes registrados. Usa la pestaña ➕ Nuevo.")
+    df_cli["estado"] = ""
 
-        top_nombre = "—"
+if df_cli.empty:
 
-    else:
+    st.warning("No hay clientes registrados.")
 
-        top_nombre = df_cli.iloc[0]["nombre"]
+    top_nombre = "—"
 
+else:
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    top_nombre = df_cli.iloc[0]["nombre"]
 
-    c1.metric("Clientes", len(df_cli))
+c1, c2, c3, c4, c5 = st.columns(5)
 
-    c2.metric(
-        "Facturación",
-        f"${df_cli['total'].sum():,.0f}"
-    )
+c1.metric("Clientes", len(df_cli))
 
-    c3.metric(
-        "VIP",
-        len(df_cli[df_cli["estado"].str.contains("VIP")])
-    )
+c2.metric(
+    "Facturación",
+    f"${df_cli['total'].sum():,.0f}"
+)
 
-    c4.metric(
-        "En riesgo",
-        len(df_cli[df_cli["estado"].str.contains("Riesgo")])
-    )
+c3.metric(
+    "VIP",
+    len(df_cli[df_cli["estado"].astype(str).str.contains("VIP", na=False)])
+)
 
-    c5.metric(
-        "TOP",
-        top_nombre
-    )
+c4.metric(
+    "En riesgo",
+    len(df_cli[df_cli["estado"].astype(str).str.contains("Riesgo", na=False)])
+)
+
+c5.metric("TOP", top_nombre)
 
 
 
@@ -5911,6 +5911,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
