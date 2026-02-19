@@ -1,6 +1,7 @@
-streamlit
+Pillow
+PyMuPDF
+numpy
 pandas
 plotly
+streamlit
 xlsxwriter
-Pillow
-numpy
