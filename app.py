@@ -2461,78 +2461,81 @@ c5.metric("TOP", top_nombre)
 
 
     # ===========================================================
-    # SEGUIMIENTO
-    # ===========================================================
+# SEGUIMIENTO
+# ===========================================================
 
-    with tabs[5]:
+with tabs[5]:
 
-        riesgo=df_cli[df_cli.estado.str.contains("Riesgo|Perdido")]
+    riesgo = df_cli[
+        df_cli.estado.astype(str).str.contains("Riesgo|Perdido", na=False)
+    ]
 
-        st.dataframe(riesgo)
-
-
-    # ===========================================================
-    # NUEVO CLIENTE
-    # ===========================================================
-
-    with tabs[6]:
-
-        with st.form("nuevo_cliente"):
-
-            nombre=st.text_input("Nombre")
-
-            whatsapp=st.text_input("WhatsApp")
-
-            email=st.text_input("Email")
-
-            direccion=st.text_input("Direccion")
-
-            notas=st.text_area("Notas")
+    st.dataframe(riesgo)
 
 
-            crear = st.form_submit_button("Crear")
+# ===========================================================
+# NUEVO CLIENTE
+# ===========================================================
 
-if crear:
+with tabs[6]:
 
-    if not nombre.strip():
+    with st.form("nuevo_cliente"):
 
-        st.error("El nombre es obligatorio")
+        nombre = st.text_input("Nombre")
 
-    else:
+        whatsapp = st.text_input("WhatsApp")
 
-        with conectar() as conn:
+        email = st.text_input("Email")
 
-            conn.execute("""
+        direccion = st.text_input("Direccion")
 
-            INSERT INTO clientes
+        notas = st.text_area("Notas")
 
-            (nombre,whatsapp,email,direccion,notas)
+        crear = st.form_submit_button("Crear")
 
-            VALUES (?,?,?,?,?)
 
-            """,
+    # ✅ ESTE IF VA DENTRO DEL TAB
+    if crear:
 
-            (
+        if not nombre.strip():
 
-            nombre.strip(),
+            st.error("El nombre es obligatorio")
 
-            whatsapp.strip(),
+        else:
 
-            email.strip(),
+            with conectar() as conn:
 
-            direccion.strip(),
+                conn.execute("""
 
-            notas.strip()
+                INSERT INTO clientes
 
-            )
+                (nombre, whatsapp, email, direccion, notas)
 
-            )
+                VALUES (?, ?, ?, ?, ?)
 
-            conn.commit()
+                """,
 
-        st.success("Cliente creado correctamente")
+                (
 
-        st.rerun()
+                    nombre.strip(),
+
+                    whatsapp.strip(),
+
+                    email.strip(),
+
+                    direccion.strip(),
+
+                    notas.strip()
+
+                )
+
+                )
+
+                conn.commit()
+
+            st.success("Cliente creado correctamente")
+
+            st.rerun()
 
 # ===========================================================
 # ⚙️ CONFIGURACIÓN PRO MAX — IMPERIO ATÓMICO (FINAL COMPLETO)
@@ -5911,6 +5914,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
