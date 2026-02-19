@@ -1692,10 +1692,10 @@ elif menu == "🎨 Análisis CMYK":
                 df_impresion_db = df_tintas_db.copy()
             try:
                 df_activos_cmyk = pd.read_sql_query(
-                    "SELECT equipo, categoria, unidad FROM activos", conn
+                    "SELECT equipo, categoria, unidad, desgaste FROM activos", conn
                 )
             except Exception:
-                df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad'])
+                df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad', 'desgaste'])
 
             # Tabla histórica
             conn.execute("""
@@ -1716,41 +1716,28 @@ elif menu == "🎨 Análisis CMYK":
         st.error(f"Error cargando datos: {e}")
         st.stop()
 
-    # --- LISTA DE IMPRESORAS DISPONIBLES ---
+    # --- LISTA DE IMPRESORAS DISPONIBLES (SOLO DESDE ACTIVOS) ---
     impresoras_disponibles = []
+    mapa_desgaste_impresora = {}
 
-    # 1) Prioridad: Activos en Maquinaria categoría Tinta (como indicaste)
     if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty:
         act = df_activos_cmyk.copy()
         mask_maquinaria = act['unidad'].fillna('').str.contains('Maquinaria', case=False, na=False)
-        # Acepta tanto categoría Tinta como Impresión/Impresora para compatibilidad
-        mask_categoria_imp = act['categoria'].fillna('').str.contains('Tinta|Impres', case=False, na=False)
+        mask_categoria_imp = act['categoria'].fillna('').str.contains('Impres|Tinta', case=False, na=False)
         mask_equipo_imp = act['equipo'].fillna('').str.contains('Impres', case=False, na=False)
-        posibles_activos = act[mask_maquinaria & (mask_categoria_imp | mask_equipo_imp)]['equipo'].dropna().astype(str).tolist()
-        for eq in posibles_activos:
-            nombre_limpio = eq
-            if '] ' in nombre_limpio:
-                nombre_limpio = nombre_limpio.split('] ', 1)[1]
+        activos_impresoras = act[mask_maquinaria & (mask_categoria_imp | mask_equipo_imp)].copy()
+
+        for _, row_imp in activos_impresoras.iterrows():
+            eq = str(row_imp.get('equipo', '')).strip()
+            if not eq:
+                continue
+            nombre_limpio = eq.split('] ', 1)[1] if '] ' in eq else eq
             if nombre_limpio not in impresoras_disponibles:
                 impresoras_disponibles.append(nombre_limpio)
+                mapa_desgaste_impresora[nombre_limpio] = float(row_imp.get('desgaste') or 0)
 
-    # 2) Fallback: equipos con palabra impresora en inventario
-    if not df_impresion_db.empty:
-        posibles = df_impresion_db[
-            df_impresion_db['item'].str.contains("impresora", case=False, na=False)
-        ]['item'].tolist()
-
-        for p in posibles:
-            if p not in impresoras_disponibles:
-                impresoras_disponibles.append(p)
-
-    # 3) Último fallback por defecto
     if not impresoras_disponibles:
-        impresoras_disponibles = ["Impresora Principal", "Impresora Secundaria"]
-
-    # --- VALIDACIÓN ---
-    if not impresoras_disponibles:
-        st.warning("⚠️ No hay impresoras registradas en el sistema.")
+        st.warning("⚠️ No hay impresoras activas registradas en Activos (Maquinaria/Impresión). Registra tus equipos allí para usar el módulo CMYK.")
         st.stop()
 
     # --- SELECCIÓN DE IMPRESORA Y ARCHIVOS ---
@@ -1775,24 +1762,20 @@ elif menu == "🎨 Análisis CMYK":
             help="Detecta zonas oscuras y mezclas ricas para sumar consumo real de tinta negra (K)."
         )
 
-        # Mantener separador decimal estilo Python (.) para evitar SyntaxError por locales con coma.
-        step_desgaste = 0.005
-        step_base_ml = 0.01
+        # Parámetros automáticos (sin calibración manual)
+        desgaste_imp = float(mapa_desgaste_impresora.get(impresora_sel, 0) or 0)
+        costo_desgaste = desgaste_imp if desgaste_imp > 0 else 0.02
 
-        costo_desgaste = st.number_input(
-            "Costo desgaste por página ($)",
-            min_value=0.0,
-            value=0.02,
-            step=step_desgaste,
-            format="%.3f"
-        )
-        ml_base_pagina = st.number_input(
-            "Consumo base por página a cobertura 100% (ml)",
-            min_value=0.01,
-            value=0.15,
-            step=step_base_ml,
-            format="%.3f"
-        )
+        nombre_imp = impresora_sel.lower()
+        if any(tag in nombre_imp for tag in ['foto', 'phot', 'xp', 'tx']):
+            ml_base_pagina = 0.18
+        elif any(tag in nombre_imp for tag in ['eco', 'l', 'tank']):
+            ml_base_pagina = 0.12
+        else:
+            ml_base_pagina = 0.15
+
+        st.info(f"⚙️ Consumo base automático: {ml_base_pagina:.3f} ml/pág al 100%.")
+        st.info(f"🛠️ Desgaste automático por página: ${costo_desgaste:.3f} (tomado de Activos).")
 
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
 
@@ -1811,29 +1794,10 @@ elif menu == "🎨 Análisis CMYK":
                 precio_tinta_ml = tintas['precio_usd'].mean()
                 st.success(f"💧 Precio de tinta detectado: ${precio_tinta_ml:.4f}/ml")
 
-        st.subheader("⚙️ Ajustes de Calibración")
-
-        factor = st.slider(
-            "Factor General de Consumo",
-            1.0, 3.0, 1.5, 0.1,
-            help="Ajuste global según rendimiento real de la impresora"
-        )
-
+        factor = 1.5
         factor_k = 0.8
         refuerzo_negro = 0.06
-        if auto_negro_inteligente:
-            st.success("🧠 Modo automático de negro activo: se detectan sombras y mezclas con negro en cada página.")
-        else:
-            factor_k = st.slider(
-                "Factor Especial para Negro (K)",
-                0.5, 1.2, 0.8, 0.05,
-                help="Modo manual: ajusta consumo base del negro."
-            )
-            refuerzo_negro = st.slider(
-                "Refuerzo de Negro en Mezclas Oscuras",
-                0.0, 0.2, 0.06, 0.01,
-                help="Modo manual: simula uso extra de K en sombras."
-            )
+        st.success("🧠 Modo automático de negro activo: se detectan sombras y mezclas con negro en cada página.")
 
     with c_file:
         archivos_multiples = st.file_uploader(
@@ -2077,11 +2041,24 @@ elif menu == "🎨 Análisis CMYK":
                 f"(${mejor['Costo por pág ($)']:.4f}/pág)"
             )
 
+            st.subheader("🎯 Escenario a enviar a cotización")
+            papel_sel = st.selectbox("Papel para cotizar", sorted(df_sim['Papel'].unique().tolist()), key='cmyk_papel_cot')
+            calidades_disp = df_sim[df_sim['Papel'] == papel_sel]['Calidad'].tolist()
+            calidad_sel = st.selectbox("Calidad para cotizar", calidades_disp, key='cmyk_calidad_cot')
+            fila_sel = df_sim[(df_sim['Papel'] == papel_sel) & (df_sim['Calidad'] == calidad_sel)].iloc[0]
+            st.info(
+                f"Se enviará a cotización: {papel_sel} | {calidad_sel} → ${float(fila_sel['Total ($)']):.2f} "
+                f"(${float(fila_sel['Costo por pág ($)']):.4f}/pág)"
+            )
+
             st.session_state['cmyk_analisis_cache'] = {
                 'resultados': resultados,
                 'simulaciones': simulaciones,
                 'impresora': impresora_sel,
-                'paginas': total_pags
+                'paginas': total_pags,
+                'papel_sel': papel_sel,
+                'calidad_sel': calidad_sel,
+                'total_sel': float(fila_sel['Total ($)'])
             }
 
             # --- VERIFICAR INVENTARIO ---
@@ -2132,8 +2109,10 @@ elif menu == "🎨 Análisis CMYK":
                 # Guardamos información completa para el cotizador
                 st.session_state['datos_pre_cotizacion'] = {
                     'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
-                    'costo_base': float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote),
+                    'costo_base': float(fila_sel['Total ($)']) if 'fila_sel' in locals() else (float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote)),
                     'unidades': total_pags,
+                    'papel': papel_sel if 'papel_sel' in locals() else '',
+                    'calidad': calidad_sel if 'calidad_sel' in locals() else '',
 
                     # Desglose de consumo real
                     'consumos': totales_lote_cmyk,
@@ -3801,14 +3780,6 @@ def registrar_venta_global(
     finally:
         if conn is not None:
             conn.close()
-
-
-
-
-
-
-
-
 
 
 
