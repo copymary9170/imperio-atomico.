@@ -18,7 +18,10 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
 
-    ruta = "imperio.db"
+    ruta = os.getenv("IMPERIO_DB_PATH", os.path.join("data", "imperio.db"))
+    carpeta_db = os.path.dirname(ruta)
+    if carpeta_db:
+        os.makedirs(carpeta_db, exist_ok=True)
 
     conn = sqlite3.connect(
         ruta,
@@ -5860,6 +5863,7 @@ def registrar_venta_global(
             pass
 
         return False, f"❌ Error interno: {str(e)}"
+
 
 
 
