@@ -1743,10 +1743,10 @@ elif menu == "🎨 Análisis CMYK":
 
     if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty:
         act = df_activos_cmyk.copy()
-        mask_maquinaria = act['unidad'].fillna('').str.contains('Maquinaria', case=False, na=False)
-        mask_categoria_imp = act['categoria'].fillna('').str.contains('Impres|Tinta', case=False, na=False)
+        mask_unidad_imp = act['unidad'].fillna('').str.contains('Impresora', case=False, na=False)
+        mask_categoria_imp = act['categoria'].fillna('').str.contains('Impresora|Impresión', case=False, na=False)
         mask_equipo_imp = act['equipo'].fillna('').str.contains('Impres', case=False, na=False)
-        activos_impresoras = act[mask_maquinaria & (mask_categoria_imp | mask_equipo_imp)].copy()
+        activos_impresoras = act[mask_unidad_imp | mask_categoria_imp | mask_equipo_imp].copy()
 
         for _, row_imp in activos_impresoras.iterrows():
             eq = str(row_imp.get('equipo', '')).strip()
@@ -1758,7 +1758,7 @@ elif menu == "🎨 Análisis CMYK":
                 mapa_desgaste_impresora[nombre_limpio] = float(row_imp.get('desgaste') or 0)
 
     if not impresoras_disponibles:
-        st.warning("⚠️ No hay impresoras activas registradas en Activos (Maquinaria/Impresión). Registra tus equipos allí para usar el módulo CMYK.")
+        st.warning("⚠️ No hay impresoras registradas en Activos. Registra primero tus impresoras (unidad/categoría: Impresora) para usar CMYK.")
         st.stop()
 
     # --- SELECCIÓN DE IMPRESORA Y ARCHIVOS ---
@@ -1801,19 +1801,57 @@ elif menu == "🎨 Análisis CMYK":
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
 
         if not df_impresion_db.empty:
-            mask = df_impresion_db['item'].str.contains("tinta", case=False, na=False)
-            tintas = df_impresion_db[mask]
+            # Consumibles de impresión: tinta líquida, cartuchos y tóner
+            consumibles = df_impresion_db[
+                df_impresion_db['item'].fillna('').str.contains('tinta|cartucho|toner|tóner', case=False, na=False)
+            ].copy()
 
-            if usar_stock_por_impresora and not tintas.empty:
-                tintas_imp = tintas[tintas['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
-                if not tintas_imp.empty:
-                    tintas = tintas_imp
+            if usar_stock_por_impresora and not consumibles.empty:
+                consumibles_imp = consumibles[consumibles['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
+                if not consumibles_imp.empty:
+                    consumibles = consumibles_imp
                 else:
-                    st.info("No se encontraron tintas asociadas a esta impresora; se usará promedio global de tintas.")
+                    st.info("No se encontraron consumibles asociados a esta impresora; se usará promedio global.")
 
-            if not tintas.empty:
-                precio_tinta_ml = tintas['precio_usd'].mean()
-                st.success(f"💧 Precio de tinta detectado: ${precio_tinta_ml:.4f}/ml")
+            # Estimación de costo por color con soporte para cartucho tricolor (CMY)
+            costos_color = {'C': [], 'M': [], 'Y': [], 'K': []}
+            if not consumibles.empty:
+                for _, row_cons in consumibles.iterrows():
+                    nombre = str(row_cons.get('item', '')).lower()
+                    precio = float(row_cons.get('precio_usd', 0) or 0)
+                    if precio <= 0:
+                        continue
+
+                    es_tricolor = ('cartucho' in nombre) and (
+                        ('tricolor' in nombre) or
+                        ('cmy' in nombre) or
+                        (('cian' in nombre or 'cyan' in nombre) and 'magenta' in nombre and ('amarillo' in nombre or 'yellow' in nombre))
+                    )
+
+                    if es_tricolor:
+                        tercio = precio / 3.0
+                        costos_color['C'].append(tercio)
+                        costos_color['M'].append(tercio)
+                        costos_color['Y'].append(tercio)
+                        continue
+
+                    if any(x in nombre for x in ['cian', 'cyan']):
+                        costos_color['C'].append(precio)
+                    if 'magenta' in nombre:
+                        costos_color['M'].append(precio)
+                    if any(x in nombre for x in ['amarillo', 'yellow']):
+                        costos_color['Y'].append(precio)
+                    if any(x in nombre for x in ['negro', 'negra', 'black', ' toner black', ' k ']):
+                        costos_color['K'].append(precio)
+
+                    # Tóner sin color explícito: se asume negro en impresoras mono
+                    if ('toner' in nombre or 'tóner' in nombre) and not any(x in nombre for x in ['cian', 'cyan', 'magenta', 'amarillo', 'yellow', 'negro', 'black']):
+                        costos_color['K'].append(precio)
+
+                pool = [v for arr in costos_color.values() for v in arr if v > 0]
+                if pool:
+                    precio_tinta_ml = sum(pool) / len(pool)
+                    st.success(f"💧 Costo estimado de consumible detectado: ${precio_tinta_ml:.4f} (incluye tinta/cartucho/tóner)")
 
         factor = 1.5
         factor_k = 0.8
@@ -2089,7 +2127,7 @@ elif menu == "🎨 Análisis CMYK":
 
                 alertas = []
 
-                stock_base = df_impresion_db[df_impresion_db['item'].str.contains('tinta', case=False, na=False)].copy()
+                stock_base = df_impresion_db[df_impresion_db['item'].str.contains('tinta|cartucho|toner|tóner', case=False, na=False)].copy()
                 if usar_stock_por_impresora:
                     stock_imp = stock_base[stock_base['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
                     if not stock_imp.empty:
@@ -2103,9 +2141,18 @@ elif menu == "🎨 Análisis CMYK":
                     'K': ['negro', 'negra', 'black', ' k ']
                 }
 
+                stock_tricolor = stock_base[
+                    stock_base['item'].fillna('').str.contains('cartucho', case=False, na=False) &
+                    stock_base['item'].fillna('').str.contains('tricolor|cmy', case=False, na=False)
+                ]
+
                 for color, ml in totales_lote_cmyk.items():
                     aliases = alias_colores.get(color, [])
                     stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
+
+                    # Soporte cartucho tricolor: sirve para C/M/Y aunque no mencione cada color por separado
+                    if stock.empty and color in ['C', 'M', 'Y'] and not stock_tricolor.empty:
+                        stock = stock_tricolor
 
                     if not stock.empty:
                         disponible = stock['cantidad'].sum()
@@ -2115,7 +2162,7 @@ elif menu == "🎨 Análisis CMYK":
                                 f"⚠️ Falta tinta {color}: necesitas {ml:.2f} ml y hay {disponible:.2f} ml"
                             )
                     else:
-                        alertas.append(f"⚠️ No se encontró tinta {color} asociada en inventario para validar stock.")
+                        alertas.append(f"⚠️ No se encontró consumible para {color} asociado a esta impresora (tinta/cartucho/tóner).")
 
                 if alertas:
                     for a in alertas:
@@ -2233,10 +2280,11 @@ elif menu == "🏗️ Activos":
             c1, c2 = st.columns(2)
 
             nombre_eq = c1.text_input("Nombre del Activo")
-            tipo_seccion = c2.selectbox("Tipo de Activo", [
-                "Maquinaria (Equipos Grandes)",
-                "Herramienta Manual (Uso diario)",
-                "Repuesto Crítico (Stock de seguridad)"
+            tipo_seccion = c2.selectbox("Tipo de Equipo", [
+                "Impresora",
+                "Corte / Plotter (Cameo)",
+                "Plancha de Sublimación",
+                "Otro"
             ])
 
             col_m1, col_m2, col_m3 = st.columns(3)
@@ -2246,7 +2294,7 @@ elif menu == "🏗️ Activos":
 
             categoria_especifica = col_m3.selectbox(
                 "Categoría",
-                ["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"]
+                ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"]
             )
 
             if st.form_submit_button("🚀 Guardar Activo"):
@@ -2268,7 +2316,7 @@ elif menu == "🏗️ Activos":
                             (equipo, categoria, inversion, unidad, desgaste) 
                             VALUES (?,?,?,?,?)
                         """, (
-                            f"[{tipo_seccion[:3].upper()}] {nombre_eq}",
+                            nombre_eq,
                             categoria_especifica,
                             monto_inv,
                             tipo_seccion,
@@ -2309,7 +2357,7 @@ elif menu == "🏗️ Activos":
                 nueva_vida = c2.number_input("Vida útil", value=1000)
                 nueva_cat = c3.selectbox(
                     "Categoría",
-                    ["Corte", "Impresión", "Tinta", "Calor", "Mobiliario", "Mantenimiento"],
+                    ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"],
                     index=0
                 )
 
@@ -2342,10 +2390,11 @@ elif menu == "🏗️ Activos":
     st.divider()
 
     # --- VISUALIZACIÓN POR SECCIONES ---
-    t1, t2, t3, t4, t5 = st.tabs([
-        "📟 Maquinaria",
-        "🛠️ Herramientas",
-        "🔄 Repuestos",
+    t1, t2, t3, t4, t5, t6 = st.tabs([
+        "🖨️ Impresoras",
+        "✂️ Corte / Plotter",
+        "🔥 Planchas",
+        "🧰 Otros",
         "📊 Resumen Global",
         "📜 Historial"
     ])
@@ -2353,21 +2402,26 @@ elif menu == "🏗️ Activos":
     if not df.empty:
 
         with t1:
-            st.subheader("Equipos y Maquinaria")
-            df_maq = df[df['unidad'].str.contains("Maquinaria")]
-            st.dataframe(df_maq, use_container_width=True, hide_index=True)
+            st.subheader("Impresoras")
+            df_imp = df[df['unidad'].fillna('').str.contains("Impresora", case=False)]
+            st.dataframe(df_imp, use_container_width=True, hide_index=True)
 
         with t2:
-            st.subheader("Herramientas Manuales")
-            df_her = df[df['unidad'].str.contains("Herramienta")]
-            st.dataframe(df_her, use_container_width=True, hide_index=True)
+            st.subheader("Corte / Plotter")
+            df_corte = df[df['unidad'].fillna('').str.contains("Corte|Plotter|Cameo", case=False)]
+            st.dataframe(df_corte, use_container_width=True, hide_index=True)
 
         with t3:
-            st.subheader("Repuestos Críticos")
-            df_rep = df[df['unidad'].str.contains("Repuesto")]
-            st.dataframe(df_rep, use_container_width=True, hide_index=True)
+            st.subheader("Planchas de Sublimación")
+            df_plancha = df[df['unidad'].fillna('').str.contains("Plancha|Sublim", case=False)]
+            st.dataframe(df_plancha, use_container_width=True, hide_index=True)
 
         with t4:
+            st.subheader("Otros equipos")
+            mask_otro = ~df['unidad'].fillna('').str.contains("Impresora|Corte|Plotter|Cameo|Plancha|Sublim", case=False)
+            st.dataframe(df[mask_otro], use_container_width=True, hide_index=True)
+
+        with t5:
             c_inv, c_des, c_prom = st.columns(3)
 
             c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
@@ -2385,7 +2439,7 @@ elif menu == "🏗️ Activos":
             )
             st.plotly_chart(fig, use_container_width=True)
 
-        with t5:
+        with t6:
             st.subheader("Historial de Movimientos de Activos")
 
             try:
@@ -3812,6 +3866,5 @@ def registrar_venta_global(
     finally:
         if conn is not None:
             conn.close()
-
 
 
