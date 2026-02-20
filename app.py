@@ -3814,3 +3814,4 @@ def registrar_venta_global(
             conn.close()
 
 
+
