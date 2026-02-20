@@ -237,6 +237,7 @@ def inicializar_sistema():
             ('iva_perc', 16.0),
             ('igtf_perc', 3.0),
             ('banco_perc', 0.5),
+            ('kontigo_perc', 5.0),
             ('costo_tinta_auto', 1.0)
         ]
 
@@ -1316,7 +1317,7 @@ elif menu == "⚙️ Configuración":
         st.subheader("🛡️ Impuestos y Comisiones")
         st.caption("Define los porcentajes numéricos (Ej: 16 para 16%)")
 
-        c3, c4, c5 = st.columns(3)
+        c3, c4, c5, c6 = st.columns(4)
 
         n_iva = c3.number_input(
             "IVA (%)",
@@ -1336,6 +1337,12 @@ elif menu == "⚙️ Configuración":
             format="%.3f"
         )
 
+        n_kontigo = c6.number_input(
+            "Comisión Kontigo (%)",
+            value=get_conf('kontigo_perc', 5.0),
+            format="%.3f"
+        )
+
         st.divider()
 
         # --- GUARDADO CON HISTORIAL ---
@@ -1348,7 +1355,8 @@ elif menu == "⚙️ Configuración":
                 ('costo_tinta_auto', 1.0 if costo_tinta_auto else 0.0),
                 ('iva_perc', n_iva),
                 ('igtf_perc', n_igtf),
-                ('banco_perc', n_banco)
+                ('banco_perc', n_banco),
+                ('kontigo_perc', n_kontigo)
             ]
 
             try:
@@ -1397,6 +1405,7 @@ elif menu == "⚙️ Configuración":
                 st.session_state.iva_perc = n_iva
                 st.session_state.igtf_perc = n_igtf
                 st.session_state.banco_perc = n_banco
+                st.session_state.kontigo_perc = n_kontigo
 
                 st.success("✅ ¡Configuración actualizada y registrada en historial!")
                 st.balloons()
@@ -1404,6 +1413,18 @@ elif menu == "⚙️ Configuración":
 
             except Exception as e:
                 st.error(f"❌ Error al guardar: {e}")
+
+    st.subheader("📋 Tabla de Control (Tasas, Impuestos y Comisiones)")
+    tabla_cfg = pd.DataFrame([
+        {"Concepto": "Tasa BCV (Bs/$)", "Valor": get_conf('tasa_bcv', 36.5)},
+        {"Concepto": "Tasa Binance (Bs/$)", "Valor": get_conf('tasa_binance', 38.0)},
+        {"Concepto": "IVA (%)", "Valor": get_conf('iva_perc', 16.0)},
+        {"Concepto": "IGTF (%)", "Valor": get_conf('igtf_perc', 3.0)},
+        {"Concepto": "Comisión Bancaria (%)", "Valor": get_conf('banco_perc', 0.5)},
+        {"Concepto": "Comisión Kontigo (%)", "Valor": get_conf('kontigo_perc', 5.0)},
+        {"Concepto": "Costo Tinta por ml ($)", "Valor": get_conf('costo_tinta_ml', 0.10)}
+    ])
+    st.dataframe(tabla_cfg, use_container_width=True, hide_index=True)
 
     # --- VISUALIZAR HISTORIAL DE CAMBIOS ---
     with st.expander("📜 Ver Historial de Cambios"):
@@ -2631,7 +2652,7 @@ elif menu == "💰 Ventas":
                 placeholder="Ej: 100 volantes, 2 banner..."
             )
 
-            c3, c4, c5 = st.columns(3)
+            c3, c4, c5, c6 = st.columns(4)
 
             monto_venta = c3.number_input(
                 "Monto ($):",
@@ -2643,7 +2664,7 @@ elif menu == "💰 Ventas":
                 "Método:",
                 ["Efectivo ($)", "Pago Móvil (BCV)",
                  "Zelle", "Binance (USDT)",
-                 "Transferencia (Bs)", "Pendiente"]
+                 "Transferencia (Bs)", "Kontigo", "Pendiente"]
             )
 
             tasa_uso = t_bcv if "BCV" in metodo_pago else (
@@ -2898,7 +2919,8 @@ elif menu == "📉 Gastos":
                 "Pago Móvil (BCV)",
                 "Zelle",
                 "Binance (USDT)",
-                "Transferencia (Bs)"
+                "Transferencia (Bs)",
+                "Kontigo"
             ])
 
             tasa_ref = t_bcv if "BCV" in metodo_pago or "Bs" in metodo_pago else (
@@ -3365,12 +3387,19 @@ elif menu == "📊 Auditoría y Métricas":
             ventas_bancarias = df_ventas[
                 df_ventas['metodo'].str.contains("Pago|Transferencia", case=False, na=False)
             ]
+            ventas_kontigo = df_ventas[df_ventas['metodo'].str.contains("Kontigo", case=False, na=False)]
         else:
             ventas_bancarias = pd.DataFrame()
+            ventas_kontigo = pd.DataFrame()
 
         banco_perc = st.session_state.get('banco_perc', 0.5)
+        kontigo_perc = st.session_state.get('kontigo_perc', 5.0)
 
-        comision_est = float(ventas_bancarias['monto_total'].sum() * (banco_perc / 100)) if not ventas_bancarias.empty else 0.0
+        comision_est = 0.0
+        if not ventas_bancarias.empty:
+            comision_est += float(ventas_bancarias['monto_total'].sum() * (banco_perc / 100))
+        if not ventas_kontigo.empty:
+            comision_est += float(ventas_kontigo['monto_total'].sum() * (kontigo_perc / 100))
 
         deudas = float(
             df_ventas[
@@ -3652,7 +3681,7 @@ if menu == "🛒 Venta Directa":
 
         metodo = c3.selectbox(
             "Método de Pago",
-            ["Efectivo $", "Pago Móvil (BCV)", "Transferencia (Bs)", "Zelle", "Binance", "Pendiente"],
+            ["Efectivo $", "Pago Móvil (BCV)", "Transferencia (Bs)", "Kontigo", "Zelle", "Binance", "Pendiente"],
             key="venta_directa_metodo"
         )
 
@@ -3678,6 +3707,8 @@ if menu == "🛒 Venta Directa":
             impuestos += float(st.session_state.get('iva_perc', 16))
         if usa_banco and metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
             impuestos += float(st.session_state.get('banco_perc', 0.5))
+        if usa_banco and metodo == "Kontigo":
+            impuestos += float(st.session_state.get('kontigo_perc', 5.0))
 
         total_usd = con_desc * (1 + impuestos / 100)
 
