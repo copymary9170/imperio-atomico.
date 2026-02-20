@@ -238,6 +238,9 @@ def inicializar_sistema():
             ('igtf_perc', 3.0),
             ('banco_perc', 0.5),
             ('kontigo_perc', 5.0),
+            ('kontigo_perc_entrada', 5.0),
+            ('kontigo_perc_salida', 5.0),
+            ('kontigo_saldo', 0.0),
             ('costo_tinta_auto', 1.0)
         ]
 
@@ -337,6 +340,7 @@ with st.sidebar:
             "🏁 Cierre de Caja",
             "📊 Auditoría y Métricas",
             "📝 Cotizaciones",
+            "💳 Kontigo",
             "⚙️ Configuración"
         ]
     )
@@ -1223,7 +1227,113 @@ elif menu == "📦 Inventario":
         c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
         c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
- # --- configuracion --- #
+ 
+# --- Kontigo --- #
+elif menu == "💳 Kontigo":
+    if ROL not in ["Admin", "Administracion"]:
+        st.error("🚫 Acceso Denegado. Solo la Jefa o Administración pueden gestionar Kontigo.")
+        st.stop()
+
+    st.title("💳 Control de Cuenta Kontigo")
+
+    pct_ent = float(st.session_state.get('kontigo_perc_entrada', st.session_state.get('kontigo_perc', 5.0)))
+    pct_sal = float(st.session_state.get('kontigo_perc_salida', st.session_state.get('kontigo_perc', 5.0)))
+    saldo_actual = float(st.session_state.get('kontigo_saldo', 0.0))
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Saldo actual", f"$ {saldo_actual:,.2f}")
+    c2.metric("Comisión Entrada", f"{pct_ent:.2f}%")
+    c3.metric("Comisión Salida", f"{pct_sal:.2f}%")
+
+    try:
+        with conectar() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS kontigo_movs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tipo TEXT,
+                    monto_bruto REAL,
+                    comision_pct REAL,
+                    comision_usd REAL,
+                    monto_neto REAL,
+                    detalle TEXT,
+                    usuario TEXT,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+    except Exception as e:
+        st.error(f"No se pudo preparar la tabla de Kontigo: {e}")
+        st.stop()
+
+    t1, t2 = st.tabs(["➕ Registrar movimiento", "📜 Historial"])
+
+    with t1:
+        with st.form("form_kontigo"):
+            k1, k2 = st.columns(2)
+            tipo = k1.selectbox("Tipo", ["Entrada", "Salida"])
+            monto_bruto = k2.number_input("Monto bruto ($)", min_value=0.01, format="%.2f")
+            detalle = st.text_input("Detalle", placeholder="Ej: Cobro cliente / Pago proveedor")
+
+            pct = pct_ent if tipo == "Entrada" else pct_sal
+            comision = monto_bruto * (pct / 100.0)
+            if tipo == "Entrada":
+                monto_sin_comision = monto_bruto - comision
+                impacto_saldo = monto_sin_comision
+                st.info(f"Entrada sin comisión: $ {monto_sin_comision:,.2f}")
+            else:
+                monto_sin_comision = monto_bruto
+                impacto_saldo = -(monto_bruto + comision)
+                st.info(f"Salida sin comisión: $ {monto_sin_comision:,.2f}")
+                st.warning(f"Salida total descontada de cuenta (con comisión): $ {abs(impacto_saldo):,.2f}")
+
+            nuevo_saldo = saldo_actual + impacto_saldo
+            st.metric("Saldo luego de registrar", f"$ {nuevo_saldo:,.2f}")
+
+            if st.form_submit_button("💾 Registrar movimiento", use_container_width=True):
+                try:
+                    with conectar() as conn:
+                        conn.execute(
+                            """
+                            INSERT INTO kontigo_movs
+                            (tipo, monto_bruto, comision_pct, comision_usd, monto_neto, detalle, usuario)
+                            VALUES (?,?,?,?,?,?,?)
+                            """,
+                            (
+                                tipo,
+                                float(monto_bruto),
+                                float(pct),
+                                float(comision),
+                                float(impacto_saldo),
+                                detalle.strip() if detalle else "",
+                                st.session_state.get("usuario_nombre", "Sistema")
+                            )
+                        )
+                        conn.execute(
+                            "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES (?, ?)",
+                            ('kontigo_saldo', float(nuevo_saldo))
+                        )
+                        conn.commit()
+                    st.session_state.kontigo_saldo = float(nuevo_saldo)
+                    st.success("Movimiento registrado en Kontigo")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al registrar movimiento: {e}")
+
+    with t2:
+        try:
+            with conectar() as conn:
+                df_k = pd.read_sql_query(
+                    "SELECT fecha, tipo, monto_bruto, comision_pct, comision_usd, monto_neto, detalle, usuario FROM kontigo_movs ORDER BY fecha DESC LIMIT 200",
+                    conn
+                )
+            if df_k.empty:
+                st.info("No hay movimientos de Kontigo aún.")
+            else:
+                st.dataframe(df_k, use_container_width=True, hide_index=True)
+        except Exception as e:
+            st.error(f"Error cargando historial de Kontigo: {e}")
+
+# --- configuracion --- #
 elif menu == "⚙️ Configuración":
 
     # --- SEGURIDAD DE ACCESO ---
@@ -1317,7 +1427,7 @@ elif menu == "⚙️ Configuración":
         st.subheader("🛡️ Impuestos y Comisiones")
         st.caption("Define los porcentajes numéricos (Ej: 16 para 16%)")
 
-        c3, c4, c5, c6 = st.columns(4)
+        c3, c4, c5, c6, c7 = st.columns(5)
 
         n_iva = c3.number_input(
             "IVA (%)",
@@ -1342,6 +1452,23 @@ elif menu == "⚙️ Configuración":
             value=get_conf('kontigo_perc', 5.0),
             format="%.3f"
         )
+        n_kontigo_ent = c7.number_input(
+            "Kontigo Entrada (%)",
+            value=get_conf('kontigo_perc_entrada', get_conf('kontigo_perc', 5.0)),
+            format="%.3f"
+        )
+
+        c8, c9 = st.columns(2)
+        n_kontigo_sal = c8.number_input(
+            "Kontigo Salida (%)",
+            value=get_conf('kontigo_perc_salida', get_conf('kontigo_perc', 5.0)),
+            format="%.3f"
+        )
+        n_kontigo_saldo = c9.number_input(
+            "Saldo Cuenta Kontigo ($)",
+            value=get_conf('kontigo_saldo', 0.0),
+            format="%.2f"
+        )
 
         st.divider()
 
@@ -1356,7 +1483,10 @@ elif menu == "⚙️ Configuración":
                 ('iva_perc', n_iva),
                 ('igtf_perc', n_igtf),
                 ('banco_perc', n_banco),
-                ('kontigo_perc', n_kontigo)
+                ('kontigo_perc', n_kontigo),
+                ('kontigo_perc_entrada', n_kontigo_ent),
+                ('kontigo_perc_salida', n_kontigo_sal),
+                ('kontigo_saldo', n_kontigo_saldo)
             ]
 
             try:
@@ -1406,6 +1536,9 @@ elif menu == "⚙️ Configuración":
                 st.session_state.igtf_perc = n_igtf
                 st.session_state.banco_perc = n_banco
                 st.session_state.kontigo_perc = n_kontigo
+                st.session_state.kontigo_perc_entrada = n_kontigo_ent
+                st.session_state.kontigo_perc_salida = n_kontigo_sal
+                st.session_state.kontigo_saldo = n_kontigo_saldo
 
                 st.success("✅ ¡Configuración actualizada y registrada en historial!")
                 st.balloons()
@@ -1422,6 +1555,9 @@ elif menu == "⚙️ Configuración":
         {"Concepto": "IGTF (%)", "Valor": get_conf('igtf_perc', 3.0)},
         {"Concepto": "Comisión Bancaria (%)", "Valor": get_conf('banco_perc', 0.5)},
         {"Concepto": "Comisión Kontigo (%)", "Valor": get_conf('kontigo_perc', 5.0)},
+        {"Concepto": "Kontigo Entrada (%)", "Valor": get_conf('kontigo_perc_entrada', get_conf('kontigo_perc', 5.0))},
+        {"Concepto": "Kontigo Salida (%)", "Valor": get_conf('kontigo_perc_salida', get_conf('kontigo_perc', 5.0))},
+        {"Concepto": "Saldo Cuenta Kontigo ($)", "Valor": get_conf('kontigo_saldo', 0.0)},
         {"Concepto": "Costo Tinta por ml ($)", "Valor": get_conf('costo_tinta_ml', 0.10)}
     ])
     st.dataframe(tabla_cfg, use_container_width=True, hide_index=True)
@@ -2652,7 +2788,7 @@ elif menu == "💰 Ventas":
                 placeholder="Ej: 100 volantes, 2 banner..."
             )
 
-            c3, c4, c5, c6 = st.columns(4)
+            c3, c4, c5, c6, c7 = st.columns(5)
 
             monto_venta = c3.number_input(
                 "Monto ($):",
@@ -3393,7 +3529,7 @@ elif menu == "📊 Auditoría y Métricas":
             ventas_kontigo = pd.DataFrame()
 
         banco_perc = st.session_state.get('banco_perc', 0.5)
-        kontigo_perc = st.session_state.get('kontigo_perc', 5.0)
+        kontigo_perc = st.session_state.get('kontigo_perc_entrada', st.session_state.get('kontigo_perc', 5.0))
 
         comision_est = 0.0
         if not ventas_bancarias.empty:
@@ -3708,7 +3844,7 @@ if menu == "🛒 Venta Directa":
         if usa_banco and metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
             impuestos += float(st.session_state.get('banco_perc', 0.5))
         if usa_banco and metodo == "Kontigo":
-            impuestos += float(st.session_state.get('kontigo_perc', 5.0))
+            impuestos += float(st.session_state.get('kontigo_perc_entrada', st.session_state.get('kontigo_perc', 5.0)))
 
         total_usd = con_desc * (1 + impuestos / 100)
 
@@ -3897,5 +4033,8 @@ def registrar_venta_global(
     finally:
         if conn is not None:
             conn.close()
+
+
+
 
 
