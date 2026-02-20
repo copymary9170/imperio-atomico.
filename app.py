@@ -111,6 +111,27 @@ def inicializar_sistema():
                 fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
             )""",
 
+            # ACTIVOS
+            """CREATE TABLE IF NOT EXISTS activos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                equipo TEXT,
+                categoria TEXT,
+                inversion REAL,
+                unidad TEXT,
+                desgaste REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            # HISTORIAL DE ACTIVOS
+            """CREATE TABLE IF NOT EXISTS activos_historial (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activo TEXT,
+                accion TEXT,
+                detalle TEXT,
+                costo REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
             # HISTORIAL DE COMPRAS
             """CREATE TABLE IF NOT EXISTS historial_compras (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2176,6 +2197,17 @@ elif menu == "🏗️ Activos":
     # --- CARGA SEGURA DE DATOS ---
     try:
         with conectar() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS activos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    equipo TEXT,
+                    categoria TEXT,
+                    inversion REAL,
+                    unidad TEXT,
+                    desgaste REAL,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             df = pd.read_sql_query("SELECT * FROM activos", conn)
 
             # Crear tabla de historial si no existe
@@ -3780,8 +3812,5 @@ def registrar_venta_global(
     finally:
         if conn is not None:
             conn.close()
-
-
-
 
 
