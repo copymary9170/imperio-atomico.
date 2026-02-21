@@ -51,6 +51,331 @@ def calcular_precio_real_ml(item_id):
     return precio_usd
 
 
+def calcular_costo_real_ml(precio, capacidad_ml=None, rendimiento_paginas=None):
+    precio = float(precio or 0.0)
+    capacidad_ml = float(capacidad_ml) if capacidad_ml not in (None, "") else None
+    rendimiento_paginas = int(rendimiento_paginas) if rendimiento_paginas not in (None, "") else None
+
+    if capacidad_ml and capacidad_ml > 0:
+        return precio / capacidad_ml
+
+    if rendimiento_paginas and rendimiento_paginas > 0:
+        ml_estimado_total = float(rendimiento_paginas) * 0.05
+        if ml_estimado_total > 0:
+            return precio / ml_estimado_total
+
+    return precio
+
+
+def actualizar_costo_real_ml_inventario(conn=None):
+    if conn is None:
+        with conectar() as conn_local:
+            filas = conn_local.execute(
+                "SELECT id, precio_usd, capacidad_ml, rendimiento_paginas FROM inventario"
+            ).fetchall()
+            for item_id, precio_usd, capacidad_ml, rendimiento_paginas in filas:
+                costo_real_ml = calcular_costo_real_ml(precio_usd, capacidad_ml, rendimiento_paginas)
+                conn_local.execute(
+                    "UPDATE inventario SET costo_real_ml=? WHERE id=?",
+                    (float(costo_real_ml), int(item_id))
+                )
+            conn_local.commit()
+        return
+
+    filas = conn.execute(
+        "SELECT id, precio_usd, capacidad_ml, rendimiento_paginas FROM inventario"
+    ).fetchall()
+    for item_id, precio_usd, capacidad_ml, rendimiento_paginas in filas:
+        costo_real_ml = calcular_costo_real_ml(precio_usd, capacidad_ml, rendimiento_paginas)
+        conn.execute(
+            "UPDATE inventario SET costo_real_ml=? WHERE id=?",
+            (float(costo_real_ml), int(item_id))
+        )
+
+
+def analizar_consumo_promedio(dias=30):
+    with conectar() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT date(fecha) AS dia, item_id, SUM(cantidad) AS consumo
+            FROM inventario_movs
+            WHERE tipo='SALIDA' AND fecha >= datetime('now', ?)
+            GROUP BY date(fecha), item_id
+            """,
+            conn,
+            params=(f'-{int(max(1, dias))} days',)
+        )
+        if df.empty:
+            return pd.DataFrame(columns=['item_id', 'consumo_promedio_diario', 'stock_actual', 'dias_restantes_stock'])
+
+        promedio = df.groupby('item_id', as_index=False)['consumo'].mean().rename(columns={'consumo': 'consumo_promedio_diario'})
+        stock = pd.read_sql_query("SELECT id AS item_id, cantidad AS stock_actual FROM inventario", conn)
+        out = promedio.merge(stock, on='item_id', how='left')
+        out['stock_actual'] = out['stock_actual'].fillna(0.0)
+        out['dias_restantes_stock'] = np.where(
+            out['consumo_promedio_diario'] > 0,
+            out['stock_actual'] / out['consumo_promedio_diario'],
+            np.nan
+        )
+        return out
+
+
+def calcular_costo_total_real(tinta=0.0, papel=0.0, desgaste=0.0, otros_procesos=0.0):
+    return float(tinta or 0.0) + float(papel or 0.0) + float(desgaste or 0.0) + float(otros_procesos or 0.0)
+
+
+def calcular_consumo_por_pixel(imagen):
+    arr = np.array(imagen.convert('CMYK'))
+    pixeles_totales = int(arr.shape[0] * arr.shape[1])
+    if pixeles_totales <= 0:
+        return {'pixeles_totales': 0, 'consumo_real_ml': 0.0, 'precision': 0.0}
+    cobertura = arr.astype(np.float32) / 255.0
+    peso = float(cobertura.mean())
+    consumo_real_ml = float(pixeles_totales * peso * 0.000001)
+    return {
+        'pixeles_totales': pixeles_totales,
+        'consumo_real_ml': consumo_real_ml,
+        'precision': max(0.0, min(1.0, 1.0 - abs(0.5 - peso)))
+    }
+
+
+def ajustar_factores_automaticamente():
+    with conectar() as conn:
+        row = conn.execute(
+            "SELECT AVG(consumo_real-consumo_estimado) FROM aprendizaje_consumo WHERE consumo_real IS NOT NULL AND consumo_estimado IS NOT NULL"
+        ).fetchone()
+    error_prom = float(row[0] or 0.0) if row else 0.0
+    ajuste = 1.0
+    if error_prom > 0:
+        ajuste = 1.05
+    elif error_prom < 0:
+        ajuste = 0.95
+    return {'factor': ajuste, 'factor_k': ajuste}
+
+
+def predecir_falla(umbral_desgaste=0.85):
+    with conectar() as conn:
+        df = pd.read_sql_query(
+            "SELECT impresora, vida_total, vida_restante FROM vida_cabezal",
+            conn
+        )
+    if df.empty:
+        return pd.DataFrame(columns=['impresora', 'riesgo'])
+    df['riesgo'] = np.where(
+        (df['vida_total'].fillna(0) > 0) & ((df['vida_restante'].fillna(0) / df['vida_total'].fillna(1)) < (1.0 - float(umbral_desgaste))),
+        'ALTO',
+        'NORMAL'
+    )
+    return df[['impresora', 'riesgo']]
+
+
+def calcular_costo_industrial_total(tinta=0.0, papel=0.0, desgaste=0.0, electricidad=0.0, operador=0.0):
+    return float(tinta or 0.0) + float(papel or 0.0) + float(desgaste or 0.0) + float(electricidad or 0.0) + float(operador or 0.0)
+
+
+def optimizar_costos(df_simulaciones):
+    if df_simulaciones is None or len(df_simulaciones) == 0:
+        return None
+    if isinstance(df_simulaciones, pd.DataFrame) and 'Total ($)' in df_simulaciones.columns:
+        return df_simulaciones.sort_values('Total ($)', ascending=True).head(1)
+    return None
+
+
+def simular_ganancia_pre_impresion(costo_real, margen_pct=30.0):
+    costo_real = float(costo_real or 0.0)
+    margen_pct = float(margen_pct or 0.0)
+    precio_sugerido = costo_real * (1 + (margen_pct / 100.0))
+    ganancia = precio_sugerido - costo_real
+    return {
+        'costo_real': costo_real,
+        'margen_pct': margen_pct,
+        'precio_sugerido': precio_sugerido,
+        'ganancia_estimada': ganancia
+    }
+
+
+def actualizar_vida_cabezal(impresora, paginas):
+    impresora = str(impresora or '').strip()
+    if not impresora:
+        return
+    paginas = int(max(0, paginas or 0))
+    if paginas <= 0:
+        return
+
+    with conectar() as conn:
+        row = conn.execute(
+            "SELECT id, vida_total, vida_restante FROM vida_cabezal WHERE lower(trim(impresora)) = lower(trim(?)) ORDER BY id DESC LIMIT 1",
+            (impresora,)
+        ).fetchone()
+
+        if row:
+            vid, vida_total, vida_restante = row
+            vida_total = float(vida_total or 100000.0)
+            vida_restante = float(vida_restante or vida_total)
+            nueva_vida = max(0.0, vida_restante - float(paginas))
+            conn.execute(
+                "UPDATE vida_cabezal SET vida_restante=?, fecha=CURRENT_TIMESTAMP WHERE id=?",
+                (nueva_vida, int(vid))
+            )
+        else:
+            vida_total = 100000.0
+            nueva_vida = max(0.0, vida_total - float(paginas))
+            conn.execute(
+                "INSERT INTO vida_cabezal (impresora, vida_total, vida_restante) VALUES (?,?,?)",
+                (impresora, vida_total, nueva_vida)
+            )
+        conn.commit()
+
+
+def actualizar_estadisticas_avanzadas():
+    with conectar() as conn:
+        df = pd.read_sql_query(
+            "SELECT fecha, cliente, impresora, costo_real, precio_cobrado, ganancia FROM trabajos_historial",
+            conn
+        )
+        if df.empty:
+            return None
+
+        df['ganancia'] = df['ganancia'].fillna(df['precio_cobrado'].fillna(0) - df['costo_real'].fillna(0))
+        top_trabajo = df.sort_values('ganancia', ascending=False).head(1)
+        top_cliente = df.groupby('cliente', as_index=False)['ganancia'].sum().sort_values('ganancia', ascending=False).head(1)
+        top_imp = df.groupby('impresora', as_index=False)['ganancia'].sum().sort_values('ganancia', ascending=False).head(1)
+
+        trabajo_val = str(top_trabajo.iloc[0]['fecha']) if not top_trabajo.empty else ''
+        cliente_val = str(top_cliente.iloc[0]['cliente']) if not top_cliente.empty else ''
+        impresora_val = str(top_imp.iloc[0]['impresora']) if not top_imp.empty else ''
+
+        conn.execute(
+            "INSERT INTO estadisticas_avanzadas (trabajo_mas_rentable, cliente_mas_rentable, impresora_mas_rentable) VALUES (?,?,?)",
+            (trabajo_val, cliente_val, impresora_val)
+        )
+        conn.commit()
+        return {
+            'trabajo_mas_rentable': trabajo_val,
+            'cliente_mas_rentable': cliente_val,
+            'impresora_mas_rentable': impresora_val
+        }
+
+
+def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_activo=0.0, nombre_archivo=''):
+    nombre_archivo = str(nombre_archivo or '').lower()
+    try:
+        imagen = Image.open(io.BytesIO(archivo_bytes)).convert('L')
+        arr = np.array(imagen)
+    except Exception:
+        # Fallback compatible para SVG/DXF u otros formatos no raster
+        tam = max(1, len(archivo_bytes or b''))
+        lado = int(max(32, min(2048, (tam ** 0.5))))
+        arr = np.zeros((lado, lado), dtype=np.uint8)
+        if nombre_archivo.endswith('.svg'):
+            arr[:, ::2] = 255
+        elif nombre_archivo.endswith('.dxf'):
+            arr[::2, :] = 255
+        else:
+            arr[:, :] = 200
+
+    binario = (arr < 245).astype(np.uint8)
+    pixeles_material = int(binario.sum())
+
+    alto, ancho = binario.shape
+    # Conversión base para compatibilidad (300 dpi aproximado)
+    cm_por_pixel = 2.54 / 300.0
+    area_cm2 = float(pixeles_material * (cm_por_pixel ** 2))
+
+    # Perímetro aproximado por cambios de borde
+    bordes_h = np.abs(np.diff(binario, axis=1)).sum()
+    bordes_v = np.abs(np.diff(binario, axis=0)).sum()
+    longitud_cm = float((bordes_h + bordes_v) * cm_por_pixel)
+
+    movimientos = int(max(1, (bordes_h + bordes_v) / 8))
+    desgaste_real = float(longitud_cm) * float(factor_dureza_material or 1.0) * float(desgaste_activo or 0.0)
+
+    return {
+        'ancho_px': int(ancho),
+        'alto_px': int(alto),
+        'area_cm2': area_cm2,
+        'longitud_corte_cm': longitud_cm,
+        'movimientos': movimientos,
+        'desgaste_real': desgaste_real
+    }
+
+
+def calcular_sublimacion_industrial(ancho_cm, alto_cm, precio_tinta_ml, consumo_ml_cm2=0.0008, costo_papel_cm2=0.0025, desgaste_activo=0.0, tiempo_uso_min=0.0):
+    area_cm2 = float(ancho_cm or 0.0) * float(alto_cm or 0.0)
+    consumo_tinta_ml = area_cm2 * float(consumo_ml_cm2 or 0.0)
+    costo_tinta = consumo_tinta_ml * float(precio_tinta_ml or 0.0)
+    costo_papel = area_cm2 * float(costo_papel_cm2 or 0.0)
+    desgaste_plancha = float(desgaste_activo or 0.0) * float(tiempo_uso_min or 0.0)
+    costo_total = costo_tinta + costo_papel + desgaste_plancha
+    return {
+        'area_cm2': area_cm2,
+        'consumo_tinta_ml': consumo_tinta_ml,
+        'costo_tinta': costo_tinta,
+        'costo_papel': costo_papel,
+        'desgaste_plancha': desgaste_plancha,
+        'costo_total': costo_total
+    }
+
+
+def calcular_produccion_manual(materiales, activos):
+    costo_materiales = sum(float(m.get('cantidad', 0.0)) * float(m.get('precio_unit', 0.0)) for m in (materiales or []))
+    costo_desgaste = sum(float(a.get('tiempo', 0.0)) * float(a.get('desgaste_hora', 0.0)) for a in (activos or []))
+    return {
+        'costo_materiales': float(costo_materiales),
+        'costo_desgaste_activos': float(costo_desgaste),
+        'costo_total': float(costo_materiales + costo_desgaste)
+    }
+
+
+def registrar_orden_produccion(tipo, cliente, producto, estado='pendiente', costo=0.0, trabajo=''):
+    with conectar() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO ordenes_produccion (tipo, cliente, producto, estado, costo, trabajo)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (str(tipo), str(cliente), str(producto), str(estado), float(costo or 0.0), str(trabajo or ''))
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def registrar_tiempo_produccion(orden_id, inicio, fin):
+    inicio_dt = pd.to_datetime(inicio)
+    fin_dt = pd.to_datetime(fin)
+    minutos = max(0.0, float((fin_dt - inicio_dt).total_seconds() / 60.0))
+    with conectar() as conn:
+        conn.execute(
+            """
+            INSERT INTO tiempos_produccion (orden_id, inicio, fin, minutos_reales)
+            VALUES (?, ?, ?, ?)
+            """,
+            (int(orden_id), str(inicio_dt), str(fin_dt), minutos)
+        )
+        conn.commit()
+    return minutos
+
+
+def enviar_a_cotizacion_desde_produccion(datos):
+    st.session_state['datos_pre_cotizacion'] = dict(datos or {})
+
+
+def descontar_materiales_produccion(consumos, usuario=None, detalle='Consumo de producción'):
+    consumos_limpios = {int(k): float(v) for k, v in (consumos or {}).items() if float(v) > 0}
+    if not consumos_limpios:
+        return False, '⚠️ No hay consumos válidos para descontar'
+    return registrar_venta_global(
+        id_cliente=None,
+        nombre_cliente='Consumo Interno Producción',
+        detalle=str(detalle),
+        monto_usd=0.01,
+        metodo='Interno',
+        consumos=consumos_limpios,
+        usuario=usuario or st.session_state.get('usuario_nombre', 'Sistema')
+    )
+
+
 def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, conn=None):
     if conn is not None:
         conn.execute(
@@ -213,6 +538,122 @@ def inicializar_sistema():
                 moneda_pago TEXT,
                 usuario TEXT,
                 fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS impresoras_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre_impresora TEXT,
+                consumo_base_ml REAL,
+                factor_color REAL,
+                factor_negro REAL,
+                factor_foto REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS trabajos_historial (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                cliente TEXT,
+                impresora TEXT,
+                costo_real REAL,
+                precio_cobrado REAL,
+                ganancia REAL,
+                paginas INTEGER,
+                ml_c REAL,
+                ml_m REAL,
+                ml_y REAL,
+                ml_k REAL
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS analisis_pixel (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                archivo TEXT,
+                pixeles_totales INTEGER,
+                consumo_real_ml REAL,
+                precision REAL
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS aprendizaje_consumo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                archivo TEXT,
+                consumo_estimado REAL,
+                consumo_real REAL,
+                error REAL,
+                impresora TEXT
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS perfiles_color (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                precision REAL,
+                factor_c REAL,
+                factor_m REAL,
+                factor_y REAL,
+                factor_k REAL,
+                impresora TEXT
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS vida_cabezal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                impresora TEXT,
+                vida_total REAL,
+                vida_restante REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS costos_impresora (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                impresora TEXT,
+                electricidad REAL,
+                mantenimiento REAL,
+                desgaste_real REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS ordenes_produccion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cliente TEXT,
+                trabajo TEXT,
+                tipo TEXT,
+                producto TEXT,
+                estado TEXT,
+                costo REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS tiempos_produccion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                orden_id INTEGER,
+                inicio DATETIME,
+                fin DATETIME,
+                minutos_reales REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS estadisticas_avanzadas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                trabajo_mas_rentable TEXT,
+                cliente_mas_rentable TEXT,
+                impresora_mas_rentable TEXT
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS materiales_corte (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                factor_dureza REAL,
+                inventario_id INTEGER
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS recetas_produccion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                producto TEXT,
+                inventario_id INTEGER,
+                cantidad REAL,
+                activo_id INTEGER,
+                tiempo REAL
             )"""
         ]
 
@@ -262,9 +703,14 @@ def inicializar_sistema():
             c.execute("ALTER TABLE inventario ADD COLUMN factor_conversion REAL DEFAULT 1.0")
         if 'capacidad_ml' not in columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN capacidad_ml REAL DEFAULT NULL")
+        if 'rendimiento_paginas' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN rendimiento_paginas INTEGER DEFAULT NULL")
+        if 'costo_real_ml' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN costo_real_ml REAL DEFAULT NULL")
         c.execute("UPDATE inventario SET activo = 1 WHERE activo IS NULL")
         c.execute("UPDATE inventario SET unidad_base = 'ml' WHERE unidad_base IS NULL")
         c.execute("UPDATE inventario SET factor_conversion = 1.0 WHERE factor_conversion IS NULL OR factor_conversion <= 0")
+        actualizar_costo_real_ml_inventario(conn)
 
         c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON ventas(cliente_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_item ON inventario(item)")
@@ -431,6 +877,9 @@ with st.sidebar:
             "🎨 Análisis CMYK",
             "🏗️ Activos",
             "🛠️ Otros Procesos",
+            "✂️ Corte Industrial",
+            "🔥 Sublimación Industrial",
+            "🎨 Producción Manual",
             "💰 Ventas",
             "📉 Gastos",
             "🏁 Cierre de Caja",
@@ -1542,10 +1991,10 @@ elif menu == "⚙️ Configuración":
         with conectar() as conn:
             df_tintas_cfg = pd.read_sql(
                 """
-                SELECT item, precio_usd
+                SELECT item, COALESCE(costo_real_ml, precio_usd) AS precio_usd
                 FROM inventario
                 WHERE item LIKE '%tinta%'
-                  AND precio_usd IS NOT NULL
+                  AND (precio_usd IS NOT NULL OR costo_real_ml IS NOT NULL)
                   AND lower(trim(COALESCE(unidad, ''))) = 'ml'
                 """,
                 conn
@@ -2053,6 +2502,13 @@ elif menu == "🎨 Análisis CMYK":
             except Exception:
                 df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad', 'desgaste'])
 
+            try:
+                df_perfiles_color = pd.read_sql_query(
+                    "SELECT nombre, precision, factor_c, factor_m, factor_y, factor_k, impresora FROM perfiles_color", conn
+                )
+            except Exception:
+                df_perfiles_color = pd.DataFrame(columns=['nombre', 'precision', 'factor_c', 'factor_m', 'factor_y', 'factor_k', 'impresora'])
+
             # Tabla histórica
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS historial_cmyk (
@@ -2167,7 +2623,7 @@ elif menu == "🎨 Análisis CMYK":
             if not consumibles.empty:
                 for _, row_cons in consumibles.iterrows():
                     nombre = str(row_cons.get('item', '')).lower()
-                    precio = float(row_cons.get('precio_usd', 0) or 0)
+                    precio = float(row_cons.get('costo_real_ml', row_cons.get('precio_usd', 0)) or 0)
                     if precio <= 0:
                         continue
 
@@ -2205,6 +2661,23 @@ elif menu == "🎨 Análisis CMYK":
         factor = 1.5
         factor_k = 0.8
         refuerzo_negro = 0.06
+
+        if 'df_perfiles_color' in locals() and not df_perfiles_color.empty:
+            pdisp = df_perfiles_color.copy()
+            pdisp['impresora'] = pdisp['impresora'].fillna('')
+            pdisp = pdisp[(pdisp['impresora'].str.strip() == '') | (pdisp['impresora'].str.lower().str.contains(impresora_sel.lower(), na=False))]
+            if not pdisp.empty:
+                p_opts = {f"{r['nombre']} ({float(r.get('precision') or 0):.2f})": r for _, r in pdisp.iterrows()}
+                sel_p = st.selectbox("Perfil de color (opcional)", ["Automático"] + list(p_opts.keys()), key='cmyk_perfil_color_sel')
+                if sel_p != "Automático":
+                    rowp = p_opts[sel_p]
+                    factor_c = float(rowp.get('factor_c') or 1.0)
+                    factor_m = float(rowp.get('factor_m') or 1.0)
+                    factor_y = float(rowp.get('factor_y') or 1.0)
+                    factor_k = float(rowp.get('factor_k') or factor_k)
+                    factor = max(0.01, (factor_c + factor_m + factor_y) / 3.0)
+                    st.info(f"Perfil aplicado: Cx{factor_c:.2f} Mx{factor_m:.2f} Yx{factor_y:.2f} Kx{factor_k:.2f}")
+
         st.success("🧠 Modo automático de negro activo: se detectan sombras y mezclas con negro en cada página.")
 
     with c_file:
@@ -2330,6 +2803,38 @@ elif menu == "🎨 Análisis CMYK":
                             "Costo $": round(costo_f, 4)
                         })
 
+                        try:
+                            pxr = calcular_consumo_por_pixel(img_obj.convert('RGB'))
+                            with conectar() as conn_px:
+                                conn_px.execute(
+                                    """
+                                    INSERT INTO analisis_pixel (archivo, pixeles_totales, consumo_real_ml, precision)
+                                    VALUES (?,?,?,?)
+                                    """,
+                                    (
+                                        str(nombre),
+                                        int(pxr.get('pixeles_totales', 0)),
+                                        float(pxr.get('consumo_real_ml', 0.0)),
+                                        float(pxr.get('precision', 0.0))
+                                    )
+                                )
+                                conn_px.execute(
+                                    """
+                                    INSERT INTO aprendizaje_consumo (archivo, consumo_estimado, consumo_real, error, impresora)
+                                    VALUES (?,?,?,?,?)
+                                    """,
+                                    (
+                                        str(nombre),
+                                        float(consumo_total_f),
+                                        float(pxr.get('consumo_real_ml', 0.0)),
+                                        float(pxr.get('consumo_real_ml', 0.0) - consumo_total_f),
+                                        str(impresora_sel)
+                                    )
+                                )
+                                conn_px.commit()
+                        except Exception:
+                            pass
+
                 except Exception as e:
                     st.error(f"Error analizando {arc.name}: {e}")
 
@@ -2359,6 +2864,44 @@ elif menu == "🎨 Análisis CMYK":
                 delta=f"$ {costo_promedio_pagina:.4f} por pág"
             )
 
+            with st.expander("📈 Simulación de ganancia antes de imprimir", expanded=False):
+                margen_sim = st.number_input("Margen simulado (%)", min_value=0.0, value=30.0, key='cmyk_margen_sim')
+                sim = simular_ganancia_pre_impresion(total_usd_lote, margen_sim)
+                a1, a2 = st.columns(2)
+                a1.metric("Precio sugerido", f"$ {sim['precio_sugerido']:.2f}")
+                a2.metric("Ganancia estimada", f"$ {sim['ganancia_estimada']:.2f}")
+
+            precio_cobrado_sim = st.number_input(
+                "Precio cobrado estimado ($)",
+                min_value=0.0,
+                value=float(total_usd_lote * 1.3),
+                key='cmyk_precio_cobrado_sim'
+            )
+            if st.button("💾 Guardar rentabilidad del trabajo", key='btn_guardar_trabajo_hist'):
+                with conectar() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO trabajos_historial
+                        (cliente, impresora, costo_real, precio_cobrado, ganancia, paginas, ml_c, ml_m, ml_y, ml_k)
+                        VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            'Consumidor Final',
+                            impresora_sel,
+                            float(total_usd_lote),
+                            float(precio_cobrado_sim),
+                            float(precio_cobrado_sim - total_usd_lote),
+                            int(total_pags),
+                            float(totales_lote_cmyk.get('C', 0.0)),
+                            float(totales_lote_cmyk.get('M', 0.0)),
+                            float(totales_lote_cmyk.get('Y', 0.0)),
+                            float(totales_lote_cmyk.get('K', 0.0))
+                        )
+                    )
+                    conn.commit()
+                actualizar_estadisticas_avanzadas()
+                st.success('Rentabilidad guardada en historial de trabajos.')
+
             df_totales = pd.DataFrame([
                 {"Color": "C", "ml": totales_lote_cmyk['C']},
                 {"Color": "M", "ml": totales_lote_cmyk['M']},
@@ -2367,6 +2910,43 @@ elif menu == "🎨 Análisis CMYK":
             ])
             fig_cmyk = px.pie(df_totales, names='Color', values='ml', title='Distribución de consumo CMYK')
             st.plotly_chart(fig_cmyk, use_container_width=True)
+
+            if st.button("🧾 Descontar consumo CMYK del inventario", key="btn_descuento_cmyk_auto"):
+                with conectar() as conn:
+                    filas_tinta = conn.execute(
+                        """
+                        SELECT id, item FROM inventario
+                        WHERE COALESCE(activo,1)=1 AND lower(trim(COALESCE(unidad,'')))='ml'
+                        """
+                    ).fetchall()
+                ids_por_color = {}
+                for item_id, item_nombre in filas_tinta:
+                    nombre = str(item_nombre or '').lower()
+                    if 'cian' in nombre or 'cyan' in nombre:
+                        ids_por_color.setdefault('C', int(item_id))
+                    if 'magenta' in nombre:
+                        ids_por_color.setdefault('M', int(item_id))
+                    if 'amarillo' in nombre or 'yellow' in nombre:
+                        ids_por_color.setdefault('Y', int(item_id))
+                    if 'negro' in nombre or 'black' in nombre or ' k ' in f" {nombre} ":
+                        ids_por_color.setdefault('K', int(item_id))
+
+                consumos_desc = {}
+                for color, ml in totales_lote_cmyk.items():
+                    if color in ids_por_color and float(ml) > 0:
+                        consumos_desc[ids_por_color[color]] = consumos_desc.get(ids_por_color[color], 0.0) + float(ml)
+
+                ok_desc, msg_desc = descontar_consumo_cmyk(
+                    consumos_desc,
+                    usuario=st.session_state.get('usuario_nombre', 'Sistema'),
+                    detalle=f"Consumo CMYK automático - {impresora_sel}",
+                    metodo='Interno-CMYK',
+                    monto_usd=0.01
+                )
+                if ok_desc:
+                    st.success(msg_desc)
+                else:
+                    st.warning(msg_desc)
 
             df_resultados = pd.DataFrame(resultados)
             st.download_button(
@@ -2562,6 +3142,7 @@ elif menu == "🎨 Análisis CMYK":
                             float(totales_lote_cmyk.get('K', 0.0))
                         ))
                         conn.commit()
+                        actualizar_vida_cabezal(impresora_sel, total_pags)
                 except Exception as e:
                     st.warning(f"No se pudo guardar en historial: {e}")
 
@@ -2943,6 +3524,170 @@ elif menu == "🛠️ Otros Procesos":
         except Exception as e:
             st.info("Historial no disponible.")
 
+
+# ===========================================================
+# ✂️ MÓDULO CORTE INDUSTRIAL
+# ===========================================================
+elif menu == "✂️ Corte Industrial":
+
+    st.title("✂️ Corte / Cameo Industrial")
+    st.caption("Módulo complementario industrial. No altera los flujos base del ERP.")
+
+    up = st.file_uploader("Archivo de corte (SVG/PNG/JPG/DXF)", type=['svg', 'png', 'jpg', 'jpeg', 'dxf'], key='corte_file_ind')
+
+    with conectar() as conn:
+        try:
+            df_mat = pd.read_sql_query("SELECT id, nombre, factor_dureza, inventario_id FROM materiales_corte ORDER BY nombre", conn)
+        except Exception:
+            df_mat = pd.DataFrame(columns=['id', 'nombre', 'factor_dureza', 'inventario_id'])
+        try:
+            df_act = pd.read_sql_query("SELECT id, equipo, categoria, desgaste FROM activos", conn)
+        except Exception:
+            df_act = pd.DataFrame(columns=['id', 'equipo', 'categoria', 'desgaste'])
+
+    df_act_corte = df_act[df_act['categoria'].fillna('').str.contains('Corte|Plotter|Cameo', case=False, na=False)].copy() if not df_act.empty else pd.DataFrame(columns=['id', 'equipo', 'categoria', 'desgaste'])
+    mat_opts = {f"{r['nombre']} (x{float(r['factor_dureza'] or 1.0):.2f})": (int(r['inventario_id']) if pd.notna(r['inventario_id']) else None, float(r['factor_dureza'] or 1.0)) for _, r in df_mat.iterrows()} if not df_mat.empty else {}
+    act_opts = {str(r['equipo']): float(r['desgaste'] or 0.0) for _, r in df_act_corte.iterrows()} if not df_act_corte.empty else {}
+
+    col1, col2 = st.columns(2)
+    mat_sel = col1.selectbox("Material", list(mat_opts.keys()) if mat_opts else ["Sin material configurado"])
+    act_sel = col2.selectbox("Equipo de corte", list(act_opts.keys()) if act_opts else ["Sin equipo configurado"])
+
+    if up is not None:
+        inv_id, fac_dur = mat_opts.get(mat_sel, (None, 1.0))
+        desgaste_act = act_opts.get(act_sel, 0.0)
+        r = calcular_corte_cameo(up.getvalue(), factor_dureza_material=fac_dur, desgaste_activo=desgaste_act, nombre_archivo=up.name)
+        st.json(r)
+
+        if st.button("Guardar orden de corte", key='btn_guardar_orden_corte'):
+            oid = registrar_orden_produccion('Corte', 'Interno', up.name, 'pendiente', float(r.get('desgaste_real', 0.0)), f"Corte industrial {up.name}")
+            st.success(f"Orden registrada #{oid}")
+
+        if inv_id and st.button("Descontar material de inventario", key='btn_desc_mat_corte'):
+            ok, msg = descontar_materiales_produccion({int(inv_id): float(r.get('area_cm2', 0.0))}, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f"Consumo corte industrial: {up.name}")
+            st.success(msg) if ok else st.warning(msg)
+
+        if st.button("Enviar a Cotización", key='btn_send_corte_cot'):
+            enviar_a_cotizacion_desde_produccion({'trabajo': f"Corte industrial {up.name}", 'costo_base': float(r.get('desgaste_real', 0.0)), 'unidades': 1, 'detalle': r})
+            st.success("Datos enviados a Cotizaciones")
+
+# ===========================================================
+# 🔥 MÓDULO SUBLIMACIÓN INDUSTRIAL
+# ===========================================================
+elif menu == "🔥 Sublimación Industrial":
+
+    st.title("🔥 Sublimación Industrial")
+    st.caption("Módulo complementario industrial. No altera los flujos base del ERP.")
+
+    up_subl = st.file_uploader("Diseño para sublimación (PNG/JPG/PDF)", type=['png', 'jpg', 'jpeg', 'pdf'], key='subl_file_ind')
+
+    c1, c2, c3 = st.columns(3)
+    ancho_cm = c1.number_input("Ancho (cm)", min_value=1.0, value=10.0)
+    alto_cm = c2.number_input("Alto (cm)", min_value=1.0, value=10.0)
+    precio_ml = c3.number_input("Costo tinta por ml ($)", min_value=0.0, value=float(st.session_state.get('costo_tinta_ml', 0.10)), format='%.4f')
+
+    with conectar() as conn:
+        try:
+            df_plancha = pd.read_sql_query("SELECT equipo, desgaste FROM activos WHERE categoria LIKE '%Sublim%' OR unidad LIKE '%Plancha%'", conn)
+        except Exception:
+            df_plancha = pd.DataFrame(columns=['equipo', 'desgaste'])
+        try:
+            df_base = pd.read_sql_query("SELECT id, item FROM inventario WHERE COALESCE(activo,1)=1", conn)
+        except Exception:
+            df_base = pd.DataFrame(columns=['id', 'item'])
+
+    desgaste_ref = float(df_plancha['desgaste'].dropna().iloc[0]) if not df_plancha.empty and not df_plancha['desgaste'].dropna().empty else 0.0
+    t1, t2, t3 = st.columns(3)
+    tiempo_calentamiento = t1.number_input("Tiempo calentamiento (min)", min_value=0.0, value=2.0)
+    tiempo_prensado = t2.number_input("Tiempo prensado (min)", min_value=0.0, value=1.0)
+    tiempo_enfriado = t3.number_input("Tiempo enfriado (min)", min_value=0.0, value=2.0)
+    tiempo_uso = float(tiempo_calentamiento + tiempo_prensado + tiempo_enfriado)
+    st.caption(f"Tiempo total de producción: {tiempo_uso:.2f} min")
+    r = calcular_sublimacion_industrial(ancho_cm, alto_cm, precio_ml, desgaste_activo=desgaste_ref, tiempo_uso_min=tiempo_uso)
+    st.json(r)
+
+    if st.button("Guardar orden de sublimación", key='btn_guardar_orden_subl'):
+        nombre_prod = up_subl.name if up_subl is not None else 'Trabajo sublimación'
+        oid = registrar_orden_produccion('Sublimación', 'Interno', nombre_prod, 'pendiente', r['costo_total'], 'Sublimación industrial')
+        fin = datetime.now()
+        inicio = fin - timedelta(minutes=float(tiempo_uso))
+        registrar_tiempo_produccion(oid, inicio, fin)
+        st.success(f"Orden registrada #{oid}")
+
+    item_opts = {f"{row['item']} (ID {int(row['id'])})": int(row['id']) for _, row in df_base.iterrows()} if not df_base.empty else {}
+    if item_opts:
+        i_papel = st.selectbox("Insumo papel/producto base", list(item_opts.keys()), key='subl_item_base')
+        if st.button("Descontar inventario sublimación", key='btn_desc_subl_inv'):
+            ok, msg = descontar_materiales_produccion({item_opts[i_papel]: float(r['area_cm2'])}, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle='Consumo sublimación industrial')
+            st.success(msg) if ok else st.warning(msg)
+
+    if st.button("Enviar a Cotización", key='btn_send_subl_cot'):
+        enviar_a_cotizacion_desde_produccion({'trabajo': 'Sublimación industrial', 'costo_base': float(r['costo_total']), 'unidades': 1, 'area_cm2': float(r['area_cm2'])})
+        st.success("Datos enviados a Cotizaciones")
+
+# ===========================================================
+# 🎨 MÓDULO PRODUCCIÓN MANUAL
+# ===========================================================
+elif menu == "🎨 Producción Manual":
+
+    st.title("🎨 Producción Manual")
+    st.caption("Módulo complementario industrial. No altera los flujos base del ERP.")
+
+    with conectar() as conn:
+        try:
+            df_inv_m = pd.read_sql_query("SELECT id, item, precio_usd FROM inventario WHERE COALESCE(activo,1)=1", conn)
+        except Exception:
+            df_inv_m = pd.DataFrame(columns=['id', 'item', 'precio_usd'])
+        try:
+            df_act_m = pd.read_sql_query("SELECT id, equipo, desgaste FROM activos", conn)
+        except Exception:
+            df_act_m = pd.DataFrame(columns=['id', 'equipo', 'desgaste'])
+
+    if df_inv_m.empty:
+        st.info("No hay inventario activo para producción manual.")
+    else:
+        item_opts = {f"{r['item']} (ID {int(r['id'])})": (int(r['id']), float(r['precio_usd'] or 0.0)) for _, r in df_inv_m.iterrows()}
+        act_opts = {f"{r['equipo']} (ID {int(r['id'])})": float(r['desgaste'] or 0.0) for _, r in df_act_m.iterrows()} if not df_act_m.empty else {}
+
+        prod = st.text_input("Producto", value='Producto manual')
+        mat_sel = st.multiselect("Materiales", list(item_opts.keys()))
+        act_sel = st.multiselect("Activos usados", list(act_opts.keys()))
+
+        materiales = []
+        consumos = {}
+        for m in mat_sel:
+            q = st.number_input(f"Cantidad {m}", min_value=0.0, value=1.0, key=f'q_{m}')
+            item_id, p_u = item_opts[m]
+            materiales.append({'cantidad': float(q), 'precio_unit': float(p_u)})
+            consumos[item_id] = consumos.get(item_id, 0.0) + float(q)
+
+        activos = []
+        for a in act_sel:
+            t = st.number_input(f"Tiempo (h) {a}", min_value=0.0, value=1.0, key=f't_{a}')
+            activos.append({'tiempo': float(t), 'desgaste_hora': float(act_opts[a])})
+
+        r = calcular_produccion_manual(materiales, activos)
+        st.json(r)
+
+        if st.button("Guardar receta", key='btn_guardar_receta_manual'):
+            with conectar() as conn:
+                for m in mat_sel:
+                    item_id, _ = item_opts[m]
+                    conn.execute("INSERT INTO recetas_produccion (producto, inventario_id, cantidad, activo_id, tiempo) VALUES (?, ?, ?, ?, ?)", (prod, int(item_id), float(consumos.get(item_id, 0.0)), None, 0.0))
+                conn.commit()
+            st.success("Receta guardada")
+
+        if st.button("Descontar inventario producción manual", key='btn_desc_manual_inv'):
+            ok, msg = descontar_materiales_produccion(consumos, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f'Producción manual: {prod}')
+            st.success(msg) if ok else st.warning(msg)
+
+        if st.button("Guardar orden manual", key='btn_guardar_orden_manual'):
+            oid = registrar_orden_produccion('Manual', 'Interno', prod, 'pendiente', float(r['costo_total']), f'Producción manual {prod}')
+            st.success(f"Orden registrada #{oid}")
+
+        if st.button("Enviar a Cotización", key='btn_send_manual_cot'):
+            enviar_a_cotizacion_desde_produccion({'trabajo': f'Producción manual {prod}', 'costo_base': float(r['costo_total']), 'unidades': 1})
+            st.success("Datos enviados a Cotizaciones")
 
 # ===========================================================
 # 12. MÓDULO PROFESIONAL DE VENTAS (VERSIÓN 2.0)
@@ -4242,6 +4987,13 @@ def registrar_venta_global(
     finally:
         if conn is not None:
             conn.close()
+
+
+
+
+
+
+
 
 
 
