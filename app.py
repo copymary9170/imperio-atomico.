@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -255,6 +255,104 @@ def actualizar_estadisticas_avanzadas():
             'cliente_mas_rentable': cliente_val,
             'impresora_mas_rentable': impresora_val
         }
+
+
+def actualizar_desgaste_activo(activo_id, uso):
+    uso = float(uso or 0.0)
+    if uso <= 0:
+        return False
+
+    with conectar() as conn:
+        row = conn.execute(
+            "SELECT vida_total, vida_restante, COALESCE(uso_actual, 0) FROM activos WHERE id=?",
+            (int(activo_id),)
+        ).fetchone()
+        if not row:
+            return False
+
+        vida_total, vida_restante, uso_actual = row
+        vida_total = float(vida_total or 0.0)
+        vida_restante = float(vida_restante if vida_restante is not None else vida_total)
+        uso_actual = float(uso_actual or 0.0)
+
+        nueva_vida = max(0.0, vida_restante - uso)
+        nuevo_uso = uso_actual + uso
+
+        conn.execute(
+            "UPDATE activos SET vida_restante=?, uso_actual=? WHERE id=?",
+            (nueva_vida, nuevo_uso, int(activo_id))
+        )
+        conn.commit()
+    return True
+
+
+def calcular_costo_activo(activo_id, uso):
+    uso = float(uso or 0.0)
+    if uso <= 0:
+        return 0.0
+
+    with conectar() as conn:
+        row = conn.execute(
+            "SELECT inversion, vida_total FROM activos WHERE id=?",
+            (int(activo_id),)
+        ).fetchone()
+    if not row:
+        return 0.0
+
+    inversion, vida_total = row
+    inversion = float(inversion or 0.0)
+    vida_total = float(vida_total or 0.0)
+    if vida_total <= 0:
+        return 0.0
+    return (inversion / vida_total) * uso
+
+
+def procesar_orden_produccion(orden_id):
+    with conectar() as conn:
+        row = conn.execute(
+            "SELECT id, tipo, producto, estado, COALESCE(costo,0) FROM ordenes_produccion WHERE id=?",
+            (int(orden_id),)
+        ).fetchone()
+        if not row:
+            return False, 'Orden no encontrada'
+
+        oid, tipo, producto, estado, costo_base = row
+        if str(estado).lower() in ('finalizado', 'cerrado'):
+            return True, 'Orden ya procesada'
+
+        # Si existe receta para el producto, descontar inventario automáticamente
+        recetas = conn.execute(
+            "SELECT inventario_id, cantidad, activo_id, tiempo FROM recetas_produccion WHERE producto=?",
+            (str(producto),)
+        ).fetchall()
+
+        costo_total = float(costo_base or 0.0)
+
+        consumos = {}
+        for inv_id, cantidad, activo_id, tiempo in recetas:
+            if inv_id is not None and float(cantidad or 0) > 0:
+                consumos[int(inv_id)] = consumos.get(int(inv_id), 0.0) + float(cantidad)
+            if activo_id is not None and float(tiempo or 0) > 0:
+                uso = float(tiempo)
+                costo_total += float(calcular_costo_activo(int(activo_id), uso))
+                actualizar_desgaste_activo(int(activo_id), uso)
+
+        if consumos:
+            ok, msg = descontar_materiales_produccion(
+                consumos,
+                usuario=st.session_state.get('usuario_nombre', 'Sistema'),
+                detalle=f"Consumo orden #{int(oid)} - {producto}"
+            )
+            if not ok:
+                return False, msg
+
+        conn.execute(
+            "UPDATE ordenes_produccion SET estado='finalizado', costo=? WHERE id=?",
+            (float(costo_total), int(oid))
+        )
+        conn.commit()
+
+    return True, f'Orden #{int(oid)} procesada'
 
 
 def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_activo=0.0, nombre_archivo=''):
@@ -654,6 +752,29 @@ def inicializar_sistema():
                 cantidad REAL,
                 activo_id INTEGER,
                 tiempo REAL
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS costo_energia (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                costo_kwh REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS operadores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT,
+                costo_por_hora REAL,
+                activo INTEGER DEFAULT 1,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS rentabilidad_productos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                producto TEXT,
+                costo_total REAL,
+                precio_venta REAL,
+                ganancia REAL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
             )"""
         ]
 
@@ -739,6 +860,17 @@ def inicializar_sistema():
         columnas_ventas = {row[1] for row in c.execute("PRAGMA table_info(ventas)").fetchall()}
         if 'usuario' not in columnas_ventas:
             c.execute("ALTER TABLE ventas ADD COLUMN usuario TEXT")
+
+        columnas_activos = {row[1] for row in c.execute("PRAGMA table_info(activos)").fetchall()}
+        if 'vida_total' not in columnas_activos:
+            c.execute("ALTER TABLE activos ADD COLUMN vida_total REAL")
+        if 'vida_restante' not in columnas_activos:
+            c.execute("ALTER TABLE activos ADD COLUMN vida_restante REAL")
+        if 'uso_actual' not in columnas_activos:
+            c.execute("ALTER TABLE activos ADD COLUMN uso_actual REAL DEFAULT 0")
+        c.execute("UPDATE activos SET uso_actual = 0 WHERE uso_actual IS NULL")
+        c.execute("UPDATE activos SET vida_total = inversion WHERE vida_total IS NULL")
+        c.execute("UPDATE activos SET vida_restante = vida_total WHERE vida_restante IS NULL")
 
         columnas_proveedores = {row[1] for row in c.execute("PRAGMA table_info(proveedores)").fetchall()}
         if "telefono" not in columnas_proveedores:
@@ -4680,6 +4812,25 @@ elif menu == "📝 Cotizaciones":
             if exito:
                 st.success(msg)
 
+                try:
+                    oid_auto = registrar_orden_produccion(
+                        tipo='Cotización',
+                        cliente=cliente_sel,
+                        producto=str(descr),
+                        estado='pendiente',
+                        costo=float(costo_total),
+                        trabajo=f"Orden automática desde cotización: {descr}"
+                    )
+                    with conectar() as conn:
+                        conn.execute(
+                            "INSERT INTO rentabilidad_productos (producto, costo_total, precio_venta, ganancia) VALUES (?,?,?,?)",
+                            (str(descr), float(costo_total), float(precio_final), float(precio_final - costo_total))
+                        )
+                        conn.commit()
+                    st.info(f"Orden de producción automática creada: #{oid_auto}")
+                except Exception:
+                    pass
+
                 # Limpiamos datos temporales de cotización
                 st.session_state.pop('datos_pre_cotizacion', None)
 
@@ -4987,13 +5138,5 @@ def registrar_venta_global(
     finally:
         if conn is not None:
             conn.close()
-
-
-
-
-
-
-
-
 
 
