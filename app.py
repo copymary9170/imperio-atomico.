@@ -23,6 +23,72 @@ def conectar():
     return conn
 
 
+def convertir_a_unidad_base(item_id):
+    with conectar() as conn:
+        row = conn.execute(
+            "SELECT cantidad, COALESCE(factor_conversion, 1.0) FROM inventario WHERE id = ?",
+            (item_id,)
+        ).fetchone()
+    if not row:
+        return 0.0
+    cantidad, factor_conversion = row
+    return float(cantidad or 0.0) * float(factor_conversion or 1.0)
+
+
+def calcular_precio_real_ml(item_id):
+    with conectar() as conn:
+        row = conn.execute(
+            "SELECT precio_usd, capacidad_ml FROM inventario WHERE id = ?",
+            (item_id,)
+        ).fetchone()
+    if not row:
+        return 0.0
+    precio_usd, capacidad_ml = row
+    precio_usd = float(precio_usd or 0.0)
+    capacidad_ml = float(capacidad_ml) if capacidad_ml is not None else None
+    if capacidad_ml and capacidad_ml > 0:
+        return precio_usd / capacidad_ml
+    return precio_usd
+
+
+def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, conn=None):
+    if conn is not None:
+        conn.execute(
+            """
+            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (int(item_id), str(tipo), float(cantidad), str(motivo), str(usuario))
+        )
+        return
+
+    with conectar() as conn_local:
+        conn_local.execute(
+            """
+            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (int(item_id), str(tipo), float(cantidad), str(motivo), str(usuario))
+        )
+        conn_local.commit()
+
+
+def descontar_consumo_cmyk(consumos_dict, usuario=None, detalle="Consumo CMYK automático", metodo="Interno", monto_usd=0.01):
+    consumos_limpios = {int(k): float(v) for k, v in (consumos_dict or {}).items() if float(v) > 0}
+    if not consumos_limpios:
+        return False, "⚠️ No hay consumos CMYK válidos para descontar"
+    usuario_final = usuario or st.session_state.get("usuario_nombre", "Sistema")
+    return registrar_venta_global(
+        id_cliente=None,
+        nombre_cliente="Consumo Interno CMYK",
+        detalle=detalle,
+        monto_usd=float(monto_usd),
+        metodo=metodo,
+        consumos=consumos_limpios,
+        usuario=usuario_final
+    )
+
+
 def hash_password(password: str, salt: str | None = None) -> str:
     """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
     salt = salt or secrets.token_hex(16)
@@ -190,9 +256,39 @@ def inicializar_sistema():
             c.execute("ALTER TABLE inventario ADD COLUMN area_por_pliego_cm2 REAL")
         if 'activo' not in columnas_inventario:
             c.execute("ALTER TABLE inventario ADD COLUMN activo INTEGER DEFAULT 1")
+        if 'unidad_base' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN unidad_base TEXT DEFAULT 'ml'")
+        if 'factor_conversion' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN factor_conversion REAL DEFAULT 1.0")
+        if 'capacidad_ml' not in columnas_inventario:
+            c.execute("ALTER TABLE inventario ADD COLUMN capacidad_ml REAL DEFAULT NULL")
         c.execute("UPDATE inventario SET activo = 1 WHERE activo IS NULL")
+        c.execute("UPDATE inventario SET unidad_base = 'ml' WHERE unidad_base IS NULL")
+        c.execute("UPDATE inventario SET factor_conversion = 1.0 WHERE factor_conversion IS NULL OR factor_conversion <= 0")
 
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON ventas(cliente_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_item ON inventario(item)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
+
+        # Guardas lógicas de inventario (sin tocar estructura de tabla)
+        c.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_inventario_no_negativo_insert
+            BEFORE INSERT ON inventario
+            FOR EACH ROW
+            WHEN NEW.cantidad < 0
+            BEGIN
+                SELECT RAISE(ABORT, 'Stock no puede ser negativo');
+            END;
+        """)
+        c.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_inventario_no_negativo_update
+            BEFORE UPDATE OF cantidad ON inventario
+            FOR EACH ROW
+            WHEN NEW.cantidad < 0
+            BEGIN
+                SELECT RAISE(ABORT, 'Stock no puede ser negativo');
+            END;
+        """)
 
         columnas_ventas = {row[1] for row in c.execute("PRAGMA table_info(ventas)").fetchall()}
         if 'usuario' not in columnas_ventas:
@@ -627,6 +723,16 @@ elif menu == "📦 Inventario":
                             "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE item=?",
                             (pliegos, cm2_por_hoja, insumo_sel)
                         )
+                        item_row = conn.execute("SELECT id FROM inventario WHERE item=?", (insumo_sel,)).fetchone()
+                        if item_row:
+                            registrar_movimiento_inventario(
+                                item_id=int(item_row[0]),
+                                tipo='AJUSTE',
+                                cantidad=float(pliegos),
+                                motivo='Conversión cm2 -> pliegos',
+                                usuario=st.session_state.get("usuario_nombre", "Sistema"),
+                                conn=conn
+                            )
                         conn.commit()
                     st.success(f"Convertido a {pliegos:.3f} pliegos.")
                     cargar_datos()
@@ -637,13 +743,22 @@ elif menu == "📦 Inventario":
                         "SELECT COUNT(*) FROM historial_compras WHERE item=?",
                         (insumo_sel,)
                     ).fetchone()[0]
-                    if existe_historial > 0:
+                    existe_movs = conn.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM inventario_movs m
+                        JOIN inventario i ON i.id = m.item_id
+                        WHERE i.item=?
+                        """,
+                        (insumo_sel,)
+                    ).fetchone()[0]
+                    if existe_historial > 0 or existe_movs > 0:
                         conn.execute(
                             "UPDATE inventario SET activo=0, cantidad=0 WHERE item=?",
                             (insumo_sel,)
                         )
                         conn.commit()
-                        st.success("Insumo archivado (tiene historial y no se elimina físicamente).")
+                        st.success("Insumo archivado (tiene movimientos/historial y no se elimina físicamente).")
                         cargar_datos()
                         st.rerun()
                     else:
@@ -655,10 +770,25 @@ elif menu == "📦 Inventario":
 
                 if colC.button("✅ Confirmar"):
                     with conectar() as conn:
-                        conn.execute(
-                            "DELETE FROM inventario WHERE item=?",
+                        existe_movs = conn.execute(
+                            """
+                            SELECT COUNT(*)
+                            FROM inventario_movs m
+                            JOIN inventario i ON i.id = m.item_id
+                            WHERE i.item=?
+                            """,
                             (insumo_sel,)
-                        )
+                        ).fetchone()[0]
+                        if existe_movs > 0:
+                            conn.execute(
+                                "UPDATE inventario SET activo=0, cantidad=0 WHERE item=?",
+                                (insumo_sel,)
+                            )
+                        else:
+                            conn.execute(
+                                "DELETE FROM inventario WHERE item=?",
+                                (insumo_sel,)
+                            )
                         conn.commit()
                     st.session_state.confirmar_borrado = False
                     cargar_datos()
@@ -879,17 +1009,14 @@ elif menu == "📦 Inventario":
                 ).fetchone()
 
                 if item_id_row:
-                    cur.execute("""
-                        INSERT INTO inventario_movs
-                        (item_id, tipo, cantidad, motivo, usuario)
-                        VALUES (?,?,?,?,?)
-                    """, (
-                        item_id_row[0],
-                        "ENTRADA",
-                        stock_real,
-                        "Compra registrada",
-                        usuario_actual
-                    ))
+                    registrar_movimiento_inventario(
+                        item_id=int(item_id_row[0]),
+                        tipo='ENTRADA',
+                        cantidad=float(stock_real),
+                        motivo='Compra registrada',
+                        usuario=usuario_actual,
+                        conn=conn
+                    )
 
                 conn.commit()
 
@@ -990,12 +1117,13 @@ elif menu == "📦 Inventario":
                             "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
                             (nueva_cant, int(item_id))
                         )
-                        cur.execute(
-                            """
-                            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-                            VALUES (?, 'SALIDA', ?, 'Corrección: eliminación de compra', ?)
-                            """,
-                            (int(item_id), float(compra_row["cantidad"]), usuario_actual)
+                        registrar_movimiento_inventario(
+                            item_id=int(item_id),
+                            tipo='SALIDA',
+                            cantidad=float(compra_row["cantidad"]),
+                            motivo='Corrección: eliminación de compra',
+                            usuario=usuario_actual,
+                            conn=conn
                         )
 
                     cur.execute("DELETE FROM historial_compras WHERE id=?", (int(compra_sel_id),))
@@ -1034,12 +1162,13 @@ elif menu == "📦 Inventario":
                                     "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
                                     (nueva_cant, int(item_id))
                                 )
-                                cur.execute(
-                                    """
-                                    INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-                                    VALUES (?, 'SALIDA', ?, 'Corrección masiva: limpieza historial por insumo', ?)
-                                    """,
-                                    (int(item_id), float(row["cantidad"]), usuario_actual)
+                                registrar_movimiento_inventario(
+                                    item_id=int(item_id),
+                                    tipo='SALIDA',
+                                    cantidad=float(row["cantidad"]),
+                                    motivo='Corrección masiva: limpieza historial por insumo',
+                                    usuario=usuario_actual,
+                                    conn=conn
                                 )
 
                         ids_borrar = [int(x) for x in filas_item["compra_id"].tolist()]
@@ -1415,7 +1544,9 @@ elif menu == "⚙️ Configuración":
                 """
                 SELECT item, precio_usd
                 FROM inventario
-                WHERE item LIKE '%tinta%' AND precio_usd IS NOT NULL
+                WHERE item LIKE '%tinta%'
+                  AND precio_usd IS NOT NULL
+                  AND lower(trim(COALESCE(unidad, ''))) = 'ml'
                 """,
                 conn
             )
@@ -1929,11 +2060,25 @@ elif menu == "🎨 Análisis CMYK":
                     impresora TEXT,
                     paginas INTEGER,
                     costo REAL,
+                    c_ml REAL,
+                    m_ml REAL,
+                    y_ml REAL,
+                    k_ml REAL,
                     fecha DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            cols_hist_cmyk = {row[1] for row in conn.execute("PRAGMA table_info(historial_cmyk)").fetchall()}
+            if 'c_ml' not in cols_hist_cmyk:
+                conn.execute("ALTER TABLE historial_cmyk ADD COLUMN c_ml REAL")
+            if 'm_ml' not in cols_hist_cmyk:
+                conn.execute("ALTER TABLE historial_cmyk ADD COLUMN m_ml REAL")
+            if 'y_ml' not in cols_hist_cmyk:
+                conn.execute("ALTER TABLE historial_cmyk ADD COLUMN y_ml REAL")
+            if 'k_ml' not in cols_hist_cmyk:
+                conn.execute("ALTER TABLE historial_cmyk ADD COLUMN k_ml REAL")
+
             df_hist_cmyk = pd.read_sql(
-                "SELECT fecha, impresora, paginas, costo FROM historial_cmyk ORDER BY fecha DESC LIMIT 100",
+                "SELECT fecha, impresora, paginas, costo, c_ml, m_ml, y_ml, k_ml FROM historial_cmyk ORDER BY fecha DESC LIMIT 100",
                 conn
             )
 
@@ -2405,9 +2550,17 @@ elif menu == "🎨 Análisis CMYK":
                     with conectar() as conn:
                         conn.execute("""
                             INSERT INTO historial_cmyk
-                            (impresora, paginas, costo)
-                            VALUES (?,?,?)
-                        """, (impresora_sel, total_pags, total_usd_lote))
+                            (impresora, paginas, costo, c_ml, m_ml, y_ml, k_ml)
+                            VALUES (?,?,?,?,?,?,?)
+                        """, (
+                            impresora_sel,
+                            total_pags,
+                            total_usd_lote,
+                            float(totales_lote_cmyk.get('C', 0.0)),
+                            float(totales_lote_cmyk.get('M', 0.0)),
+                            float(totales_lote_cmyk.get('Y', 0.0)),
+                            float(totales_lote_cmyk.get('K', 0.0))
+                        ))
                         conn.commit()
                 except Exception as e:
                     st.warning(f"No se pudo guardar en historial: {e}")
@@ -3995,7 +4148,7 @@ def registrar_venta_global(
         conn = conectar()
         cursor = conn.cursor()
 
-        conn.execute("BEGIN TRANSACTION")
+        conn.execute("BEGIN IMMEDIATE TRANSACTION")
 
         if id_cliente is not None:
             existe_cli = cursor.execute(
@@ -4032,15 +4185,24 @@ def registrar_venta_global(
 
             cursor.execute("""
                 UPDATE inventario
-                SET cantidad = cantidad - ?
+                SET cantidad = cantidad - ?,
+                    ultima_actualizacion = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (cant, item_id))
+                  AND cantidad >= ?
+            """, (cant, item_id, cant))
 
-            cursor.execute("""
-                INSERT INTO inventario_movs
-                (item_id, tipo, cantidad, motivo, usuario)
-                VALUES (?, 'SALIDA', ?, ?, ?)
-            """, (item_id, cant, f"Venta: {detalle}", usuario))
+            if cursor.rowcount == 0:
+                conn.rollback()
+                return False, f"⚠️ Stock insuficiente para consumo concurrente (ID {item_id})"
+
+            registrar_movimiento_inventario(
+                item_id=item_id,
+                tipo='SALIDA',
+                cantidad=cant,
+                motivo=f"Venta: {detalle}",
+                usuario=usuario,
+                conn=conn
+            )
 
         cursor.execute("""
             INSERT INTO ventas
@@ -4080,18 +4242,6 @@ def registrar_venta_global(
     finally:
         if conn is not None:
             conn.close()
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
