@@ -1283,7 +1283,7 @@ elif menu == "📦 Inventario":
                     "cantidad": "Stock",
                     "unidad": "Unidad",
                     "Costo Unitario": st.column_config.NumberColumn(
-                        f"Costo ({simbolo})", format="%.4f"
+                        f"Costo ({simbolo})", format="%.2f"
                     ),
                     "Valor Total": st.column_config.NumberColumn(
                         f"Valor Total ({simbolo})", format="%.2f"
@@ -1345,7 +1345,7 @@ elif menu == "📦 Inventario":
                                 conn=conn
                             )
                         conn.commit()
-                    st.success(f"Convertido a {pliegos:.3f} pliegos.")
+                    st.success(f"Convertido a {pliegos:.2f} pliegos.")
                     cargar_datos()
                     st.rerun()
             if colB.button("🗑 Eliminar Insumo"):
@@ -1542,7 +1542,7 @@ elif menu == "📦 Inventario":
                     t_bin if "Binance" in delivery_moneda else
                     1.0
                 ),
-                format="%.4f",
+                format="%.2f",
                 key="inv_delivery_tasa_manual"
             )
 
@@ -1559,7 +1559,7 @@ elif menu == "📦 Inventario":
 
         delivery = delivery_monto / tasa_delivery if tasa_delivery > 0 else delivery_monto
 
-        st.caption(f"Delivery equivalente: ${delivery:.4f}")
+        st.caption(f"Delivery equivalente: ${delivery:.2f}")
 
         # ------------------------------
         # BOTÓN GUARDAR
@@ -5246,6 +5246,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
