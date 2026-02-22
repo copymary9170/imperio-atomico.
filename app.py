@@ -1562,31 +1562,7 @@ else:
 
 delivery = delivery_monto / tasa_delivery if tasa_delivery > 0 else delivery_monto
 
-st.caption(f"Delivery equivalente: ${delivery:.4f}")
-
-# Permite usar tasa automática o manual
-usar_tasa_manual = col_del3.checkbox("Tasa manual", help="Activa si pagaste a tasa diferente")
-
-if usar_tasa_manual:
-    tasa_delivery = st.number_input(
-        "Tasa usada en delivery",
-        min_value=0.0001,
-        value=float(t_ref if "BCV" in delivery_moneda else t_bin if "Binance" in delivery_moneda else 1.0),
-        format="%.4f"
-    )
-else:
-    if "BCV" in delivery_moneda:
-        tasa_delivery = t_ref
-    elif "Binance" in delivery_moneda:
-        tasa_delivery = t_bin
-    else:
-        tasa_delivery = 1.0
-
-# Conversión final a USD
-delivery = delivery_monto / tasa_delivery if tasa_delivery > 0 else delivery_monto
-
-st.caption(f"Delivery equivalente: ${delivery:.4f}")
-        # ------------------------------
+st.caption(f"Delivery equivalente: ${delivery:.4f}")        # ------------------------------
         # BOTÓN GUARDAR
         # ------------------------------
         if st.button("💾 Guardar Compra", use_container_width=True):
@@ -5243,6 +5219,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
