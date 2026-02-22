@@ -2702,6 +2702,17 @@ elif menu == "🎨 Análisis CMYK":
                 df_impresion_db = df_tintas_db[df_tintas_db['imprimible_cmyk'].fillna(0) == 1].copy()
             else:
                 df_impresion_db = df_tintas_db.copy()
+
+            # Esquema mínimo defensivo para evitar KeyError cuando inventario no trae todas las columnas esperadas
+            for col, default in {
+                'item': '',
+                'cantidad': 0.0,
+                'precio_usd': 0.0,
+                'costo_real_ml': 0.0,
+                'unidad': ''
+            }.items():
+                if col not in df_impresion_db.columns:
+                    df_impresion_db[col] = default
             try:
                 df_activos_cmyk = pd.read_sql_query(
                     "SELECT equipo, categoria, unidad, desgaste FROM activos", conn
@@ -5269,4 +5280,3 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
