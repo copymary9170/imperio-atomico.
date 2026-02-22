@@ -2818,23 +2818,41 @@ elif menu == "🎨 Análisis CMYK":
                 df_impresion_db['item'].fillna('').str.contains('tinta|cartucho|toner|tóner', case=False, na=False)
             ].copy()
 
-            if usar_stock_por_impresora and not consumibles.empty:
-                consumibles_imp = consumibles[consumibles['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
-                if not consumibles_imp.empty:
-                    consumibles = consumibles_imp
-                else:
-                    st.info("No se encontraron consumibles asociados a esta impresora; se usará promedio global.")
+            consumibles_impresora = consumibles[
+                consumibles['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)
+            ]
+
+            consumibles_final = pd.DataFrame()
+
+            prioridades = ['sublim', 'tinta', 'cartucho', 'toner', 'tóner']
+
+            for tipo in prioridades:
+
+                temp = consumibles_impresora[
+                    consumibles_impresora['item'].fillna('').str.contains(tipo, case=False, na=False)
+                ]
+
+                if not temp.empty:
+
+                    consumibles_final = temp
+
+                    break
+
+            if consumibles_final.empty:
+
+                consumibles_final = consumibles_impresora
 
             # Estimación de costo por color con soporte para cartucho tricolor (CMY)
             costos_color = {'C': [], 'M': [], 'Y': [], 'K': []}
-            if not consumibles.empty:
-                for _, row_cons in consumibles.iterrows():
+            if not consumibles_final.empty:
+                for _, row_cons in consumibles_final.iterrows():
                     nombre = str(row_cons.get('item', '')).lower()
                     precio = float(row_cons.get('costo_real_ml', row_cons.get('precio_usd', 0)) or 0)
                     if precio <= 0:
                         continue
 
                     es_tricolor = ('cartucho' in nombre) and (
+                        ('color' in nombre) or
                         ('tricolor' in nombre) or
                         ('cmy' in nombre) or
                         (('cian' in nombre or 'cyan' in nombre) and 'magenta' in nombre and ('amarillo' in nombre or 'yellow' in nombre))
@@ -3123,8 +3141,12 @@ elif menu == "🎨 Análisis CMYK":
                     filas_tinta = conn.execute(
                         """
                         SELECT id, item FROM inventario
-                        WHERE COALESCE(activo,1)=1 AND lower(trim(COALESCE(unidad,'')))='ml'
+                        WHERE COALESCE(activo,1)=1
+                          AND lower(trim(COALESCE(unidad,'')))='ml'
+                          AND lower(COALESCE(item,'')) LIKE lower(?)
                         """
+                    ,
+                        (f"%{impresora_sel}%",)
                     ).fetchall()
                 ids_por_color = {}
                 for item_id, item_nombre in filas_tinta:
@@ -3137,6 +3159,12 @@ elif menu == "🎨 Análisis CMYK":
                         ids_por_color.setdefault('Y', int(item_id))
                     if 'negro' in nombre or 'black' in nombre or ' k ' in f" {nombre} ":
                         ids_por_color.setdefault('K', int(item_id))
+
+                    es_tricolor = ('cartucho' in nombre) and any(x in nombre for x in ['color', 'tricolor', 'cmy'])
+                    if es_tricolor:
+                        ids_por_color.setdefault('C', int(item_id))
+                        ids_por_color.setdefault('M', int(item_id))
+                        ids_por_color.setdefault('Y', int(item_id))
 
                 consumos_desc = {}
                 for color, ml in totales_lote_cmyk.items():
@@ -3279,7 +3307,7 @@ elif menu == "🎨 Análisis CMYK":
 
                 stock_tricolor = stock_base[
                     stock_base['item'].fillna('').str.contains('cartucho', case=False, na=False) &
-                    stock_base['item'].fillna('').str.contains('tricolor|cmy', case=False, na=False)
+                    stock_base['item'].fillna('').str.contains('color|tricolor|cmy', case=False, na=False)
                 ]
 
                 for color, ml in totales_lote_cmyk.items():
@@ -5218,10 +5246,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
 
 
 
