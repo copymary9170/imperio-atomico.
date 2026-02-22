@@ -2842,13 +2842,28 @@ elif menu == "🎨 Análisis CMYK":
                 df_impresion_db['item'].fillna('').str.contains('tinta|cartucho|toner|tóner', case=False, na=False)
             ].copy()
 
-            consumibles_impresora = consumibles[
-                consumibles['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)
-            ]
+            # NORMALIZACIÓN MODO DIOS
+modelo_norm = ''.join(filter(str.isalnum, impresora_sel.lower()))
+
+def coincide_modelo(item):
+    item_norm = ''.join(filter(str.isalnum, str(item).lower()))
+    return modelo_norm in item_norm
+
+consumibles_impresora = consumibles[
+    consumibles['item'].apply(coincide_modelo)
+]
 
             consumibles_final = pd.DataFrame()
 
-            prioridades = ['sublim', 'tinta', 'cartucho', 'toner', 'tóner']
+            prioridades = [
+    'sublimacion',
+    'sublimation',
+    'sublim',
+    'tinta',
+    'cartucho',
+    'toner',
+    'tóner'
+]
 
             for tipo in prioridades:
 
@@ -3043,10 +3058,10 @@ elif menu == "🎨 Análisis CMYK":
 
                         resultados.append({
                             "Archivo": nombre,
-                            "C (ml)": round(ml_c, 4),
-                            "M (ml)": round(ml_m, 4),
-                            "Y (ml)": round(ml_y, 4),
-                            "K (ml)": round(ml_k, 4),
+                            "C (ml)": round(ml_c, 2),
+                            "M (ml)": round(ml_c, 2),
+                            "Y (ml)": round(ml_c, 2),
+                            "K (ml)": round(ml_c, 2),
                             "K extra auto (ml)": round(k_extra_ml, 4),
                             "Total ml": round(consumo_total_f, 4),
                             "Costo $": round(costo_f, 4)
@@ -3167,7 +3182,8 @@ elif menu == "🎨 Análisis CMYK":
                         SELECT id, item FROM inventario
                         WHERE COALESCE(activo,1)=1
                           AND lower(trim(COALESCE(unidad,'')))='ml'
-                          AND lower(COALESCE(item,'')) LIKE lower(?)
+                          AND lower(replace(replace(replace(item,' ',''),'-',''),'_',''))
+                          LIKE lower(replace(replace(replace(?,' ',''),'-',''),'_',''))
                         """
                     ,
                         (f"%{impresora_sel}%",)
@@ -3317,7 +3333,13 @@ elif menu == "🎨 Análisis CMYK":
 
                 stock_base = df_impresion_db[df_impresion_db['item'].str.contains('tinta|cartucho|toner|tóner', case=False, na=False)].copy()
                 if usar_stock_por_impresora:
-                    stock_imp = stock_base[stock_base['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
+                    modelo_norm = ''.join(filter(str.isalnum, impresora_sel.lower()))
+
+                    stock_imp = stock_base[
+                        stock_base['item'].apply(
+                            lambda x: modelo_norm in ''.join(filter(str.isalnum, str(x).lower()))
+             )
+]
                     if not stock_imp.empty:
                         stock_base = stock_imp
 
@@ -5270,6 +5292,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
