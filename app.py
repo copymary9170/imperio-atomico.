@@ -6,6 +6,7 @@ import io
 import plotly.express as px
 from PIL import Image
 from datetime import datetime, date, timedelta
+from config import
 import time
 import os
 import hashlib
@@ -17,21 +18,26 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
-    """Conexión principal a la base de datos del Imperio."""
-    conn = sqlite3.connect('imperio_v2.db', check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode=WAL")
+
+    import sqlite3
+
+    conn = sqlite3.connect(
+        "database.db",
+        timeout=30,
+        isolation_level=None
+    )
+
+    conn.execute("PRAGMA foreign_keys = ON;")
+
+    conn.execute("PRAGMA journal_mode = WAL;")
+
+    conn.execute("PRAGMA synchronous = NORMAL;")
+
+    conn.execute("PRAGMA temp_store = MEMORY;")
+
+    conn.execute("PRAGMA cache_size = -10000;")
+
     return conn
-
-
-def convertir_a_unidad_base(item_id):
-    with conectar() as conn:
-        row = conn.execute(
-            "SELECT cantidad, COALESCE(factor_conversion, 1.0) FROM inventario WHERE id = ?",
-            (item_id,)
-        ).fetchone()
-    if not row:
-        return 0.0
     cantidad, factor_conversion = row
     return float(cantidad or 0.0) * float(factor_conversion or 1.0)
 
@@ -321,6 +327,12 @@ def procesar_orden_produccion(orden_id):
         if str(estado).lower() in ('finalizado', 'cerrado'):
             return True, 'Orden ya procesada'
 
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_id ON inventario(id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_item ON inventario(item)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_movs_item ON inventario_movs(item_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_gastos_fecha ON gastos(fecha)")
+
         # Si existe receta para el producto, descontar inventario automáticamente
         recetas = conn.execute(
             "SELECT inventario_id, cantidad, activo_id, tiempo FROM recetas_produccion WHERE producto=?",
@@ -464,6 +476,13 @@ def descontar_materiales_produccion(consumos, usuario=None, detalle='Consumo de 
     consumos_limpios = {int(k): float(v) for k, v in (consumos or {}).items() if float(v) > 0}
     if not consumos_limpios:
         return False, '⚠️ No hay consumos válidos para descontar'
+
+    if consumos is None:
+    consumos = {}
+
+if not isinstance(consumos, dict):
+    return False, "Error interno: consumos inválidos"
+    
     return registrar_venta_global(
         id_cliente=None,
         nombre_cliente='Consumo Interno Producción',
@@ -1186,7 +1205,7 @@ if menu == "📊 Dashboard":
             st.info("Sin datos de clientes en el periodo.")
         else:
             topc = dfv.groupby('cliente', as_index=False)['monto_total'].sum().sort_values('monto_total', ascending=False).head(10)
-            st.dataframe(topc, use_container_width=True, hide_index=True)
+            st.dataframe(topc, use_container_width=True)
 
     st.divider()
     st.subheader("📦 Estado del Inventario")
@@ -5333,7 +5352,9 @@ def registrar_venta_global(
 
             cursor.execute("""
                 UPDATE inventario
-                SET cantidad = cantidad - ?,
+                SET cantidad = cantidad - ?
+                WHERE id = ?
+                AND cantidad >= ?
                     ultima_actualizacion = CURRENT_TIMESTAMP
                 WHERE id = ?
                   AND cantidad >= ?
@@ -5390,3 +5411,4 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
