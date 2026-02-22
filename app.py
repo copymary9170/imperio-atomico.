@@ -2699,8 +2699,12 @@ elif menu == "🎨 Análisis CMYK":
                 "SELECT * FROM inventario", conn
             )
             if 'imprimible_cmyk' in df_tintas_db.columns:
-                df_impresion_db = df_tintas_db[df_tintas_db['imprimible_cmyk'].fillna(0) == 1].copy()
-                # Fallback: si no hay insumos marcados como CMYK, usar inventario completo
+                items_raw = df_tintas_db['item'].fillna('').astype(str) if 'item' in df_tintas_db.columns else pd.Series('', index=df_tintas_db.index)
+                mask_flag = df_tintas_db['imprimible_cmyk'].fillna(0) == 1
+                mask_consumible = items_raw.str.contains('tinta|cartucho|toner|tóner|papel|fotograf|bond|glossy|mate|satin', case=False, na=False)
+                # Incluye ítems marcados CMYK y también consumibles de impresión detectados por nombre
+                df_impresion_db = df_tintas_db[mask_flag | mask_consumible].copy()
+                # Fallback: si por alguna razón queda vacío, usar inventario completo
                 if df_impresion_db.empty:
                     df_impresion_db = df_tintas_db.copy()
             else:
@@ -3275,7 +3279,13 @@ elif menu == "🎨 Análisis CMYK":
                 "Borrador": {"ink_mult": 0.82, "wear_mult": 0.90},
                 "Normal": {"ink_mult": 1.00, "wear_mult": 1.00},
                 "Alta": {"ink_mult": 1.18, "wear_mult": 1.10},
-                "Foto": {"ink_mult": 1.32, "wear_mult": 1.15}
+                "Foto": {"ink_mult": 1.32, "wear_mult": 1.15},
+                # Ajustes de impresión (no confundir con tipo de papel físico)
+                "Papel brillante": {"ink_mult": 1.20, "wear_mult": 1.08},
+                "Papel fotográfico": {"ink_mult": 1.28, "wear_mult": 1.12},
+                "Papel satinado": {"ink_mult": 1.16, "wear_mult": 1.06},
+                "Premium glossy": {"ink_mult": 1.35, "wear_mult": 1.16},
+                "Premium mate": {"ink_mult": 1.30, "wear_mult": 1.14}
             }
 
             total_ml_lote = float(sum(totales_lote_cmyk.values()))
@@ -3338,15 +3348,20 @@ elif menu == "🎨 Análisis CMYK":
 
                 alertas = []
 
-                stock_base = df_impresion_db[df_impresion_db['item'].str.contains('tinta|cartucho|toner|tóner', case=False, na=False)].copy()
+                stock_base = df_impresion_db[df_impresion_db['item'].fillna('').astype(str).str.contains('tinta|cartucho|toner|tóner', case=False, na=False)].copy()
                 if usar_stock_por_impresora:
 
                     modelo_norm = ''.join(filter(str.isalnum, impresora_sel.lower()))
+                    modelo_tokens = [tok for tok in ''.join(ch if ch.isalnum() else ' ' for ch in impresora_sel.lower()).split() if len(tok) >= 3]
+
+                    def coincide_impresora_item(nombre_item):
+                        item_norm = ''.join(filter(str.isalnum, str(nombre_item).lower()))
+                        if modelo_norm and modelo_norm in item_norm:
+                            return True
+                        return any(tok in item_norm for tok in modelo_tokens)
 
                     stock_imp = stock_base[
-                        stock_base['item'].apply(
-                            lambda x: modelo_norm in ''.join(filter(str.isalnum, str(x).lower()))
-                        )
+                        stock_base['item'].fillna('').astype(str).apply(coincide_impresora_item)
                     ]
 
                     if not stock_imp.empty:
@@ -3390,16 +3405,31 @@ elif menu == "🎨 Análisis CMYK":
                     st.success("✅ Hay suficiente tinta para producir")
 
 
-                       # --- ENVÍO A COTIZACIÓN ---
-            if st.button("📝 ENVIAR A COTIZACIÓN", use_container_width=True):
+            # --- ENVÍO A SIGUIENTE PROCESO ---
+            st.subheader("🚦 Enviar trabajo al siguiente paso")
+            ruta_post_impresion = st.radio(
+                "Luego de imprimir, ¿qué sigue?",
+                ["Solo impresión", "Impresión + Recorte", "Impresión + Plastificado"],
+                horizontal=True,
+                key='cmyk_ruta_post'
+            )
 
-                # Guardamos información completa para el cotizador
+            b1, b2, b3, b4 = st.columns(4)
+            btn_cotizar = b1.button("📝 Enviar a Cotización", use_container_width=True)
+            btn_recorte = b2.button("✂️ Enviar a Corte Industrial", use_container_width=True)
+            btn_plastificado = b3.button("🛠️ Enviar a Otros Procesos", use_container_width=True)
+            btn_sublimacion = b4.button("🔥 Enviar a Sublimación", use_container_width=True)
+
+            if btn_cotizar or btn_recorte or btn_plastificado or btn_sublimacion:
+
+                # Guardamos información completa para el cotizador / procesos
                 st.session_state['datos_pre_cotizacion'] = {
                     'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
                     'costo_base': float(fila_sel['Total ($)']) if 'fila_sel' in locals() else (float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote)),
                     'unidades': total_pags,
                     'papel': papel_sel if 'papel_sel' in locals() else '',
                     'calidad': calidad_sel if 'calidad_sel' in locals() else '',
+                    'ruta_post_impresion': ruta_post_impresion,
 
                     # Desglose de consumo real
                     'consumos': totales_lote_cmyk,
@@ -3436,9 +3466,41 @@ elif menu == "🎨 Análisis CMYK":
                 except Exception as e:
                     st.warning(f"No se pudo guardar en historial: {e}")
 
+                if btn_recorte:
+                    st.session_state['datos_corte_desde_cmyk'] = {
+                        'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
+                        'unidades': total_pags,
+                        'observacion': f"Ruta sugerida: {ruta_post_impresion}"
+                    }
+                    st.success("✅ Datos enviados a Corte Industrial")
+                    st.toast("Listo para corte", icon="✂️")
+                    st.rerun()
+
+                if btn_plastificado:
+                    st.session_state['datos_proceso_desde_cmyk'] = {
+                        'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
+                        'unidades': total_pags,
+                        'observacion': f"Ruta sugerida: {ruta_post_impresion}"
+                    }
+                    st.success("✅ Datos enviados a Otros Procesos")
+                    st.toast("Listo para plastificado/proceso", icon="🛠️")
+                    st.rerun()
+
+                if btn_sublimacion:
+                    st.session_state['datos_sublimacion_desde_cmyk'] = {
+                        'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
+                        'unidades': total_pags,
+                        'costo_base': float(st.session_state['datos_pre_cotizacion'].get('costo_base', 0.0) or 0.0),
+                        'papel': st.session_state['datos_pre_cotizacion'].get('papel', ''),
+                        'calidad': st.session_state['datos_pre_cotizacion'].get('calidad', ''),
+                        'observacion': f"Ruta sugerida: {ruta_post_impresion}"
+                    }
+                    st.success("✅ Datos enviados a Sublimación Industrial")
+                    st.toast("Listo para sublimación", icon="🔥")
+                    st.rerun()
+
                 st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
                 st.toast("Listo para cotizar", icon="📨")
-
                 st.rerun()
 
 
@@ -3696,6 +3758,13 @@ elif menu == "🛠️ Otros Procesos":
 
     st.title("🛠️ Calculadora de Procesos Especiales")
     st.info("Cálculo de costos de procesos que no usan tinta: corte, laminado, planchado, etc.")
+    if 'datos_proceso_desde_cmyk' in st.session_state:
+        p_cmyk = st.session_state.get('datos_proceso_desde_cmyk', {})
+        st.success(f"Trabajo recibido desde CMYK: {p_cmyk.get('trabajo', 'N/D')} ({p_cmyk.get('unidades', 0)} uds)")
+        st.caption(str(p_cmyk.get('observacion', '')))
+        if st.button("Limpiar envío CMYK (Procesos)", key='btn_clear_cmyk_proc'):
+            st.session_state.pop('datos_proceso_desde_cmyk', None)
+            st.rerun()
 
     # --- CARGA SEGURA DE EQUIPOS ---
     try:
@@ -3822,6 +3891,13 @@ elif menu == "✂️ Corte Industrial":
 
     st.title("✂️ Corte / Cameo Industrial")
     st.caption("Módulo complementario industrial. No altera los flujos base del ERP.")
+    if 'datos_corte_desde_cmyk' in st.session_state:
+        c_cmyk = st.session_state.get('datos_corte_desde_cmyk', {})
+        st.success(f"Trabajo recibido desde CMYK: {c_cmyk.get('trabajo', 'N/D')} ({c_cmyk.get('unidades', 0)} uds)")
+        st.caption(str(c_cmyk.get('observacion', '')))
+        if st.button("Limpiar envío CMYK (Corte)", key='btn_clear_cmyk_corte'):
+            st.session_state.pop('datos_corte_desde_cmyk', None)
+            st.rerun()
 
     up = st.file_uploader("Archivo de corte (SVG/PNG/JPG/DXF)", type=['svg', 'png', 'jpg', 'jpeg', 'dxf'], key='corte_file_ind')
 
@@ -3869,13 +3945,26 @@ elif menu == "🔥 Sublimación Industrial":
 
     st.title("🔥 Sublimación Industrial")
     st.caption("Módulo complementario industrial. No altera los flujos base del ERP.")
+    if 'datos_sublimacion_desde_cmyk' in st.session_state:
+        s_cmyk = st.session_state.get('datos_sublimacion_desde_cmyk', {})
+        st.success(f"Trabajo recibido desde CMYK: {s_cmyk.get('trabajo', 'N/D')} ({s_cmyk.get('unidades', 0)} uds)")
+        st.caption(f"Papel: {s_cmyk.get('papel', '')} | Ajuste: {s_cmyk.get('calidad', '')}")
+        st.caption(str(s_cmyk.get('observacion', '')))
+        if st.button("Usar costo base recibido en tinta/ml", key='btn_use_cmyk_cost_subl'):
+            costo_base = float(s_cmyk.get('costo_base', 0.0) or 0.0)
+            unidades = float(s_cmyk.get('unidades', 1) or 1)
+            st.session_state['subl_precio_ml_prefill'] = max(costo_base / max(unidades, 1.0), 0.0)
+            st.toast("Costo base de CMYK aplicado como referencia", icon="✅")
+        if st.button("Limpiar envío CMYK (Sublimación)", key='btn_clear_cmyk_subl'):
+            st.session_state.pop('datos_sublimacion_desde_cmyk', None)
+            st.rerun()
 
     up_subl = st.file_uploader("Diseño para sublimación (PNG/JPG/PDF)", type=['png', 'jpg', 'jpeg', 'pdf'], key='subl_file_ind')
 
     c1, c2, c3 = st.columns(3)
     ancho_cm = c1.number_input("Ancho (cm)", min_value=1.0, value=10.0)
     alto_cm = c2.number_input("Alto (cm)", min_value=1.0, value=10.0)
-    precio_ml = c3.number_input("Costo tinta por ml ($)", min_value=0.0, value=float(st.session_state.get('costo_tinta_ml', 0.10)), format='%.4f')
+    precio_ml = c3.number_input("Costo tinta por ml ($)", min_value=0.0, value=float(st.session_state.get('subl_precio_ml_prefill', st.session_state.get('costo_tinta_ml', 0.10))), format='%.4f')
 
     with conectar() as conn:
         try:
