@@ -2824,9 +2824,19 @@ elif menu == "🎨 Análisis CMYK":
         precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
 
         if not df_impresion_db.empty:
+            # Evita colisiones por columnas duplicadas en inventario (p.ej. dos 'item')
+            if df_impresion_db.columns.duplicated().any():
+                df_impresion_db = df_impresion_db.loc[:, ~df_impresion_db.columns.duplicated()].copy()
+
+            # Garantizar serie de ítems segura para filtros de texto
+            if 'item' not in df_impresion_db.columns:
+                df_impresion_db = df_impresion_db.copy()
+                df_impresion_db['item'] = ''
+            items_impresion = df_impresion_db['item'].fillna('').astype(str)
+
             # Consumibles de impresión: tinta líquida, cartuchos y tóner
             consumibles = df_impresion_db[
-                df_impresion_db['item'].fillna('').str.contains('tinta|cartucho|toner|tóner', case=False, na=False)
+                items_impresion.str.contains('tinta|cartucho|toner|tóner', case=False, na=False)
             ].copy()
 
             # NORMALIZACIÓN MODO DIOS
@@ -2837,8 +2847,12 @@ elif menu == "🎨 Análisis CMYK":
                 return modelo_norm in item_norm
 
             consumibles_impresora = consumibles[
-                consumibles['item'].apply(coincide_modelo)
+                consumibles.get('item', pd.Series('', index=consumibles.index)).fillna('').astype(str).apply(coincide_modelo)
             ]
+
+            if 'item' not in consumibles_impresora.columns:
+                consumibles_impresora = consumibles_impresora.copy()
+                consumibles_impresora['item'] = ''
 
             consumibles_final = pd.DataFrame()
 
