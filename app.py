@@ -5361,9 +5361,7 @@ def registrar_venta_global(
 
             cursor.execute("""
                 UPDATE inventario
-                SET cantidad = cantidad - ?
-                WHERE id = ?
-                AND cantidad >= ?
+                SET cantidad = cantidad - ?,
                     ultima_actualizacion = CURRENT_TIMESTAMP
                 WHERE id = ?
                   AND cantidad >= ?
@@ -5419,4 +5417,4 @@ def registrar_venta_global(
 
     finally:
         if conn_creada and conn_local is not None:
-            conn_local.close(
+            conn_local.close()
