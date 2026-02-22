@@ -1737,7 +1737,7 @@ elif menu == "📦 Inventario":
                     "cantidad": "Cantidad",
                     "unidad": "Unidad",
                     "costo_total_usd": st.column_config.NumberColumn("Costo Total ($)", format="%.2f"),
-                    "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.4f"),
+                    "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.2f"),
                     "impuestos": "Impuestos %",
                     "delivery": "Delivery $",
                     "moneda_pago": "Moneda",
@@ -5246,6 +5246,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
