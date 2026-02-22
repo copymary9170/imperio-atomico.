@@ -6,7 +6,7 @@ import io
 import plotly.express as px
 from PIL import Image
 from datetime import datetime, date, timedelta
-from config import
+from config import DATABASE, VERSION, EMPRESA
 import time
 import os
 import hashlib
@@ -473,16 +473,13 @@ def enviar_a_cotizacion_desde_produccion(datos):
 
 
 def descontar_materiales_produccion(consumos, usuario=None, detalle='Consumo de producción'):
-    consumos_limpios = {int(k): float(v) for k, v in (consumos or {}).items() if float(v) > 0}
+    if not isinstance(consumos, dict):
+        return False, "Error interno: consumos inválidos"
+
+    consumos_limpios = {int(k): float(v) for k, v in consumos.items() if float(v) > 0}
     if not consumos_limpios:
         return False, '⚠️ No hay consumos válidos para descontar'
 
-    if consumos is None:
-    consumos = {}
-
-if not isinstance(consumos, dict):
-    return False, "Error interno: consumos inválidos"
-    
     return registrar_venta_global(
         id_cliente=None,
         nombre_cliente='Consumo Interno Producción',
@@ -5411,4 +5408,3 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
