@@ -1514,9 +1514,9 @@ elif menu == "📦 Inventario":
 
         st.caption(f"Sugerencia de impuesto total para compras: {st.session_state.get('inv_impuesto_default', 16.0):.2f}%")
 
-        # ======================================================
-# 🚚 DELIVERY INTELIGENTE CON MONEDA Y TASA PROPIA
-# ======================================================
+       # ------------------------------
+# DELIVERY INTELIGENTE
+# ------------------------------
 
 col_del1, col_del2, col_del3 = st.columns([1.2, 1, 1])
 
@@ -1531,6 +1531,38 @@ delivery_moneda = col_del2.selectbox(
     ["USD $", "Bs (BCV)", "Bs (Binance)"],
     key="inv_delivery_moneda"
 )
+
+usar_tasa_manual = col_del3.checkbox("Tasa manual")
+
+if usar_tasa_manual:
+
+    tasa_delivery = st.number_input(
+        "Tasa usada en delivery",
+        min_value=0.0001,
+        value=float(
+            t_ref if "BCV" in delivery_moneda else
+            t_bin if "Binance" in delivery_moneda else
+            1.0
+        ),
+        format="%.4f",
+        key="inv_delivery_tasa_manual"
+    )
+
+else:
+
+    if "BCV" in delivery_moneda:
+        tasa_delivery = t_ref
+
+    elif "Binance" in delivery_moneda:
+        tasa_delivery = t_bin
+
+    else:
+        tasa_delivery = 1.0
+
+
+delivery = delivery_monto / tasa_delivery if tasa_delivery > 0 else delivery_monto
+
+st.caption(f"Delivery equivalente: ${delivery:.4f}")
 
 # Permite usar tasa automática o manual
 usar_tasa_manual = col_del3.checkbox("Tasa manual", help="Activa si pagaste a tasa diferente")
@@ -5211,6 +5243,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
