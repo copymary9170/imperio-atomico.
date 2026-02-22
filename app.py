@@ -2700,6 +2700,9 @@ elif menu == "🎨 Análisis CMYK":
             )
             if 'imprimible_cmyk' in df_tintas_db.columns:
                 df_impresion_db = df_tintas_db[df_tintas_db['imprimible_cmyk'].fillna(0) == 1].copy()
+                # Fallback: si no hay insumos marcados como CMYK, usar inventario completo
+                if df_impresion_db.empty:
+                    df_impresion_db = df_tintas_db.copy()
             else:
                 df_impresion_db = df_tintas_db.copy()
 
@@ -2849,6 +2852,10 @@ elif menu == "🎨 Análisis CMYK":
             consumibles_impresora = consumibles[
                 consumibles.get('item', pd.Series('', index=consumibles.index)).fillna('').astype(str).apply(coincide_modelo)
             ]
+
+            # Si no hubo match por modelo, usar todos los consumibles detectados para no dejar el análisis vacío
+            if consumibles_impresora.empty:
+                consumibles_impresora = consumibles.copy()
 
             if 'item' not in consumibles_impresora.columns:
                 consumibles_impresora = consumibles_impresora.copy()
