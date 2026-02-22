@@ -986,16 +986,28 @@ def cargar_datos():
             for _, row in conf_df.iterrows():
                 st.session_state[row['parametro']] = float(row['valor'])
         except (sqlite3.DatabaseError, ValueError, KeyError) as e:
-            st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")
+            # Si el esquema aún no existe (p.ej. DB nueva o sesión antigua),
+            # intentamos crear/migrar estructura y recargar una sola vez.
+            inicializar_sistema()
+            try:
+                st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
+                st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+                conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
+                for _, row in conf_df.iterrows():
+                    st.session_state[row['parametro']] = float(row['valor'])
+            except sqlite3.DatabaseError:
+                st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")
 
 # Alias de compatibilidad para módulos que lo usan
 def cargar_datos_seguros():
     cargar_datos()
 
 # --- 5. LOGICA DE ACCESO ---
+# Garantiza esquema base en cada arranque (idempotente).
+inicializar_sistema()
+
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
-    inicializar_sistema()
 
 def login():
     st.title("⚛️ Acceso al Imperio Atómico")
@@ -5407,4 +5419,4 @@ def registrar_venta_global(
 
     finally:
         if conn_creada and conn_local is not None:
-            conn_local.close()
+            conn_local.close(
