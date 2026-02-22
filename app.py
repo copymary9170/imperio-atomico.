@@ -1278,26 +1278,50 @@ elif menu == "📦 Inventario":
           
             st.dataframe(
                df_v.style.apply(resaltar_critico, axis=1),
-                column_config={
-                    "item": "Insumo",
-                    "cantidad": "Stock",
-                    "unidad": "Unidad",
-                    "Costo Unitario": st.column_config.NumberColumn(
-                        f"Costo ({simbolo})", format="%.2f"
-                    ),
-                    "Valor Total": st.column_config.NumberColumn(
-                        f"Valor Total ({simbolo})", format="%.2f"
-                    ),
-                    "minimo": "Mínimo",
-                    "imprimible_cmyk": st.column_config.CheckboxColumn("CMYK", help="Disponible para impresión en Análisis CMYK"),
-                    "area_por_pliego_cm2": st.column_config.NumberColumn("cm²/pliego", format="%.2f"),
-                    "precio_usd": None,
-                    "id": None,
-                    "activo": None,
-                    "ultima_actualizacion": None
-                },
-                use_container_width=True,
-                hide_index=True
+column_config={
+
+    "item": "Insumo",
+
+    "cantidad": st.column_config.NumberColumn(
+        "Stock",
+        format="%.2f"
+    ),
+
+    "unidad": "Unidad",
+
+    "Costo Unitario": st.column_config.NumberColumn(
+        f"Costo ({simbolo})",
+        format="%.2f"
+    ),
+
+    "Valor Total": st.column_config.NumberColumn(
+        f"Valor Total ({simbolo})",
+        format="%.2f"
+    ),
+
+    "minimo": st.column_config.NumberColumn(
+        "Mínimo",
+        format="%.2f"
+    ),
+
+    "imprimible_cmyk": st.column_config.CheckboxColumn(
+        "CMYK",
+        help="Disponible para impresión en Análisis CMYK"
+    ),
+
+    "area_por_pliego_cm2": st.column_config.NumberColumn(
+        "cm²/pliego",
+        format="%.2f"
+    ),
+
+    "precio_usd": None,
+    "id": None,
+    "activo": None,
+    "ultima_actualizacion": None
+
+},
+use_container_width=True,
+hide_index=True
             )
 
         st.divider()
@@ -5246,6 +5270,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
