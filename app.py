@@ -2723,33 +2723,74 @@ elif menu == "🎨 Análisis CMYK":
     try:
         with conectar() as conn:
 
-            # Usamos el inventario como fuente de tintas
+            # Usamos el inventario como fuente
             df_tintas_db = pd.read_sql_query(
                 "SELECT * FROM inventario", conn
             )
-            if 'imprimible_cmyk' in df_tintas_db.columns:
-                items_raw = df_tintas_db['item'].fillna('').astype(str) if 'item' in df_tintas_db.columns else pd.Series('', index=df_tintas_db.index)
-                mask_flag = df_tintas_db['imprimible_cmyk'].fillna(0) == 1
-                mask_consumible = items_raw.str.contains('tinta|cartucho|toner|tóner|papel|fotograf|bond|glossy|mate|satin', case=False, na=False)
-                # Incluye ítems marcados CMYK y también consumibles de impresión detectados por nombre
-                df_impresion_db = df_tintas_db[mask_flag | mask_consumible].copy()
-                # Fallback: si por alguna razón queda vacío, usar inventario completo
-                if df_impresion_db.empty:
-                    df_impresion_db = df_tintas_db.copy()
-            else:
+
+            # NORMALIZAR COLUMNAS (CRÍTICO)
+            df_tintas_db.columns = df_tintas_db.columns.str.strip().str.lower()
+
+
+            # GARANTÍA DEFENSIVA
+            if 'item' not in df_tintas_db.columns:
+                df_tintas_db['item'] = ''
+
+            items_raw = df_tintas_db['item'].fillna('').astype(str)
+
+
+            # FILTROS SEPARADOS
+
+            mask_flag = df_tintas_db.get('imprimible_cmyk', 0).fillna(0) == 1
+
+
+            mask_tintas = items_raw.str.contains(
+                'tinta|cartucho|toner|tóner',
+                case=False,
+                na=False
+            )
+
+
+            mask_papel = items_raw.str.contains(
+                'papel|bond|fotograf|glossy|mate|satin',
+                case=False,
+                na=False
+            )
+
+
+            # DATAFRAME PRINCIPAL
+            df_impresion_db = df_tintas_db[
+                mask_flag | mask_tintas | mask_papel
+            ].copy()
+
+
+            # FALLBACK
+            if df_impresion_db.empty:
+
                 df_impresion_db = df_tintas_db.copy()
 
-            # Esquema mínimo defensivo para evitar KeyError cuando inventario no trae todas las columnas esperadas
+
+
+            # DEFENSIVO FINAL
             for col, default in {
+
                 'item': '',
+
                 'cantidad': 0.0,
+
                 'precio_usd': 0.0,
+
                 'costo_real_ml': 0.0,
+
                 'unidad': ''
+
             }.items():
+
                 if col not in df_impresion_db.columns:
+
                     df_impresion_db[col] = default
-            try:
+                    
+                    try:
                 df_activos_cmyk = pd.read_sql_query(
                     "SELECT equipo, categoria, unidad, desgaste FROM activos", conn
                 )
@@ -2763,7 +2804,7 @@ elif menu == "🎨 Análisis CMYK":
             except Exception:
                 df_perfiles_color = pd.DataFrame(columns=['nombre', 'precision', 'factor_c', 'factor_m', 'factor_y', 'factor_k', 'impresora'])
 
-            # Tabla histórica
+                        # Tabla histórica
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS historial_cmyk (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2778,12 +2819,16 @@ elif menu == "🎨 Análisis CMYK":
                 )
             """)
             cols_hist_cmyk = {row[1] for row in conn.execute("PRAGMA table_info(historial_cmyk)").fetchall()}
+
             if 'c_ml' not in cols_hist_cmyk:
                 conn.execute("ALTER TABLE historial_cmyk ADD COLUMN c_ml REAL")
+
             if 'm_ml' not in cols_hist_cmyk:
                 conn.execute("ALTER TABLE historial_cmyk ADD COLUMN m_ml REAL")
+
             if 'y_ml' not in cols_hist_cmyk:
                 conn.execute("ALTER TABLE historial_cmyk ADD COLUMN y_ml REAL")
+
             if 'k_ml' not in cols_hist_cmyk:
                 conn.execute("ALTER TABLE historial_cmyk ADD COLUMN k_ml REAL")
 
@@ -2793,933 +2838,1059 @@ elif menu == "🎨 Análisis CMYK":
             )
 
     except Exception as e:
+
         st.error(f"Error cargando datos: {e}")
+
         st.stop()
+
 
     # --- LISTA DE IMPRESORAS DISPONIBLES (SOLO DESDE ACTIVOS) ---
     impresoras_disponibles = []
     mapa_desgaste_impresora = {}
 
     if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty:
+
         act = df_activos_cmyk.copy()
+
         mask_unidad_imp = act['unidad'].fillna('').str.contains('Impresora', case=False, na=False)
+
         mask_categoria_imp = act['categoria'].fillna('').str.contains('Impresora|Impresión', case=False, na=False)
+
         mask_equipo_imp = act['equipo'].fillna('').str.contains('Impres', case=False, na=False)
-        activos_impresoras = act[mask_unidad_imp | mask_categoria_imp | mask_equipo_imp].copy()
+
+        activos_impresoras = act[
+            mask_unidad_imp |
+            mask_categoria_imp |
+            mask_equipo_imp
+        ].copy()
 
         for _, row_imp in activos_impresoras.iterrows():
+
             eq = str(row_imp.get('equipo', '')).strip()
+
             if not eq:
                 continue
+
             nombre_limpio = eq.split('] ', 1)[1] if '] ' in eq else eq
+
             if nombre_limpio not in impresoras_disponibles:
+
                 impresoras_disponibles.append(nombre_limpio)
-                mapa_desgaste_impresora[nombre_limpio] = float(row_imp.get('desgaste') or 0)
+
+                mapa_desgaste_impresora[nombre_limpio] = float(
+                    row_imp.get('desgaste') or 0
+                )
+
 
     if not impresoras_disponibles:
-        st.warning("⚠️ No hay impresoras registradas en Activos. Registra primero tus impresoras (unidad/categoría: Impresora) para usar CMYK.")
+
+        st.warning(
+            "⚠️ No hay impresoras registradas en Activos. "
+            "Registra primero tus impresoras (unidad/categoría: Impresora) para usar CMYK."
+        )
+
         st.stop()
+
 
     # --- SELECCIÓN DE IMPRESORA Y ARCHIVOS ---
     c_printer, c_file = st.columns([1, 2])
 
+
     with c_printer:
 
-        impresora_sel = st.selectbox("🖨️ Equipo de Impresión", impresoras_disponibles)
+        impresora_sel = st.selectbox(
+            "🖨️ Equipo de Impresión",
+            impresoras_disponibles
+        )
+
 
         impresora_aliases = [impresora_sel.lower().strip()]
+
+
         if ' ' in impresora_aliases[0]:
-            impresora_aliases.extend([x for x in impresora_aliases[0].split(' ') if len(x) > 2])
+
+            impresora_aliases.extend(
+
+                [x for x in impresora_aliases[0].split(' ') if len(x) > 2]
+
+            )
+
 
         usar_stock_por_impresora = st.checkbox(
+
             "Usar tintas del inventario solo de esta impresora",
+
             value=True,
+
             help="Actívalo si registras tintas separadas por impresora en inventario."
+
         )
+
+
         auto_negro_inteligente = st.checkbox(
+
             "Conteo automático inteligente de negro (sombras y mezclas)",
+
             value=True,
+
             help="Detecta zonas oscuras y mezclas ricas para sumar consumo real de tinta negra (K)."
+
         )
+
 
         # Parámetros automáticos (sin calibración manual)
-        desgaste_imp = float(mapa_desgaste_impresora.get(impresora_sel, 0) or 0)
+
+        desgaste_imp = float(
+
+            mapa_desgaste_impresora.get(impresora_sel, 0) or 0
+
+        )
+
+
         costo_desgaste = desgaste_imp if desgaste_imp > 0 else 0.02
 
+
         nombre_imp = impresora_sel.lower()
+
+
         if any(tag in nombre_imp for tag in ['foto', 'phot', 'xp', 'tx']):
+
             ml_base_pagina = 0.18
+
+
         elif any(tag in nombre_imp for tag in ['eco', 'l', 'tank']):
+
             ml_base_pagina = 0.12
+
+
         else:
+
             ml_base_pagina = 0.15
 
-        st.info(f"⚙️ Consumo base automático: {ml_base_pagina:.3f} ml/pág al 100%.")
-        st.info(f"🛠️ Desgaste automático por página: ${costo_desgaste:.3f} (tomado de Activos).")
 
-        precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
+        st.info(
+
+            f"⚙️ Consumo base automático: {ml_base_pagina:.3f} ml/pág al 100%."
+
+        )
+
+
+        st.info(
+
+            f"🛠️ Desgaste automático por página: ${costo_desgaste:.3f} (tomado de Activos)."
+
+        )
+
+
+        precio_tinta_ml = st.session_state.get(
+
+            'costo_tinta_ml',
+
+            0.10
+
+        )
+
 
         if not df_impresion_db.empty:
+
+
             # Evita colisiones por columnas duplicadas en inventario (p.ej. dos 'item')
+
             if df_impresion_db.columns.duplicated().any():
-                df_impresion_db = df_impresion_db.loc[:, ~df_impresion_db.columns.duplicated()].copy()
+
+                df_impresion_db = df_impresion_db.loc[
+
+                    :,
+
+                    ~df_impresion_db.columns.duplicated()
+
+                ].copy()
+
 
             # Garantizar serie de ítems segura para filtros de texto
+
             if 'item' not in df_impresion_db.columns:
+
                 df_impresion_db = df_impresion_db.copy()
+
                 df_impresion_db['item'] = ''
+
+
             items_impresion = df_impresion_db['item'].fillna('').astype(str)
 
+
             # Consumibles de impresión: tinta líquida, cartuchos y tóner
+
             consumibles = df_impresion_db[
-                items_impresion.str.contains('tinta|cartucho|toner|tóner', case=False, na=False)
+
+                items_impresion.str.contains(
+
+                    'tinta|cartucho|toner|tóner',
+
+                    case=False,
+
+                    na=False
+
+                )
+
             ].copy()
 
+
             # NORMALIZACIÓN MODO DIOS
-            modelo_norm = ''.join(filter(str.isalnum, impresora_sel.lower()))
+
+            modelo_norm = ''.join(
+
+                filter(str.isalnum, impresora_sel.lower())
+
+            )
+
 
             def coincide_modelo(item):
-                item_norm = ''.join(filter(str.isalnum, str(item).lower()))
+
+                item_norm = ''.join(
+
+                    filter(str.isalnum, str(item).lower())
+
+                )
+
                 return modelo_norm in item_norm
 
+
             consumibles_impresora = consumibles[
-                consumibles.get('item', pd.Series('', index=consumibles.index)).fillna('').astype(str).apply(coincide_modelo)
+
+                consumibles.get(
+
+                    'item',
+
+                    pd.Series('', index=consumibles.index)
+
+                )
+
+                .fillna('')
+
+                .astype(str)
+
+                .apply(coincide_modelo)
+
             ]
 
+
             # Si no hubo match por modelo, usar todos los consumibles detectados para no dejar el análisis vacío
+
             if consumibles_impresora.empty:
+
                 consumibles_impresora = consumibles.copy()
 
+
             if 'item' not in consumibles_impresora.columns:
+
                 consumibles_impresora = consumibles_impresora.copy()
+
                 consumibles_impresora['item'] = ''
+
 
             consumibles_final = pd.DataFrame()
 
+
             prioridades = [
+
                 'sublimacion',
+
                 'sublimation',
+
                 'sublim',
+
                 'tinta',
+
                 'cartucho',
+
                 'toner',
+
                 'tóner'
+
             ]
+
 
             for tipo in prioridades:
 
+
                 temp = consumibles_impresora[
-                    consumibles_impresora['item'].fillna('').str.contains(tipo, case=False, na=False)
+
+                    consumibles_impresora['item']
+
+                    .fillna('')
+
+                    .str.contains(
+
+                        tipo,
+
+                        case=False,
+
+                        na=False
+
+                    )
+
                 ]
+
 
                 if not temp.empty:
 
+
                     consumibles_final = temp
+
 
                     break
 
+
             if consumibles_final.empty:
+
 
                 consumibles_final = consumibles_impresora
 
             # Estimación de costo por color con soporte para cartucho tricolor (CMY)
             costos_color = {'C': [], 'M': [], 'Y': [], 'K': []}
+
             if not consumibles_final.empty:
+
                 for _, row_cons in consumibles_final.iterrows():
+
                     nombre = str(row_cons.get('item', '')).lower()
-                    precio = float(row_cons.get('costo_real_ml', row_cons.get('precio_usd', 0)) or 0)
+
+                    precio = float(
+                        row_cons.get(
+                            'costo_real_ml',
+                            row_cons.get('precio_usd', 0)
+                        ) or 0
+                    )
+
                     if precio <= 0:
                         continue
 
-                    es_tricolor = ('cartucho' in nombre) and (
-                        ('color' in nombre) or
-                        ('tricolor' in nombre) or
-                        ('cmy' in nombre) or
-                        (('cian' in nombre or 'cyan' in nombre) and 'magenta' in nombre and ('amarillo' in nombre or 'yellow' in nombre))
+
+                    es_tricolor = (
+
+                        ('cartucho' in nombre)
+
+                        and (
+
+                            ('color' in nombre)
+
+                            or ('tricolor' in nombre)
+
+                            or ('cmy' in nombre)
+
+                            or (
+
+                                ('cian' in nombre or 'cyan' in nombre)
+
+                                and 'magenta' in nombre
+
+                                and ('amarillo' in nombre or 'yellow' in nombre)
+
+                            )
+
+                        )
+
                     )
 
+
                     if es_tricolor:
+
                         tercio = precio / 3.0
+
                         costos_color['C'].append(tercio)
+
                         costos_color['M'].append(tercio)
+
                         costos_color['Y'].append(tercio)
+
                         continue
 
+
                     if any(x in nombre for x in ['cian', 'cyan']):
+
                         costos_color['C'].append(precio)
+
+
                     if 'magenta' in nombre:
+
                         costos_color['M'].append(precio)
+
+
                     if any(x in nombre for x in ['amarillo', 'yellow']):
+
                         costos_color['Y'].append(precio)
+
+
                     if any(x in nombre for x in ['negro', 'negra', 'black', ' toner black', ' k ']):
+
                         costos_color['K'].append(precio)
 
-                    # Tóner sin color explícito: se asume negro en impresoras mono
-                    if ('toner' in nombre or 'tóner' in nombre) and not any(x in nombre for x in ['cian', 'cyan', 'magenta', 'amarillo', 'yellow', 'negro', 'black']):
+
+                    if (
+
+                        ('toner' in nombre or 'tóner' in nombre)
+
+                        and not any(
+
+                            x in nombre
+
+                            for x in [
+
+                                'cian',
+
+                                'cyan',
+
+                                'magenta',
+
+                                'amarillo',
+
+                                'yellow',
+
+                                'negro',
+
+                                'black'
+
+                            ]
+
+                        )
+
+                    ):
+
                         costos_color['K'].append(precio)
 
-                pool = [v for arr in costos_color.values() for v in arr if v > 0]
+
+
+                pool = [
+
+                    v
+
+                    for arr in costos_color.values()
+
+                    for v in arr
+
+                    if v > 0
+
+                ]
+
+
                 if pool:
+
                     precio_tinta_ml = sum(pool) / len(pool)
-                    st.success(f"💧 Costo estimado de consumible detectado: ${precio_tinta_ml:.4f} (incluye tinta/cartucho/tóner)")
+
+                    st.success(
+
+                        f"💧 Costo estimado de consumible detectado: "
+
+                        f"${precio_tinta_ml:.4f} "
+
+                        "(incluye tinta/cartucho/tóner)"
+
+                    )
+
+
 
         factor = 1.5
         factor_k = 0.8
         refuerzo_negro = 0.06
 
+
+
         if 'df_perfiles_color' in locals() and not df_perfiles_color.empty:
+
+
             pdisp = df_perfiles_color.copy()
+
+
             pdisp['impresora'] = pdisp['impresora'].fillna('')
-            pdisp = pdisp[(pdisp['impresora'].str.strip() == '') | (pdisp['impresora'].str.lower().str.contains(impresora_sel.lower(), na=False))]
+
+
+            pdisp = pdisp[
+
+                (
+
+                    pdisp['impresora'].str.strip() == ''
+
+                )
+
+                |
+
+                (
+
+                    pdisp['impresora']
+
+                    .str.lower()
+
+                    .str.contains(
+
+                        impresora_sel.lower(),
+
+                        na=False
+
+                    )
+
+                )
+
+            ]
+
+
             if not pdisp.empty:
-                p_opts = {f"{r['nombre']} ({float(r.get('precision') or 0):.2f})": r for _, r in pdisp.iterrows()}
-                sel_p = st.selectbox("Perfil de color (opcional)", ["Automático"] + list(p_opts.keys()), key='cmyk_perfil_color_sel')
+
+
+                p_opts = {
+
+                    f"{r['nombre']} "
+
+                    f"({float(r.get('precision') or 0):.2f})": r
+
+                    for _, r in pdisp.iterrows()
+
+                }
+
+
+                sel_p = st.selectbox(
+
+                    "Perfil de color (opcional)",
+
+                    ["Automático"] + list(p_opts.keys()),
+
+                    key='cmyk_perfil_color_sel'
+
+                )
+
+
                 if sel_p != "Automático":
+
+
                     rowp = p_opts[sel_p]
+
+
                     factor_c = float(rowp.get('factor_c') or 1.0)
+
                     factor_m = float(rowp.get('factor_m') or 1.0)
+
                     factor_y = float(rowp.get('factor_y') or 1.0)
+
                     factor_k = float(rowp.get('factor_k') or factor_k)
-                    factor = max(0.01, (factor_c + factor_m + factor_y) / 3.0)
-                    st.info(f"Perfil aplicado: Cx{factor_c:.2f} Mx{factor_m:.2f} Yx{factor_y:.2f} Kx{factor_k:.2f}")
 
-        st.success("🧠 Modo automático de negro activo: se detectan sombras y mezclas con negro en cada página.")
 
-    with c_file:
-        archivos_multiples = st.file_uploader(
-            "Carga tus diseños",
-            type=['pdf', 'png', 'jpg', 'jpeg'],
-            accept_multiple_files=True
+                    factor = max(
+
+                        0.01,
+
+                        (
+
+                            factor_c
+
+                            + factor_m
+
+                            + factor_y
+
+                        )
+
+                        / 3.0
+
+                    )
+
+
+                    st.info(
+
+                        f"Perfil aplicado: "
+
+                        f"Cx{factor_c:.2f} "
+
+                        f"Mx{factor_m:.2f} "
+
+                        f"Yx{factor_y:.2f} "
+
+                        f"Kx{factor_k:.2f}"
+
+                    )
+
+
+
+        st.success(
+
+            "🧠 Modo automático de negro activo: "
+
+            "se detectan sombras y mezclas con negro en cada página."
+
         )
 
+
+
+    with c_file:
+
+
+        archivos_multiples = st.file_uploader(
+
+            "Carga tus diseños",
+
+            type=['pdf', 'png', 'jpg', 'jpeg'],
+
+            accept_multiple_files=True
+
+        )
+
+
+
     if not archivos_multiples and 'cmyk_analisis_cache' in st.session_state:
-        st.session_state.pop('cmyk_analisis_cache', None)
 
-    # --- PROCESAMIENTO ---
-    if archivos_multiples:
 
-        try:
-            import fitz  # PyMuPDF (opcional para PDF)
-        except ModuleNotFoundError:
-            fitz = None
+        st.session_state.pop(
 
-        resultados = []
-        totales_lote_cmyk = {'C': 0.0, 'M': 0.0, 'Y': 0.0, 'K': 0.0}
-        total_pags = 0
+            'cmyk_analisis_cache',
 
-        with st.spinner('🚀 Analizando cobertura real...'):
+            None
 
-            for arc in archivos_multiples:
+        )
 
-                try:
-                    paginas_items = []
-                    bytes_data = arc.read()
 
-                    if arc.name.lower().endswith('.pdf'):
-
-                        if fitz is None:
-                            st.error(
-                                f"No se puede analizar '{arc.name}' porque falta PyMuPDF (fitz). "
-                                "Carga imágenes (PNG/JPG) o instala la dependencia para PDF."
-                            )
-                            continue
-
-                        doc = fitz.open(stream=bytes_data, filetype="pdf")
-
-                        for i in range(len(doc)):
-                            page = doc.load_page(i)
-
-                            pix = page.get_pixmap(colorspace=fitz.csCMYK, dpi=150)
-
-                            img = Image.frombytes(
-                                "CMYK",
-                                [pix.width, pix.height],
-                                pix.samples
-                            )
-
-                            paginas_items.append((f"{arc.name} (P{i+1})", img))
-
-                        doc.close()
-
-                    else:
-                        img = Image.open(io.BytesIO(bytes_data)).convert('CMYK')
-                        paginas_items.append((arc.name, img))
-
-                    for nombre, img_obj in paginas_items:
-
-                        total_pags += 1
-                        arr = np.array(img_obj)
-
-                        c_chan = arr[:, :, 0] / 255.0
-                        m_chan = arr[:, :, 1] / 255.0
-                        y_chan = arr[:, :, 2] / 255.0
-                        k_chan = arr[:, :, 3] / 255.0
-
-                        c_media = float(np.mean(c_chan))
-                        m_media = float(np.mean(m_chan))
-                        y_media = float(np.mean(y_chan))
-                        k_media = float(np.mean(k_chan))
-
-                        ml_c = c_media * ml_base_pagina * factor
-                        ml_m = m_media * ml_base_pagina * factor
-                        ml_y = y_media * ml_base_pagina * factor
-
-                        ml_k_base = k_media * ml_base_pagina * factor * factor_k
-                        k_extra_ml = 0.0
-
-                        if auto_negro_inteligente:
-                            cobertura_cmy = (c_chan + m_chan + y_chan) / 3.0
-                            neutral_mask = (
-                                (np.abs(c_chan - m_chan) < 0.08)
-                                & (np.abs(m_chan - y_chan) < 0.08)
-                            )
-                            shadow_mask = (k_chan > 0.45) | (cobertura_cmy > 0.60)
-                            rich_black_mask = shadow_mask & (cobertura_cmy > 0.35)
-
-                            ratio_extra = (
-                                float(np.mean(shadow_mask)) * 0.12
-                                + float(np.mean(neutral_mask)) * 0.10
-                                + float(np.mean(rich_black_mask)) * 0.18
-                            )
-                            k_extra_ml = ml_base_pagina * factor * ratio_extra
-                        else:
-                            promedio_color = (c_media + m_media + y_media) / 3
-                            if promedio_color > 0.55:
-                                k_extra_ml = promedio_color * refuerzo_negro * factor
-
-                        ml_k = ml_k_base + k_extra_ml
-                        consumo_total_f = ml_c + ml_m + ml_y + ml_k
-
-                        costo_f = (consumo_total_f * precio_tinta_ml) + costo_desgaste
-
-                        totales_lote_cmyk['C'] += ml_c
-                        totales_lote_cmyk['M'] += ml_m
-                        totales_lote_cmyk['Y'] += ml_y
-                        totales_lote_cmyk['K'] += ml_k
-
-                        resultados.append({
-                            "Archivo": nombre,
-                            "C (ml)": round(ml_c, 2),
-                            "M (ml)": round(ml_m, 2),
-                            "Y (ml)": round(ml_y, 2),
-                            "K (ml)": round(ml_k, 2),
-                            "K extra auto (ml)": round(k_extra_ml, 2),
-                            "Total ml": round(consumo_total_f, 2),
-                            "Costo $": round(costo_f, 2)
-                        })
-
-                        try:
-                            pxr = calcular_consumo_por_pixel(img_obj.convert('RGB'))
-                            with conectar() as conn_px:
-                                conn_px.execute(
-                                    """
-                                    INSERT INTO analisis_pixel (archivo, pixeles_totales, consumo_real_ml, precision)
-                                    VALUES (?,?,?,?)
-                                    """,
-                                    (
-                                        str(nombre),
-                                        int(pxr.get('pixeles_totales', 0)),
-                                        float(pxr.get('consumo_real_ml', 0.0)),
-                                        float(pxr.get('precision', 0.0))
-                                    )
-                                )
-                                conn_px.execute(
-                                    """
-                                    INSERT INTO aprendizaje_consumo (archivo, consumo_estimado, consumo_real, error, impresora)
-                                    VALUES (?,?,?,?,?)
-                                    """,
-                                    (
-                                        str(nombre),
-                                        float(consumo_total_f),
-                                        float(pxr.get('consumo_real_ml', 0.0)),
-                                        float(pxr.get('consumo_real_ml', 0.0) - consumo_total_f),
-                                        str(impresora_sel)
-                                    )
-                                )
-                                conn_px.commit()
-                        except Exception:
-                            pass
-
-                except Exception as e:
-                    st.error(f"Error analizando {arc.name}: {e}")
-
-        # --- RESULTADOS ---
-        if resultados:
-
-            st.subheader("📋 Desglose por Archivo")
-            st.dataframe(pd.DataFrame(resultados), use_container_width=True)
-
-            st.subheader("🧪 Consumo Total de Tintas")
-
-            col_c, col_m, col_y, col_k = st.columns(4)
-
-            col_c.metric("Cian", f"{totales_lote_cmyk['C']:.3f} ml")
-            col_m.metric("Magenta", f"{totales_lote_cmyk['M']:.3f} ml")
-            col_y.metric("Amarillo", f"{totales_lote_cmyk['Y']:.3f} ml")
-            col_k.metric("Negro", f"{totales_lote_cmyk['K']:.3f} ml")
-
-            st.divider()
-
-            total_usd_lote = sum(r['Costo $'] for r in resultados)
-
-            costo_promedio_pagina = (total_usd_lote / total_pags) if total_pags > 0 else 0
-            st.metric(
-                "💰 Costo Total Estimado de Producción",
-                f"$ {total_usd_lote:.2f}",
-                delta=f"$ {costo_promedio_pagina:.4f} por pág"
-            )
-
-            with st.expander("📈 Simulación de ganancia antes de imprimir", expanded=False):
-                margen_sim = st.number_input("Margen simulado (%)", min_value=0.0, value=30.0, key='cmyk_margen_sim')
-                sim = simular_ganancia_pre_impresion(total_usd_lote, margen_sim)
-                a1, a2 = st.columns(2)
-                a1.metric("Precio sugerido", f"$ {sim['precio_sugerido']:.2f}")
-                a2.metric("Ganancia estimada", f"$ {sim['ganancia_estimada']:.2f}")
-
-            precio_cobrado_sim = st.number_input(
-                "Precio cobrado estimado ($)",
-                min_value=0.0,
-                value=float(total_usd_lote * 1.3),
-                key='cmyk_precio_cobrado_sim'
-            )
-            if st.button("💾 Guardar rentabilidad del trabajo", key='btn_guardar_trabajo_hist'):
-                with conectar() as conn:
-                    conn.execute(
-                        """
-                        INSERT INTO trabajos_historial
-                        (cliente, impresora, costo_real, precio_cobrado, ganancia, paginas, ml_c, ml_m, ml_y, ml_k)
-                        VALUES (?,?,?,?,?,?,?,?,?,?)
-                        """,
-                        (
-                            'Consumidor Final',
-                            impresora_sel,
-                            float(total_usd_lote),
-                            float(precio_cobrado_sim),
-                            float(precio_cobrado_sim - total_usd_lote),
-                            int(total_pags),
-                            float(totales_lote_cmyk.get('C', 0.0)),
-                            float(totales_lote_cmyk.get('M', 0.0)),
-                            float(totales_lote_cmyk.get('Y', 0.0)),
-                            float(totales_lote_cmyk.get('K', 0.0))
-                        )
-                    )
-                    conn.commit()
-                actualizar_estadisticas_avanzadas()
-                st.success('Rentabilidad guardada en historial de trabajos.')
-
-            df_totales = pd.DataFrame([
-                {"Color": "C", "ml": totales_lote_cmyk['C']},
-                {"Color": "M", "ml": totales_lote_cmyk['M']},
-                {"Color": "Y", "ml": totales_lote_cmyk['Y']},
-                {"Color": "K", "ml": totales_lote_cmyk['K']}
-            ])
-            fig_cmyk = px.pie(df_totales, names='Color', values='ml', title='Distribución de consumo CMYK')
-            st.plotly_chart(fig_cmyk, use_container_width=True)
-
-            if st.button("🧾 Descontar consumo CMYK del inventario", key="btn_descuento_cmyk_auto"):
-                with conectar() as conn:
-                    filas_tinta = conn.execute(
-                        """
-                        SELECT id, item FROM inventario
-                        WHERE COALESCE(activo,1)=1
-                          AND lower(trim(COALESCE(unidad,'')))='ml'
-                          AND lower(COALESCE(item,'')) LIKE lower(?)
-                        """
-                    ,
-                        (f"%{impresora_sel}%",)
-                    ).fetchall()
-                ids_por_color = {}
-                for item_id, item_nombre in filas_tinta:
-                    nombre = str(item_nombre or '').lower()
-                    if 'cian' in nombre or 'cyan' in nombre:
-                        ids_por_color.setdefault('C', int(item_id))
-                    if 'magenta' in nombre:
-                        ids_por_color.setdefault('M', int(item_id))
-                    if 'amarillo' in nombre or 'yellow' in nombre:
-                        ids_por_color.setdefault('Y', int(item_id))
-                    if 'negro' in nombre or 'black' in nombre or ' k ' in f" {nombre} ":
-                        ids_por_color.setdefault('K', int(item_id))
-
-                    es_tricolor = ('cartucho' in nombre) and any(x in nombre for x in ['color', 'tricolor', 'cmy'])
-                    if es_tricolor:
-                        ids_por_color.setdefault('C', int(item_id))
-                        ids_por_color.setdefault('M', int(item_id))
-                        ids_por_color.setdefault('Y', int(item_id))
-
-                consumos_desc = {}
-                for color, ml in totales_lote_cmyk.items():
-                    if color in ids_por_color and float(ml) > 0:
-                        consumos_desc[ids_por_color[color]] = consumos_desc.get(ids_por_color[color], 0.0) + float(ml)
-
-                ok_desc, msg_desc = descontar_consumo_cmyk(
-                    consumos_desc,
-                    usuario=st.session_state.get('usuario_nombre', 'Sistema'),
-                    detalle=f"Consumo CMYK automático - {impresora_sel}",
-                    metodo='Interno-CMYK',
-                    monto_usd=0.01
-                )
-                if ok_desc:
-                    st.success(msg_desc)
-                else:
-                    st.warning(msg_desc)
-
-            df_resultados = pd.DataFrame(resultados)
-            st.download_button(
-                "📥 Descargar desglose CMYK (CSV)",
-                data=df_resultados.to_csv(index=False).encode('utf-8'),
-                file_name="analisis_cmyk.csv",
-                mime="text/csv"
-            )
 
             # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
             st.subheader("🧾 Simulación automática por Papel y Calidad")
-            # Papeles desde inventario (precio_usd) con fallback por defecto
+
             perfiles_papel = {}
+
             try:
+
                 papeles_inv = df_impresion_db[
+
                     df_impresion_db['item'].fillna('').str.contains(
+
                         'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
+
                         case=False,
+
                         na=False
+
                     )
+
                 ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
 
+
                 for _, row_p in papeles_inv.iterrows():
+
                     nombre_p = str(row_p['item']).strip()
+
                     precio_p = float(row_p['precio_usd'])
+
                     if precio_p > 0:
+
                         perfiles_papel[nombre_p] = precio_p
+
             except Exception:
+
                 perfiles_papel = {}
 
+
             if not perfiles_papel:
+
                 perfiles_papel = {
+
                     "Bond 75g": 0.03,
+
                     "Bond 90g": 0.05,
+
                     "Fotográfico Brillante": 0.22,
+
                     "Fotográfico Mate": 0.20,
+
                     "Cartulina": 0.12,
+
                     "Adhesivo": 0.16
+
                 }
+
                 st.info("No se detectaron papeles en inventario; se usan costos base por defecto.")
+
             else:
+
                 st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
-           # ===============================================
-    # CALIDAD DE IMPRESIÓN (CONFIGURACIÓN USUARIO)
-    # ===============================================
-    # Calidad real de impresión (configuración del usuario)
-    calidades_impresion = {
-        
-        "Borrador": 0.75,
 
-        "Normal": 1.00,
 
-        "Alta": 1.18,
 
-        "Foto": 1.35
+            # ===============================================
+            # CALIDAD DE IMPRESIÓN
+            # ===============================================
 
-    }
+            calidades_impresion = {
 
+                "Borrador": 0.75,
 
-    # Perfil del driver (tipo seleccionado en la impresora)
-    perfil_driver = {
-        
-        "Mate": 1.00,
+                "Normal": 1.00,
 
-        "Glossy": 1.12,
+                "Alta": 1.18,
 
-        "Semi-Gloss": 1.08,
+                "Foto": 1.35
 
-        "Satinado": 1.06,
+            }
 
-        "Premium Glossy": 1.15,
 
-        "Premium Mate": 1.10
 
-    }
+            perfil_driver = {
 
+                "Mate": 1.00,
 
-    # ===============================================
-    # CÁLCULOS BASE
-    # ===============================================
-    
-    total_ml_lote = float(sum(totales_lote_cmyk.values()))
+                "Glossy": 1.12,
 
-    costo_desgaste_base = float(costo_desgaste) * float(total_pags)
+                "Semi-Gloss": 1.08,
 
-    
-    # ===============================================
-    # SIMULACIONES
-    # ===============================================
+                "Satinado": 1.06,
 
-    simulaciones = []
+                "Premium Glossy": 1.15,
 
-    for papel, costo_hoja in perfiles_papel.items():
+                "Premium Mate": 1.10
 
-       for calidad, mult_calidad in calidades_impresion.items():
+            }
 
-            for driver, mult_driver in perfil_driver.items():
 
-                tinta_real = costo_tinta_base * mult_calidad * mult_driver
 
-                desgaste_real = costo_desgaste_base
+            # ===============================================
+            # CÁLCULOS BASE
+            # ===============================================
 
-                costo_papel_q = float(total_pags) * costo_hoja
+            total_ml_lote = float(sum(totales_lote_cmyk.values()))
 
-                total_q = tinta_real + desgaste_real + costo_papel_q
+            costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
 
-                simulaciones.append({
+            costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
-                    "Papel": papel,
 
-                    "Calidad": calidad,
 
-                    "Perfil": driver,
+            # ===============================================
+            # SIMULACIONES
+            # ===============================================
 
-                    "Páginas": total_pags,
+            simulaciones = []
 
-                    "Tinta ($)": round(tinta_real, 2),
 
-                    "Desgaste ($)": round(desgaste_real, 2),
+            for papel, costo_hoja in perfiles_papel.items():
 
-                    "Papel ($)": round(costo_papel_q, 2),
+                for calidad, mult_calidad in calidades_impresion.items():
 
-                    "Total ($)": round(total_q, 2),
+                    for driver, mult_driver in perfil_driver.items():
 
-                    "Costo por pág ($)": round(total_q / total_pags, 2) if total_pags else 0
+                        tinta_real = costo_tinta_base * mult_calidad * mult_driver
 
-                })
+                        desgaste_real = costo_desgaste_base
 
+                        costo_papel_q = float(total_pags) * costo_hoja
 
-    # ===============================================
-    # DATAFRAME
-    # ===============================================
-    df_sim = pd.DataFrame(simulaciones).sort_values('Total ($)')
+                        total_q = tinta_real + desgaste_real + costo_papel_q
 
-    st.dataframe(
-        
-        df_sim,
 
-        use_container_width=True,
+                        simulaciones.append({
 
-        hide_index=True
+                            "Papel": papel,
 
-    )
+                            "Calidad": calidad,
 
+                            "Perfil": driver,
 
-    # ===============================================
-    # GRÁFICO
-    # ===============================================
+                            "Páginas": total_pags,
 
-    fig_sim = px.bar(
+                            "Tinta ($)": round(tinta_real, 2),
 
-        df_sim.head(12),
+                            "Desgaste ($)": round(desgaste_real, 2),
 
-        x='Papel',
+                            "Papel ($)": round(costo_papel_q, 2),
 
-        y='Total ($)',
+                            "Total ($)": round(total_q, 2),
 
-        color='Calidad',
+                            "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
 
-        barmode='group',
+                        })
 
-        title='Comparativo de costos'
 
-    )
 
-    st.plotly_chart(
+            df_sim = pd.DataFrame(simulaciones).sort_values("Total ($)")
 
-        fig_sim,
 
-        use_container_width=True
+            st.dataframe(
 
-    )
+                df_sim,
 
+                use_container_width=True,
 
-    # ===============================================
-    # MEJOR OPCIÓN
-    # ===============================================
+                hide_index=True
 
-    mejor = df_sim.iloc[0]
+            )
 
 
-    st.success(
+            # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
+            st.subheader("🧾 Simulación automática por Papel y Calidad")
 
-        f"Mejor costo automático: "
+            perfiles_papel = {}
 
-        f"{mejor['Papel']} | {mejor['Calidad']} | {mejor['Perfil']} "
+            try:
 
-        f"→ ${mejor['Total ($)']:.2f}"
+                papeles_inv = df_impresion_db[
 
-    )
+                    df_impresion_db['item']
 
+                    .fillna('')
 
-    # ===============================================
-    # SELECTORES
-    # ===============================================
+                    .str.contains(
 
-    st.subheader("🎯 Escenario a enviar a cotización")
+                        'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
 
+                        case=False,
 
-    papel_sel = st.selectbox(
+                        na=False
 
-        "Papel",
+                    )
 
-        sorted(df_sim['Papel'].unique()),
+                ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
 
-        key='cmyk_papel_cot'
 
-    )
+                for _, row_p in papeles_inv.iterrows():
 
+                    nombre_p = str(row_p['item']).strip()
 
-    calidad_sel = st.selectbox(
+                    precio_p = float(row_p['precio_usd'])
 
-        "Calidad de impresión",
+                    if precio_p > 0:
 
-        sorted(df_sim['Calidad'].unique()),
+                        perfiles_papel[nombre_p] = precio_p
 
-        key='cmyk_calidad_cot'
 
-    )
+            except Exception:
 
+                perfiles_papel = {}
 
-    perfil_sel = st.selectbox(
 
-        "Perfil del driver",
+            if not perfiles_papel:
 
-        sorted(df_sim['Perfil'].unique()),
+                perfiles_papel = {
 
-        key='cmyk_driver_cot'
+                    "Bond 75g": 0.03,
 
-    )
+                    "Bond 90g": 0.05,
 
+                    "Fotográfico Brillante": 0.22,
 
-    fila_sel = df_sim[
+                    "Fotográfico Mate": 0.20,
 
-        (df_sim['Papel'] == papel_sel)
+                    "Cartulina": 0.12,
 
-        & (df_sim['Calidad'] == calidad_sel)
+                    "Adhesivo": 0.16
 
-        & (df_sim['Perfil'] == perfil_sel)
+                }
 
-    ].iloc[0]
 
+            # ===============================================
+            # CALIDAD DE IMPRESIÓN
+            # ===============================================
 
-    st.info(
+            calidades_impresion = {
 
-        f"Se enviará a cotización: "
+                "Borrador": 0.75,
 
-        f"{papel_sel} | {calidad_sel} | {perfil_sel} "
+                "Normal": 1.00,
 
-        f"→ ${float(fila_sel['Total ($)']):.2f}"
+                "Alta": 1.18,
 
-    )
+                "Foto": 1.35
 
+            }
 
-    # ===============================================
-    # CACHE
-    # ===============================================
 
-    st.session_state['cmyk_analisis_cache'] = {
+            perfil_driver = {
 
-        'resultados': resultados,
+                "Mate": 1.00,
 
-        'simulaciones': simulaciones,
+                "Glossy": 1.12,
 
-        'impresora': impresora_sel,
-    
-        'paginas': total_pags,
+                "Semi-Gloss": 1.08,
 
-        'papel_sel': papel_sel,
+                "Satinado": 1.06,
 
-        'calidad_sel': calidad_sel,
+                "Premium Glossy": 1.15,
 
-        'perfil_sel': perfil_sel,
+                "Premium Mate": 1.10
 
-        'total_sel': float(fila_sel['Total ($)'])
-    
-    }
+            }
 
-    # --- VERIFICAR INVENTARIO ---
-         if not df_impresion_db.empty:
 
-                    st.subheader("📦 Verificación de Inventario")
+            # ===============================================
+            # CALCULOS BASE
+            # ===============================================
 
-                    alertas = []
+            total_ml_lote = float(sum(totales_lote_cmyk.values()))
 
-                    stock_base = df_impresion_db[df_impresion_db['item'].fillna('').astype(str).str.contains('tinta|cartucho|toner|tóner', case=False, na=False)].copy()
-                    if usar_stock_por_impresora:
+            costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
 
-                        modelo_norm = ''.join(filter(str.isalnum, impresora_sel.lower()))
-                        modelo_tokens = [tok for tok in ''.join(ch if ch.isalnum() else ' ' for ch in impresora_sel.lower()).split() if len(tok) >= 3]
+            costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
-                        def coincide_impresora_item(nombre_item):
-                            item_norm = ''.join(filter(str.isalnum, str(nombre_item).lower()))
-                            if modelo_norm and modelo_norm in item_norm:
-                                return True
-                            return any(tok in item_norm for tok in modelo_tokens)
 
-                        stock_imp = stock_base[
-                            stock_base['item'].fillna('').astype(str).apply(coincide_impresora_item)
-                        ]
+            # ===============================================
+            # SIMULACIONES
+            # ===============================================
 
-                        if not stock_imp.empty:
-                            stock_base = stock_imp
+            simulaciones = []
 
-                    alias_colores = {
-                        'C': ['cian', 'cyan'],
-                        'M': ['magenta'],
-                        'Y': ['amarillo', 'yellow'],
-                        # K = Negro. Incluye variantes reales de inventario: negro/negra/black/k
-                        'K': ['negro', 'negra', 'black', ' k ']
-                    }
 
-                    stock_tricolor = stock_base[
-                        stock_base['item'].fillna('').str.contains('cartucho', case=False, na=False) &
-                        stock_base['item'].fillna('').str.contains('color|tricolor|cmy', case=False, na=False)
-                    ]
+            for papel, costo_hoja in perfiles_papel.items():
 
-                    for color, ml in totales_lote_cmyk.items():
-                        aliases = alias_colores.get(color, [])
-                        stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
+                for calidad, mult_calidad in calidades_impresion.items():
 
-                        # Soporte cartucho tricolor: sirve para C/M/Y aunque no mencione cada color por separado
-                        if stock.empty and color in ['C', 'M', 'Y'] and not stock_tricolor.empty:
-                            stock = stock_tricolor
+                    for driver, mult_driver in perfil_driver.items():
 
-                        if not stock.empty:
-                            disponible = stock['cantidad'].sum()
+                        tinta_real = costo_tinta_base * mult_calidad * mult_driver
 
-                            if disponible < ml:
-                                alertas.append(
-                                    f"⚠️ Falta tinta {color}: necesitas {ml:.2f} ml y hay {disponible:.2f} ml"
-                                )
-                        else:
-                            alertas.append(f"⚠️ No se encontró consumible para {color} asociado a esta impresora (tinta/cartucho/tóner).")
+                        desgaste_real = costo_desgaste_base
 
-                    if alertas:
-                        for a in alertas:
-                            st.error(a)
-                    else:
-                        st.success("✅ Hay suficiente tinta para producir")
+                        costo_papel_q = total_pags * costo_hoja
 
+                        total_q = tinta_real + desgaste_real + costo_papel_q
 
-                # --- ENVÍO A SIGUIENTE PROCESO ---
-                st.subheader("🚦 Enviar trabajo al siguiente paso")
-                ruta_post_impresion = st.radio(
-                    "Luego de imprimir, ¿qué sigue?",
-                    ["Solo impresión", "Impresión + Recorte", "Impresión + Plastificado"],
-                    horizontal=True,
-                    key='cmyk_ruta_post'
-                )
-    
-                b1, b2, b3, b4 = st.columns(4)
-                btn_cotizar = b1.button("📝 Enviar a Cotización", use_container_width=True)
-                btn_recorte = b2.button("✂️ Enviar a Corte Industrial", use_container_width=True)
-                btn_plastificado = b3.button("🛠️ Enviar a Otros Procesos", use_container_width=True)
-                btn_sublimacion = b4.button("🔥 Enviar a Sublimación", use_container_width=True)
 
-                if btn_cotizar or btn_recorte or btn_plastificado or btn_sublimacion:
+                        simulaciones.append({
 
-                    # Guardamos información completa para el cotizador / procesos
-                    st.session_state['datos_pre_cotizacion'] = {
-                        'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
-                        'costo_base': float(fila_sel['Total ($)']) if 'fila_sel' in locals() else (float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote)),
-                        'unidades': total_pags,
-                        'papel': papel_sel if 'papel_sel' in locals() else '',
-                        'calidad': calidad_sel if 'calidad_sel' in locals() else '',
-                        'ruta_post_impresion': ruta_post_impresion,
+                            "Papel": papel,
 
-                        # Desglose de consumo real
-                        'consumos': totales_lote_cmyk,
+                            "Calidad": calidad,
 
-                        # Información técnica adicional
-                        'impresora': impresora_sel,
-                        'factor_consumo': factor,
-                        'factor_negro': factor_k,
-                        'refuerzo_negro': refuerzo_negro,
-                        'precio_tinta_ml': precio_tinta_ml,
-                        'costo_desgaste': costo_desgaste,
+                            "Perfil": driver,
 
-                        # Historial detallado por archivo
-                        'detalle_archivos': resultados
-                    }
+                            "Páginas": total_pags,
 
-                    try:
-                        with conectar() as conn:
-                            conn.execute("""
-                                INSERT INTO historial_cmyk
-                                (impresora, paginas, costo, c_ml, m_ml, y_ml, k_ml)
-                                VALUES (?,?,?,?,?,?,?)
-                            """, (
-                                impresora_sel,
-                                total_pags,
-                                total_usd_lote,
-                                float(totales_lote_cmyk.get('C', 0.0)),
-                                float(totales_lote_cmyk.get('M', 0.0)),
-                                float(totales_lote_cmyk.get('Y', 0.0)),
-                                float(totales_lote_cmyk.get('K', 0.0))
-                            ))
-                            conn.commit()
-                            actualizar_vida_cabezal(impresora_sel, total_pags)
-                    except Exception as e:
-                        st.warning(f"No se pudo guardar en historial: {e}")
+                            "Tinta ($)": round(tinta_real, 2),
 
-                    if btn_recorte:
-                        st.session_state['datos_corte_desde_cmyk'] = {
-                            'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
-                            'unidades': total_pags,
-                            'observacion': f"Ruta sugerida: {ruta_post_impresion}"
-                        }
-                        st.success("✅ Datos enviados a Corte Industrial")
-                        st.toast("Listo para corte", icon="✂️")
-                        st.rerun()
+                            "Desgaste ($)": round(desgaste_real, 2),
 
-                    if btn_plastificado:
-                        st.session_state['datos_proceso_desde_cmyk'] = {
-                            'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
-                            'unidades': total_pags,
-                            'observacion': f"Ruta sugerida: {ruta_post_impresion}"
-                        }
-                        st.success("✅ Datos enviados a Otros Procesos")
-                        st.toast("Listo para plastificado/proceso", icon="🛠️")
-                        st.rerun()
+                            "Papel ($)": round(costo_papel_q, 2),
 
-                    if btn_sublimacion:
-                        st.session_state['datos_sublimacion_desde_cmyk'] = {
-                            'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
-                            'unidades': total_pags,
-                            'costo_base': float(st.session_state['datos_pre_cotizacion'].get('costo_base', 0.0) or 0.0),
-                            'papel': st.session_state['datos_pre_cotizacion'].get('papel', ''),
-                            'calidad': st.session_state['datos_pre_cotizacion'].get('calidad', ''),
-                            'observacion': f"Ruta sugerida: {ruta_post_impresion}"
-                        }
-                        st.success("✅ Datos enviados a Sublimación Industrial")
-                        st.toast("Listo para sublimación", icon="🔥")
-                        st.rerun()
+                            "Total ($)": round(total_q, 2),
 
-                    st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
-                    st.toast("Listo para cotizar", icon="📨")
-                    st.rerun()
+                            "Costo por pág ($)": round(total_q / total_pags, 4)
 
+                        })
 
-        st.divider()
-        st.subheader("🕘 Historial reciente CMYK")
-        if df_hist_cmyk.empty:
-            st.info("Aún no hay análisis guardados en el historial.")
-        else:
-            df_hist_view = df_hist_cmyk.copy()
-            df_hist_view['fecha'] = pd.to_datetime(df_hist_view['fecha'], errors='coerce')
-            st.dataframe(df_hist_view, use_container_width=True, hide_index=True)
 
-            hist_ordenado = df_hist_view.dropna(subset=['fecha']).copy()
-            if not hist_ordenado.empty:
-                hist_ordenado['dia'] = hist_ordenado['fecha'].dt.date.astype(str)
-                hist_dia = hist_ordenado.groupby('dia', as_index=False)['costo'].sum()
-                fig_hist = px.line(hist_dia, x='dia', y='costo', markers=True, title='Costo CMYK por día (historial)')
-                fig_hist.update_layout(xaxis_title='Día', yaxis_title='Costo ($)')
-                st.plotly_chart(fig_hist, use_container_width=True)
+            # ===============================================
+            # DATAFRAME
+            # ===============================================
 
+            df_sim = pd.DataFrame(simulaciones).sort_values('Total ($)')
+
+
+            st.dataframe(
+
+                df_sim,
+
+                use_container_width=True,
+
+                hide_index=True
+
+            )
+
+
+            # ===============================================
+            # GRAFICO
+            # ===============================================
+
+            fig_sim = px.bar(
+
+                df_sim.head(12),
+
+                x='Papel',
+
+                y='Total ($)',
+
+                color='Calidad',
+
+                barmode='group'
+
+            )
+
+
+            st.plotly_chart(
+
+                fig_sim,
+
+                use_container_width=True
+
+            )
+
+
+            # ===============================================
+            # MEJOR OPCION
+            # ===============================================
+
+            mejor = df_sim.iloc[0]
+
+
+            st.success(
+
+                f"Mejor costo: "
+
+                f"{mejor['Papel']} | "
+
+                f"{mejor['Calidad']} | "
+
+                f"{mejor['Perfil']} "
+
+                f"→ ${mejor['Total ($)']:.2f}"
+
+            )
+
+
+            # ===============================================
+            # SELECTORES
+            # ===============================================
+
+            st.subheader("🎯 Escenario a enviar a cotización")
+
+
+            papel_sel = st.selectbox(
+
+                "Papel",
+
+                sorted(df_sim['Papel'].unique())
+
+            )
+
+
+            calidad_sel = st.selectbox(
+
+                "Calidad",
+
+                sorted(df_sim['Calidad'].unique())
+
+            )
+
+
+            perfil_sel = st.selectbox(
+
+                "Perfil driver",
+
+                sorted(df_sim['Perfil'].unique())
+
+            )
+
+
+            fila_sel = df_sim[
+
+                (df_sim['Papel'] == papel_sel)
+
+                &
+
+                (df_sim['Calidad'] == calidad_sel)
+
+                &
+
+                (df_sim['Perfil'] == perfil_sel)
+
+            ].iloc[0]
+
+
+            st.info(
+
+                f"Costo final: ${fila_sel['Total ($)']:.2f}"
+
+            )
 
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
@@ -5589,6 +5760,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
