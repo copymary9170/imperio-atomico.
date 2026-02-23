@@ -2790,7 +2790,7 @@ elif menu == "🎨 Análisis CMYK":
 
                     df_impresion_db[col] = default
                     
-                    try:
+            try:
                 df_activos_cmyk = pd.read_sql_query(
                     "SELECT equipo, categoria, unidad, desgaste FROM activos", conn
                 )
@@ -5760,6 +5760,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
