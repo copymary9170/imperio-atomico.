@@ -3342,8 +3342,8 @@ elif menu == "🎨 Análisis CMYK":
     # ===============================================
     # CÁLCULOS BASE
     # ===============================================
-
-    total_ml_lote = total_ml_lote = float(sum(totales_lote_cmyk.values()))
+    
+    total_ml_lote = float(sum(totales_lote_cmyk.values()))
 
     costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
@@ -3356,7 +3356,7 @@ elif menu == "🎨 Análisis CMYK":
 
     for papel, costo_hoja in perfiles_papel.items():
 
-        for calidad, mult_calidad in calidades_impresion.items():
+       for calidad, mult_calidad in calidades_impresion.items():
 
             for driver, mult_driver in perfil_driver.items():
 
@@ -3391,156 +3391,154 @@ elif menu == "🎨 Análisis CMYK":
                 })
 
 
-# ===============================================
-# DATAFRAME
-# ===============================================
+    # ===============================================
+    # DATAFRAME
+    # ===============================================
+    df_sim = pd.DataFrame(simulaciones).sort_values('Total ($)')
 
-df_sim = pd.DataFrame(simulaciones).sort_values('Total ($)')
+    st.dataframe(
+        
+        df_sim,
 
+        use_container_width=True,
 
-st.dataframe(
+        hide_index=True
 
-    df_sim,
+    )
 
-    use_container_width=True,
 
-    hide_index=True
+    # ===============================================
+    # GRÁFICO
+    # ===============================================
 
-)
+    fig_sim = px.bar(
 
+        df_sim.head(12),
 
-# ===============================================
-# GRÁFICO
-# ===============================================
+        x='Papel',
 
-fig_sim = px.bar(
+        y='Total ($)',
 
-    df_sim.head(12),
+        color='Calidad',
 
-    x='Papel',
+        barmode='group',
 
-    y='Total ($)',
+        title='Comparativo de costos'
 
-    color='Calidad',
+    )
 
-    barmode='group',
+    st.plotly_chart(
 
-    title='Comparativo de costos'
+        fig_sim,
 
-)
+        use_container_width=True
 
-st.plotly_chart(
+    )
 
-    fig_sim,
 
-    use_container_width=True
+    # ===============================================
+    # MEJOR OPCIÓN
+    # ===============================================
 
-)
+    mejor = df_sim.iloc[0]
 
 
-# ===============================================
-# MEJOR OPCIÓN
-# ===============================================
+    st.success(
 
-mejor = df_sim.iloc[0]
+        f"Mejor costo automático: "
 
+        f"{mejor['Papel']} | {mejor['Calidad']} | {mejor['Perfil']} "
 
-st.success(
+        f"→ ${mejor['Total ($)']:.2f}"
 
-    f"Mejor costo automático: "
+    )
 
-    f"{mejor['Papel']} | {mejor['Calidad']} | {mejor['Perfil']} "
 
-    f"→ ${mejor['Total ($)']:.2f}"
+    # ===============================================
+    # SELECTORES
+    # ===============================================
 
-)
+    st.subheader("🎯 Escenario a enviar a cotización")
 
 
-# ===============================================
-# SELECTORES
-# ===============================================
+    papel_sel = st.selectbox(
 
-st.subheader("🎯 Escenario a enviar a cotización")
+        "Papel",
 
+        sorted(df_sim['Papel'].unique()),
 
-papel_sel = st.selectbox(
+        key='cmyk_papel_cot'
 
-    "Papel",
+    )
 
-    sorted(df_sim['Papel'].unique()),
 
-    key='cmyk_papel_cot'
+    calidad_sel = st.selectbox(
 
-)
+        "Calidad de impresión",
 
+        sorted(df_sim['Calidad'].unique()),
 
-calidad_sel = st.selectbox(
+        key='cmyk_calidad_cot'
 
-    "Calidad de impresión",
+    )
 
-    sorted(df_sim['Calidad'].unique()),
 
-    key='cmyk_calidad_cot'
+    perfil_sel = st.selectbox(
 
-)
+        "Perfil del driver",
 
+        sorted(df_sim['Perfil'].unique()),
 
-perfil_sel = st.selectbox(
+        key='cmyk_driver_cot'
 
-    "Perfil del driver",
+    )
 
-    sorted(df_sim['Perfil'].unique()),
 
-    key='cmyk_driver_cot'
+    fila_sel = df_sim[
 
-)
+        (df_sim['Papel'] == papel_sel)
 
+        & (df_sim['Calidad'] == calidad_sel)
 
-fila_sel = df_sim[
+        & (df_sim['Perfil'] == perfil_sel)
 
-    (df_sim['Papel'] == papel_sel)
+    ].iloc[0]
 
-    & (df_sim['Calidad'] == calidad_sel)
 
-    & (df_sim['Perfil'] == perfil_sel)
+    st.info(
 
-].iloc[0]
+        f"Se enviará a cotización: "
 
+        f"{papel_sel} | {calidad_sel} | {perfil_sel} "
 
-st.info(
+        f"→ ${float(fila_sel['Total ($)']):.2f}"
 
-    f"Se enviará a cotización: "
+    )
 
-    f"{papel_sel} | {calidad_sel} | {perfil_sel} "
 
-    f"→ ${float(fila_sel['Total ($)']):.2f}"
+    # ===============================================
+    # CACHE
+    # ===============================================
 
-)
+    st.session_state['cmyk_analisis_cache'] = {
 
+        'resultados': resultados,
 
-# ===============================================
-# CACHE
-# ===============================================
+        'simulaciones': simulaciones,
 
-st.session_state['cmyk_analisis_cache'] = {
+        'impresora': impresora_sel,
+    
+        'paginas': total_pags,
 
-    'resultados': resultados,
+        'papel_sel': papel_sel,
 
-    'simulaciones': simulaciones,
+        'calidad_sel': calidad_sel,
 
-    'impresora': impresora_sel,
+        'perfil_sel': perfil_sel,
 
-    'paginas': total_pags,
-
-    'papel_sel': papel_sel,
-
-    'calidad_sel': calidad_sel,
-
-    'perfil_sel': perfil_sel,
-
-    'total_sel': float(fila_sel['Total ($)'])
-
-}
+        'total_sel': float(fila_sel['Total ($)'])
+    
+    }
 
             # --- VERIFICAR INVENTARIO ---
             if not df_impresion_db.empty:
@@ -5591,6 +5589,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
