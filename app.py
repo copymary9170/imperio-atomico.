@@ -3343,54 +3343,52 @@ elif menu == "🎨 Análisis CMYK":
     # CÁLCULOS BASE
     # ===============================================
 
-total_ml_lote = float(sum(totales_lote_cmyk.values()))
+    total_ml_lote = total_ml_lote = float(sum(totales_lote_cmyk.values()))
 
-costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
+    costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
-costo_desgaste_base = float(costo_desgaste) * float(total_pags)
+    
+    # ===============================================
+    # SIMULACIONES
+    # ===============================================
 
+    simulaciones = []
 
-# ===============================================
-# SIMULACIONES
-# ===============================================
+    for papel, costo_hoja in perfiles_papel.items():
 
-simulaciones = []
+        for calidad, mult_calidad in calidades_impresion.items():
 
-for papel, costo_hoja in perfiles_papel.items():
+            for driver, mult_driver in perfil_driver.items():
 
-    for calidad, mult_calidad in calidades_impresion.items():
+                tinta_real = costo_tinta_base * mult_calidad * mult_driver
 
-        for driver, mult_driver in perfil_driver.items():
+                desgaste_real = costo_desgaste_base
 
-            tinta_real = costo_tinta_base * mult_calidad * mult_driver
+                costo_papel_q = float(total_pags) * costo_hoja
 
-            desgaste_real = costo_desgaste_base
+                total_q = tinta_real + desgaste_real + costo_papel_q
 
-            costo_papel_q = float(total_pags) * costo_hoja
+                simulaciones.append({
 
-            total_q = tinta_real + desgaste_real + costo_papel_q
+                    "Papel": papel,
 
-            simulaciones.append({
+                    "Calidad": calidad,
 
-                "Papel": papel,
+                    "Perfil": driver,
 
-                "Calidad": calidad,
+                    "Páginas": total_pags,
 
-                "Perfil": driver,
+                    "Tinta ($)": round(tinta_real, 2),
 
-                "Páginas": total_pags,
+                    "Desgaste ($)": round(desgaste_real, 2),
 
-                "Tinta ($)": round(tinta_real, 2),
+                    "Papel ($)": round(costo_papel_q, 2),
 
-                "Desgaste ($)": round(desgaste_real, 2),
+                    "Total ($)": round(total_q, 2),
 
-                "Papel ($)": round(costo_papel_q, 2),
+                    "Costo por pág ($)": round(total_q / total_pags, 2) if total_pags else 0
 
-                "Total ($)": round(total_q, 2),
-
-                "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
-
-            })
+                })
 
 
 # ===============================================
@@ -5593,6 +5591,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
