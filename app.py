@@ -3329,7 +3329,7 @@ elif menu == "🎨 Análisis CMYK":
 
             costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
-                       simulaciones = []
+            simulaciones = []
 
             for papel, costo_hoja in perfiles_papel.items():
 
@@ -5534,6 +5534,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
