@@ -3303,40 +3303,84 @@ elif menu == "🎨 Análisis CMYK":
                 st.info("No se detectaron papeles en inventario; se usan costos base por defecto.")
             else:
                 st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
-            perfiles_calidad = {
-                "Borrador": {"ink_mult": 0.82, "wear_mult": 0.90},
-                "Normal": {"ink_mult": 1.00, "wear_mult": 1.00},
-                "Alta": {"ink_mult": 1.18, "wear_mult": 1.10},
-                "Foto": {"ink_mult": 1.32, "wear_mult": 1.15},
-                # Ajustes de impresión (no confundir con tipo de papel físico)
-                "Papel brillante": {"ink_mult": 1.20, "wear_mult": 1.08},
-                "Papel fotográfico": {"ink_mult": 1.28, "wear_mult": 1.12},
-                "Papel satinado": {"ink_mult": 1.16, "wear_mult": 1.06},
-                "Premium glossy": {"ink_mult": 1.35, "wear_mult": 1.16},
-                "Premium mate": {"ink_mult": 1.30, "wear_mult": 1.14}
-            }
+            # ===============================================
+# CALIDAD DE IMPRESIÓN (CONFIGURACIÓN USUARIO)
+# ===============================================
+
+calidades_impresion = {
+
+    "Borrador": 0.75,
+
+    "Normal": 1.00,
+
+    "Alta": 1.18,
+
+    "Foto": 1.35
+
+}
+
+# ===============================================
+# PERFIL DEL PAPEL (CONFIGURACIÓN DRIVER)
+# ===============================================
+
+perfil_driver = {
+
+    "Bond normal": 1.00,
+
+    "Mate": 1.08,
+
+    "Glossy": 1.18,
+
+    "Satinado": 1.12,
+
+    "Fotográfico": 1.25,
+
+    "Premium Glossy": 1.35,
+
+    "Premium Mate": 1.30
+
+}
 
             total_ml_lote = float(sum(totales_lote_cmyk.values()))
             costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
             costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
             simulaciones = []
-            for papel, costo_hoja in perfiles_papel.items():
-                for calidad, cfg_q in perfiles_calidad.items():
-                    costo_tinta_q = costo_tinta_base * cfg_q['ink_mult']
-                    costo_desgaste_q = costo_desgaste_base * cfg_q['wear_mult']
-                    costo_papel_q = float(total_pags) * costo_hoja
-                    total_q = costo_tinta_q + costo_desgaste_q + costo_papel_q
-                    simulaciones.append({
-                        "Papel": papel,
-                        "Calidad": calidad,
-                        "Páginas": total_pags,
-                        "Tinta ($)": round(costo_tinta_q, 2),
-                        "Desgaste ($)": round(costo_desgaste_q, 2),
-                        "Papel ($)": round(costo_papel_q, 2),
-                        "Total ($)": round(total_q, 2),
-                        "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
-                    })
+           for papel, costo_hoja in perfiles_papel.items():
+
+    for calidad, mult_calidad in calidades_impresion.items():
+
+        for driver, mult_driver in perfil_driver.items():
+
+            tinta_real = costo_tinta_base * mult_calidad * mult_driver
+
+            desgaste_real = costo_desgaste_base
+
+            costo_papel_q = float(total_pags) * costo_hoja
+
+            total_q = tinta_real + desgaste_real + costo_papel_q
+
+            simulaciones.append({
+
+                "Papel": papel,
+
+                "Calidad": calidad,
+
+                "Perfil": driver,
+
+                "Páginas": total_pags,
+
+                "Tinta ($)": round(tinta_real, 2),
+
+                "Desgaste ($)": round(desgaste_real, 2),
+
+                "Papel ($)": round(costo_papel_q, 2),
+
+                "Total ($)": round(total_q, 2),
+
+                "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
+
+            })
 
             df_sim = pd.DataFrame(simulaciones).sort_values('Total ($)')
             st.dataframe(df_sim, use_container_width=True, hide_index=True)
@@ -3353,12 +3397,25 @@ elif menu == "🎨 Análisis CMYK":
             papel_sel = st.selectbox("Papel para cotizar", sorted(df_sim['Papel'].unique().tolist()), key='cmyk_papel_cot')
             calidades_disp = df_sim[df_sim['Papel'] == papel_sel]['Calidad'].tolist()
             calidad_sel = st.selectbox("Calidad para cotizar", calidades_disp, key='cmyk_calidad_cot')
-            fila_sel = df_sim[(df_sim['Papel'] == papel_sel) & (df_sim['Calidad'] == calidad_sel)].iloc[0]
+            fila_sel = df_sim[
+
+    (df_sim['Papel'] == papel_sel) &
+
+    (df_sim['Calidad'] == calidad_sel) &
+
+    (df_sim['Perfil'] == perfil_sel)
+
+].iloc[0]
             st.info(
                 f"Se enviará a cotización: {papel_sel} | {calidad_sel} → ${float(fila_sel['Total ($)']):.2f} "
                 f"(${float(fila_sel['Costo por pág ($)']):.4f}/pág)"
             )
 
+            perfil_sel = st.selectbox(
+    "Perfil del papel (driver)",
+    sorted(df_sim['Perfil'].unique().tolist()),
+    key='cmyk_driver_cot'
+)
             st.session_state['cmyk_analisis_cache'] = {
                 'resultados': resultados,
                 'simulaciones': simulaciones,
@@ -5418,4 +5475,5 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
