@@ -3307,42 +3307,26 @@ elif menu == "🎨 Análisis CMYK":
 # CALIDAD DE IMPRESIÓN (CONFIGURACIÓN USUARIO)
 # ===============================================
 
-calidades_impresion = {
+            perfiles_calidad = {
+                "Borrador": {"ink_mult": 0.82, "wear_mult": 0.90},
+                "Normal": {"ink_mult": 1.00, "wear_mult": 1.00},
+                "Alta": {"ink_mult": 1.18, "wear_mult": 1.10},
+                "Foto": {"ink_mult": 1.32, "wear_mult": 1.15},
 
-    "Borrador": 0.75,
+                # CONFIGURACIÓN DEL DRIVER
+                "Mate": {"ink_mult": 1.15, "wear_mult": 1.05},
+                "Glossy": {"ink_mult": 1.30, "wear_mult": 1.12},
+                "Semi-Gloss": {"ink_mult": 1.22, "wear_mult": 1.08},
+                "Satinado": {"ink_mult": 1.18, "wear_mult": 1.06},
+                "Premium Glossy": {"ink_mult": 1.35, "wear_mult": 1.15},
+                "Premium Mate": {"ink_mult": 1.28, "wear_mult": 1.12}
+            }
 
-    "Normal": 1.00,
-
-    "Alta": 1.18,
-
-    "Foto": 1.35
-
-}
-
-# ===============================================
-# PERFIL DEL PAPEL (CONFIGURACIÓN DRIVER)
-# ===============================================
-
-perfil_driver = {
-
-    "Bond normal": 1.00,
-
-    "Mate": 1.08,
-
-    "Glossy": 1.18,
-
-    "Satinado": 1.12,
-
-    "Fotográfico": 1.25,
-
-    "Premium Glossy": 1.35,
-
-    "Premium Mate": 1.30
-
-}
 
             total_ml_lote = float(sum(totales_lote_cmyk.values()))
+
             costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
+
             costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
             simulaciones = []
@@ -5475,5 +5459,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
