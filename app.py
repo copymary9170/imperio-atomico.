@@ -3540,8 +3540,8 @@ elif menu == "🎨 Análisis CMYK":
     
     }
 
-            # --- VERIFICAR INVENTARIO ---
-                if not df_impresion_db.empty:
+    # --- VERIFICAR INVENTARIO ---
+         if not df_impresion_db.empty:
 
                     st.subheader("📦 Verificación de Inventario")
 
@@ -5589,6 +5589,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
