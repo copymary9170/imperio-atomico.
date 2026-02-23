@@ -3333,9 +3333,9 @@ elif menu == "🎨 Análisis CMYK":
 
             for papel, costo_hoja in perfiles_papel.items():
 
-            for calidad, mult_calidad in calidades_impresion.items():
+                for calidad, mult_calidad in calidades_impresion.items():
 
-            for driver, mult_driver in perfil_driver.items():
+                    for driver, mult_driver in perfil_driver.items():
 
                         tinta_real = costo_tinta_base * mult_calidad * mult_driver
 
@@ -5534,6 +5534,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
