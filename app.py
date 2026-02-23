@@ -3541,184 +3541,184 @@ elif menu == "🎨 Análisis CMYK":
     }
 
             # --- VERIFICAR INVENTARIO ---
-            if not df_impresion_db.empty:
+                if not df_impresion_db.empty:
 
-                st.subheader("📦 Verificación de Inventario")
+                    st.subheader("📦 Verificación de Inventario")
 
-                alertas = []
+                    alertas = []
 
-                stock_base = df_impresion_db[df_impresion_db['item'].fillna('').astype(str).str.contains('tinta|cartucho|toner|tóner', case=False, na=False)].copy()
-                if usar_stock_por_impresora:
+                    stock_base = df_impresion_db[df_impresion_db['item'].fillna('').astype(str).str.contains('tinta|cartucho|toner|tóner', case=False, na=False)].copy()
+                    if usar_stock_por_impresora:
 
-                    modelo_norm = ''.join(filter(str.isalnum, impresora_sel.lower()))
-                    modelo_tokens = [tok for tok in ''.join(ch if ch.isalnum() else ' ' for ch in impresora_sel.lower()).split() if len(tok) >= 3]
+                        modelo_norm = ''.join(filter(str.isalnum, impresora_sel.lower()))
+                        modelo_tokens = [tok for tok in ''.join(ch if ch.isalnum() else ' ' for ch in impresora_sel.lower()).split() if len(tok) >= 3]
 
-                    def coincide_impresora_item(nombre_item):
-                        item_norm = ''.join(filter(str.isalnum, str(nombre_item).lower()))
-                        if modelo_norm and modelo_norm in item_norm:
-                            return True
-                        return any(tok in item_norm for tok in modelo_tokens)
+                        def coincide_impresora_item(nombre_item):
+                            item_norm = ''.join(filter(str.isalnum, str(nombre_item).lower()))
+                            if modelo_norm and modelo_norm in item_norm:
+                                return True
+                            return any(tok in item_norm for tok in modelo_tokens)
 
-                    stock_imp = stock_base[
-                        stock_base['item'].fillna('').astype(str).apply(coincide_impresora_item)
+                        stock_imp = stock_base[
+                            stock_base['item'].fillna('').astype(str).apply(coincide_impresora_item)
+                        ]
+
+                        if not stock_imp.empty:
+                            stock_base = stock_imp
+
+                    alias_colores = {
+                        'C': ['cian', 'cyan'],
+                        'M': ['magenta'],
+                        'Y': ['amarillo', 'yellow'],
+                        # K = Negro. Incluye variantes reales de inventario: negro/negra/black/k
+                        'K': ['negro', 'negra', 'black', ' k ']
+                    }
+
+                    stock_tricolor = stock_base[
+                        stock_base['item'].fillna('').str.contains('cartucho', case=False, na=False) &
+                        stock_base['item'].fillna('').str.contains('color|tricolor|cmy', case=False, na=False)
                     ]
 
-                    if not stock_imp.empty:
-                        stock_base = stock_imp
+                    for color, ml in totales_lote_cmyk.items():
+                        aliases = alias_colores.get(color, [])
+                        stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
 
-                alias_colores = {
-                    'C': ['cian', 'cyan'],
-                    'M': ['magenta'],
-                    'Y': ['amarillo', 'yellow'],
-                    # K = Negro. Incluye variantes reales de inventario: negro/negra/black/k
-                    'K': ['negro', 'negra', 'black', ' k ']
-                }
+                        # Soporte cartucho tricolor: sirve para C/M/Y aunque no mencione cada color por separado
+                        if stock.empty and color in ['C', 'M', 'Y'] and not stock_tricolor.empty:
+                            stock = stock_tricolor
 
-                stock_tricolor = stock_base[
-                    stock_base['item'].fillna('').str.contains('cartucho', case=False, na=False) &
-                    stock_base['item'].fillna('').str.contains('color|tricolor|cmy', case=False, na=False)
-                ]
+                        if not stock.empty:
+                            disponible = stock['cantidad'].sum()
 
-                for color, ml in totales_lote_cmyk.items():
-                    aliases = alias_colores.get(color, [])
-                    stock = stock_base[(" " + stock_base['item'].fillna('').str.lower() + " " ).str.contains('|'.join(aliases), case=False, na=False)] if aliases else pd.DataFrame()
+                            if disponible < ml:
+                                alertas.append(
+                                    f"⚠️ Falta tinta {color}: necesitas {ml:.2f} ml y hay {disponible:.2f} ml"
+                                )
+                        else:
+                            alertas.append(f"⚠️ No se encontró consumible para {color} asociado a esta impresora (tinta/cartucho/tóner).")
 
-                    # Soporte cartucho tricolor: sirve para C/M/Y aunque no mencione cada color por separado
-                    if stock.empty and color in ['C', 'M', 'Y'] and not stock_tricolor.empty:
-                        stock = stock_tricolor
-
-                    if not stock.empty:
-                        disponible = stock['cantidad'].sum()
-
-                        if disponible < ml:
-                            alertas.append(
-                                f"⚠️ Falta tinta {color}: necesitas {ml:.2f} ml y hay {disponible:.2f} ml"
-                            )
+                    if alertas:
+                        for a in alertas:
+                            st.error(a)
                     else:
-                        alertas.append(f"⚠️ No se encontró consumible para {color} asociado a esta impresora (tinta/cartucho/tóner).")
-
-                if alertas:
-                    for a in alertas:
-                        st.error(a)
-                else:
-                    st.success("✅ Hay suficiente tinta para producir")
+                        st.success("✅ Hay suficiente tinta para producir")
 
 
-            # --- ENVÍO A SIGUIENTE PROCESO ---
-            st.subheader("🚦 Enviar trabajo al siguiente paso")
-            ruta_post_impresion = st.radio(
-                "Luego de imprimir, ¿qué sigue?",
-                ["Solo impresión", "Impresión + Recorte", "Impresión + Plastificado"],
-                horizontal=True,
-                key='cmyk_ruta_post'
-            )
+                # --- ENVÍO A SIGUIENTE PROCESO ---
+                st.subheader("🚦 Enviar trabajo al siguiente paso")
+                ruta_post_impresion = st.radio(
+                    "Luego de imprimir, ¿qué sigue?",
+                    ["Solo impresión", "Impresión + Recorte", "Impresión + Plastificado"],
+                    horizontal=True,
+                    key='cmyk_ruta_post'
+                )
+    
+                b1, b2, b3, b4 = st.columns(4)
+                btn_cotizar = b1.button("📝 Enviar a Cotización", use_container_width=True)
+                btn_recorte = b2.button("✂️ Enviar a Corte Industrial", use_container_width=True)
+                btn_plastificado = b3.button("🛠️ Enviar a Otros Procesos", use_container_width=True)
+                btn_sublimacion = b4.button("🔥 Enviar a Sublimación", use_container_width=True)
 
-            b1, b2, b3, b4 = st.columns(4)
-            btn_cotizar = b1.button("📝 Enviar a Cotización", use_container_width=True)
-            btn_recorte = b2.button("✂️ Enviar a Corte Industrial", use_container_width=True)
-            btn_plastificado = b3.button("🛠️ Enviar a Otros Procesos", use_container_width=True)
-            btn_sublimacion = b4.button("🔥 Enviar a Sublimación", use_container_width=True)
+                if btn_cotizar or btn_recorte or btn_plastificado or btn_sublimacion:
 
-            if btn_cotizar or btn_recorte or btn_plastificado or btn_sublimacion:
-
-                # Guardamos información completa para el cotizador / procesos
-                st.session_state['datos_pre_cotizacion'] = {
-                    'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
-                    'costo_base': float(fila_sel['Total ($)']) if 'fila_sel' in locals() else (float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote)),
-                    'unidades': total_pags,
-                    'papel': papel_sel if 'papel_sel' in locals() else '',
-                    'calidad': calidad_sel if 'calidad_sel' in locals() else '',
-                    'ruta_post_impresion': ruta_post_impresion,
-
-                    # Desglose de consumo real
-                    'consumos': totales_lote_cmyk,
-
-                    # Información técnica adicional
-                    'impresora': impresora_sel,
-                    'factor_consumo': factor,
-                    'factor_negro': factor_k,
-                    'refuerzo_negro': refuerzo_negro,
-                    'precio_tinta_ml': precio_tinta_ml,
-                    'costo_desgaste': costo_desgaste,
-
-                    # Historial detallado por archivo
-                    'detalle_archivos': resultados
-                }
-
-                try:
-                    with conectar() as conn:
-                        conn.execute("""
-                            INSERT INTO historial_cmyk
-                            (impresora, paginas, costo, c_ml, m_ml, y_ml, k_ml)
-                            VALUES (?,?,?,?,?,?,?)
-                        """, (
-                            impresora_sel,
-                            total_pags,
-                            total_usd_lote,
-                            float(totales_lote_cmyk.get('C', 0.0)),
-                            float(totales_lote_cmyk.get('M', 0.0)),
-                            float(totales_lote_cmyk.get('Y', 0.0)),
-                            float(totales_lote_cmyk.get('K', 0.0))
-                        ))
-                        conn.commit()
-                        actualizar_vida_cabezal(impresora_sel, total_pags)
-                except Exception as e:
-                    st.warning(f"No se pudo guardar en historial: {e}")
-
-                if btn_recorte:
-                    st.session_state['datos_corte_desde_cmyk'] = {
-                        'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
+                    # Guardamos información completa para el cotizador / procesos
+                    st.session_state['datos_pre_cotizacion'] = {
+                        'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
+                        'costo_base': float(fila_sel['Total ($)']) if 'fila_sel' in locals() else (float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote)),
                         'unidades': total_pags,
-                        'observacion': f"Ruta sugerida: {ruta_post_impresion}"
+                        'papel': papel_sel if 'papel_sel' in locals() else '',
+                        'calidad': calidad_sel if 'calidad_sel' in locals() else '',
+                        'ruta_post_impresion': ruta_post_impresion,
+
+                        # Desglose de consumo real
+                        'consumos': totales_lote_cmyk,
+
+                        # Información técnica adicional
+                        'impresora': impresora_sel,
+                        'factor_consumo': factor,
+                        'factor_negro': factor_k,
+                        'refuerzo_negro': refuerzo_negro,
+                        'precio_tinta_ml': precio_tinta_ml,
+                        'costo_desgaste': costo_desgaste,
+
+                        # Historial detallado por archivo
+                        'detalle_archivos': resultados
                     }
-                    st.success("✅ Datos enviados a Corte Industrial")
-                    st.toast("Listo para corte", icon="✂️")
+
+                    try:
+                        with conectar() as conn:
+                            conn.execute("""
+                                INSERT INTO historial_cmyk
+                                (impresora, paginas, costo, c_ml, m_ml, y_ml, k_ml)
+                                VALUES (?,?,?,?,?,?,?)
+                            """, (
+                                impresora_sel,
+                                total_pags,
+                                total_usd_lote,
+                                float(totales_lote_cmyk.get('C', 0.0)),
+                                float(totales_lote_cmyk.get('M', 0.0)),
+                                float(totales_lote_cmyk.get('Y', 0.0)),
+                                float(totales_lote_cmyk.get('K', 0.0))
+                            ))
+                            conn.commit()
+                            actualizar_vida_cabezal(impresora_sel, total_pags)
+                    except Exception as e:
+                        st.warning(f"No se pudo guardar en historial: {e}")
+
+                    if btn_recorte:
+                        st.session_state['datos_corte_desde_cmyk'] = {
+                            'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
+                            'unidades': total_pags,
+                            'observacion': f"Ruta sugerida: {ruta_post_impresion}"
+                        }
+                        st.success("✅ Datos enviados a Corte Industrial")
+                        st.toast("Listo para corte", icon="✂️")
+                        st.rerun()
+
+                    if btn_plastificado:
+                        st.session_state['datos_proceso_desde_cmyk'] = {
+                            'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
+                            'unidades': total_pags,
+                            'observacion': f"Ruta sugerida: {ruta_post_impresion}"
+                        }
+                        st.success("✅ Datos enviados a Otros Procesos")
+                        st.toast("Listo para plastificado/proceso", icon="🛠️")
+                        st.rerun()
+
+                    if btn_sublimacion:
+                        st.session_state['datos_sublimacion_desde_cmyk'] = {
+                            'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
+                            'unidades': total_pags,
+                            'costo_base': float(st.session_state['datos_pre_cotizacion'].get('costo_base', 0.0) or 0.0),
+                            'papel': st.session_state['datos_pre_cotizacion'].get('papel', ''),
+                            'calidad': st.session_state['datos_pre_cotizacion'].get('calidad', ''),
+                            'observacion': f"Ruta sugerida: {ruta_post_impresion}"
+                        }
+                        st.success("✅ Datos enviados a Sublimación Industrial")
+                        st.toast("Listo para sublimación", icon="🔥")
+                        st.rerun()
+
+                    st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
+                    st.toast("Listo para cotizar", icon="📨")
                     st.rerun()
 
-                if btn_plastificado:
-                    st.session_state['datos_proceso_desde_cmyk'] = {
-                        'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
-                        'unidades': total_pags,
-                        'observacion': f"Ruta sugerida: {ruta_post_impresion}"
-                    }
-                    st.success("✅ Datos enviados a Otros Procesos")
-                    st.toast("Listo para plastificado/proceso", icon="🛠️")
-                    st.rerun()
 
-                if btn_sublimacion:
-                    st.session_state['datos_sublimacion_desde_cmyk'] = {
-                        'trabajo': st.session_state['datos_pre_cotizacion']['trabajo'],
-                        'unidades': total_pags,
-                        'costo_base': float(st.session_state['datos_pre_cotizacion'].get('costo_base', 0.0) or 0.0),
-                        'papel': st.session_state['datos_pre_cotizacion'].get('papel', ''),
-                        'calidad': st.session_state['datos_pre_cotizacion'].get('calidad', ''),
-                        'observacion': f"Ruta sugerida: {ruta_post_impresion}"
-                    }
-                    st.success("✅ Datos enviados a Sublimación Industrial")
-                    st.toast("Listo para sublimación", icon="🔥")
-                    st.rerun()
+        st.divider()
+        st.subheader("🕘 Historial reciente CMYK")
+        if df_hist_cmyk.empty:
+            st.info("Aún no hay análisis guardados en el historial.")
+        else:
+            df_hist_view = df_hist_cmyk.copy()
+            df_hist_view['fecha'] = pd.to_datetime(df_hist_view['fecha'], errors='coerce')
+            st.dataframe(df_hist_view, use_container_width=True, hide_index=True)
 
-                st.success("✅ Datos enviados correctamente al módulo de Cotizaciones")
-                st.toast("Listo para cotizar", icon="📨")
-                st.rerun()
-
-
-    st.divider()
-    st.subheader("🕘 Historial reciente CMYK")
-    if df_hist_cmyk.empty:
-        st.info("Aún no hay análisis guardados en el historial.")
-    else:
-        df_hist_view = df_hist_cmyk.copy()
-        df_hist_view['fecha'] = pd.to_datetime(df_hist_view['fecha'], errors='coerce')
-        st.dataframe(df_hist_view, use_container_width=True, hide_index=True)
-
-        hist_ordenado = df_hist_view.dropna(subset=['fecha']).copy()
-        if not hist_ordenado.empty:
-            hist_ordenado['dia'] = hist_ordenado['fecha'].dt.date.astype(str)
-            hist_dia = hist_ordenado.groupby('dia', as_index=False)['costo'].sum()
-            fig_hist = px.line(hist_dia, x='dia', y='costo', markers=True, title='Costo CMYK por día (historial)')
-            fig_hist.update_layout(xaxis_title='Día', yaxis_title='Costo ($)')
-            st.plotly_chart(fig_hist, use_container_width=True)
+            hist_ordenado = df_hist_view.dropna(subset=['fecha']).copy()
+            if not hist_ordenado.empty:
+                hist_ordenado['dia'] = hist_ordenado['fecha'].dt.date.astype(str)
+                hist_dia = hist_ordenado.groupby('dia', as_index=False)['costo'].sum()
+                fig_hist = px.line(hist_dia, x='dia', y='costo', markers=True, title='Costo CMYK por día (historial)')
+                fig_hist.update_layout(xaxis_title='Día', yaxis_title='Costo ($)')
+                st.plotly_chart(fig_hist, use_container_width=True)
 
 
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
@@ -5589,6 +5589,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
