@@ -12,6 +12,7 @@ import os
 import hashlib
 import hmac
 import secrets
+import re
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -3098,13 +3099,13 @@ elif menu == "🎨 Análisis CMYK":
 
                         resultados.append({
                             "Archivo": nombre,
-                            "C (ml)": round(ml_c, 4),
-                            "M (ml)": round(ml_m, 4),
-                            "Y (ml)": round(ml_y, 4),
-                            "K (ml)": round(ml_k, 4),
-                            "K extra auto (ml)": round(k_extra_ml, 4),
-                            "Total ml": round(consumo_total_f, 4),
-                            "Costo $": round(costo_f, 4)
+                            "C (ml)": round(ml_c, 2),
+                            "M (ml)": round(ml_m, 2),
+                            "Y (ml)": round(ml_y, 2),
+                            "K (ml)": round(ml_k, 2),
+                            "K extra auto (ml)": round(k_extra_ml, 2),
+                            "Total ml": round(consumo_total_f, 2),
+                            "Costo $": round(costo_f, 2)
                         })
 
                         try:
@@ -3304,44 +3305,43 @@ elif menu == "🎨 Análisis CMYK":
             else:
                 st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
            # ===============================================
-# CALIDAD DE IMPRESIÓN (CONFIGURACIÓN USUARIO)
-# ===============================================
+    # CALIDAD DE IMPRESIÓN (CONFIGURACIÓN USUARIO)
+    # ===============================================
+    # Calidad real de impresión (configuración del usuario)
+    calidades_impresion = {
+        
+        "Borrador": 0.75,
 
-# Calidad real de impresión (configuración del usuario)
-calidades_impresion = {
+        "Normal": 1.00,
 
-    "Borrador": 0.75,
+        "Alta": 1.18,
 
-    "Normal": 1.00,
+        "Foto": 1.35
 
-    "Alta": 1.18,
-
-    "Foto": 1.35
-
-}
-
-
-# Perfil del driver (tipo seleccionado en la impresora)
-perfil_driver = {
-
-    "Mate": 1.00,
-
-    "Glossy": 1.12,
-
-    "Semi-Gloss": 1.08,
-
-    "Satinado": 1.06,
-
-    "Premium Glossy": 1.15,
-
-    "Premium Mate": 1.10
-
-}
+    }
 
 
-# ===============================================
-# CÁLCULOS BASE
-# ===============================================
+    # Perfil del driver (tipo seleccionado en la impresora)
+    perfil_driver = {
+        
+        "Mate": 1.00,
+
+        "Glossy": 1.12,
+
+        "Semi-Gloss": 1.08,
+
+        "Satinado": 1.06,
+
+        "Premium Glossy": 1.15,
+
+        "Premium Mate": 1.10
+
+    }
+
+
+    # ===============================================
+    # CÁLCULOS BASE
+    # ===============================================
 
 total_ml_lote = float(sum(totales_lote_cmyk.values()))
 
@@ -5593,6 +5593,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
