@@ -3447,96 +3447,95 @@ elif menu == "🎨 Análisis CMYK":
 
 
 
-            # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
-            st.subheader("🧾 Simulación automática por Papel y Calidad")
+        # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
+        st.subheader("🧾 Simulación automática por Papel y Calidad")
+
+        perfiles_papel = {}
+
+        try:
+
+            papeles_inv = df_impresion_db[
+                df_impresion_db['item'].fillna('').str.contains(
+                    'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
+                    case=False,
+                    na=False
+                )
+            ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
+
+
+            for _, row_p in papeles_inv.iterrows():
+
+                nombre_p = str(row_p['item']).strip()
+
+                precio_p = float(row_p['precio_usd'])
+
+                if precio_p > 0:
+
+                    perfiles_papel[nombre_p] = precio_p
+
+
+        except Exception:
 
             perfiles_papel = {}
 
-            try:
 
-                papeles_inv = df_impresion_db[
-                    df_impresion_db['item'].fillna('').str.contains(
-                        'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
-                        case=False,
-                        na=False
-                    )
-                ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
+        if not perfiles_papel:
 
+            perfiles_papel = {
 
-                for _, row_p in papeles_inv.iterrows():
+                "Bond 75g": 0.03,
 
-                    nombre_p = str(row_p['item']).strip()
+                "Bond 90g": 0.05,
 
-                    precio_p = float(row_p['precio_usd'])
+                "Fotográfico Brillante": 0.22,
 
-                    if precio_p > 0:
+                "Fotográfico Mate": 0.20,
 
-                        perfiles_papel[nombre_p] = precio_p
+                "Cartulina": 0.12,
 
-
-            except Exception:
-
-                perfiles_papel = {}
-
-
-            if not perfiles_papel:
-
-                perfiles_papel = {
-
-                    "Bond 75g": 0.03,
-
-                    "Bond 90g": 0.05,
-
-                    "Fotográfico Brillante": 0.22,
-
-                    "Fotográfico Mate": 0.20,
-
-                    "Cartulina": 0.12,
-
-                    "Adhesivo": 0.16
-
-                }
-
-                st.info("No se detectaron papeles en inventario; se usan costos base por defecto.")
-
-            else:
-
-                st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
-
-
-            # ===============================================
-            # CALIDAD DE IMPRESIÓN
-            # ===============================================
-
-            calidades_impresion = {
-
-                "Borrador": 0.75,
-
-                "Normal": 1.00,
-
-                "Alta": 1.18,
-
-                "Foto": 1.35
+                "Adhesivo": 0.16
 
             }
 
+            st.info("No se detectaron papeles en inventario; se usan costos base por defecto.")
 
-            perfil_driver = {
+        else:
 
-                "Mate": 1.00,
+            st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
 
-                "Glossy": 1.12,
 
-                "Semi-Gloss": 1.08,
+        # ===============================================
+        # CALIDAD DE IMPRESIÓN
+        # ===============================================
 
-                "Satinado": 1.06,
+        calidades_impresion = {
 
-                "Premium Glossy": 1.15,
+            "Borrador": 0.75,
 
-                "Premium Mate": 1.10
+            "Normal": 1.00,
 
-            }
+            "Alta": 1.18,
 
+            "Foto": 1.35
+
+        }
+
+
+        perfil_driver = {
+
+            "Mate": 1.00,
+
+            "Glossy": 1.12,
+
+            "Semi-Gloss": 1.08,
+
+            "Satinado": 1.06,
+
+            "Premium Glossy": 1.15,
+
+            "Premium Mate": 1.10
+
+        }
             # ===============================================
             # CÁLCULOS BASE
             # ===============================================
@@ -5751,6 +5750,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
