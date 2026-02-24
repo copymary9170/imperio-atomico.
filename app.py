@@ -3601,158 +3601,147 @@ elif menu == "🎨 Análisis CMYK":
 
         )
 
+        # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
+        st.subheader("🧾 Simulación automática por Papel y Calidad")
+
+        perfiles_papel = {}
+
+        try:
+
+            papeles_inv = df_impresion_db[
+                df_impresion_db['item']
+                .fillna('')
+                .str.contains(
+                    'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
+                    case=False,
+                    na=False
+                )
+            ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
 
 
-            # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
-            st.subheader("🧾 Simulación automática por Papel y Calidad")
+            for _, row_p in papeles_inv.iterrows():
+
+                nombre_p = str(row_p['item']).strip()
+
+                precio_p = float(row_p['precio_usd'])
+
+                if precio_p > 0:
+
+                    perfiles_papel[nombre_p] = precio_p
+
+
+        except Exception:
 
             perfiles_papel = {}
 
-            try:
 
-                papeles_inv = df_impresion_db[
+        if not perfiles_papel:
 
-                    df_impresion_db['item']
+            perfiles_papel = {
 
-                    .fillna('')
+                "Bond 75g": 0.03,
 
-                    .str.contains(
+                "Bond 90g": 0.05,
 
-                        'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
+                "Fotográfico Brillante": 0.22,
 
-                        case=False,
+                "Fotográfico Mate": 0.20,
 
-                        na=False
+                "Cartulina": 0.12,
 
-                    )
-
-                ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
-
-
-                for _, row_p in papeles_inv.iterrows():
-
-                    nombre_p = str(row_p['item']).strip()
-
-                    precio_p = float(row_p['precio_usd'])
-
-                    if precio_p > 0:
-
-                        perfiles_papel[nombre_p] = precio_p
-
-
-            except Exception:
-
-                perfiles_papel = {}
-
-
-            if not perfiles_papel:
-
-                perfiles_papel = {
-
-                    "Bond 75g": 0.03,
-
-                    "Bond 90g": 0.05,
-
-                    "Fotográfico Brillante": 0.22,
-
-                    "Fotográfico Mate": 0.20,
-
-                    "Cartulina": 0.12,
-
-                    "Adhesivo": 0.16
-
-                }
-
-
-            # ===============================================
-            # CALIDAD DE IMPRESIÓN
-            # ===============================================
-
-            calidades_impresion = {
-
-                "Borrador": 0.75,
-
-                "Normal": 1.00,
-
-                "Alta": 1.18,
-
-                "Foto": 1.35
+                "Adhesivo": 0.16
 
             }
 
 
-            perfil_driver = {
+        # ===============================================
+        # CALIDAD DE IMPRESIÓN
+        # ===============================================
 
-                "Mate": 1.00,
+        calidades_impresion = {
 
-                "Glossy": 1.12,
+            "Borrador": 0.75,
 
-                "Semi-Gloss": 1.08,
+            "Normal": 1.00,
 
-                "Satinado": 1.06,
+            "Alta": 1.18,
 
-                "Premium Glossy": 1.15,
+            "Foto": 1.35
 
-                "Premium Mate": 1.10
-
-            }
-
-
-            # ===============================================
-            # CALCULOS BASE
-            # ===============================================
-
-            total_ml_lote = float(sum(totales_lote_cmyk.values()))
-
-            costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
-
-            costo_desgaste_base = float(costo_desgaste) * float(total_pags)
+        }
 
 
-            # ===============================================
-            # SIMULACIONES
-            # ===============================================
+        perfil_driver = {
 
-            simulaciones = []
+            "Mate": 1.00,
 
+            "Glossy": 1.12,
 
-            for papel, costo_hoja in perfiles_papel.items():
+            "Semi-Gloss": 1.08,
 
-                for calidad, mult_calidad in calidades_impresion.items():
+            "Satinado": 1.06,
 
-                    for driver, mult_driver in perfil_driver.items():
+            "Premium Glossy": 1.15,
 
-                        tinta_real = costo_tinta_base * mult_calidad * mult_driver
+            "Premium Mate": 1.10
 
-                        desgaste_real = costo_desgaste_base
-
-                        costo_papel_q = total_pags * costo_hoja
-
-                        total_q = tinta_real + desgaste_real + costo_papel_q
+        }
 
 
-                        simulaciones.append({
+        # ===============================================
+        # CALCULOS BASE
+        # ===============================================
 
-                            "Papel": papel,
+        total_ml_lote = float(sum(totales_lote_cmyk.values()))
 
-                            "Calidad": calidad,
+        costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
 
-                            "Perfil": driver,
+        costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
-                            "Páginas": total_pags,
 
-                            "Tinta ($)": round(tinta_real, 2),
+        # ===============================================
+        # SIMULACIONES
+        # ===============================================
 
-                            "Desgaste ($)": round(desgaste_real, 2),
+        simulaciones = []
 
-                            "Papel ($)": round(costo_papel_q, 2),
 
-                            "Total ($)": round(total_q, 2),
+        for papel, costo_hoja in perfiles_papel.items():
 
-                            "Costo por pág ($)": round(total_q / total_pags, 4)
+            for calidad, mult_calidad in calidades_impresion.items():
 
-                        })
+                for driver, mult_driver in perfil_driver.items():
 
+                    tinta_real = costo_tinta_base * mult_calidad * mult_driver
+
+                    desgaste_real = costo_desgaste_base
+
+                    costo_papel_q = total_pags * costo_hoja
+
+                    total_q = tinta_real + desgaste_real + costo_papel_q
+
+
+                    simulaciones.append({
+
+                        "Papel": papel,
+
+                        "Calidad": calidad,
+
+                        "Perfil": driver,
+
+                        "Páginas": total_pags,
+
+                        "Tinta ($)": round(tinta_real, 2),
+
+                        "Desgaste ($)": round(desgaste_real, 2),
+
+                        "Papel ($)": round(costo_papel_q, 2),
+
+                        "Total ($)": round(total_q, 2),
+
+                        "Costo por pág ($)": round(total_q / total_pags, 4)
+
+                    })
 
             # ===============================================
             # DATAFRAME
@@ -5745,6 +5734,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
