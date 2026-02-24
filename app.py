@@ -3448,24 +3448,18 @@ elif menu == "🎨 Análisis CMYK":
 
 
             # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
-                st.subheader("🧾 Simulación automática por Papel y Calidad")
+            st.subheader("🧾 Simulación automática por Papel y Calidad")
 
             perfiles_papel = {}
 
             try:
 
                 papeles_inv = df_impresion_db[
-
                     df_impresion_db['item'].fillna('').str.contains(
-
                         'papel|bond|fotograf|cartulina|adhesivo|opalina|sulfato',
-
                         case=False,
-
                         na=False
-
                     )
-
                 ][['item', 'precio_usd']].dropna(subset=['precio_usd'])
 
 
@@ -3478,6 +3472,7 @@ elif menu == "🎨 Análisis CMYK":
                     if precio_p > 0:
 
                         perfiles_papel[nombre_p] = precio_p
+
 
             except Exception:
 
@@ -3509,7 +3504,6 @@ elif menu == "🎨 Análisis CMYK":
                 st.success("📄 Costos de papeles detectados automáticamente desde inventario.")
 
 
-
             # ===============================================
             # CALIDAD DE IMPRESIÓN
             # ===============================================
@@ -3527,7 +3521,6 @@ elif menu == "🎨 Análisis CMYK":
             }
 
 
-
             perfil_driver = {
 
                 "Mate": 1.00,
@@ -3543,8 +3536,6 @@ elif menu == "🎨 Análisis CMYK":
                 "Premium Mate": 1.10
 
             }
-
-
 
             # ===============================================
             # CÁLCULOS BASE
@@ -5760,6 +5751,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
