@@ -3524,88 +3524,82 @@ elif menu == "🎨 Análisis CMYK":
         perfil_driver = {
 
             "Mate": 1.00,
-
             "Glossy": 1.12,
-
             "Semi-Gloss": 1.08,
-
             "Satinado": 1.06,
-
             "Premium Glossy": 1.15,
-
             "Premium Mate": 1.10
 
         }
-            # ===============================================
-            # CÁLCULOS BASE
-            # ===============================================
 
-            total_ml_lote = float(sum(totales_lote_cmyk.values()))
+        # ===============================================
+        # CÁLCULOS BASE
+        # ===============================================
 
-            costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
+        total_ml_lote = float(sum(totales_lote_cmyk.values()))
 
-            costo_desgaste_base = float(costo_desgaste) * float(total_pags)
+        costo_tinta_base = total_ml_lote * float(precio_tinta_ml)
 
-
-
-            # ===============================================
-            # SIMULACIONES
-            # ===============================================
-
-            simulaciones = []
+        costo_desgaste_base = float(costo_desgaste) * float(total_pags)
 
 
-            for papel, costo_hoja in perfiles_papel.items():
+        # ===============================================
+        # SIMULACIONES
+        # ===============================================
 
-                for calidad, mult_calidad in calidades_impresion.items():
-
-                    for driver, mult_driver in perfil_driver.items():
-
-                        tinta_real = costo_tinta_base * mult_calidad * mult_driver
-
-                        desgaste_real = costo_desgaste_base
-
-                        costo_papel_q = float(total_pags) * costo_hoja
-
-                        total_q = tinta_real + desgaste_real + costo_papel_q
+        simulaciones = []
 
 
-                        simulaciones.append({
+        for papel, costo_hoja in perfiles_papel.items():
 
-                            "Papel": papel,
+            for calidad, mult_calidad in calidades_impresion.items():
 
-                            "Calidad": calidad,
+                for driver, mult_driver in perfil_driver.items():
 
-                            "Perfil": driver,
+                    tinta_real = costo_tinta_base * mult_calidad * mult_driver
 
-                            "Páginas": total_pags,
+                    desgaste_real = costo_desgaste_base
 
-                            "Tinta ($)": round(tinta_real, 2),
+                    costo_papel_q = float(total_pags) * costo_hoja
 
-                            "Desgaste ($)": round(desgaste_real, 2),
-
-                            "Papel ($)": round(costo_papel_q, 2),
-
-                            "Total ($)": round(total_q, 2),
-
-                            "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
-
-                        })
+                    total_q = tinta_real + desgaste_real + costo_papel_q
 
 
+                    simulaciones.append({
 
-            df_sim = pd.DataFrame(simulaciones).sort_values("Total ($)")
+                        "Papel": papel,
+
+                        "Calidad": calidad,
+
+                        "Perfil": driver,
+
+                        "Páginas": total_pags,
+
+                        "Tinta ($)": round(tinta_real, 2),
+
+                        "Desgaste ($)": round(desgaste_real, 2),
+
+                        "Papel ($)": round(costo_papel_q, 2),
+
+                        "Total ($)": round(total_q, 2),
+
+                        "Costo por pág ($)": round(total_q / total_pags, 4) if total_pags else 0
+
+                    })
 
 
-            st.dataframe(
+        df_sim = pd.DataFrame(simulaciones).sort_values("Total ($)")
 
-                df_sim,
 
-                use_container_width=True,
+        st.dataframe(
 
-                hide_index=True
+            df_sim,
 
-            )
+            use_container_width=True,
+
+            hide_index=True
+
+        )
 
 
 
@@ -5751,6 +5745,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
