@@ -3608,6 +3608,7 @@ elif menu == "🎨 Análisis CMYK":
             )
 
 
+
             # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
             st.subheader("🧾 Simulación automática por Papel y Calidad")
 
@@ -5750,6 +5751,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
