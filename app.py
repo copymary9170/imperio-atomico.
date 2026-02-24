@@ -3590,20 +3590,6 @@ elif menu == "🎨 Análisis CMYK":
 
         df_sim = pd.DataFrame(simulaciones).sort_values("Total ($)")
 
-        # ===============================================
-        # MOSTRAR TABLA
-        # ===============================================
-
-        st.dataframe(
-            df_sim,
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-        # ===============================================
-        # VALIDAR QUE NO ESTÉ VACÍO
-        # ===============================================
 
         if not df_sim.empty:
 
@@ -3622,6 +3608,22 @@ elif menu == "🎨 Análisis CMYK":
 
         )
 
+ # ===============================================
+        # MOSTRAR TABLA
+        # ===============================================
+
+        st.dataframe(
+            df_sim,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+        # ===============================================
+        # VALIDAR QUE NO ESTÉ VACÍO
+        # ===============================================
+        
+        
         # --- COSTEO AUTOMÁTICO POR PAPEL Y CALIDAD ---
         st.subheader("🧾 Simulación automática por Papel y Calidad")
 
@@ -5755,6 +5757,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
