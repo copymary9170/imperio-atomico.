@@ -3590,6 +3590,27 @@ elif menu == "🎨 Análisis CMYK":
 
         df_sim = pd.DataFrame(simulaciones).sort_values("Total ($)")
 
+        # ===============================================
+        # MOSTRAR TABLA
+        # ===============================================
+
+        st.dataframe(
+            df_sim,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+        # ===============================================
+        # VALIDAR QUE NO ESTÉ VACÍO
+        # ===============================================
+
+        if not df_sim.empty:
+
+
+           
+
+        
 
         st.dataframe(
 
@@ -5734,6 +5755,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
