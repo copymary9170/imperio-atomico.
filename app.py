@@ -3589,9 +3589,7 @@ elif menu == "🎨 Análisis CMYK":
 
 
         df_sim = pd.DataFrame(simulaciones).sort_values("Total ($)")
-
-
-        if not df_sim.empty:
+          if not df_sim.empty:
 
 
            
@@ -5757,6 +5755,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
