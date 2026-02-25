@@ -2730,7 +2730,7 @@ if not df_sim.empty:
             hide_index=True
         )
 
-        with st.expander("⚙️ Acciones rápidas por cliente"):
+    with st.expander("⚙️ Acciones rápidas por cliente"):
             cliente_accion = st.selectbox("Selecciona cliente", df_resumen['nombre'].tolist(), key='cli_accion')
             cli_row = df_resumen[df_resumen['nombre'] == cliente_accion].iloc[0]
             a1, a2 = st.columns(2)
@@ -5866,6 +5866,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
