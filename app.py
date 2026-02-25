@@ -2715,7 +2715,7 @@ if not df_sim.empty:
     )
 
         
-        st.dataframe(
+    st.dataframe(
             df_resumen.sort_values(['deudas', 'total_comprado'], ascending=[False, False]),
             column_config={
                 'id': None,
@@ -5866,6 +5866,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
