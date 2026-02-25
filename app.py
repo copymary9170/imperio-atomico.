@@ -2764,7 +2764,7 @@ else:
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
 # ===========================================================
-    elif menu == "🎨 Análisis CMYK":
+elif menu == "🎨 Análisis CMYK":
 
     st.title("🎨 Analizador Profesional de Cobertura CMYK")
 
@@ -5866,6 +5866,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
