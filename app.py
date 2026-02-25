@@ -2755,7 +2755,7 @@ if not df_sim.empty:
                         st.rerun()
 
 
-    else:
+else:
         st.info("No hay clientes que coincidan con los filtros.")
 
 
@@ -5866,6 +5866,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
