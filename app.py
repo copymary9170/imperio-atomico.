@@ -4026,54 +4026,44 @@ elif menu == "💰 Ventas":
 
                         conn.commit()
 
-# 🚀 DESCONTAR INVENTARIO AUTOMÁTICO
-                # 🚀 DESCONTAR INVENTARIO AUTOMÁTICO
-                try:
+                    # 🚀 DESCONTAR INVENTARIO AUTOMÁTICO
+                    alias_colores = {
 
-                    with conectar() as conn:
+                        'C': ['cian', 'cyan'],
+                        'M': ['magenta'],
+                        'Y': ['amarillo', 'yellow'],
+                        'K': ['negro', 'negra', 'black']
 
-                        alias_colores = {
+                    }
 
-                            'C': ['cian', 'cyan'],
-                            'M': ['magenta'],
-                            'Y': ['amarillo', 'yellow'],
-                            'K': ['negro', 'negra', 'black']
+                    for color, consumo in totales_lote_cmyk.items():
 
-                        }
+                        aliases = alias_colores.get(color, [])
 
-                        for color, consumo in totales_lote_cmyk.items():
+                        if not aliases:
+                            continue
 
-                            aliases = alias_colores.get(color, [])
+                        conn.execute("""
 
-                            if not aliases:
-                                continue
+                            UPDATE inventario
 
-                            conn.execute("""
+                            SET cantidad = MAX(cantidad - ?, 0)
 
-                                UPDATE inventario
+                            WHERE item LIKE ?
 
-                                SET cantidad = cantidad - ?
+                            AND activo = 1
 
-                                WHERE item LIKE ?
+                        """, (
 
-                                AND activo = 1
+                            consumo,
 
-                            """, (
+                            f"%{aliases[0]}%"
 
-                                consumo,
+                        ))
 
-                                f"%{aliases[0]}%"
-
-                            ))
-
-                        conn.commit()
+                    conn.commit()
 
                     st.success("📦 Inventario descontado automáticamente")
-
-                except Exception as e:
-
-                    st.warning(f"No se pudo descontar inventario: {e}")
-
 
 
                 st.success("Venta registrada correctamente")
@@ -4081,7 +4071,6 @@ elif menu == "💰 Ventas":
                 st.balloons()
 
                 st.rerun()
-
 
             except Exception as e:
 
@@ -5287,6 +5276,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
