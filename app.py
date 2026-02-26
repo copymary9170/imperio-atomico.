@@ -2673,92 +2673,7 @@ elif menu == "👥 Clientes":
 df_sim = pd.DataFrame(simulaciones)
 
 
-# MOSTRAR RESULTADOS
-if not df_sim.empty:
-
-    st.dataframe(
-        df_sim,
-        use_container_width=True
-    )
-
-
-    fig = px.bar(
-        df_sim,
-        x="Papel",
-        y="Total ($)",
-        color="Calidad",
-        title="Comparación de costos"
-    )
-
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
-    )
-
-
-    mejor = df_sim.iloc[0]
-
-
-    st.success(
-
-        f"Mejor opción: "
-
-        f"{mejor['Papel']} | "
-
-        f"{mejor['Calidad']} | "
-
-        f"{mejor['Perfil']} "
-
-        f"→ ${mejor['Total ($)']}"
-
-    )
-
-        
-    st.dataframe(
-            df_resumen.sort_values(['deudas', 'total_comprado'], ascending=[False, False]),
-            column_config={
-                'id': None,
-                'nombre': 'Cliente',
-                'whatsapp': 'WhatsApp',
-                'total_comprado': st.column_config.NumberColumn('Total Comprado ($)', format='%.2f'),
-                'deudas': st.column_config.NumberColumn('Deudas ($)', format='%.2f'),
-                'operaciones': 'Operaciones',
-                'ultima_compra': 'Última compra'
-            },
-            use_container_width=True,
-            hide_index=True
-        )
-
-    with st.expander("⚙️ Acciones rápidas por cliente"):
-            cliente_accion = st.selectbox("Selecciona cliente", df_resumen['nombre'].tolist(), key='cli_accion')
-            cli_row = df_resumen[df_resumen['nombre'] == cliente_accion].iloc[0]
-            a1, a2 = st.columns(2)
-            if cli_row['whatsapp']:
-                wa_num = str(cli_row['whatsapp'])
-                if not wa_num.startswith('58'):
-                    wa_num = '58' + wa_num.lstrip('0')
-                a1.link_button("💬 Abrir chat WhatsApp", f"https://wa.me/{wa_num}")
-            else:
-                a1.info("Cliente sin número de WhatsApp")
-
-            if a2.button("🗑 Eliminar cliente", type='secondary'):
-                with conectar() as conn:
-                    tiene_ventas = conn.execute("SELECT COUNT(*) FROM ventas WHERE cliente_id = ?", (int(cli_row['id']),)).fetchone()[0]
-                    if tiene_ventas > 0:
-                        st.error("No se puede eliminar: el cliente tiene ventas asociadas.")
-                    else:
-                        conn.execute("DELETE FROM clientes WHERE id = ?", (int(cli_row['id']),))
-                        conn.commit()
-                        st.success("Cliente eliminado correctamente.")
-                        cargar_datos()
-                        st.rerun()
-
-
-    else:
-
-        st.info("No hay clientes que coincidan con los filtros.")
-
+            format="%.2f"
 
 # ===========================================================
 # 11. MÓDULO PROFESIONAL DE OTROS PROCESOS
@@ -4399,6 +4314,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
