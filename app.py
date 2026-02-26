@@ -829,61 +829,207 @@ def inicializar_sistema():
         for tabla in tablas:
             c.execute(tabla)
 
-        # MIGRACIONES LIGERAS
-        columnas_usuarios = {row[1] for row in c.execute("PRAGMA table_info(usuarios)").fetchall()}
-        if 'password_hash' not in columnas_usuarios:
-            c.execute("ALTER TABLE usuarios ADD COLUMN password_hash TEXT")
+        # ===========================================================
+        # MIGRACIONES LIGERAS — BLOQUE FINAL SEGURO
+        # ===========================================================
 
-        columnas_movs = {row[1] for row in c.execute("PRAGMA table_info(inventario_movs)").fetchall()}
+        # =========================
+        # TABLA USUARIOS
+        # =========================
+
+        columnas_usuarios = {
+            row[1]
+            for row in c.execute(
+                "PRAGMA table_info(usuarios)"
+            ).fetchall()
+        }
+
+        if 'password_hash' not in columnas_usuarios:
+
+            c.execute(
+                "ALTER TABLE usuarios ADD COLUMN password_hash TEXT"
+            )
+
+
+        # =========================
+        # TABLA INVENTARIO MOVIMIENTOS
+        # =========================
+
+        columnas_movs = {
+            row[1]
+            for row in c.execute(
+                "PRAGMA table_info(inventario_movs)"
+            ).fetchall()
+        }
+
         if 'item_id' not in columnas_movs:
-            c.execute("ALTER TABLE inventario_movs ADD COLUMN item_id INTEGER")
+
+            c.execute(
+                "ALTER TABLE inventario_movs ADD COLUMN item_id INTEGER"
+            )
+
+
+        # migración datos antiguos
         if 'item' in columnas_movs:
+
             c.execute(
                 """
                 UPDATE inventario_movs
                 SET item_id = (
-                    SELECT i.id FROM inventario i WHERE i.item = inventario_movs.item LIMIT 1
+
+                    SELECT i.id
+
+                    FROM inventario i
+
+                    WHERE i.item = inventario_movs.item
+
+                    LIMIT 1
+
                 )
                 WHERE item_id IS NULL
                 """
             )
 
-        columnas_inventario = {row[1] for row in c.execute("PRAGMA table_info(inventario)").fetchall()}
-        if 'cantidad' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN cantidad REAL DEFAULT 0")
-        if 'unidad' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN unidad TEXT DEFAULT 'Unidad'")
-        if 'precio_usd' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN precio_usd REAL DEFAULT 0")
-        if 'minimo' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN minimo REAL DEFAULT 5.0")
-        if 'ultima_actualizacion' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN ultima_actualizacion DATETIME")
-            c.execute("UPDATE inventario SET ultima_actualizacion = CURRENT_TIMESTAMP WHERE ultima_actualizacion IS NULL")
-        if 'imprimible_cmyk' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN imprimible_cmyk INTEGER DEFAULT 0")
-        if 'area_por_pliego_cm2' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN area_por_pliego_cm2 REAL")
-        if 'activo' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN activo INTEGER DEFAULT 1")
-        if 'unidad_base' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN unidad_base TEXT DEFAULT 'ml'")
-        if 'factor_conversion' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN factor_conversion REAL DEFAULT 1.0")
-        if 'capacidad_ml' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN capacidad_ml REAL DEFAULT NULL")
-        if 'rendimiento_paginas' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN rendimiento_paginas INTEGER DEFAULT NULL")
-        if 'costo_real_ml' not in columnas_inventario:
-            c.execute("ALTER TABLE inventario ADD COLUMN costo_real_ml REAL DEFAULT NULL")
-        c.execute("UPDATE inventario SET activo = 1 WHERE activo IS NULL")
-        c.execute("UPDATE inventario SET unidad_base = 'ml' WHERE unidad_base IS NULL")
-        c.execute("UPDATE inventario SET factor_conversion = 1.0 WHERE factor_conversion IS NULL OR factor_conversion <= 0")
-        actualizar_costo_real_ml_inventario(conn)
 
-        c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON ventas(cliente_id)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_item ON inventario(item)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id ON inventario_movs(item_id)")
+        # =========================
+        # TABLA INVENTARIO
+        # =========================
+
+        columnas_inventario = {
+            row[1]
+            for row in c.execute(
+                "PRAGMA table_info(inventario)"
+            ).fetchall()
+        }
+
+
+        def agregar_columna(col, definicion):
+
+            if col not in columnas_inventario:
+
+                c.execute(
+                    f"ALTER TABLE inventario ADD COLUMN {col} {definicion}"
+                )
+
+
+        agregar_columna("cantidad", "REAL DEFAULT 0")
+
+        agregar_columna("unidad", "TEXT DEFAULT 'Unidad'")
+
+        agregar_columna("precio_usd", "REAL DEFAULT 0")
+
+        agregar_columna("minimo", "REAL DEFAULT 5.0")
+
+
+        if 'ultima_actualizacion' not in columnas_inventario:
+
+            c.execute(
+                """
+                ALTER TABLE inventario
+                ADD COLUMN ultima_actualizacion DATETIME
+                """
+            )
+
+            c.execute(
+                """
+                UPDATE inventario
+                SET ultima_actualizacion = CURRENT_TIMESTAMP
+                WHERE ultima_actualizacion IS NULL
+                """
+            )
+
+
+        agregar_columna("imprimible_cmyk", "INTEGER DEFAULT 0")
+
+        agregar_columna("area_por_pliego_cm2", "REAL")
+
+        agregar_columna("activo", "INTEGER DEFAULT 1")
+
+        agregar_columna("unidad_base", "TEXT DEFAULT 'ml'")
+
+        agregar_columna("factor_conversion", "REAL DEFAULT 1.0")
+
+        agregar_columna("capacidad_ml", "REAL DEFAULT NULL")
+
+        agregar_columna("rendimiento_paginas", "INTEGER DEFAULT NULL")
+
+        agregar_columna("costo_real_ml", "REAL DEFAULT NULL")
+
+
+        # =========================
+        # NORMALIZACIÓN
+        # =========================
+
+        c.execute(
+            """
+            UPDATE inventario
+            SET activo = 1
+            WHERE activo IS NULL
+            """
+        )
+
+
+        c.execute(
+            """
+            UPDATE inventario
+            SET unidad_base = 'ml'
+            WHERE unidad_base IS NULL
+            """
+        )
+
+
+        c.execute(
+            """
+            UPDATE inventario
+            SET factor_conversion = 1.0
+            WHERE factor_conversion IS NULL
+            OR factor_conversion <= 0
+            """
+        )
+
+
+        # =========================
+        # ACTUALIZAR COSTO REAL
+        # =========================
+
+        try:
+
+            actualizar_costo_real_ml_inventario(conn)
+
+        except Exception as e:
+
+            print(
+                "Aviso actualizar_costo_real_ml_inventario:",
+                e
+            )
+
+
+        # =========================
+        # ÍNDICES
+        # =========================
+
+        c.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id
+            ON ventas(cliente_id)
+            """
+        )
+
+
+        c.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_inventario_item
+            ON inventario(item)
+            """
+        )
+
+
+        c.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id
+            ON inventario_movs(item_id)
+            """
+        )
 
         # Guardas lógicas de inventario (sin tocar estructura de tabla)
         c.execute("""
@@ -4868,6 +5014,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
