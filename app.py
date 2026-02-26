@@ -3320,10 +3320,44 @@ elif menu == "🎨 Análisis CMYK":
 
                 # Guardamos información completa para el cotizador
                 st.session_state['datos_pre_cotizacion'] = {
-                    'trabajo': f"Impresión {impresora_sel} ({total_pags} pgs)",
-                    'costo_base': float(df_sim.iloc[0]['Total ($)']) if not df_sim.empty else float(total_usd_lote),
-                    'unidades': total_pags,
 
+                    # BASE
+                
+                    'tipo': tipo_produccion,
+                
+                    'trabajo': f"{tipo_produccion} - {impresora_sel}",
+                
+                    'cantidad': total_pags,
+                
+                    'costo_base': float(df_sim.iloc[0]['Total ($)']),
+                
+                    # CMYK
+                
+                    'consumos_cmyk': totales_lote_cmyk,
+                
+                    'archivos': resultados,
+                
+                    # PRODUCCIÓN
+                
+                    'impresora': impresora_sel,
+                
+                    'papel': mejor['Papel'],
+                
+                    'calidad': mejor['Calidad'],
+                
+                    # COSTOS
+                
+                    'precio_tinta_ml': precio_tinta_ml,
+                
+                    'costo_desgaste': costo_desgaste,
+                
+                    # CONTROL
+                
+                    'origen': "CMYK",
+                
+                    'fecha': pd.Timestamp.now()
+                
+                }
                     # Desglose de consumo real
                     'consumos': totales_lote_cmyk,
 
@@ -3372,6 +3406,26 @@ elif menu == "🎨 Análisis CMYK":
             fig_hist = px.line(hist_dia, x='dia', y='costo', markers=True, title='Costo CMYK por día (historial)')
             fig_hist.update_layout(xaxis_title='Día', yaxis_title='Costo ($)')
             st.plotly_chart(fig_hist, use_container_width=True)
+
+    st.subheader("🏭 Tipo de Producción")
+    
+    tipo_produccion = st.selectbox(
+    
+        "Selecciona proceso",
+    
+        [
+    
+            "Impresión CMYK",
+    
+            "Sublimación",
+    
+            "Corte Cameo",
+    
+            "Producción Manual"
+    
+        ]
+    
+    )
 
 
 
@@ -3805,6 +3859,54 @@ elif menu == "💰 Ventas":
                         ))
 
                         conn.commit()
+
+# 🚀 DESCONTAR INVENTARIO AUTOMÁTICO
+try:
+
+    with conectar() as conn:
+
+        alias_colores = {
+
+            'C': ['cian', 'cyan'],
+            'M': ['magenta'],
+            'Y': ['amarillo', 'yellow'],
+            'K': ['negro', 'negra', 'black']
+
+        }
+
+        for color, consumo in totales_lote_cmyk.items():
+
+            aliases = alias_colores.get(color, [])
+
+            if not aliases:
+                continue
+
+            conn.execute(f"""
+
+                UPDATE inventario
+
+                SET cantidad = cantidad - ?
+
+                WHERE item LIKE ?
+
+                AND activo = 1
+
+            """, (
+
+                consumo,
+
+                f"%{aliases[0]}%"
+
+            ))
+
+        conn.commit()
+
+    st.success("📦 Inventario descontado automáticamente")
+
+except Exception as e:
+
+    st.warning(f"No se pudo descontar inventario: {e}")
+
 
                     st.success("Venta registrada correctamente")
                     st.balloons()
@@ -5014,6 +5116,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
