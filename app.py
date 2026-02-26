@@ -4066,15 +4066,15 @@ elif menu == "💰 Ventas":
                     st.success("📦 Inventario descontado automáticamente")
 
 
-                st.success("Venta registrada correctamente")
+                    st.success("Venta registrada correctamente")
 
-                st.balloons()
+                    st.balloons()
 
-                st.rerun()
+                    st.rerun()
 
-            except Exception as e:
+                except Exception as e:
 
-                st.error(f"Error: {e}")
+                    st.error(f"Error: {e}")
     # -----------------------------------
     # HISTORIAL
     # -----------------------------------
@@ -5276,6 +5276,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
