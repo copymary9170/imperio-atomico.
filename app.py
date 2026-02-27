@@ -1144,7 +1144,7 @@ def cargar_datos():
                 _cargar_sesion_desde_db(conn, filtrar_inventario_activo=False)
             except sqlite3.DatabaseError:␊
                 st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")␊
-
+            
 # Alias de compatibilidad para módulos que lo usan
 def cargar_datos_seguros():
     cargar_datos()
@@ -3594,6 +3594,7 @@ elif menu == "🎨 Análisis CMYK":
 
 
     )
+
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
 
@@ -5506,6 +5507,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
