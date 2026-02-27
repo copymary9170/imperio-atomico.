@@ -3592,6 +3592,237 @@ elif menu == "🎨 Análisis CMYK":
 
         ]
 
+
+        
+# --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
+elif menu == "🏗️ Activos":
+
+    if ROL != "Admin":
+        st.error("🚫 Acceso Denegado. Solo Administración puede gestionar activos.")
+        st.stop()
+
+    st.title("🏗️ Gestión Integral de Activos")
+
+    # --- CARGA SEGURA DE DATOS ---
+    try:
+        with conectar() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS activos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    equipo TEXT,
+                    categoria TEXT,
+                    inversion REAL,
+                    unidad TEXT,
+                    desgaste REAL,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            df = pd.read_sql_query("SELECT * FROM activos", conn)
+
+            # Crear tabla de historial si no existe
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS activos_historial (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    activo TEXT,
+                    accion TEXT,
+                    detalle TEXT,
+                    costo REAL,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+    except Exception as e:
+        st.error(f"Error al cargar activos: {e}")
+        st.stop()
+
+    # --- REGISTRO DE NUEVO ACTIVO ---
+    with st.expander("➕ Registrar Nuevo Activo"):
+
+        with st.form("form_activos_pro"):
+
+            c1, c2 = st.columns(2)
+
+            nombre_eq = c1.text_input("Nombre del Activo")
+            tipo_seccion = c2.selectbox("Tipo de Equipo", [
+                "Impresora",
+                "Corte / Plotter (Cameo)",
+                "Plancha de Sublimación",
+                "Otro"
+            ])
+
+            col_m1, col_m2, col_m3 = st.columns(3)
+
+            monto_inv = col_m1.number_input("Inversión ($)", min_value=0.0)
+            vida_util = col_m2.number_input("Vida Útil (Usos)", min_value=1, value=1000)
+
+            categoria_especifica = col_m3.selectbox(
+                "Categoría",
+                ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"]
+            )
+
+            if st.form_submit_button("🚀 Guardar Activo"):
+
+                if not nombre_eq:
+                    st.error("Debe indicar un nombre.")
+                    st.stop()
+
+                if monto_inv <= 0:
+                    st.error("La inversión debe ser mayor a cero.")
+                    st.stop()
+
+                desgaste_u = monto_inv / vida_util
+
+                try:
+                    with conectar() as conn:
+                        conn.execute("""
+                            INSERT INTO activos 
+                            (equipo, categoria, inversion, unidad, desgaste) 
+                            VALUES (?,?,?,?,?)
+                        """, (
+                            nombre_eq,
+                            categoria_especifica,
+                            monto_inv,
+                            tipo_seccion,
+                            desgaste_u
+                        ))
+
+                        conn.execute("""
+                            INSERT INTO activos_historial 
+                            (activo, accion, detalle, costo)
+                            VALUES (?,?,?,?)
+                        """, (nombre_eq, "CREACIÓN", "Registro inicial", monto_inv))
+
+                        conn.commit()
+
+                    st.success("✅ Activo registrado correctamente.")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Error al registrar: {e}")
+
+    st.divider()
+
+    # --- EDICIÓN DE ACTIVOS ---
+    with st.expander("✏️ Editar Activo Existente"):
+
+        if df.empty:
+            st.info("No hay activos para editar.")
+        else:
+            activo_sel = st.selectbox("Seleccionar activo:", df['equipo'].tolist())
+
+            datos = df[df['equipo'] == activo_sel].iloc[0]
+
+            with st.form("editar_activo"):
+
+                c1, c2, c3 = st.columns(3)
+
+                nueva_inv = c1.number_input("Inversión ($)", value=float(datos['inversion']))
+                nueva_vida = c2.number_input("Vida útil", value=1000)
+                nueva_cat = c3.selectbox(
+                    "Categoría",
+                    ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"],
+                    index=0
+                )
+
+                if st.form_submit_button("💾 Guardar Cambios"):
+
+                    nuevo_desgaste = nueva_inv / nueva_vida
+
+                    try:
+                        with conectar() as conn:
+                            conn.execute("""
+                                UPDATE activos
+                                SET inversion = ?, categoria = ?, desgaste = ?
+                                WHERE id = ?
+                            """, (nueva_inv, nueva_cat, nuevo_desgaste, int(datos['id'])))
+
+                            conn.execute("""
+                                INSERT INTO activos_historial 
+                                (activo, accion, detalle, costo)
+                                VALUES (?,?,?,?)
+                            """, (activo_sel, "EDICIÓN", "Actualización de valores", nueva_inv))
+
+                            conn.commit()
+
+                        st.success("Activo actualizado.")
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Error al actualizar: {e}")
+
+    st.divider()
+
+    # --- VISUALIZACIÓN POR SECCIONES ---
+    t1, t2, t3, t4, t5, t6 = st.tabs([
+        "🖨️ Impresoras",
+        "✂️ Corte / Plotter",
+        "🔥 Planchas",
+        "🧰 Otros",
+        "📊 Resumen Global",
+        "📜 Historial"
+    ])
+
+    if not df.empty:
+
+        with t1:
+            st.subheader("Impresoras")
+            df_imp = df[df['unidad'].fillna('').str.contains("Impresora", case=False)]
+            st.dataframe(df_imp, use_container_width=True, hide_index=True)
+
+        with t2:
+            st.subheader("Corte / Plotter")
+            df_corte = df[df['unidad'].fillna('').str.contains("Corte|Plotter|Cameo", case=False)]
+            st.dataframe(df_corte, use_container_width=True, hide_index=True)
+
+        with t3:
+            st.subheader("Planchas de Sublimación")
+            df_plancha = df[df['unidad'].fillna('').str.contains("Plancha|Sublim", case=False)]
+            st.dataframe(df_plancha, use_container_width=True, hide_index=True)
+
+        with t4:
+            st.subheader("Otros equipos")
+            mask_otro = ~df['unidad'].fillna('').str.contains("Impresora|Corte|Plotter|Cameo|Plancha|Sublim", case=False)
+            st.dataframe(df[mask_otro], use_container_width=True, hide_index=True)
+
+        with t5:
+            c_inv, c_des, c_prom = st.columns(3)
+
+            c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
+            c_des.metric("Activos Registrados", len(df))
+
+            promedio = df['desgaste'].mean() if not df.empty else 0
+            c_prom.metric("Desgaste Promedio por Uso", f"$ {promedio:.4f}")
+
+            fig = px.bar(
+                df,
+                x='equipo',
+                y='inversion',
+                color='categoria',
+                title="Distribución de Inversión por Activo"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with t6:
+            st.subheader("Historial de Movimientos de Activos")
+
+            try:
+                with conectar() as conn:
+                    df_hist = pd.read_sql_query(
+                        "SELECT activo, accion, detalle, costo, fecha FROM activos_historial ORDER BY fecha DESC",
+                        conn
+                    )
+
+                if not df_hist.empty:
+                    st.dataframe(df_hist, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay movimientos registrados aún.")
+
+            except Exception as e:
+                st.error(f"Error cargando historial: {e}")
+
+    else:
+        st.info("No hay activos registrados todavía.")
+
+
     )
 
 
@@ -5276,6 +5507,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
