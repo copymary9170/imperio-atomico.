@@ -3593,7 +3593,7 @@ elif menu == "🎨 Análisis CMYK":
         ]
 
 
-        
+    )
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
 
@@ -3823,7 +3823,6 @@ elif menu == "🏗️ Activos":
         st.info("No hay activos registrados todavía.")
 
 
-    )
 
 
 # ===========================================================
@@ -5507,6 +5506,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
