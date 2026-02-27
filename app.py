@@ -87,7 +87,8 @@ def actualizar_costo_real_ml_inventario(conn=None):
                     "UPDATE inventario SET costo_real_ml=? WHERE id=?",
                     (float(costo_real_ml), int(item_id))
                 )
-            conn_local.commit()
+            registrar_log_actividad(conn_local, 'INSERT', 'ventas', usuario=usuario)
+        conn_local.commit()
         return
 
     filas = conn.execute(
@@ -136,6 +137,54 @@ def _safe_float(valor, default=0.0):
         return float(valor)
     except (TypeError, ValueError):
         return float(default)
+
+
+def money(v):
+    return round(float(v or 0.0) + 1e-9, 2)
+
+
+KANBAN_ESTADOS = ['Cotización', 'Pendiente', 'Diseño', 'Impresión/Corte', 'Acabado', 'Listo para Entrega', 'Entregado']
+
+
+def normalizar_estado_kanban(estado):
+    estado_txt = str(estado or '').strip()
+    if estado_txt.lower() in {'pendiente', 'pendiente de producción'}:
+        return 'Pendiente'
+    if estado_txt.lower() in {'finalizado', 'cerrado', 'entregado'}:
+        return 'Entregado'
+    return estado_txt if estado_txt in KANBAN_ESTADOS else 'Cotización'
+
+
+def registrar_log_actividad(conn, accion, tabla_afectada, usuario=None):
+    usuario_final = str(usuario or st.session_state.get('usuario_nombre', 'Sistema'))
+    conn.execute(
+        """
+        INSERT INTO logs_actividad (usuario, accion, tabla_afectada)
+        VALUES (?, ?, ?)
+        """,
+        (usuario_final, str(accion), str(tabla_afectada))
+    )
+
+
+def calcular_precio_final(costo_base, metodo_pago, tiene_iva):
+    base = money(costo_base)
+    metodo = str(metodo_pago or '').lower()
+    comision = 0.0
+
+    if 'kontigo' in metodo:
+        comision += float(st.session_state.get('kontigo_perc_entrada', st.session_state.get('kontigo_perc', 5.0)))
+    elif any(m in metodo for m in ['pago móvil', 'pago movil', 'transferencia', 'zelle']):
+        comision += float(st.session_state.get('banco_perc', 0.5))
+
+    if bool(tiene_iva):
+        comision += float(st.session_state.get('iva_perc', 16.0))
+
+    total = money(base * (1 + (comision / 100.0)))
+    return {
+        'base': base,
+        'porcentaje_total': round(comision, 4),
+        'total': total
+    }
 
 def _calcular_vida_util_desde_activo(inversion, desgaste, default=1000):
     inversion_f = _safe_float(inversion)
@@ -338,7 +387,7 @@ def procesar_orden_produccion(orden_id):
             return False, 'Orden no encontrada'
 
         oid, tipo, producto, estado, costo_base = row
-        if str(estado).lower() in ('finalizado', 'cerrado'):
+        if str(estado).lower() in ('finalizado', 'cerrado', 'entregado'):
             return True, 'Orden ya procesada'
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_id ON inventario(id)")
@@ -374,7 +423,7 @@ def procesar_orden_produccion(orden_id):
                 return False, msg
 
         conn.execute(
-            "UPDATE ordenes_produccion SET estado='finalizado', costo=? WHERE id=?",
+            "UPDATE ordenes_produccion SET estado='Entregado', costo=? WHERE id=?",
             (float(costo_total), int(oid))
         )
         conn.commit()
@@ -382,7 +431,7 @@ def procesar_orden_produccion(orden_id):
     return True, f'Orden #{int(oid)} procesada'
 
 
-def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_activo=0.0, nombre_archivo=''):
+def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_activo=0.0, nombre_archivo='', complejidad_diseno='Media', mano_obra_base=0.0):
     nombre_archivo = str(nombre_archivo or '').lower()
     try:
         imagen = Image.open(io.BytesIO(archivo_bytes)).convert('L')
@@ -414,6 +463,8 @@ def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_act
 
     movimientos = int(max(1, (bordes_h + bordes_v) / 8))
     desgaste_real = float(longitud_cm) * float(factor_dureza_material or 1.0) * float(desgaste_activo or 0.0)
+    factor_complejidad = {'baja': 1.0, 'media': 1.35, 'alta': 1.7}.get(str(complejidad_diseno or 'media').lower(), 1.35)
+    costo_mano_obra = money(float(mano_obra_base or 0.0) * factor_complejidad)
 
     return {
         'ancho_px': int(ancho),
@@ -421,24 +472,29 @@ def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_act
         'area_cm2': area_cm2,
         'longitud_corte_cm': longitud_cm,
         'movimientos': movimientos,
-        'desgaste_real': desgaste_real
+        'desgaste_real': money(desgaste_real),
+        'complejidad_diseno': complejidad_diseno,
+        'factor_complejidad': factor_complejidad,
+        'costo_mano_obra': costo_mano_obra,
+        'costo_total': money(desgaste_real + costo_mano_obra)
     }
 
 
-def calcular_sublimacion_industrial(ancho_cm, alto_cm, precio_tinta_ml, consumo_ml_cm2=0.0008, costo_papel_cm2=0.0025, desgaste_activo=0.0, tiempo_uso_min=0.0):
+def calcular_sublimacion_industrial(ancho_cm, alto_cm, precio_tinta_ml, consumo_ml_cm2=0.0008, costo_papel_cm2=0.0025, desgaste_activo=0.0, tiempo_uso_min=0.0, costo_bajada_plancha=0.0):
     area_cm2 = float(ancho_cm or 0.0) * float(alto_cm or 0.0)
     consumo_tinta_ml = area_cm2 * float(consumo_ml_cm2 or 0.0)
     costo_tinta = consumo_tinta_ml * float(precio_tinta_ml or 0.0)
     costo_papel = area_cm2 * float(costo_papel_cm2 or 0.0)
     desgaste_plancha = float(desgaste_activo or 0.0) * float(tiempo_uso_min or 0.0)
-    costo_total = costo_tinta + costo_papel + desgaste_plancha
+    costo_total = costo_tinta + costo_papel + desgaste_plancha + float(costo_bajada_plancha or 0.0)
     return {
         'area_cm2': area_cm2,
         'consumo_tinta_ml': consumo_tinta_ml,
-        'costo_tinta': costo_tinta,
-        'costo_papel': costo_papel,
-        'desgaste_plancha': desgaste_plancha,
-        'costo_total': costo_total
+        'costo_tinta': money(costo_tinta),
+        'costo_papel': money(costo_papel),
+        'desgaste_plancha': money(desgaste_plancha),
+        'bajada_plancha': money(costo_bajada_plancha),
+        'costo_total': money(costo_total)
     }
 
 
@@ -452,7 +508,7 @@ def calcular_produccion_manual(materiales, activos):
     }
 
 
-def registrar_orden_produccion(tipo, cliente, producto, estado='pendiente', costo=0.0, trabajo=''):
+def registrar_orden_produccion(tipo, cliente, producto, estado='Cotización', costo=0.0, trabajo=''):
     with conectar() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -460,8 +516,9 @@ def registrar_orden_produccion(tipo, cliente, producto, estado='pendiente', cost
             INSERT INTO ordenes_produccion (tipo, cliente, producto, estado, costo, trabajo)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (str(tipo), str(cliente), str(producto), str(estado), float(costo or 0.0), str(trabajo or ''))
+            (str(tipo), str(cliente), str(producto), normalizar_estado_kanban(estado), money(costo), str(trabajo or ''))
         )
+        registrar_log_actividad(conn, 'INSERT', 'ordenes_produccion')
         conn.commit()
         return int(cur.lastrowid)
 
@@ -842,6 +899,16 @@ def inicializar_sistema():
         for tabla in tablas:
             c.execute(tabla)
 
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS logs_actividad (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario TEXT,
+                accion TEXT,
+                tabla_afectada TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # ===========================================================
         # MIGRACIONES LIGERAS — BLOQUE FINAL SEGURO
         # ===========================================================
@@ -1092,6 +1159,14 @@ def inicializar_sistema():
             c.execute("ALTER TABLE proveedores ADD COLUMN fecha_creacion TEXT")
             c.execute("UPDATE proveedores SET fecha_creacion = CURRENT_TIMESTAMP WHERE fecha_creacion IS NULL")
 
+        for tabla_soft in ('clientes', 'proveedores', 'gastos', 'historial_compras', 'ventas', 'ordenes_produccion'):
+            cols_soft = {row[1] for row in c.execute(f"PRAGMA table_info({tabla_soft})").fetchall()}
+            if 'activo' not in cols_soft:
+                c.execute(f"ALTER TABLE {tabla_soft} ADD COLUMN activo INTEGER DEFAULT 1")
+            c.execute(f"UPDATE {tabla_soft} SET activo=1 WHERE activo IS NULL")
+
+        columnas_conf = {row[1] for row in c.execute("PRAGMA table_info(configuracion)").fetchall()}
+
         # USUARIO ADMIN POR DEFECTO
         admin_password = obtener_password_admin_inicial()
         c.execute(
@@ -1122,7 +1197,10 @@ def inicializar_sistema():
             ('kontigo_perc_entrada', 5.0),
             ('kontigo_perc_salida', 5.0),
             ('kontigo_saldo', 0.0),
-            ('costo_tinta_auto', 1.0)
+            ('costo_tinta_auto', 1.0),
+            ('factor_desperdicio_cmyk', 1.15),
+            ('desgaste_cabezal_ml', 0.005),
+            ('costo_bajada_plancha', 0.03)
         ]
 
         for p, v in config_init:
@@ -1139,7 +1217,7 @@ def _cargar_sesion_desde_db(conn, filtrar_inventario_activo=True):
         query_inv += " WHERE COALESCE(activo,1)=1"
 
     st.session_state.df_inv = pd.read_sql(query_inv, conn)
-    st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+    st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes WHERE COALESCE(activo,1)=1", conn)
     conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
     for _, row in conf_df.iterrows():
         st.session_state[row['parametro']] = float(row['valor'])
@@ -1261,19 +1339,23 @@ if menu == "📊 Dashboard":
             df_ventas = pd.DataFrame(columns=["fecha", "cliente", "metodo", "monto_total"])
 
         try:
-            df_gastos = pd.read_sql("SELECT fecha, monto, categoria FROM gastos", conn)
+            df_gastos = pd.read_sql("SELECT fecha, monto, categoria FROM gastos WHERE COALESCE(activo,1)=1", conn)
         except Exception:
             df_gastos = pd.DataFrame(columns=["fecha", "monto", "categoria"])
 
         try:
-            total_clientes = conn.execute("SELECT COUNT(*) FROM clientes").fetchone()[0]
+            total_clientes = conn.execute("SELECT COUNT(*) FROM clientes WHERE COALESCE(activo,1)=1").fetchone()[0]
         except Exception:
             total_clientes = 0
 
         try:
-            df_inv_dash = pd.read_sql("SELECT cantidad, precio_usd, minimo FROM inventario", conn)
+            df_inv_dash = pd.read_sql("SELECT cantidad, precio_usd, minimo FROM inventario WHERE COALESCE(activo,1)=1", conn)
         except Exception:
             df_inv_dash = pd.DataFrame(columns=["cantidad", "precio_usd", "minimo"])
+        try:
+            df_tiempos_dash = pd.read_sql("SELECT minutos_reales FROM tiempos_produccion", conn)
+        except Exception:
+            df_tiempos_dash = pd.DataFrame(columns=['minutos_reales'])
 
     # ------------------------------
     # Filtro temporal
@@ -1315,6 +1397,28 @@ if menu == "📊 Dashboard":
             comision_est += float(ventas_kontigo['monto_total'].sum() * (kontigo_perc / 100))
 
     utilidad = ventas_total - gastos_total - comision_est
+
+    utilidad_neta_mes = 0.0
+    if not df_ventas.empty:
+        dvm = df_ventas.copy()
+        dvm['fecha'] = pd.to_datetime(dvm['fecha'], errors='coerce')
+        ini_mes = pd.Timestamp.now().replace(day=1).normalize()
+        ventas_mes = float(dvm[dvm['fecha'] >= ini_mes]['monto_total'].sum()) if 'monto_total' in dvm.columns else 0.0
+        gastos_mes = 0.0
+        if not df_gastos.empty:
+            dgm = df_gastos.copy()
+            dgm['fecha'] = pd.to_datetime(dgm['fecha'], errors='coerce')
+            gastos_mes = float(dgm[dgm['fecha'] >= ini_mes]['monto'].sum()) if 'monto' in dgm.columns else 0.0
+        utilidad_neta_mes = money(ventas_mes - gastos_mes)
+
+    eficiencia_horas = float(df_tiempos_dash['minutos_reales'].mean() / 60.0) if not df_tiempos_dash.empty else 0.0
+    insumos_criticos = int((df_inv_dash['cantidad'] <= df_inv_dash['minimo']).sum()) if not df_inv_dash.empty else 0
+
+    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1.metric('Utilidad Neta del Mes', f"$ {utilidad_neta_mes:,.2f}")
+    kpi2.metric('Eficiencia Producción (prom. entrega)', f"{eficiencia_horas:.2f} h")
+    kpi3.metric('Alerta Insumos Críticos', insumos_criticos)
+    st.divider()
 
     capital_inv = 0.0
     stock_bajo = 0
@@ -1585,7 +1689,7 @@ elif menu == "📦 Inventario":
                             )
                         else:
                             conn.execute(
-                                "DELETE FROM inventario WHERE item=?",
+                                "UPDATE inventario SET activo=0, ultima_actualizacion=CURRENT_TIMESTAMP WHERE item=?",
                                 (insumo_sel,)
                             )
                         conn.commit()
@@ -1607,7 +1711,7 @@ elif menu == "📦 Inventario":
         with conectar() as conn:
             try:
                 proveedores_existentes = pd.read_sql(
-                    "SELECT nombre FROM proveedores ORDER BY nombre ASC",
+                    "SELECT nombre FROM proveedores WHERE COALESCE(activo,1)=1 ORDER BY nombre ASC",
                     conn
                 )["nombre"].dropna().astype(str).tolist()
             except (sqlite3.DatabaseError, pd.errors.DatabaseError):
@@ -1787,7 +1891,7 @@ elif menu == "📦 Inventario":
 
                 proveedor_id = None
                 if proveedor:
-                    cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
+                    cur.execute("SELECT id FROM proveedores WHERE nombre=? AND COALESCE(activo,1)=1", (proveedor,))
                     prov = cur.fetchone()
                     if not prov:
                         cur.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor,))
@@ -1892,6 +1996,7 @@ elif menu == "📦 Inventario":
                     p.nombre as proveedor
                 FROM historial_compras h
                 LEFT JOIN proveedores p ON h.proveedor_id = p.id
+                WHERE COALESCE(h.activo,1)=1
                 ORDER BY h.fecha DESC
             """, conn)
 
@@ -1970,7 +2075,7 @@ elif menu == "📦 Inventario":
                             conn=conn
                         )
 
-                    cur.execute("DELETE FROM historial_compras WHERE id=?", (int(compra_sel_id),))
+                    cur.execute("UPDATE historial_compras SET activo=0 WHERE id=?", (int(compra_sel_id),))
                     conn.commit()
 
                 st.success("Compra eliminada y stock ajustado correctamente.")
@@ -2016,7 +2121,7 @@ elif menu == "📦 Inventario":
                                 )
 
                         ids_borrar = [int(x) for x in filas_item["compra_id"].tolist()]
-                        cur.executemany("DELETE FROM historial_compras WHERE id=?", [(i,) for i in ids_borrar])
+                        cur.executemany("UPDATE historial_compras SET activo=0 WHERE id=?", [(i,) for i in ids_borrar])
                         conn.commit()
 
                     st.success(f"Se borró el historial de '{item_norm_sel}' y se ajustó el stock donde correspondía.")
@@ -2174,7 +2279,7 @@ elif menu == "📦 Inventario":
                     if compras > 0:
                         st.error("No se puede eliminar: el proveedor tiene compras asociadas.")
                     else:
-                        conn.execute("DELETE FROM proveedores WHERE id=?", (int(prov_actual["id"]),))
+                        conn.execute("UPDATE proveedores SET activo=0 WHERE id=?", (int(prov_actual["id"]),))
                         conn.commit()
                         st.success("Proveedor eliminado.")
                         st.rerun()
@@ -2492,6 +2597,11 @@ elif menu == "⚙️ Configuración":
             format="%.2f"
         )
 
+        c10, c11, c12 = st.columns(3)
+        n_factor_desperdicio = c10.number_input("Factor desperdicio CMYK", value=get_conf('factor_desperdicio_cmyk', 1.15), format='%.3f')
+        n_desgaste_cabezal = c11.number_input("Desgaste cabezal por ml ($)", value=get_conf('desgaste_cabezal_ml', 0.005), format='%.4f')
+        n_bajada_plancha = c12.number_input("Bajada de plancha ($/u)", value=get_conf('costo_bajada_plancha', 0.03), format='%.2f')
+
         st.divider()
 
         # --- GUARDADO CON HISTORIAL ---
@@ -2508,7 +2618,10 @@ elif menu == "⚙️ Configuración":
                 ('kontigo_perc', n_kontigo),
                 ('kontigo_perc_entrada', n_kontigo_ent),
                 ('kontigo_perc_salida', n_kontigo_sal),
-                ('kontigo_saldo', n_kontigo_saldo)
+                ('kontigo_saldo', n_kontigo_saldo),
+                ('factor_desperdicio_cmyk', n_factor_desperdicio),
+                ('desgaste_cabezal_ml', n_desgaste_cabezal),
+                ('costo_bajada_plancha', n_bajada_plancha)
             ]
 
             try:
@@ -2614,7 +2727,7 @@ elif menu == "👥 Clientes":
     # --- CARGA SEGURA DE DATOS ---
     try:
         with conectar() as conn:
-            df_clientes = pd.read_sql("SELECT * FROM clientes", conn)
+            df_clientes = pd.read_sql("SELECT * FROM clientes WHERE COALESCE(activo,1)=1", conn)
             df_ventas = pd.read_sql("SELECT cliente_id, cliente, monto_total, metodo, fecha FROM ventas", conn)
     except Exception as e:
         st.error(f"Error al cargar datos: {e}")
@@ -2860,7 +2973,7 @@ elif menu == "👥 Clientes":
                     if tiene_ventas > 0:
                         st.error("No se puede eliminar: el cliente tiene ventas asociadas.")
                     else:
-                        conn.execute("DELETE FROM clientes WHERE id = ?", (int(cli_row['id']),))
+                        conn.execute("UPDATE clientes SET activo=0 WHERE id = ?", (int(cli_row['id']),))
                         conn.commit()
                         st.success("Cliente eliminado correctamente.")
                         cargar_datos()
@@ -3141,8 +3254,11 @@ elif menu == "🎨 Análisis CMYK":
 
                         ml_k = ml_k_base + k_extra_ml
                         consumo_total_f = ml_c + ml_m + ml_y + ml_k
+                        factor_desperdicio = float(st.session_state.get('factor_desperdicio_cmyk', 1.15))
+                        desgaste_cabezal_ml = float(st.session_state.get('desgaste_cabezal_ml', 0.005))
+                        consumo_total_ajustado = consumo_total_f * max(1.0, factor_desperdicio)
 
-                        costo_f = (consumo_total_f * precio_tinta_ml) + costo_desgaste
+                        costo_f = (consumo_total_ajustado * precio_tinta_ml) + costo_desgaste + (consumo_total_ajustado * desgaste_cabezal_ml)
 
                         totales_lote_cmyk['C'] += ml_c
                         totales_lote_cmyk['M'] += ml_m
@@ -3156,7 +3272,7 @@ elif menu == "🎨 Análisis CMYK":
                             "Y (ml)": round(ml_y, 4),
                             "K (ml)": round(ml_k, 4),
                             "K extra auto (ml)": round(k_extra_ml, 4),
-                            "Total ml": round(consumo_total_f, 4),
+                            "Total ml": round(consumo_total_ajustado, 4),
                             "Costo $": round(costo_f, 4)
                         })
 
@@ -3622,6 +3738,34 @@ elif menu == "🎨 Análisis CMYK":
     ]
 
     tipo_produccion = st.selectbox("Selecciona proceso", procesos_disponibles)
+
+    st.subheader("🧩 Tablero de Taller (Kanban)")
+    with conectar() as conn:
+        df_kanban = pd.read_sql_query("SELECT id, tipo, producto, estado, fecha FROM ordenes_produccion WHERE COALESCE(activo,1)=1 ORDER BY fecha DESC LIMIT 150", conn)
+
+    if df_kanban.empty:
+        st.info("No hay órdenes de producción activas.")
+    else:
+        df_kanban['estado'] = df_kanban['estado'].apply(normalizar_estado_kanban)
+        cols_k = st.columns(len(KANBAN_ESTADOS))
+        for i, estado_k in enumerate(KANBAN_ESTADOS):
+            with cols_k[i]:
+                st.markdown(f"**{estado_k}**")
+                sub = df_kanban[df_kanban['estado'] == estado_k].head(8)
+                if sub.empty:
+                    st.caption('—')
+                for _, ord_row in sub.iterrows():
+                    st.caption(f"#{int(ord_row['id'])} · {ord_row['producto']}")
+
+        op_orden = st.selectbox("Orden a mover", df_kanban['id'].astype(int).tolist(), key='kanban_orden_sel')
+        op_estado = st.selectbox("Nuevo estado", KANBAN_ESTADOS, key='kanban_estado_sel')
+        if st.button("Mover orden", key='kanban_move_btn'):
+            with conectar() as conn:
+                conn.execute("UPDATE ordenes_produccion SET estado=? WHERE id=?", (op_estado, int(op_orden)))
+                registrar_log_actividad(conn, 'UPDATE_ESTADO', 'ordenes_produccion')
+                conn.commit()
+            st.toast(f"Orden #{op_orden} movida a {op_estado}", icon='✅')
+            st.rerun()
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
 
@@ -4077,18 +4221,20 @@ elif menu == "✂️ Corte Industrial":
     mat_opts = {f"{r['nombre']} (x{float(r['factor_dureza'] or 1.0):.2f})": (int(r['inventario_id']) if pd.notna(r['inventario_id']) else None, float(r['factor_dureza'] or 1.0)) for _, r in df_mat.iterrows()} if not df_mat.empty else {}
     act_opts = {str(r['equipo']): float(r['desgaste'] or 0.0) for _, r in df_act_corte.iterrows()} if not df_act_corte.empty else {}
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     mat_sel = col1.selectbox("Material", list(mat_opts.keys()) if mat_opts else ["Sin material configurado"])
     act_sel = col2.selectbox("Equipo de corte", list(act_opts.keys()) if act_opts else ["Sin equipo configurado"])
+    complejidad = col3.selectbox("Complejidad diseño", ["Baja", "Media", "Alta"], index=1)
+    mano_obra_base = st.number_input("Mano de obra base ($)", min_value=0.0, value=0.5, step=0.1)
 
     if up is not None:
         inv_id, fac_dur = mat_opts.get(mat_sel, (None, 1.0))
         desgaste_act = act_opts.get(act_sel, 0.0)
-        r = calcular_corte_cameo(up.getvalue(), factor_dureza_material=fac_dur, desgaste_activo=desgaste_act, nombre_archivo=up.name)
+        r = calcular_corte_cameo(up.getvalue(), factor_dureza_material=fac_dur, desgaste_activo=desgaste_act, nombre_archivo=up.name, complejidad_diseno=complejidad, mano_obra_base=mano_obra_base)
         st.json(r)
 
         if st.button("Guardar orden de corte", key='btn_guardar_orden_corte'):
-            oid = registrar_orden_produccion('Corte', 'Interno', up.name, 'pendiente', float(r.get('desgaste_real', 0.0)), f"Corte industrial {up.name}")
+            oid = registrar_orden_produccion('Corte', 'Interno', up.name, 'Pendiente', float(r.get('costo_total', 0.0)), f"Corte industrial {up.name}")
             st.success(f"Orden registrada #{oid}")
 
         if inv_id and st.button("Descontar material de inventario", key='btn_desc_mat_corte'):
@@ -4099,6 +4245,15 @@ elif menu == "✂️ Corte Industrial":
         if st.button("Enviar a Cotización", key='btn_send_corte_cot'):
             enviar_a_cotizacion_desde_produccion({'trabajo': f"Corte industrial {up.name}", 'costo_base': float(r.get('desgaste_real', 0.0)), 'unidades': 1, 'detalle': r})
             st.success("Datos enviados a Cotizaciones")
+        porc_sobrante = st.number_input("% sobrante material", min_value=0.0, max_value=100.0, value=0.0, step=1.0, key='corte_sobrante_pct')
+        nombre_retal = st.text_input("Nombre retal", value=f"Retal {up.name}", key='corte_retal_nombre')
+        if porc_sobrante > 20 and st.button("Registrar retal en inventario", key='btn_reg_retal'):
+            with conectar() as conn:
+                conn.execute("INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo, activo) VALUES (?, ?, 'unidad', 0, 0, 1)", (nombre_retal, 1.0))
+                registrar_log_actividad(conn, 'INSERT_RETAL', 'inventario')
+                conn.commit()
+            st.toast("Retal registrado con costo $0 para futuras ventas", icon="✅")
+
 
 # ===========================================================
 # 🔥 MÓDULO SUBLIMACIÓN INDUSTRIAL
@@ -4123,10 +4278,11 @@ elif menu == "🔥 Sublimación Industrial":
 
     up_subl = st.file_uploader("Diseño para sublimación (PNG/JPG/PDF)", type=['png', 'jpg', 'jpeg', 'pdf'], key='subl_file_ind')
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     ancho_cm = c1.number_input("Ancho (cm)", min_value=1.0, value=10.0)
     alto_cm = c2.number_input("Alto (cm)", min_value=1.0, value=10.0)
     precio_ml = c3.number_input("Costo tinta por ml ($)", min_value=0.0, value=float(st.session_state.get('subl_precio_ml_prefill', st.session_state.get('costo_tinta_ml', 0.10))), format='%.4f')
+    costo_bajada = c4.number_input("Bajada de plancha ($/u)", min_value=0.0, value=float(st.session_state.get('costo_bajada_plancha', 0.03)), step=0.01)
 
     with conectar() as conn:
         try:
@@ -4145,7 +4301,7 @@ elif menu == "🔥 Sublimación Industrial":
     tiempo_enfriado = t3.number_input("Tiempo enfriado (min)", min_value=0.0, value=2.0)
     tiempo_uso = float(tiempo_calentamiento + tiempo_prensado + tiempo_enfriado)
     st.caption(f"Tiempo total de producción: {tiempo_uso:.2f} min")
-    r = calcular_sublimacion_industrial(ancho_cm, alto_cm, precio_ml, desgaste_activo=desgaste_ref, tiempo_uso_min=tiempo_uso)
+    r = calcular_sublimacion_industrial(ancho_cm, alto_cm, precio_ml, desgaste_activo=desgaste_ref, tiempo_uso_min=tiempo_uso, costo_bajada_plancha=costo_bajada)
     st.json(r)
 
     if st.button("Guardar orden de sublimación", key='btn_guardar_orden_subl'):
@@ -4669,6 +4825,7 @@ elif menu == "📉 Gastos":
                         e.usuario
                     FROM gastos g
                     LEFT JOIN gastos_extra e ON g.id = e.gasto_id
+                    WHERE COALESCE(g.activo,1)=1
                     ORDER BY g.fecha DESC
                 """, conn)
         except Exception as e:
@@ -4749,7 +4906,7 @@ elif menu == "📉 Gastos":
                     try:
                         with conectar() as conn:
                             conn.execute(
-                                "DELETE FROM gastos WHERE id = ?",
+                                "UPDATE gastos SET activo=0 WHERE id = ?",
                                 (int(datos['id']),)
                             )
                             conn.commit()
@@ -4780,7 +4937,7 @@ elif menu == "📉 Gastos":
 
         try:
             with conectar() as conn:
-                df = pd.read_sql("SELECT * FROM gastos", conn)
+                df = pd.read_sql("SELECT * FROM gastos WHERE COALESCE(activo,1)=1", conn)
         except:
             st.info("Sin datos")
             st.stop()
@@ -4844,7 +5001,7 @@ elif menu == "🏁 Cierre de Caja":
             )
 
             df_g = pd.read_sql(
-                "SELECT * FROM gastos WHERE date(fecha) = ?",
+                "SELECT * FROM gastos WHERE COALESCE(activo,1)=1 AND date(fecha) = ?",
                 conn,
                 params=(fecha_str,)
             )
@@ -5020,7 +5177,7 @@ elif menu == "📊 Auditoría y Métricas":
             """, conn)
 
             df_ventas = pd.read_sql("SELECT * FROM ventas", conn)
-            df_gastos = pd.read_sql("SELECT * FROM gastos", conn)
+            df_gastos = pd.read_sql("SELECT * FROM gastos WHERE COALESCE(activo,1)=1", conn)
 
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
@@ -5386,15 +5543,13 @@ if menu == "🛒 Venta Directa":
         con_margen = costo_material * (1 + margen / 100)
         con_desc = con_margen * (1 - desc / 100)
 
-        impuestos = 0.0
-        if usa_iva:
-            impuestos += float(st.session_state.get('iva_perc', 16))
-        if usa_banco and metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
-            impuestos += float(st.session_state.get('banco_perc', 0.5))
-        if usa_banco and metodo == "Kontigo":
-            impuestos += float(st.session_state.get('kontigo_perc_entrada', st.session_state.get('kontigo_perc', 5.0)))
+        if not usa_banco and ('pago móvil' in metodo.lower() or 'pago movil' in metodo.lower() or 'transferencia' in metodo.lower() or 'kontigo' in metodo.lower() or 'zelle' in metodo.lower()):
+            metodo_tmp = 'Efectivo'
+        else:
+            metodo_tmp = metodo
 
-        total_usd = con_desc * (1 + impuestos / 100)
+        precio_calc = calcular_precio_final(con_desc, metodo_tmp, usa_iva)
+        total_usd = float(precio_calc['total'])
 
         total_bs = 0.0
         if metodo in ["Pago Móvil (BCV)", "Transferencia (Bs)"]:
@@ -5474,7 +5629,8 @@ def registrar_venta_global(
     metodo="Efectivo $",
     consumos=None,
     usuario=None,
-    conn=None
+    conn=None,
+    tiene_iva=False
 ):
     """
     FUNCIÓN MAESTRA DEL IMPERIO – VERSIÓN SEGURA Y TRANSACCIONAL
@@ -5482,6 +5638,8 @@ def registrar_venta_global(
 
     if consumos is None:
         consumos = {}
+
+    monto_usd = money(monto_usd)
 
     if monto_usd <= 0:
         return False, "⚠️ El monto de la venta debe ser mayor a 0"
@@ -5501,10 +5659,12 @@ def registrar_venta_global(
         cursor = conn_local.cursor()
 
         conn_local.execute("BEGIN IMMEDIATE TRANSACTION")
+        precio_final = calcular_precio_final(monto_usd, metodo, tiene_iva)
+
 
         if id_cliente is not None:
             existe_cli = cursor.execute(
-                "SELECT id FROM clientes WHERE id = ?",
+                "SELECT id FROM clientes WHERE id = ? AND COALESCE(activo,1)=1",
                 (id_cliente,)
             ).fetchone()
 
@@ -5564,11 +5724,12 @@ def registrar_venta_global(
             id_cliente,
             nombre_cliente,
             detalle,
-            float(monto_usd),
+            float(precio_final['total']),
             metodo,
             usuario
         ))
 
+        registrar_log_actividad(conn_local, 'INSERT', 'ventas', usuario=usuario)
         conn_local.commit()
 
         cargar_datos()
@@ -5594,36 +5755,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
