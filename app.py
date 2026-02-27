@@ -131,6 +131,19 @@ def analizar_consumo_promedio(dias=30):
 def calcular_costo_total_real(tinta=0.0, papel=0.0, desgaste=0.0, otros_procesos=0.0):
     return float(tinta or 0.0) + float(papel or 0.0) + float(desgaste or 0.0) + float(otros_procesos or 0.0)
 
+def _safe_float(valor, default=0.0):
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return float(default)
+
+def _calcular_vida_util_desde_activo(inversion, desgaste, default=1000):
+    inversion_f = _safe_float(inversion)
+    desgaste_f = _safe_float(desgaste)
+    if inversion_f > 0 and desgaste_f > 0:
+        return max(1, int(round(inversion_f / desgaste_f)))
+    return int(default)
+
 
 def calcular_consumo_por_pixel(imagen):
     arr = np.array(imagen.convert('CMYK'))
@@ -3176,6 +3189,31 @@ elif menu == "🎨 Análisis CMYK":
                 delta=f"$ {costo_promedio_pagina:.4f} por pág"
             )
 
+            st.subheader("🚀 Inteligencia de Producción CMYK")
+            k1, k2, k3 = st.columns(3)
+            ml_por_pagina = (float(sum(totales_lote_cmyk.values())) / float(total_pags)) if total_pags else 0.0
+            paginas_por_dolar = (float(total_pags) / float(total_usd_lote)) if total_usd_lote > 0 else 0.0
+            peso_negro = (totales_lote_cmyk['K'] / float(sum(totales_lote_cmyk.values()))) if sum(totales_lote_cmyk.values()) > 0 else 0.0
+            k1.metric("Consumo promedio", f"{ml_por_pagina:.4f} ml/pág")
+            k2.metric("Rendimiento", f"{paginas_por_dolar:.2f} pág/$")
+            k3.metric("Participación K", f"{peso_negro * 100:.1f}%")
+
+            if costo_promedio_pagina > 0.35:
+                st.warning("Costo por página alto: considera calidad 'Normal/Borrador' o papel de menor costo para mejorar margen.")
+            elif peso_negro > 0.55:
+                st.info("Dominio de negro detectado: revisa modo escala de grises para reducir mezcla de color innecesaria.")
+            else:
+                st.success("Parámetros de consumo estables para producción continua.")
+
+            with st.expander("💸 Precio sugerido rápido", expanded=False):
+                margen_objetivo = st.slider("Margen objetivo (%)", min_value=10, max_value=120, value=35, step=5, key='cmyk_margen_obj')
+                sugerido = simular_ganancia_pre_impresion(total_usd_lote, margen_objetivo)
+                s1, s2 = st.columns(2)
+                s1.metric("Precio sugerido", f"$ {sugerido['precio_sugerido']:.2f}")
+                s2.metric("Ganancia estimada", f"$ {sugerido['ganancia_estimada']:.2f}")
+
+
+            
             df_totales = pd.DataFrame([
                 {"Color": "C", "ml": totales_lote_cmyk['C']},
                 {"Color": "M", "ml": totales_lote_cmyk['M']},
@@ -3575,6 +3613,7 @@ elif menu == "🎨 Análisis CMYK":
 
     st.subheader("🏭 Tipo de Producción")
 
+
     procesos_disponibles = [
         "Impresión CMYK",
         "Sublimación",
@@ -3583,9 +3622,6 @@ elif menu == "🎨 Análisis CMYK":
     ]
 
     tipo_produccion = st.selectbox("Selecciona proceso", procesos_disponibles)
-    
-
-
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
 
@@ -3625,6 +3661,29 @@ elif menu == "🏗️ Activos":
     except Exception as e:
         st.error(f"Error al cargar activos: {e}")
         st.stop()
+    if not df.empty:
+        df['inversion'] = pd.to_numeric(df['inversion'], errors='coerce').fillna(0.0)
+        df['desgaste'] = pd.to_numeric(df['desgaste'], errors='coerce').fillna(0.0)
+        ranking_riesgo = df['desgaste'].rank(pct=True, method='average').fillna(0)
+        df['riesgo'] = np.where(ranking_riesgo >= 0.80, '🔴 Alto', np.where(ranking_riesgo >= 0.50, '🟠 Medio', '🟢 Bajo'))
+
+        st.subheader("🧠 Salud de Activos")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Inversión instalada", f"$ {df['inversion'].sum():,.2f}")
+        m2.metric("Desgaste promedio", f"$ {df['desgaste'].mean():.4f}/uso")
+        m3.metric("Activos en riesgo alto", int((df['riesgo'] == '🔴 Alto').sum()))
+        activo_critico = df.sort_values('desgaste', ascending=False).iloc[0]['equipo']
+        m4.metric("Activo más crítico", str(activo_critico))
+
+        with st.expander("🔎 Activos con prioridad de mantenimiento", expanded=False):
+            st.dataframe(
+                df.sort_values('desgaste', ascending=False)[['equipo', 'categoria', 'unidad', 'inversion', 'desgaste', 'riesgo']].head(10),
+                use_container_width=True,
+                hide_index=True
+            )
+            fig_riesgo = px.histogram(df, x='riesgo', color='riesgo', title='Distribución de riesgo por desgaste')
+            st.plotly_chart(fig_riesgo, use_container_width=True)
+
 
     # --- REGISTRO DE NUEVO ACTIVO ---
     with st.expander("➕ Registrar Nuevo Activo"):
@@ -3707,18 +3766,22 @@ elif menu == "🏗️ Activos":
 
                 c1, c2, c3 = st.columns(3)
 
-                nueva_inv = c1.number_input("Inversión ($)", value=float(datos['inversion']))
-                nueva_vida = c2.number_input("Vida útil", value=1000)
+                categorias_activo = ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"]
+                categoria_actual = str(datos.get('categoria', 'Otro'))
+                idx_categoria = categorias_activo.index(categoria_actual) if categoria_actual in categorias_activo else len(categorias_activo) - 1
+
+                nueva_inv = c1.number_input("Inversión ($)", min_value=0.0, value=_safe_float(datos['inversion']))
+                vida_sugerida = _calcular_vida_util_desde_activo(datos.get('inversion', 0.0), datos.get('desgaste', 0.0), default=1000)
+                nueva_vida = c2.number_input("Vida útil", min_value=1, value=int(vida_sugerida), step=1)
                 nueva_cat = c3.selectbox(
                     "Categoría",
-                    ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"],
-                    index=0
+                    categorias_activo,
+                    index=idx_categoria
                 )
 
-                if st.form_submit_button("💾 Guardar Cambios"):
+                            if st.form_submit_button("💾 Guardar Cambios"):
 
-                    nuevo_desgaste = nueva_inv / nueva_vida
-
+                    nuevo_desgaste = (nueva_inv / max(1, int(nueva_vida))) if nueva_inv > 0 else 0.0
                     try:
                         with conectar() as conn:
                             conn.execute("""
@@ -3854,9 +3917,14 @@ elif menu == "🛠️ Otros Procesos":
         st.stop()
 
     # Filtrar solo equipos que NO gastan tinta
-    otros_equipos = df_act_db[
-        df_act_db['categoria'] != "Impresora (Gasta Tinta)"
-    ].to_dict('records')
+    
+    mask_no_tinta = ~(
+        df_act_db['categoria'].fillna('').str.contains('impres|tinta', case=False, na=False)
+        | df_act_db['unidad'].fillna('').str.contains('impres', case=False, na=False)
+    )
+    otros_equipos = df_act_db[mask_no_tinta].copy()
+    otros_equipos['desgaste'] = pd.to_numeric(otros_equipos['desgaste'], errors='coerce').fillna(0.0)
+    otros_equipos = otros_equipos.to_dict('records')
 
     if not otros_equipos:
         st.warning("⚠️ No hay equipos registrados para procesos especiales.")
@@ -3895,7 +3963,9 @@ elif menu == "🛠️ Otros Procesos":
             st.session_state.lista_procesos.append({
                 "equipo": eq_sel,
                 "cantidad": cantidad,
-                "costo": costo_total
+                           "costo_unitario": costo_unitario,
+                "costo": costo_total,
+                "fecha": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
             })
             st.toast("Proceso añadido")
 
@@ -3910,8 +3980,13 @@ elif menu == "🛠️ Otros Procesos":
         total = df_proc["costo"].sum()
         st.metric("Total Procesos", f"$ {total:.2f}")
 
-        col1, col2 = st.columns(2)
+         p1, p2, p3 = st.columns(3)
+        p1.metric("Procesos cargados", int(len(df_proc)))
+        p2.metric("Costo promedio por proceso", f"$ {df_proc['costo'].mean():.2f}")
+        p3.metric("Equipo más usado", str(df_proc['equipo'].mode().iloc[0]) if not df_proc['equipo'].mode().empty else "N/D")
 
+        col1, col2, col3 = st.columns(3)
+        
         with col1:
             if st.button("📝 Enviar a Cotización", use_container_width=True):
 
@@ -3930,6 +4005,27 @@ elif menu == "🛠️ Otros Procesos":
             if st.button("🧹 Limpiar", use_container_width=True):
                 st.session_state.lista_procesos = []
                 st.rerun()
+
+    
+        with col3:
+            limpiar_tras_guardar = st.checkbox("Limpiar lista tras guardar", value=True, key='proc_limpiar_tras_guardar')
+            if st.button("💾 Guardar en historial", use_container_width=True):
+                try:
+                    with conectar() as conn:
+                        conn.executemany(
+                            "INSERT INTO historial_procesos (equipo, cantidad, costo) VALUES (?,?,?)",
+                            [
+                                (str(r['equipo']), float(r['cantidad']), float(r['costo']))
+                                for _, r in df_proc.iterrows()
+                            ]
+                        )
+                        conn.commit()
+                    st.success("Procesos guardados en historial.")
+                    if limpiar_tras_guardar:
+                        st.session_state.lista_procesos = []
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo guardar historial: {e}")
 
     # --- HISTORIAL ---
     with st.expander("📜 Historial de Procesos"):
@@ -5498,6 +5594,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
