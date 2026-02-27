@@ -5928,3 +5928,10 @@ def registrar_venta_global(
             conn_local.close()
 
 
+
+
+
+
+
+
+
