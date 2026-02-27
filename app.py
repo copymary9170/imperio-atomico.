@@ -1119,31 +1119,31 @@ def inicializar_sistema():
 
 
 # --- 4. CARGA DE DATOS ---
+def _cargar_sesion_desde_db(conn, filtrar_inventario_activo=True):
+    columnas_inventario = {row[1] for row in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+    query_inv = "SELECT * FROM inventario"
+    if filtrar_inventario_activo and 'activo' in columnas_inventario:
+        query_inv += " WHERE COALESCE(activo,1)=1"
+
+    st.session_state.df_inv = pd.read_sql(query_inv, conn)
+    st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
+    conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
+    for _, row in conf_df.iterrows():
+        st.session_state[row['parametro']] = float(row['valor'])
+
+
 def cargar_datos():
     with conectar() as conn:
         try:
-            columnas_inventario = {row[1] for row in conn.execute("PRAGMA table_info(inventario)").fetchall()}
-            query_inv = "SELECT * FROM inventario"
-            if 'activo' in columnas_inventario:
-                query_inv += " WHERE COALESCE(activo,1)=1"
-
-            st.session_state.df_inv = pd.read_sql(query_inv, conn)
-            st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-            conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
-            for _, row in conf_df.iterrows():
-                st.session_state[row['parametro']] = float(row['valor'])
+            _cargar_sesion_desde_db(conn)
         except (sqlite3.DatabaseError, ValueError, KeyError) as e:
             # Si el esquema aún no existe (p.ej. DB nueva o sesión antigua),
             # intentamos crear/migrar estructura y recargar una sola vez.
             inicializar_sistema()
             try:
-                st.session_state.df_inv = pd.read_sql("SELECT * FROM inventario", conn)
-                st.session_state.df_cli = pd.read_sql("SELECT * FROM clientes", conn)
-                conf_df = pd.read_sql("SELECT * FROM configuracion", conn)
-                for _, row in conf_df.iterrows():
-                    st.session_state[row['parametro']] = float(row['valor'])
-            except sqlite3.DatabaseError:
-                st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")
+                _cargar_sesion_desde_db(conn, filtrar_inventario_activo=False)
+            except sqlite3.DatabaseError:␊
+                st.warning(f"No se pudieron cargar todos los datos de sesión: {e}")␊
 
 # Alias de compatibilidad para módulos que lo usan
 def cargar_datos_seguros():
@@ -5507,6 +5507,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
