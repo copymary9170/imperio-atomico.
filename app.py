@@ -3584,6 +3584,8 @@ elif menu == "🎨 Análisis CMYK":
 
     tipo_produccion = st.selectbox("Selecciona proceso", procesos_disponibles)
     
+
+
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
 
@@ -3608,7 +3610,7 @@ elif menu == "🏗️ Activos":
                 )
             """)
             df = pd.read_sql_query("SELECT * FROM activos", conn)
-
+            
             # Crear tabla de historial si no existe
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS activos_historial (
@@ -5496,6 +5498,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
