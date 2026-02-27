@@ -3575,16 +3575,15 @@ elif menu == "🎨 Análisis CMYK":
 
     st.subheader("🏭 Tipo de Producción")
 
-
-      procesos_disponibles = [
+    procesos_disponibles = [
         "Impresión CMYK",
         "Sublimación",
         "Corte Cameo",
         "Producción Manual",
     ]
-    
-  tipo_produccion = st.selectbox("Selecciona proceso", procesos_disponibles)
 
+    tipo_produccion = st.selectbox("Selecciona proceso", procesos_disponibles)
+    
 # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
 
@@ -5497,6 +5496,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
