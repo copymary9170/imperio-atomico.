@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import secrets
 import re
+from decimal import Decimal, ROUND_HALF_UP
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -140,29 +141,27 @@ def _safe_float(valor, default=0.0):
 
 
 def money(v):
-    return round(float(v or 0.0) + 1e-9, 2)
+    return float(Decimal(str(v or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-KANBAN_ESTADOS = ['Diseño', 'Aprobado por Cliente', 'En Producción', 'Acabado/Control de Calidad', 'Listo para Entrega', 'Entregado']
+KANBAN_ESTADOS = ['Cotización', 'Pendiente', 'Diseño', 'Producción', 'Control de Calidad', 'Listo', 'Entregado']
 
 
 def normalizar_estado_kanban(estado):
     estado_txt = str(estado or '').strip()
     map_antiguo = {
-        'cotización': 'Diseño',
-        'cotizacion': 'Diseño',
-        'pendiente': 'Aprobado por Cliente',
+        'cotización': 'Cotización', 'cotizacion': 'Cotización',
+        'pendiente': 'Pendiente',
+        'aprobado por cliente': 'Pendiente',
         'diseño': 'Diseño',
-        'impresión/corte': 'En Producción',
-        'acabado': 'Acabado/Control de Calidad',
-        'listo para entrega': 'Listo para Entrega',
-        'finalizado': 'Entregado',
-        'cerrado': 'Entregado',
-        'entregado': 'Entregado'
+        'impresión/corte': 'Producción', 'en producción': 'Producción', 'producción': 'Producción',
+        'acabado': 'Control de Calidad', 'acabado/control de calidad': 'Control de Calidad', 'control de calidad': 'Control de Calidad',
+        'listo para entrega': 'Listo', 'listo': 'Listo',
+        'finalizado': 'Entregado', 'cerrado': 'Entregado', 'entregado': 'Entregado'
     }
     if estado_txt.lower() in map_antiguo:
         return map_antiguo[estado_txt.lower()]
-    return estado_txt if estado_txt in KANBAN_ESTADOS else 'Diseño'
+    return estado_txt if estado_txt in KANBAN_ESTADOS else 'Cotización'
 
 
 def registrar_log_actividad(conn, accion, tabla_afectada, usuario=None):
@@ -532,7 +531,7 @@ def calcular_produccion_manual(materiales, activos):
     }
 
 
-def registrar_orden_produccion(tipo, cliente, producto, estado='Diseño', costo=0.0, trabajo=''):
+def registrar_orden_produccion(tipo, cliente, producto, estado='Cotización', costo=0.0, trabajo=''):
     with conectar() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -616,6 +615,65 @@ def convertir_area_cm2_a_unidad_inventario(item_id, area_cm2):
         return area_cm2 / factor
 
     return area_cm2
+
+
+def obtener_tintas_impresora(conn, impresora_sel):
+    impresora = str(impresora_sel or '').strip()
+    if not impresora:
+        return pd.DataFrame()
+
+    cols_act = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
+    tiene_modelo = 'modelo' in cols_act
+    q_act = "SELECT id, equipo, categoria" + (", modelo" if tiene_modelo else "") + " FROM activos WHERE COALESCE(activo,1)=1"
+    df_act = pd.read_sql_query(q_act, conn)
+    if df_act.empty:
+        return pd.DataFrame()
+
+    act_row = df_act[df_act['equipo'].astype(str).str.lower() == impresora.lower()]
+    if act_row.empty:
+        act_row = df_act[df_act['equipo'].astype(str).str.contains(impresora, case=False, na=False)]
+    if act_row.empty:
+        return pd.DataFrame()
+    activo_id = int(act_row.iloc[0]['id'])
+    modelo = str(act_row.iloc[0].get('modelo', '') or '').strip()
+
+    cols_inv = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+    tiene_modelo_ref = 'modelo_referencia' in cols_inv
+
+    existe_rel = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activos_insumos'").fetchone()
+    if existe_rel:
+        q_rel = """
+            SELECT i.*
+            FROM activos_insumos ai
+            JOIN inventario i ON i.id = ai.inventario_id
+            WHERE ai.activo_id=?
+              AND COALESCE(ai.activo,1)=1
+              AND COALESCE(i.activo,1)=1
+              AND i.item LIKE '%tinta%'
+        """
+        df_rel = pd.read_sql_query(q_rel, conn, params=(activo_id,))
+        if not df_rel.empty:
+            return df_rel
+
+    tokens = [t for t in re.split(r'\s+', impresora.lower()) if len(t) > 2]
+    if modelo:
+        tokens.extend([t for t in re.split(r'\s+', modelo.lower()) if len(t) > 2])
+    if not tokens:
+        return pd.DataFrame()
+    pattern = '|'.join(sorted(set(re.escape(t) for t in tokens)))
+
+    df_inv = pd.read_sql_query("SELECT * FROM inventario WHERE COALESCE(activo,1)=1", conn)
+    if not df_inv.empty:
+        filtro_base = df_inv['item'].fillna('').str.lower().str.contains('tinta', na=False)
+        if tiene_modelo_ref:
+            filtro_base = filtro_base | df_inv['modelo_referencia'].fillna('').str.lower().str.contains('tinta', na=False)
+        df_inv = df_inv[filtro_base].copy()
+    if df_inv.empty:
+        return df_inv
+    filtro = df_inv['item'].fillna('').str.lower().str.contains(pattern, na=False)
+    if tiene_modelo_ref:
+        filtro = filtro | df_inv['modelo_referencia'].fillna('').str.lower().str.contains(pattern, na=False)
+    return df_inv[filtro].copy()
 
 
 def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, conn=None):
@@ -766,6 +824,14 @@ def inicializar_sistema():
                 detalle TEXT,
                 costo REAL,
                 fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS activos_insumos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activo_id INTEGER,
+                inventario_id INTEGER,
+                activo INTEGER DEFAULT 1,
+                FOREIGN KEY(activo_id) REFERENCES activos(id),
+                FOREIGN KEY(inventario_id) REFERENCES inventario(id)
             )""",
 
             # HISTORIAL DE COMPRAS
@@ -1113,6 +1179,7 @@ def inicializar_sistema():
         agregar_columna("rendimiento_paginas", "INTEGER DEFAULT NULL")
 
         agregar_columna("costo_real_ml", "REAL DEFAULT NULL")
+        agregar_columna("modelo_referencia", "TEXT")
 
 
         # =========================
@@ -1221,6 +1288,8 @@ def inicializar_sistema():
             c.execute("ALTER TABLE activos ADD COLUMN vida_restante REAL")
         if 'uso_actual' not in columnas_activos:
             c.execute("ALTER TABLE activos ADD COLUMN uso_actual REAL DEFAULT 0")
+        if 'modelo' not in columnas_activos:
+            c.execute("ALTER TABLE activos ADD COLUMN modelo TEXT")
         c.execute("UPDATE activos SET uso_actual = 0 WHERE uso_actual IS NULL")
         c.execute("UPDATE activos SET vida_total = inversion WHERE vida_total IS NULL")
         c.execute("UPDATE activos SET vida_restante = vida_total WHERE vida_restante IS NULL")
@@ -1246,8 +1315,8 @@ def inicializar_sistema():
 
         cols_clientes = {row[1] for row in c.execute("PRAGMA table_info(clientes)").fetchall()}
         if 'categoria' not in cols_clientes:
-            c.execute("ALTER TABLE clientes ADD COLUMN categoria TEXT DEFAULT 'Nuevo'")
-        c.execute("UPDATE clientes SET categoria='Nuevo' WHERE categoria IS NULL OR trim(categoria)=''")
+            c.execute("ALTER TABLE clientes ADD COLUMN categoria TEXT DEFAULT 'General'")
+        c.execute("UPDATE clientes SET categoria='General' WHERE categoria IS NULL OR trim(categoria)=''")
 
         columnas_conf = {row[1] for row in c.execute("PRAGMA table_info(configuracion)").fetchall()}
 
@@ -1285,7 +1354,8 @@ def inicializar_sistema():
             ('factor_desperdicio_cmyk', 1.15),
             ('desgaste_cabezal_ml', 0.005),
             ('costo_bajada_plancha', 0.03),
-            ('recargo_urgente_pct', 0.0)
+            ('recargo_urgente_pct', 0.0),
+            ('costo_limpieza_cabezal', 0.02)
         ]
 
         for p, v in config_init:
@@ -1531,10 +1601,22 @@ if menu == "📊 Dashboard":
 
     with conectar() as conn:
         df_top = pd.read_sql_query("SELECT detalle, monto_total FROM ventas WHERE COALESCE(activo,1)=1 ORDER BY fecha DESC LIMIT 500", conn)
+        try:
+            df_costos = pd.read_sql_query("SELECT trabajo, COALESCE(costo,0) AS costo FROM ordenes_produccion WHERE COALESCE(activo,1)=1", conn)
+        except Exception:
+            df_costos = pd.DataFrame(columns=['trabajo', 'costo'])
     if not df_top.empty:
-        df_top['utilidad_est'] = df_top['monto_total'] * 0.3
-        top3 = df_top.groupby('detalle', as_index=False)['utilidad_est'].sum().sort_values('utilidad_est', ascending=False).head(3)
-        st.subheader('🏆 Top 3 Productos por Utilidad Real (estimada)')
+        ventas_det = df_top.groupby('detalle', as_index=False)['monto_total'].sum().rename(columns={'monto_total': 'ventas'})
+        if not df_costos.empty:
+            costos_det = df_costos.groupby('trabajo', as_index=False)['costo'].sum().rename(columns={'trabajo': 'detalle', 'costo': 'costos'})
+            top3 = ventas_det.merge(costos_det, on='detalle', how='left')
+        else:
+            top3 = ventas_det.copy()
+            top3['costos'] = 0.0
+        top3['costos'] = top3['costos'].fillna(0.0)
+        top3['utilidad_neta'] = top3['ventas'] - top3['costos']
+        top3 = top3.sort_values('utilidad_neta', ascending=False).head(3)
+        st.subheader('🏆 Ranking de Rentabilidad Neta por producto')
         st.dataframe(top3, use_container_width=True, hide_index=True)
 
     st.subheader('🚦 Monitor de Insumos')
@@ -1724,12 +1806,14 @@ elif menu == "📦 Inventario":
             merma_qty = colC.number_input('Registrar merma (cantidad)', min_value=0.0, value=0.0, key='inv_merma_qty')
             if colC.button('⚠️ Registrar merma') and merma_qty > 0:
                 with conectar() as conn:
-                    row_item = conn.execute("SELECT id, cantidad FROM inventario WHERE item=?", (insumo_sel,)).fetchone()
+                    row_item = conn.execute("SELECT id, cantidad, COALESCE(precio_usd,0) FROM inventario WHERE item=?", (insumo_sel,)).fetchone()
                     if row_item:
-                        iid, cant_act = int(row_item[0]), float(row_item[1] or 0.0)
+                        iid, cant_act, precio_u = int(row_item[0]), float(row_item[1] or 0.0), float(row_item[2] or 0.0)
                         nueva = max(0.0, cant_act - float(merma_qty))
                         conn.execute("UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?", (nueva, iid))
                         registrar_movimiento_inventario(iid, 'SALIDA', float(merma_qty), 'Merma/Material dañado', st.session_state.get('usuario_nombre','Sistema'), conn=conn)
+                        costo_merma = money(float(merma_qty) * precio_u)
+                        conn.execute("INSERT INTO gastos (descripcion, monto, categoria, metodo, usuario, activo) VALUES (?,?,?,?,?,1)", (f'Merma de inventario: {insumo_sel}', float(costo_merma), 'Gasto por Falla de Calidad', 'Interno', st.session_state.get('usuario_nombre','Sistema')))
                         registrar_log_actividad(conn, 'MERMA', 'inventario')
                         registrar_auditoria(conn, 'MERMA_INVENTARIO', cant_act, nueva)
                         conn.commit()
@@ -2720,11 +2804,12 @@ elif menu == "⚙️ Configuración":
             format="%.2f"
         )
 
-        c10, c11, c12, c13 = st.columns(4)
+        c10, c11, c12, c13, c14 = st.columns(5)
         n_factor_desperdicio = c10.number_input("Factor desperdicio CMYK", value=get_conf('factor_desperdicio_cmyk', 1.15), format='%.3f')
         n_desgaste_cabezal = c11.number_input("Desgaste cabezal por ml ($)", value=get_conf('desgaste_cabezal_ml', 0.005), format='%.4f')
         n_bajada_plancha = c12.number_input("Bajada de plancha ($/u)", value=get_conf('costo_bajada_plancha', 0.03), format='%.2f')
         n_recargo_urg = c13.selectbox("Recargo urgencia global", [0.0, 25.0, 50.0], index=[0.0,25.0,50.0].index(get_conf('recargo_urgente_pct',0.0)) if get_conf('recargo_urgente_pct',0.0) in [0.0,25.0,50.0] else 0)
+        n_limpieza_cabezal = c14.number_input("Costo limpieza cabezal por trabajo ($)", value=get_conf('costo_limpieza_cabezal', 0.02), format='%.2f')
 
         st.divider()
 
@@ -2746,7 +2831,8 @@ elif menu == "⚙️ Configuración":
                 ('factor_desperdicio_cmyk', n_factor_desperdicio),
                 ('desgaste_cabezal_ml', n_desgaste_cabezal),
                 ('costo_bajada_plancha', n_bajada_plancha),
-                ('recargo_urgente_pct', n_recargo_urg)
+                ('recargo_urgente_pct', n_recargo_urg),
+                ('costo_limpieza_cabezal', n_limpieza_cabezal)
             ]
 
             try:
@@ -2882,7 +2968,7 @@ elif menu == "👥 Clientes":
 
                 nombre_cli = col1.text_input("Nombre del Cliente o Negocio").strip()
                 whatsapp_cli = col2.text_input("WhatsApp").strip()
-                categoria_cli = col3.selectbox('Categoría', ['Nuevo', 'Fiel', 'VIP', 'Revendedor'])
+                categoria_cli = col3.selectbox('Categoría', ['General', 'VIP', 'Revendedor'])
 
                 if st.form_submit_button("✅ Guardar Cliente"):
 
@@ -2938,7 +3024,7 @@ elif menu == "👥 Clientes":
 
                     nuevo_nombre = col1.text_input("Nombre", value=datos['nombre'])
                     nuevo_wa = col2.text_input("WhatsApp", value=datos['whatsapp'])
-                    nueva_categoria = col3.selectbox('Categoría', ['Nuevo','Fiel','VIP','Revendedor'], index=['Nuevo','Fiel','VIP','Revendedor'].index(str(datos.get('categoria','Nuevo')) if str(datos.get('categoria','Nuevo')) in ['Nuevo','Fiel','VIP','Revendedor'] else 'Nuevo'))
+                    nueva_categoria = col3.selectbox('Categoría', ['General','VIP','Revendedor'], index=['General','VIP','Revendedor'].index(str(datos.get('categoria','General')) if str(datos.get('categoria','General')) in ['General','VIP','Revendedor'] else 'General'))
 
                     if st.form_submit_button("💾 Actualizar Cliente"):
 
@@ -3148,7 +3234,7 @@ elif menu == "🎨 Análisis CMYK":
 
             # Usamos el inventario como fuente de tintas
             df_tintas_db = pd.read_sql_query(
-                "SELECT * FROM inventario", conn
+                "SELECT * FROM inventario WHERE COALESCE(activo,1)=1", conn
             )
             if 'imprimible_cmyk' in df_tintas_db.columns:
                 df_impresion_db = df_tintas_db[df_tintas_db['imprimible_cmyk'].fillna(0) == 1].copy()
@@ -3156,7 +3242,7 @@ elif menu == "🎨 Análisis CMYK":
                 df_impresion_db = df_tintas_db.copy()
             try:
                 df_activos_cmyk = pd.read_sql_query(
-                    "SELECT equipo, categoria, unidad FROM activos", conn
+                    "SELECT id, equipo, categoria, unidad, COALESCE(modelo,'') AS modelo FROM activos WHERE COALESCE(activo,1)=1", conn
                 )
             except Exception:
                 df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad'])
@@ -3183,20 +3269,15 @@ elif menu == "🎨 Análisis CMYK":
     # --- LISTA DE IMPRESORAS DISPONIBLES ---
     impresoras_disponibles = []
 
-    # 1) Prioridad: Activos en Maquinaria categoría Tinta (como indicaste)
+    # 1) Prioridad: Activos registrados (impresoras)
     if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty:
         act = df_activos_cmyk.copy()
-        mask_maquinaria = act['unidad'].fillna('').str.contains('Maquinaria', case=False, na=False)
-        # Acepta tanto categoría Tinta como Impresión/Impresora para compatibilidad
-        mask_categoria_imp = act['categoria'].fillna('').str.contains('Tinta|Impres', case=False, na=False)
-        mask_equipo_imp = act['equipo'].fillna('').str.contains('Impres', case=False, na=False)
-        posibles_activos = act[mask_maquinaria & (mask_categoria_imp | mask_equipo_imp)]['equipo'].dropna().astype(str).tolist()
+        mask_categoria_imp = act['categoria'].fillna('').str.contains('Impres|CMYK|Gran', case=False, na=False)
+        mask_equipo_imp = act['equipo'].fillna('').str.contains('Impres|Roland|Epson|Mimaki', case=False, na=False)
+        posibles_activos = act[mask_categoria_imp | mask_equipo_imp]['equipo'].dropna().astype(str).tolist()
         for eq in posibles_activos:
-            nombre_limpio = eq
-            if '] ' in nombre_limpio:
-                nombre_limpio = nombre_limpio.split('] ', 1)[1]
-            if nombre_limpio not in impresoras_disponibles:
-                impresoras_disponibles.append(nombre_limpio)
+            if eq not in impresoras_disponibles:
+                impresoras_disponibles.append(eq)
 
     # 2) Fallback: equipos con palabra impresora en inventario
     if not df_impresion_db.empty:
@@ -3258,22 +3339,21 @@ elif menu == "🎨 Análisis CMYK":
             format="%.3f"
         )
 
-        precio_tinta_ml = st.session_state.get('costo_tinta_ml', 0.10)
+        precio_tinta_ml = float(st.session_state.get('costo_tinta_ml', 0.10))
+        costo_limpieza_cabezal = float(st.session_state.get('costo_limpieza_cabezal', 0.02))
 
-        if not df_impresion_db.empty:
-            mask = df_impresion_db['item'].str.contains("tinta", case=False, na=False)
-            tintas = df_impresion_db[mask]
+        with conectar() as conn:
+            tintas_vinculadas = obtener_tintas_impresora(conn, impresora_sel)
 
-            if usar_stock_por_impresora and not tintas.empty:
-                tintas_imp = tintas[tintas['item'].fillna('').str.contains('|'.join(impresora_aliases), case=False, na=False)]
-                if not tintas_imp.empty:
-                    tintas = tintas_imp
-                else:
-                    st.info("No se encontraron tintas asociadas a esta impresora; se usará promedio global de tintas.")
-
-            if not tintas.empty:
-                precio_tinta_ml = tintas['precio_usd'].mean()
-                st.success(f"💧 Precio de tinta detectado: ${precio_tinta_ml:.4f}/ml")
+        if tintas_vinculadas is not None and not tintas_vinculadas.empty:
+            precios_validos = pd.to_numeric(tintas_vinculadas['precio_usd'], errors='coerce').dropna()
+            precios_validos = precios_validos[precios_validos > 0]
+            if not precios_validos.empty:
+                precio_tinta_ml = float(precios_validos.mean())
+                st.success(f"💧 Costo dinámico tinta ({impresora_sel}): ${precio_tinta_ml:.4f}/ml")
+            st.caption(f"Tintas vinculadas detectadas: {len(tintas_vinculadas)}")
+        else:
+            st.info("No se encontró vínculo activo-insumo; se usa costo global configurado.")
 
         st.subheader("⚙️ Ajustes de Calibración")
 
@@ -3407,7 +3487,8 @@ elif menu == "🎨 Análisis CMYK":
                         desgaste_cabezal_ml = float(st.session_state.get('desgaste_cabezal_ml', 0.005))
                         consumo_total_ajustado = consumo_total_f * max(1.0, factor_desperdicio)
 
-                        costo_f = (consumo_total_ajustado * precio_tinta_ml) + costo_desgaste + (consumo_total_ajustado * desgaste_cabezal_ml)
+                        costo_limpieza_prorrateado = (costo_limpieza_cabezal / max(1, len(paginas_items)))
+                        costo_f = (consumo_total_ajustado * precio_tinta_ml) + costo_desgaste + (consumo_total_ajustado * desgaste_cabezal_ml) + costo_limpieza_prorrateado
 
                         totales_lote_cmyk['C'] += ml_c
                         totales_lote_cmyk['M'] += ml_m
@@ -3905,6 +3986,18 @@ elif menu == "🎨 Análisis CMYK":
                     st.caption('—')
                 for _, ord_row in sub.iterrows():
                     st.caption(f"#{int(ord_row['id'])} · {ord_row['producto']}")
+
+        try:
+            with conectar() as conn:
+                df_hist_est = pd.read_sql_query("SELECT orden_id, fecha FROM ordenes_estado_historial ORDER BY orden_id, fecha", conn)
+            if not df_hist_est.empty:
+                df_hist_est['fecha'] = pd.to_datetime(df_hist_est['fecha'], errors='coerce')
+                df_hist_est = df_hist_est.dropna(subset=['fecha']).sort_values(['orden_id', 'fecha'])
+                df_hist_est['delta_min'] = df_hist_est.groupby('orden_id')['fecha'].diff().dt.total_seconds() / 60.0
+                prom_min = float(df_hist_est['delta_min'].dropna().mean()) if not df_hist_est['delta_min'].dropna().empty else 0.0
+                st.caption(f"⏱️ Tiempo promedio entre estados: {prom_min:.1f} min")
+        except Exception:
+            pass
 
         op_orden = st.selectbox("Orden a mover", df_kanban['id'].astype(int).tolist(), key='kanban_orden_sel')
         op_estado = st.selectbox("Nuevo estado", KANBAN_ESTADOS, key='kanban_estado_sel')
@@ -5664,7 +5757,7 @@ if menu == "🛒 Venta Directa":
         else:
             cliente_nombre = "Consumidor Final"
             id_cliente = None
-            categoria_cli = 'Nuevo'
+            categoria_cli = 'General'
             st.info("Venta sin cliente registrado")
 
         c1, c2, c3 = st.columns(3)
@@ -5693,7 +5786,7 @@ if menu == "🛒 Venta Directa":
             key="venta_directa_desc"
         )
 
-        descuentos_categoria = {'Nuevo': 0.0, 'Fiel': 5.0, 'VIP': 10.0, 'Revendedor': 12.0}
+        descuentos_categoria = {'General': 0.0, 'VIP': 10.0, 'Revendedor': 12.0}
         desc_categoria = float(descuentos_categoria.get(categoria_cli, 0.0))
         st.caption(f"Categoría cliente: {categoria_cli} | Descuento auto: {desc_categoria:.1f}%")
 
@@ -5713,7 +5806,8 @@ if menu == "🛒 Venta Directa":
             metodo_tmp = metodo
 
         recargo_urgente = st.selectbox('Recargo urgencia', ['0%', '25%', '50%'], index=0, key='venta_directa_urgencia')
-        urg_pct = 50.0 if recargo_urgente == '50%' else (25.0 if recargo_urgente == '25%' else float(st.session_state.get('recargo_urgente_pct', 0.0)))
+        urg_pct = 50.0 if recargo_urgente == '50%' else (25.0 if recargo_urgente == '25%' else float(st.session_state.get('recargo_urgente_pct', 0.0),
+            ('costo_limpieza_cabezal', 0.02)))
         precio_calc = calcular_precio_final(con_desc, metodo_tmp, usa_iva, recargo_urgencia=urg_pct)
         total_usd = float(precio_calc['total'])
 
@@ -5926,10 +6020,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
 
 
 
