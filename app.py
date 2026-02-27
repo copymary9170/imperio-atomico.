@@ -143,16 +143,26 @@ def money(v):
     return round(float(v or 0.0) + 1e-9, 2)
 
 
-KANBAN_ESTADOS = ['Cotización', 'Pendiente', 'Diseño', 'Impresión/Corte', 'Acabado', 'Listo para Entrega', 'Entregado']
+KANBAN_ESTADOS = ['Diseño', 'Aprobado por Cliente', 'En Producción', 'Acabado/Control de Calidad', 'Listo para Entrega', 'Entregado']
 
 
 def normalizar_estado_kanban(estado):
     estado_txt = str(estado or '').strip()
-    if estado_txt.lower() in {'pendiente', 'pendiente de producción'}:
-        return 'Pendiente'
-    if estado_txt.lower() in {'finalizado', 'cerrado', 'entregado'}:
-        return 'Entregado'
-    return estado_txt if estado_txt in KANBAN_ESTADOS else 'Cotización'
+    map_antiguo = {
+        'cotización': 'Diseño',
+        'cotizacion': 'Diseño',
+        'pendiente': 'Aprobado por Cliente',
+        'diseño': 'Diseño',
+        'impresión/corte': 'En Producción',
+        'acabado': 'Acabado/Control de Calidad',
+        'listo para entrega': 'Listo para Entrega',
+        'finalizado': 'Entregado',
+        'cerrado': 'Entregado',
+        'entregado': 'Entregado'
+    }
+    if estado_txt.lower() in map_antiguo:
+        return map_antiguo[estado_txt.lower()]
+    return estado_txt if estado_txt in KANBAN_ESTADOS else 'Diseño'
 
 
 def registrar_log_actividad(conn, accion, tabla_afectada, usuario=None):
@@ -166,7 +176,19 @@ def registrar_log_actividad(conn, accion, tabla_afectada, usuario=None):
     )
 
 
-def calcular_precio_final(costo_base, metodo_pago, tiene_iva):
+
+def registrar_auditoria(conn, accion, valor_anterior, valor_nuevo, usuario=None):
+    usuario_final = str(usuario or st.session_state.get('usuario_nombre', 'Sistema'))
+    conn.execute(
+        """
+        INSERT INTO auditoria (usuario, accion, valor_anterior, valor_nuevo)
+        VALUES (?, ?, ?, ?)
+        """,
+        (usuario_final, str(accion), str(valor_anterior), str(valor_nuevo))
+    )
+
+
+def calcular_precio_final(costo_base, metodo_pago, tiene_iva, recargo_urgencia=0.0):
     base = money(costo_base)
     metodo = str(metodo_pago or '').lower()
     comision = 0.0
@@ -179,10 +201,12 @@ def calcular_precio_final(costo_base, metodo_pago, tiene_iva):
     if bool(tiene_iva):
         comision += float(st.session_state.get('iva_perc', 16.0))
 
-    total = money(base * (1 + (comision / 100.0)))
+    urgencia = max(0.0, float(recargo_urgencia or 0.0))
+    total = money(base * (1 + (comision / 100.0)) * (1 + urgencia / 100.0))
     return {
         'base': base,
         'porcentaje_total': round(comision, 4),
+        'recargo_urgencia': urgencia,
         'total': total
     }
 
@@ -431,7 +455,7 @@ def procesar_orden_produccion(orden_id):
     return True, f'Orden #{int(oid)} procesada'
 
 
-def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_activo=0.0, nombre_archivo='', complejidad_diseno='Media', mano_obra_base=0.0):
+def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_activo=0.0, nombre_archivo='', factor_complejidad=1.35, mano_obra_base=0.0):
     nombre_archivo = str(nombre_archivo or '').lower()
     try:
         imagen = Image.open(io.BytesIO(archivo_bytes)).convert('L')
@@ -463,7 +487,7 @@ def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_act
 
     movimientos = int(max(1, (bordes_h + bordes_v) / 8))
     desgaste_real = float(longitud_cm) * float(factor_dureza_material or 1.0) * float(desgaste_activo or 0.0)
-    factor_complejidad = {'baja': 1.0, 'media': 1.35, 'alta': 1.7}.get(str(complejidad_diseno or 'media').lower(), 1.35)
+    factor_complejidad = min(2.5, max(1.0, float(factor_complejidad or 1.35)))
     costo_mano_obra = money(float(mano_obra_base or 0.0) * factor_complejidad)
 
     return {
@@ -473,7 +497,7 @@ def calcular_corte_cameo(archivo_bytes, factor_dureza_material=1.0, desgaste_act
         'longitud_corte_cm': longitud_cm,
         'movimientos': movimientos,
         'desgaste_real': money(desgaste_real),
-        'complejidad_diseno': complejidad_diseno,
+        'complejidad_diseno': f'Factor {factor_complejidad:.2f}',
         'factor_complejidad': factor_complejidad,
         'costo_mano_obra': costo_mano_obra,
         'costo_total': money(desgaste_real + costo_mano_obra)
@@ -508,7 +532,7 @@ def calcular_produccion_manual(materiales, activos):
     }
 
 
-def registrar_orden_produccion(tipo, cliente, producto, estado='Cotización', costo=0.0, trabajo=''):
+def registrar_orden_produccion(tipo, cliente, producto, estado='Diseño', costo=0.0, trabajo=''):
     with conectar() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -519,8 +543,13 @@ def registrar_orden_produccion(tipo, cliente, producto, estado='Cotización', co
             (str(tipo), str(cliente), str(producto), normalizar_estado_kanban(estado), money(costo), str(trabajo or ''))
         )
         registrar_log_actividad(conn, 'INSERT', 'ordenes_produccion')
+        oid = int(cur.lastrowid)
+        conn.execute(
+            "INSERT INTO ordenes_estado_historial (orden_id, estado_anterior, estado_nuevo, usuario) VALUES (?, ?, ?, ?)",
+            (oid, None, normalizar_estado_kanban(estado), st.session_state.get('usuario_nombre', 'Sistema'))
+        )
         conn.commit()
-        return int(cur.lastrowid)
+        return oid
 
 
 def registrar_tiempo_produccion(orden_id, inicio, fin):
@@ -665,7 +694,7 @@ def inicializar_sistema():
         tablas = [
 
             # CLIENTES
-            "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT)",
+            "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, whatsapp TEXT, categoria TEXT DEFAULT 'Nuevo')",
 
             # INVENTARIO (MEJORADO)
             """CREATE TABLE IF NOT EXISTS inventario (
@@ -907,6 +936,56 @@ def inicializar_sistema():
                 tabla_afectada TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS auditoria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                usuario TEXT,
+                accion TEXT,
+                valor_anterior TEXT,
+                valor_nuevo TEXT
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS ordenes_estado_historial (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                orden_id INTEGER,
+                estado_anterior TEXT,
+                estado_nuevo TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                usuario TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_auditoria_inventario_update
+            AFTER UPDATE ON inventario
+            BEGIN
+                INSERT INTO auditoria (usuario, accion, valor_anterior, valor_nuevo)
+                VALUES ('DB_TRIGGER', 'UPDATE_INVENTARIO',
+                        'id=' || OLD.id || ';cant=' || OLD.cantidad || ';activo=' || COALESCE(OLD.activo,1),
+                        'id=' || NEW.id || ';cant=' || NEW.cantidad || ';activo=' || COALESCE(NEW.activo,1));
+            END;
+        """)
+        c.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_auditoria_ventas_insert
+            AFTER INSERT ON ventas
+            BEGIN
+                INSERT INTO auditoria (usuario, accion, valor_anterior, valor_nuevo)
+                VALUES (COALESCE(NEW.usuario,'DB_TRIGGER'), 'INSERT_VENTA', '',
+                        'id=' || NEW.id || ';monto=' || NEW.monto_total || ';metodo=' || NEW.metodo);
+            END;
+        """)
+        c.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_auditoria_gastos_update
+            AFTER UPDATE ON gastos
+            BEGIN
+                INSERT INTO auditoria (usuario, accion, valor_anterior, valor_nuevo)
+                VALUES ('DB_TRIGGER', 'UPDATE_GASTO',
+                        'id=' || OLD.id || ';monto=' || OLD.monto || ';activo=' || COALESCE(OLD.activo,1),
+                        'id=' || NEW.id || ';monto=' || NEW.monto || ';activo=' || COALESCE(NEW.activo,1));
+            END;
         """)
 
         # ===========================================================
@@ -1159,11 +1238,16 @@ def inicializar_sistema():
             c.execute("ALTER TABLE proveedores ADD COLUMN fecha_creacion TEXT")
             c.execute("UPDATE proveedores SET fecha_creacion = CURRENT_TIMESTAMP WHERE fecha_creacion IS NULL")
 
-        for tabla_soft in ('clientes', 'proveedores', 'gastos', 'historial_compras', 'ventas', 'ordenes_produccion'):
+        for tabla_soft in ('clientes', 'proveedores', 'gastos', 'historial_compras', 'ventas', 'ordenes_produccion', 'inventario'):
             cols_soft = {row[1] for row in c.execute(f"PRAGMA table_info({tabla_soft})").fetchall()}
             if 'activo' not in cols_soft:
                 c.execute(f"ALTER TABLE {tabla_soft} ADD COLUMN activo INTEGER DEFAULT 1")
             c.execute(f"UPDATE {tabla_soft} SET activo=1 WHERE activo IS NULL")
+
+        cols_clientes = {row[1] for row in c.execute("PRAGMA table_info(clientes)").fetchall()}
+        if 'categoria' not in cols_clientes:
+            c.execute("ALTER TABLE clientes ADD COLUMN categoria TEXT DEFAULT 'Nuevo'")
+        c.execute("UPDATE clientes SET categoria='Nuevo' WHERE categoria IS NULL OR trim(categoria)=''")
 
         columnas_conf = {row[1] for row in c.execute("PRAGMA table_info(configuracion)").fetchall()}
 
@@ -1200,7 +1284,8 @@ def inicializar_sistema():
             ('costo_tinta_auto', 1.0),
             ('factor_desperdicio_cmyk', 1.15),
             ('desgaste_cabezal_ml', 0.005),
-            ('costo_bajada_plancha', 0.03)
+            ('costo_bajada_plancha', 0.03),
+            ('recargo_urgente_pct', 0.0)
         ]
 
         for p, v in config_init:
@@ -1426,6 +1511,10 @@ if menu == "📊 Dashboard":
         capital_inv = float((df_inv_dash["cantidad"] * df_inv_dash["precio_usd"]).sum())
         stock_bajo = int((df_inv_dash["cantidad"] <= df_inv_dash["minimo"]).sum())
 
+    # KPI v4.0 de mando
+    costos_fijos_hoy = float(dfg[dfg['fecha'].dt.date == pd.Timestamp.now().date()]['monto'].sum()) if (not dfg.empty and 'fecha' in dfg.columns) else 0.0
+    punto_equilibrio_restante = max(0.0, money(costos_fijos_hoy - ventas_total))
+
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("💰 Ventas", f"${ventas_total:,.2f}")
     c2.metric("💸 Gastos", f"${gastos_total:,.2f}")
@@ -1435,6 +1524,24 @@ if menu == "📊 Dashboard":
     c6.metric("🚨 Ítems Mínimo", stock_bajo)
 
     st.divider()
+
+    dpe1, dpe2 = st.columns(2)
+    dpe1.metric('Punto de Equilibrio (faltante hoy)', f"$ {punto_equilibrio_restante:,.2f}")
+    dpe2.metric('Costos fijos hoy', f"$ {costos_fijos_hoy:,.2f}")
+
+    with conectar() as conn:
+        df_top = pd.read_sql_query("SELECT detalle, monto_total FROM ventas WHERE COALESCE(activo,1)=1 ORDER BY fecha DESC LIMIT 500", conn)
+    if not df_top.empty:
+        df_top['utilidad_est'] = df_top['monto_total'] * 0.3
+        top3 = df_top.groupby('detalle', as_index=False)['utilidad_est'].sum().sort_values('utilidad_est', ascending=False).head(3)
+        st.subheader('🏆 Top 3 Productos por Utilidad Real (estimada)')
+        st.dataframe(top3, use_container_width=True, hide_index=True)
+
+    st.subheader('🚦 Monitor de Insumos')
+    if not df_inv_dash.empty:
+        monitor = df_inv_dash.copy()
+        monitor['nivel'] = np.where(monitor['cantidad'] <= monitor['minimo'], '🔴 Crítico', np.where(monitor['cantidad'] <= (monitor['minimo']*1.5), '🟡 Bajo', '🟢 OK'))
+        st.dataframe(monitor[['cantidad','minimo','nivel']].head(20), use_container_width=True, hide_index=True)
 
     col_a, col_b = st.columns(2)
 
@@ -1612,6 +1719,22 @@ elif menu == "📦 Inventario":
                     conn.commit()
                 cargar_datos()
                 st.success("Stock mínimo actualizado.")
+                st.rerun()
+
+            merma_qty = colC.number_input('Registrar merma (cantidad)', min_value=0.0, value=0.0, key='inv_merma_qty')
+            if colC.button('⚠️ Registrar merma') and merma_qty > 0:
+                with conectar() as conn:
+                    row_item = conn.execute("SELECT id, cantidad FROM inventario WHERE item=?", (insumo_sel,)).fetchone()
+                    if row_item:
+                        iid, cant_act = int(row_item[0]), float(row_item[1] or 0.0)
+                        nueva = max(0.0, cant_act - float(merma_qty))
+                        conn.execute("UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?", (nueva, iid))
+                        registrar_movimiento_inventario(iid, 'SALIDA', float(merma_qty), 'Merma/Material dañado', st.session_state.get('usuario_nombre','Sistema'), conn=conn)
+                        registrar_log_actividad(conn, 'MERMA', 'inventario')
+                        registrar_auditoria(conn, 'MERMA_INVENTARIO', cant_act, nueva)
+                        conn.commit()
+                st.toast('Merma registrada como pérdida', icon='⚠️')
+                cargar_datos()
                 st.rerun()
 
             # Conversión para inventarios viejos cargados como cm2
@@ -2597,10 +2720,11 @@ elif menu == "⚙️ Configuración":
             format="%.2f"
         )
 
-        c10, c11, c12 = st.columns(3)
+        c10, c11, c12, c13 = st.columns(4)
         n_factor_desperdicio = c10.number_input("Factor desperdicio CMYK", value=get_conf('factor_desperdicio_cmyk', 1.15), format='%.3f')
         n_desgaste_cabezal = c11.number_input("Desgaste cabezal por ml ($)", value=get_conf('desgaste_cabezal_ml', 0.005), format='%.4f')
         n_bajada_plancha = c12.number_input("Bajada de plancha ($/u)", value=get_conf('costo_bajada_plancha', 0.03), format='%.2f')
+        n_recargo_urg = c13.selectbox("Recargo urgencia global", [0.0, 25.0, 50.0], index=[0.0,25.0,50.0].index(get_conf('recargo_urgente_pct',0.0)) if get_conf('recargo_urgente_pct',0.0) in [0.0,25.0,50.0] else 0)
 
         st.divider()
 
@@ -2621,7 +2745,8 @@ elif menu == "⚙️ Configuración":
                 ('kontigo_saldo', n_kontigo_saldo),
                 ('factor_desperdicio_cmyk', n_factor_desperdicio),
                 ('desgaste_cabezal_ml', n_desgaste_cabezal),
-                ('costo_bajada_plancha', n_bajada_plancha)
+                ('costo_bajada_plancha', n_bajada_plancha),
+                ('recargo_urgente_pct', n_recargo_urg)
             ]
 
             try:
@@ -2674,6 +2799,7 @@ elif menu == "⚙️ Configuración":
                 st.session_state.kontigo_perc_entrada = n_kontigo_ent
                 st.session_state.kontigo_perc_salida = n_kontigo_sal
                 st.session_state.kontigo_saldo = n_kontigo_saldo
+                st.session_state.recargo_urgente_pct = n_recargo_urg
 
                 st.success("✅ ¡Configuración actualizada y registrada en historial!")
                 st.balloons()
@@ -2728,7 +2854,7 @@ elif menu == "👥 Clientes":
     try:
         with conectar() as conn:
             df_clientes = pd.read_sql("SELECT * FROM clientes WHERE COALESCE(activo,1)=1", conn)
-            df_ventas = pd.read_sql("SELECT cliente_id, cliente, monto_total, metodo, fecha FROM ventas", conn)
+            df_ventas = pd.read_sql("SELECT cliente_id, cliente, monto_total, metodo, fecha FROM ventas WHERE COALESCE(activo,1)=1", conn)
     except Exception as e:
         st.error(f"Error al cargar datos: {e}")
         st.stop()
@@ -2752,10 +2878,11 @@ elif menu == "👥 Clientes":
 
             with st.form("form_nuevo_cliente"):
 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
 
                 nombre_cli = col1.text_input("Nombre del Cliente o Negocio").strip()
                 whatsapp_cli = col2.text_input("WhatsApp").strip()
+                categoria_cli = col3.selectbox('Categoría', ['Nuevo', 'Fiel', 'VIP', 'Revendedor'])
 
                 if st.form_submit_button("✅ Guardar Cliente"):
 
@@ -2781,8 +2908,8 @@ elif menu == "👥 Clientes":
                                 st.error("⚠️ Ya existe un cliente con ese nombre.")
                             else:
                                 conn.execute(
-                                    "INSERT INTO clientes (nombre, whatsapp) VALUES (?,?)",
-                                    (nombre_cli, wa_limpio)
+                                    "INSERT INTO clientes (nombre, whatsapp, categoria) VALUES (?,?,?)",
+                                    (nombre_cli, wa_limpio, categoria_cli)
                                 )
                                 conn.commit()
 
@@ -2807,10 +2934,11 @@ elif menu == "👥 Clientes":
 
                 with st.form("form_editar_cliente"):
 
-                    col1, col2 = st.columns(2)
+                    col1, col2, col3 = st.columns(3)
 
                     nuevo_nombre = col1.text_input("Nombre", value=datos['nombre'])
                     nuevo_wa = col2.text_input("WhatsApp", value=datos['whatsapp'])
+                    nueva_categoria = col3.selectbox('Categoría', ['Nuevo','Fiel','VIP','Revendedor'], index=['Nuevo','Fiel','VIP','Revendedor'].index(str(datos.get('categoria','Nuevo')) if str(datos.get('categoria','Nuevo')) in ['Nuevo','Fiel','VIP','Revendedor'] else 'Nuevo'))
 
                     if st.form_submit_button("💾 Actualizar Cliente"):
 
@@ -2820,9 +2948,9 @@ elif menu == "👥 Clientes":
                             with conectar() as conn:
                                 conn.execute("""
                                     UPDATE clientes
-                                    SET nombre = ?, whatsapp = ?
+                                    SET nombre = ?, whatsapp = ?, categoria=?
                                     WHERE id = ?
-                                """, (nuevo_nombre, wa_limpio, int(datos['id'])))
+                                """, (nuevo_nombre, wa_limpio, nueva_categoria, int(datos['id'])))
 
                                 conn.commit()
 
@@ -2832,6 +2960,26 @@ elif menu == "👥 Clientes":
 
                         except Exception as e:
                             st.error(f"Error al actualizar: {e}")
+
+    if not df_clientes.empty:
+        inactivos = []
+        hoy = pd.Timestamp.now().normalize()
+        for _, cli in df_clientes.iterrows():
+            compras_cli = df_ventas[df_ventas['cliente_id'] == cli['id']]
+            if compras_cli.empty:
+                inactivos.append({'cliente': cli['nombre'], 'dias_sin_compra': 'Sin compras'})
+                continue
+            fechas = pd.to_datetime(compras_cli['fecha'], errors='coerce').dropna()
+            if fechas.empty:
+                continue
+            dias = int((hoy - fechas.max().normalize()).days)
+            if dias > 45:
+                inactivos.append({'cliente': cli['nombre'], 'dias_sin_compra': dias})
+        with st.expander('⏰ Alertas de Inactividad (>45 días)', expanded=False):
+            if inactivos:
+                st.dataframe(pd.DataFrame(inactivos), use_container_width=True, hide_index=True)
+            else:
+                st.caption('Sin clientes inactivos críticos.')
 
     st.divider()
 
@@ -2866,7 +3014,8 @@ elif menu == "👥 Clientes":
             "total_comprado": total_comprado,
             "deudas": deudas,
             "operaciones": len(compras),
-            "ultima_compra": ultima_compra or "Sin compras"
+            "ultima_compra": ultima_compra,
+            "categoria": cli.get("categoria", "Nuevo") or "Sin compras"
         })
 
     df_resumen = pd.DataFrame(resumen)
@@ -3761,8 +3910,15 @@ elif menu == "🎨 Análisis CMYK":
         op_estado = st.selectbox("Nuevo estado", KANBAN_ESTADOS, key='kanban_estado_sel')
         if st.button("Mover orden", key='kanban_move_btn'):
             with conectar() as conn:
+                previo = conn.execute("SELECT estado FROM ordenes_produccion WHERE id=?", (int(op_orden),)).fetchone()
+                estado_prev = str(previo[0]) if previo else ''
                 conn.execute("UPDATE ordenes_produccion SET estado=? WHERE id=?", (op_estado, int(op_orden)))
+                conn.execute(
+                    "INSERT INTO ordenes_estado_historial (orden_id, estado_anterior, estado_nuevo, usuario) VALUES (?, ?, ?, ?)",
+                    (int(op_orden), estado_prev, op_estado, st.session_state.get('usuario_nombre', 'Sistema'))
+                )
                 registrar_log_actividad(conn, 'UPDATE_ESTADO', 'ordenes_produccion')
+                registrar_auditoria(conn, 'CAMBIO_ESTADO_ORDEN', estado_prev, op_estado)
                 conn.commit()
             st.toast(f"Orden #{op_orden} movida a {op_estado}", icon='✅')
             st.rerun()
@@ -4224,13 +4380,13 @@ elif menu == "✂️ Corte Industrial":
     col1, col2, col3 = st.columns(3)
     mat_sel = col1.selectbox("Material", list(mat_opts.keys()) if mat_opts else ["Sin material configurado"])
     act_sel = col2.selectbox("Equipo de corte", list(act_opts.keys()) if act_opts else ["Sin equipo configurado"])
-    complejidad = col3.selectbox("Complejidad diseño", ["Baja", "Media", "Alta"], index=1)
+    factor_comp = col3.slider('Factor complejidad', min_value=1.0, max_value=2.5, value=1.35, step=0.05)
     mano_obra_base = st.number_input("Mano de obra base ($)", min_value=0.0, value=0.5, step=0.1)
 
     if up is not None:
         inv_id, fac_dur = mat_opts.get(mat_sel, (None, 1.0))
         desgaste_act = act_opts.get(act_sel, 0.0)
-        r = calcular_corte_cameo(up.getvalue(), factor_dureza_material=fac_dur, desgaste_activo=desgaste_act, nombre_archivo=up.name, complejidad_diseno=complejidad, mano_obra_base=mano_obra_base)
+        r = calcular_corte_cameo(up.getvalue(), factor_dureza_material=fac_dur, desgaste_activo=desgaste_act, nombre_archivo=up.name, factor_complejidad=factor_comp, mano_obra_base=mano_obra_base)
         st.json(r)
 
         if st.button("Guardar orden de corte", key='btn_guardar_orden_corte'):
@@ -4245,9 +4401,9 @@ elif menu == "✂️ Corte Industrial":
         if st.button("Enviar a Cotización", key='btn_send_corte_cot'):
             enviar_a_cotizacion_desde_produccion({'trabajo': f"Corte industrial {up.name}", 'costo_base': float(r.get('desgaste_real', 0.0)), 'unidades': 1, 'detalle': r})
             st.success("Datos enviados a Cotizaciones")
-        porc_sobrante = st.number_input("% sobrante material", min_value=0.0, max_value=100.0, value=0.0, step=1.0, key='corte_sobrante_pct')
+        sobrante_cm = st.number_input("Largo sobrante (cm)", min_value=0.0, value=0.0, step=1.0, key='corte_sobrante_cm')
         nombre_retal = st.text_input("Nombre retal", value=f"Retal {up.name}", key='corte_retal_nombre')
-        if porc_sobrante > 20 and st.button("Registrar retal en inventario", key='btn_reg_retal'):
+        if sobrante_cm > 30 and st.button("Registrar retal en inventario", key='btn_reg_retal'):
             with conectar() as conn:
                 conn.execute("INSERT INTO inventario (item, cantidad, unidad, precio_usd, minimo, activo) VALUES (?, ?, 'unidad', 0, 0, 1)", (nombre_retal, 1.0))
                 registrar_log_actividad(conn, 'INSERT_RETAL', 'inventario')
@@ -5503,9 +5659,12 @@ if menu == "🛒 Venta Directa":
                 key="venta_directa_cliente"
             )
             id_cliente = opciones_cli[cliente_nombre]
+            fila_cli = df_cli[df_cli['id'] == id_cliente].iloc[0] if 'id' in df_cli.columns else None
+            categoria_cli = str(fila_cli.get('categoria', 'Nuevo')) if fila_cli is not None else 'Nuevo'
         else:
             cliente_nombre = "Consumidor Final"
             id_cliente = None
+            categoria_cli = 'Nuevo'
             st.info("Venta sin cliente registrado")
 
         c1, c2, c3 = st.columns(3)
@@ -5534,6 +5693,10 @@ if menu == "🛒 Venta Directa":
             key="venta_directa_desc"
         )
 
+        descuentos_categoria = {'Nuevo': 0.0, 'Fiel': 5.0, 'VIP': 10.0, 'Revendedor': 12.0}
+        desc_categoria = float(descuentos_categoria.get(categoria_cli, 0.0))
+        st.caption(f"Categoría cliente: {categoria_cli} | Descuento auto: {desc_categoria:.1f}%")
+
         st.write("Impuestos aplicables:")
         i1, i2 = st.columns(2)
         usa_iva = i1.checkbox("Aplicar IVA", key="venta_directa_iva")
@@ -5541,14 +5704,17 @@ if menu == "🛒 Venta Directa":
 
         costo_material = cantidad * precio_base
         con_margen = costo_material * (1 + margen / 100)
-        con_desc = con_margen * (1 - desc / 100)
+        desc_total = max(float(desc), desc_categoria)
+        con_desc = con_margen * (1 - desc_total / 100)
 
         if not usa_banco and ('pago móvil' in metodo.lower() or 'pago movil' in metodo.lower() or 'transferencia' in metodo.lower() or 'kontigo' in metodo.lower() or 'zelle' in metodo.lower()):
             metodo_tmp = 'Efectivo'
         else:
             metodo_tmp = metodo
 
-        precio_calc = calcular_precio_final(con_desc, metodo_tmp, usa_iva)
+        recargo_urgente = st.selectbox('Recargo urgencia', ['0%', '25%', '50%'], index=0, key='venta_directa_urgencia')
+        urg_pct = 50.0 if recargo_urgente == '50%' else (25.0 if recargo_urgente == '25%' else float(st.session_state.get('recargo_urgente_pct', 0.0)))
+        precio_calc = calcular_precio_final(con_desc, metodo_tmp, usa_iva, recargo_urgencia=urg_pct)
         total_usd = float(precio_calc['total'])
 
         total_bs = 0.0
@@ -5575,15 +5741,19 @@ if menu == "🛒 Venta Directa":
 
         consumos = {id_producto: cantidad}
 
-        exito, mensaje = registrar_venta_global(
-            id_cliente=id_cliente,
-            nombre_cliente=cliente_nombre,
-            detalle=f"{cantidad} {unidad} de {prod_sel}",
-            monto_usd=float(total_usd),
-            metodo=metodo,
-            consumos=consumos,
-            usuario=usuario_actual
-        )
+        with st.status('Procesando venta y descontando inventario...', expanded=False) as estado_proc:
+            exito, mensaje = registrar_venta_global(
+                id_cliente=id_cliente,
+                nombre_cliente=cliente_nombre,
+                detalle=f"{cantidad} {unidad} de {prod_sel}",
+                monto_usd=float(total_usd),
+                metodo=metodo,
+                consumos=consumos,
+                usuario=usuario_actual,
+                tiene_iva=usa_iva,
+                recargo_urgencia=urg_pct
+            )
+            estado_proc.update(label='Proceso finalizado', state='complete')
 
         if exito:
             st.success(mensaje)
@@ -5630,7 +5800,8 @@ def registrar_venta_global(
     consumos=None,
     usuario=None,
     conn=None,
-    tiene_iva=False
+    tiene_iva=False,
+    recargo_urgencia=0.0
 ):
     """
     FUNCIÓN MAESTRA DEL IMPERIO – VERSIÓN SEGURA Y TRANSACCIONAL
@@ -5659,7 +5830,7 @@ def registrar_venta_global(
         cursor = conn_local.cursor()
 
         conn_local.execute("BEGIN IMMEDIATE TRANSACTION")
-        precio_final = calcular_precio_final(monto_usd, metodo, tiene_iva)
+        precio_final = calcular_precio_final(monto_usd, metodo, tiene_iva, recargo_urgencia=recargo_urgencia)
 
 
         if id_cliente is not None:
@@ -5755,23 +5926,5 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
