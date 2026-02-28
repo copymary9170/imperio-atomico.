@@ -140,8 +140,15 @@ def _safe_float(valor, default=0.0):
         return float(default)
 
 
+def D(v, default='0'):
+    try:
+        return Decimal(str(v if v is not None else default))
+    except Exception:
+        return Decimal(default)
+
+
 def money(v):
-    return float(Decimal(str(v or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    return float(D(v).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 KANBAN_ESTADOS = ['Cotización', 'Pendiente', 'Diseño', 'Producción', 'Control de Calidad', 'Listo', 'Entregado']
@@ -188,25 +195,34 @@ def registrar_auditoria(conn, accion, valor_anterior, valor_nuevo, usuario=None)
 
 
 def calcular_precio_final(costo_base, metodo_pago, tiene_iva, recargo_urgencia=0.0):
-    base = money(costo_base)
+    base = D(costo_base).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     metodo = str(metodo_pago or '').lower()
-    comision = 0.0
-
-    if 'kontigo' in metodo:
-        comision += float(st.session_state.get('kontigo_perc_entrada', st.session_state.get('kontigo_perc', 5.0)))
-    elif any(m in metodo for m in ['pago móvil', 'pago movil', 'transferencia', 'zelle']):
-        comision += float(st.session_state.get('banco_perc', 0.5))
+    porcentaje_total = Decimal('0')
 
     if bool(tiene_iva):
-        comision += float(st.session_state.get('iva_perc', 16.0))
+        porcentaje_total += D(st.session_state.get('iva_perc', 16.0))
 
-    urgencia = max(0.0, float(recargo_urgencia or 0.0))
-    total = money(base * (1 + (comision / 100.0)) * (1 + urgencia / 100.0))
+    if 'kontigo' in metodo:
+        porcentaje_total += D(st.session_state.get('kontigo_perc_entrada', st.session_state.get('kontigo_perc', 5.0)))
+    elif any(m in metodo for m in ['pago móvil', 'pago movil', 'transferencia', 'zelle']):
+        porcentaje_total += D(st.session_state.get('banco_perc', 0.5))
+
+    if any(m in metodo for m in ['efectivo $', 'usd efectivo', 'cash usd']):
+        porcentaje_total += D(st.session_state.get('igtf_perc', 0.0))
+
+    urgencia = D(recargo_urgencia)
+    if urgencia < 0:
+        urgencia = Decimal('0')
+
+    total = base * (Decimal('1') + (porcentaje_total / Decimal('100')))
+    total = total * (Decimal('1') + (urgencia / Decimal('100')))
+    total = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
     return {
-        'base': base,
-        'porcentaje_total': round(comision, 4),
-        'recargo_urgencia': urgencia,
-        'total': total
+        'base': float(base),
+        'porcentaje_total': float(porcentaje_total.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)),
+        'recargo_urgencia': float(urgencia),
+        'total': float(total)
     }
 
 def _calcular_vida_util_desde_activo(inversion, desgaste, default=1000):
@@ -5777,7 +5793,7 @@ if menu == "🛒 Venta Directa":
             )
             id_cliente = opciones_cli[cliente_nombre]
             fila_cli = df_cli[df_cli['id'] == id_cliente].iloc[0] if 'id' in df_cli.columns else None
-            categoria_cli = str(fila_cli.get('categoria', 'Nuevo')) if fila_cli is not None else 'Nuevo'
+            categoria_cli = str(fila_cli.get('categoria', 'General')) if fila_cli is not None else 'General'
         else:
             cliente_nombre = "Consumidor Final"
             id_cliente = None
@@ -5830,8 +5846,7 @@ if menu == "🛒 Venta Directa":
             metodo_tmp = metodo
 
         recargo_urgente = st.selectbox('Recargo urgencia', ['0%', '25%', '50%'], index=0, key='venta_directa_urgencia')
-        urg_pct = 50.0 if recargo_urgente == '50%' else (25.0 if recargo_urgente == '25%' else float(st.session_state.get('recargo_urgente_pct', 0.0),
-            ('costo_limpieza_cabezal', 0.02)))
+        urg_pct = 50.0 if recargo_urgente == '50%' else (25.0 if recargo_urgente == '25%' else float(st.session_state.get('recargo_urgente_pct', 0.0)))
         precio_calc = calcular_precio_final(con_desc, metodo_tmp, usa_iva, recargo_urgencia=urg_pct)
         total_usd = float(precio_calc['total'])
 
@@ -5961,14 +5976,23 @@ def registrar_venta_global(
                 conn_local.rollback()
                 return False, "❌ Cliente no encontrado en base de datos"
 
-        for item_id, cant in consumos.items():
+        consumos_normalizados = {}
+        for item_id, cant in (consumos or {}).items():
+            iid = int(item_id)
+            qty = float(cant or 0.0)
+            if qty <= 0:
+                conn_local.rollback()
+                return False, f"⚠️ Cantidad inválida para el insumo {iid}"
+            consumos_normalizados[iid] = consumos_normalizados.get(iid, 0.0) + qty
+
+        for item_id, cant in consumos_normalizados.items():
 
             if cant <= 0:
                 conn_local.rollback()
                 return False, f"⚠️ Cantidad inválida para el insumo {item_id}"
 
             stock_actual = cursor.execute(
-                "SELECT cantidad, item FROM inventario WHERE id = ?",
+                "SELECT cantidad, item FROM inventario WHERE id = ? AND COALESCE(activo,1)=1",
                 (item_id,)
             ).fetchone()
 
@@ -5982,7 +6006,7 @@ def registrar_venta_global(
                 conn_local.rollback()
                 return False, f"⚠️ Stock insuficiente para: {nombre_item}"
 
-        for item_id, cant in consumos.items():
+        for item_id, cant in consumos_normalizados.items():
 
             cursor.execute("""
                 UPDATE inventario
@@ -6044,20 +6068,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
