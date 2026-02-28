@@ -2181,8 +2181,8 @@ elif menu == "📦 Inventario":
 
         st.caption(f"Delivery equivalente: ${delivery:.2f}")
 
-    
-                # =======================================================
+        
+        # =======================================================
         # 🎨 GENERADOR DE VARIANTES EDITABLES (COLORES / MODELOS)
         # =======================================================
         
@@ -2271,6 +2271,26 @@ elif menu == "📦 Inventario":
                     porc_impuestos += st.session_state.get("banco_perc",0.5)
         
         
+                # ===============================
+                # CALCULO CORRECTO PROPORCIONAL
+                # ===============================
+        
+                costo_factura_total = ((monto_factura / tasa_usada) * (1 + (porc_impuestos/100))) + delivery
+        
+        
+                total_cantidad_variantes = sum(cantidades_finales.values())
+        
+        
+                if total_cantidad_variantes <= 0:
+        
+                    st.error("Debes colocar cantidades válidas")
+        
+                    st.stop()
+        
+        
+                costo_unitario = costo_factura_total / total_cantidad_variantes
+        
+        
                 with conectar() as conn:
         
                     cur = conn.cursor()
@@ -2290,15 +2310,14 @@ elif menu == "📦 Inventario":
                     for var, cantidad in cantidades_finales.items():
         
                         if cantidad <= 0:
+        
                             continue
         
         
                         nombre_final = f"{nombre_base_var} - {var}"
         
         
-                        costo_total_usd = ((monto_factura / tasa_usada) * (1 + (porc_impuestos/100))) + delivery
-        
-                        costo_unitario = costo_total_usd / max(stock_real,1)
+                        costo_total_item = cantidad * costo_unitario
         
         
                         old = cur.execute(
@@ -2329,6 +2348,8 @@ elif menu == "📦 Inventario":
                             precio_ponderado = costo_unitario
         
         
+                        # INVENTARIO
+        
                         cur.execute("""
         
                         INSERT OR REPLACE INTO inventario
@@ -2358,6 +2379,8 @@ elif menu == "📦 Inventario":
                         ))
         
         
+                        # HISTORIAL
+        
                         cur.execute("""
         
                         INSERT INTO historial_compras
@@ -2378,9 +2401,9 @@ elif menu == "📦 Inventario":
         
                             unidad_final,
         
-                            costo_total_usd,
+                            costo_total_item,
         
-                            precio_ponderado,
+                            costo_unitario,
         
                             porc_impuestos,
         
@@ -2402,130 +2425,10 @@ elif menu == "📦 Inventario":
         
                 st.session_state.variantes_editor = {}
         
-                st.success("Variantes guardadas correctamente")
+                st.success("✅ Variantes guardadas correctamente")
         
                 st.rerun()
-            
-        # ------------------------------
-        # BOTÓN GUARDAR
-        # ------------------------------
-        if st.button("💾 Guardar Compra", use_container_width=True):
-
-            if not nombre_c:
-                st.error("Debe indicar nombre del insumo.")
-                st.stop()
-
-            if stock_real <= 0:
-                st.error("Cantidad inválida.")
-                st.stop()
-
-            if "BCV" in moneda_pago:
-                tasa_usada = t_ref
-            elif "Binance" in moneda_pago:
-                tasa_usada = t_bin
-
-            else:
-                tasa_usada = 1.0
-
-            porc_impuestos = 0
-            if iva_activo:
-                porc_impuestos += st.session_state.get("iva_perc", 16)
-            if igtf_activo:
-                porc_impuestos += st.session_state.get("igtf_perc", 3)
-            if banco_activo:
-                porc_impuestos += st.session_state.get("banco_perc", 0.5)
-
-            costo_total_usd = ((monto_factura / tasa_usada) * (1 + (porc_impuestos / 100))) + delivery
-            costo_unitario = costo_total_usd / stock_real
-
-            with conectar() as conn:
-                cur = conn.cursor()
-
-
-                proveedor_id = None
-                if proveedor:
-                    cur.execute("SELECT id FROM proveedores WHERE nombre=? AND COALESCE(activo,1)=1", (proveedor,))
-                    prov = cur.fetchone()
-                    if not prov:
-                        cur.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor,))
-                        proveedor_id = cur.lastrowid
-                    else:
-                        proveedor_id = prov[0]
-
-                old = cur.execute(
-                    "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
-                    (nombre_c,)
-                ).fetchone()
-
-                if old:
-                    nueva_cant = old[0] + stock_real
-                    precio_ponderado = (
-                        (old[0] * old[1] + stock_real * costo_unitario)
-                        / nueva_cant
-                    )
-                else:
-                    nueva_cant = stock_real
-                    precio_ponderado = costo_unitario
-
-                if old:
-                    cur.execute(
-                        """
-                        UPDATE inventario
-                        SET cantidad=?, unidad=?, precio_usd=?, minimo=?, imprimible_cmyk=?, area_por_pliego_cm2=?, activo=1, ultima_actualizacion=CURRENT_TIMESTAMP
-                        WHERE item=?
-                        """,
-                        (nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, nombre_c)
-                    )
-                else:
-                    cur.execute(
-                        """
-                        INSERT INTO inventario
-                        (item, cantidad, unidad, precio_usd, minimo, imprimible_cmyk, area_por_pliego_cm2, activo, ultima_actualizacion)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """,
-                        (nombre_c, nueva_cant, unidad_final, precio_ponderado, minimo_stock, 1 if imprimible_cmyk else 0, area_por_pliego_val, 1)
-                    )
-
-                cur.execute("""
-                    INSERT INTO historial_compras
-                    (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                """, (
-                    nombre_c,
-                    proveedor_id,
-                    stock_real,
-                    unidad_final,
-                    costo_total_usd,
-                    costo_unitario,
-                    porc_impuestos,
-                    delivery,
-                    tasa_usada,
-                    moneda_pago,
-                    usuario_actual
-                ))
-
-                item_id_row = cur.execute(
-                    "SELECT id FROM inventario WHERE item = ?",
-                    (nombre_c,)
-                ).fetchone()
-
-                if item_id_row:
-                    registrar_movimiento_inventario(
-                        item_id=int(item_id_row[0]),
-                        tipo='ENTRADA',
-                        cantidad=float(stock_real),
-                        motivo='Compra registrada',
-                        usuario=usuario_actual,
-                        conn=conn
-                    )
-
-                conn.commit()
-
-            cargar_datos()
-            st.success("Compra registrada correctamente.")
-            st.rerun()
-
-
+        
     # =======================================================
     # 📊 TAB 3 — HISTORIAL DE COMPRAS
     # =======================================================
@@ -7042,6 +6945,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
