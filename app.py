@@ -23,8 +23,10 @@ def conectar():
 
     import sqlite3
 
+    db_path = DATABASE if str(DATABASE or '').strip() else "database.db"
+
     conn = sqlite3.connect(
-        "database.db",
+        db_path,
         timeout=30,
         isolation_level=None
     )
@@ -3341,12 +3343,17 @@ elif menu == "🎨 Análisis CMYK":
     # --- LISTA DE IMPRESORAS DISPONIBLES ---
     impresoras_disponibles = []
 
-    # 1) Prioridad: Activos registrados (impresoras)
-    if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty:
-        act = df_activos_cmyk.copy()
-        mask_categoria_imp = act['categoria'].fillna('').str.contains('Impres|CMYK|Gran', case=False, na=False)
-        mask_equipo_imp = act['equipo'].fillna('').str.contains('Impres|Roland|Epson|Mimaki', case=False, na=False)
-        posibles_activos = act[mask_categoria_imp | mask_equipo_imp]['equipo'].dropna().astype(str).tolist()
+    # 1) Prioridad: todos los activos de impresión registrados por el usuario
+    if 'df_activos_cmyk' in locals() and not df_activos_cmyk.empty and 'equipo' in df_activos_cmyk.columns:
+        posibles_activos = (
+            df_activos_cmyk['equipo']
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .replace('', np.nan)
+            .dropna()
+            .tolist()
+        )
         for eq in posibles_activos:
             if eq not in impresoras_disponibles:
                 impresoras_disponibles.append(eq)
