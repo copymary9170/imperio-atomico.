@@ -3050,295 +3050,391 @@ elif menu == "⚙️ Configuración":
         except Exception:
             st.info("Historial aún no disponible.")
 
+# ============================================================
+# 👥 MÓDULO PROFESIONAL DE CLIENTES v4.0 ERP
+# Optimizado para papelería, sublimación e imprenta
+# ============================================================
 
-# --- 8. MÓDULO PROFESIONAL DE CLIENTES (VERSIÓN 2.0 MEJORADA) ---
 elif menu == "👥 Clientes":
 
-    st.title("👥 Gestión Integral de Clientes")
-    st.caption("Directorio inteligente con análisis comercial y control de deudas")
+    import numpy as np
+    import io
+    import pandas as pd
+    import plotly.express as px
 
-    # --- CARGA SEGURA DE DATOS ---
-    try:
+
+    st.title("👥 Gestión Profesional de Clientes")
+    st.caption("ERP Comercial • Control financiero • Análisis inteligente")
+
+
+    # ============================================================
+    # 🚀 CARGA PROFESIONAL SQL OPTIMIZADA
+    # ============================================================
+
+    @st.cache_data(ttl=300)
+    def cargar_clientes():
+
+        query = """
+
+        SELECT
+
+        c.id,
+        c.nombre,
+        c.whatsapp,
+        COALESCE(c.categoria,'General') categoria,
+
+        COUNT(v.id) operaciones,
+
+        COALESCE(SUM(v.monto_total),0) total_comprado,
+
+        COALESCE(SUM(
+            CASE
+            WHEN v.metodo LIKE '%Pendiente%'
+            OR v.metodo LIKE '%Deuda%'
+            THEN v.monto_total
+            ELSE 0
+            END
+        ),0) deudas,
+
+        MAX(v.fecha) ultima_compra
+
+
+        FROM clientes c
+
+        LEFT JOIN ventas v
+        ON v.cliente_id = c.id
+        AND COALESCE(v.activo,1)=1
+
+        WHERE COALESCE(c.activo,1)=1
+
+        GROUP BY c.id
+
+        ORDER BY total_comprado DESC
+
+        """
+
         with conectar() as conn:
-            df_clientes = pd.read_sql("SELECT * FROM clientes WHERE COALESCE(activo,1)=1", conn)
-            df_ventas = pd.read_sql("SELECT cliente_id, cliente, monto_total, metodo, fecha FROM ventas WHERE COALESCE(activo,1)=1", conn)
-    except Exception as e:
-        st.error(f"Error al cargar datos: {e}")
-        st.stop()
 
-    # --- BUSCADOR AVANZADO ---
-    col_b1, col_b2 = st.columns([3, 1])
+            return pd.read_sql(query, conn)
 
-    busqueda = col_b1.text_input(
-        "🔍 Buscar cliente (nombre o teléfono)...",
-        placeholder="Escribe nombre, apellido o número..."
-    )
 
-    filtro_deudores = col_b2.checkbox("Solo con deudas")
 
-    # --- FORMULARIO DE REGISTRO Y EDICIÓN ---
-    with st.expander("➕ Registrar / Editar Cliente"):
+    df = cargar_clientes()
 
-        modo = st.radio("Acción:", ["Registrar Nuevo", "Editar Existente"], horizontal=True)
 
-        if modo == "Registrar Nuevo":
+    # ============================================================
+    # 🧠 MÉTRICAS EMPRESARIALES
+    # ============================================================
 
-            with st.form("form_nuevo_cliente"):
 
-                col1, col2, col3 = st.columns(3)
+    if not df.empty:
 
-                nombre_cli = col1.text_input("Nombre del Cliente o Negocio").strip()
-                whatsapp_cli = col2.text_input("WhatsApp").strip()
-                categoria_cli = col3.selectbox('Categoría', ['General', 'VIP', 'Revendedor'])
+        df["ticket_promedio"] = np.where(
+            df["operaciones"] > 0,
+            df["total_comprado"] / df["operaciones"],
+            0
+        )
 
-                if st.form_submit_button("✅ Guardar Cliente"):
 
-                    if not nombre_cli:
-                        st.error("⚠️ El nombre es obligatorio.")
-                        st.stop()
+        df["ultima_compra"] = pd.to_datetime(df["ultima_compra"])
 
-                    wa_limpio = "".join(filter(str.isdigit, whatsapp_cli))
 
-                    if whatsapp_cli and len(wa_limpio) < 10:
-                        st.error("⚠️ Número de WhatsApp inválido.")
-                        st.stop()
+        df["dias_sin_compra"] = (
+            pd.Timestamp.now() - df["ultima_compra"]
+        ).dt.days
 
-                    try:
-                        with conectar() as conn:
 
-                            existe = conn.execute(
-                                "SELECT COUNT(*) FROM clientes WHERE lower(nombre) = ?",
-                                (nombre_cli.lower(),)
-                            ).fetchone()[0]
+        df["estado"] = np.select(
 
-                            if existe:
-                                st.error("⚠️ Ya existe un cliente con ese nombre.")
-                            else:
-                                conn.execute(
-                                    "INSERT INTO clientes (nombre, whatsapp, categoria) VALUES (?,?,?)",
-                                    (nombre_cli, wa_limpio, categoria_cli)
-                                )
-                                conn.commit()
+            [
 
-                                st.success(f"✅ Cliente '{nombre_cli}' registrado correctamente.")
-                                cargar_datos()
-                                st.rerun()
+            df["total_comprado"] > 1000,
 
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
+            df["total_comprado"] > 500,
 
-        else:
-            # --- EDICIÓN DE CLIENTE ---
-            if df_clientes.empty:
-                st.info("No hay clientes para editar.")
-            else:
-                cliente_sel = st.selectbox(
-                    "Seleccionar Cliente:",
-                    df_clientes['nombre'].tolist()
-                )
+            df["dias_sin_compra"] > 60
 
-                datos = df_clientes[df_clientes['nombre'] == cliente_sel].iloc[0]
+            ],
 
-                with st.form("form_editar_cliente"):
+            [
 
-                    col1, col2, col3 = st.columns(3)
+            "VIP",
 
-                    nuevo_nombre = col1.text_input("Nombre", value=datos['nombre'])
-                    nuevo_wa = col2.text_input("WhatsApp", value=datos['whatsapp'])
-                    nueva_categoria = col3.selectbox('Categoría', ['General','VIP','Revendedor'], index=['General','VIP','Revendedor'].index(str(datos.get('categoria','General')) if str(datos.get('categoria','General')) in ['General','VIP','Revendedor'] else 'General'))
+            "Frecuente",
 
-                    if st.form_submit_button("💾 Actualizar Cliente"):
+            "Inactivo"
 
-                        wa_limpio = "".join(filter(str.isdigit, nuevo_wa))
+            ],
 
-                        try:
-                            with conectar() as conn:
-                                conn.execute("""
-                                    UPDATE clientes
-                                    SET nombre = ?, whatsapp = ?, categoria=?
-                                    WHERE id = ?
-                                """, (nuevo_nombre, wa_limpio, nueva_categoria, int(datos['id'])))
+            default="Normal"
 
-                                conn.commit()
+        )
 
-                            st.success("✅ Cliente actualizado.")
-                            cargar_datos()
-                            st.rerun()
 
-                        except Exception as e:
-                            st.error(f"Error al actualizar: {e}")
 
-    if not df_clientes.empty:
-        inactivos = []
-        hoy = pd.Timestamp.now().normalize()
-        for _, cli in df_clientes.iterrows():
-            compras_cli = df_ventas[df_ventas['cliente_id'] == cli['id']]
-            if compras_cli.empty:
-                inactivos.append({'cliente': cli['nombre'], 'dias_sin_compra': 'Sin compras'})
-                continue
-            fechas = pd.to_datetime(compras_cli['fecha'], errors='coerce').dropna()
-            if fechas.empty:
-                continue
-            dias = int((hoy - fechas.max().normalize()).days)
-            if dias > 45:
-                inactivos.append({'cliente': cli['nombre'], 'dias_sin_compra': dias})
-        with st.expander('⏰ Alertas de Inactividad (>45 días)', expanded=False):
-            if inactivos:
-                st.dataframe(pd.DataFrame(inactivos), use_container_width=True, hide_index=True)
-            else:
-                st.caption('Sin clientes inactivos críticos.')
+    # ============================================================
+    # 🔍 FILTROS
+    # ============================================================
 
-    st.divider()
+    col1, col2 = st.columns([3,1])
 
-    # --- ANÁLISIS COMERCIAL ---
-    if df_clientes.empty:
-        st.info("No hay clientes para analizar.")
-    else:
-        st.write("Módulo de análisis comercial activo.")
+    busqueda = col1.text_input("Buscar cliente")
 
-    resumen = []
+    filtro_deuda = col2.checkbox("Solo morosos")
 
-    for _, cli in df_clientes.iterrows():
 
-        compras = df_ventas[df_ventas['cliente_id'] == cli['id']]
-
-        total_comprado = compras['monto_total'].sum() if not compras.empty else 0
-
-        deudas = compras[
-            compras['metodo'].str.contains("Pendiente|Deuda", case=False, na=False)
-        ]['monto_total'].sum() if not compras.empty else 0
-
-        ultima_compra = None
-        if not compras.empty and 'fecha' in compras.columns:
-            fechas_validas = pd.to_datetime(compras['fecha'], errors='coerce').dropna()
-            if not fechas_validas.empty:
-                ultima_compra = fechas_validas.max().strftime('%Y-%m-%d')
-
-        resumen.append({
-            "id": cli['id'],
-            "nombre": cli['nombre'],
-            "whatsapp": cli['whatsapp'],
-            "total_comprado": total_comprado,
-            "deudas": deudas,
-            "operaciones": len(compras),
-            "ultima_compra": ultima_compra,
-            "categoria": cli.get("categoria", "Nuevo") or "Sin compras"
-        })
-
-    df_resumen = pd.DataFrame(resumen)
-
-    # --- FILTROS ---
     if busqueda:
-        df_resumen = df_resumen[
-            df_resumen['nombre'].str.contains(busqueda, case=False, na=False) |
-            df_resumen['whatsapp'].str.contains(busqueda, case=False, na=False)
+
+        df = df[
+            df["nombre"].str.contains(busqueda, case=False, na=False)
         ]
 
-    if filtro_deudores:
-        df_resumen = df_resumen[df_resumen['deudas'] > 0]
+
+    if filtro_deuda:
+
+        df = df[df["deudas"] > 0]
 
 
 
-    # --- DASHBOARD DE CLIENTES ---
-    if not df_resumen.empty:
+    # ============================================================
+    # ➕ REGISTRAR CLIENTE
+    # ============================================================
 
-        st.subheader("📊 Resumen Comercial")
+    with st.expander("➕ Nuevo Cliente"):
 
-        ticket_promedio = (df_resumen['total_comprado'].sum() / df_resumen['operaciones'].sum()) if df_resumen['operaciones'].sum() > 0 else 0
-        mayor_deudor = df_resumen.sort_values('deudas', ascending=False).iloc[0]
+        with st.form("nuevo"):
 
-        m1, m2, m3, m4 = st.columns(4)
+            col1, col2, col3 = st.columns(3)
 
-        m1.metric("Clientes Totales", len(df_resumen))
-        m2.metric("Ventas Totales", f"$ {df_resumen['total_comprado'].sum():,.2f}")
-        m3.metric("Cuentas por Cobrar", f"$ {df_resumen['deudas'].sum():,.2f}")
-        m4.metric("Ticket Promedio", f"$ {ticket_promedio:,.2f}")
+            nombre = col1.text_input("Nombre")
 
-        st.caption(f"Mayor deudor actual: {mayor_deudor['nombre']} (${mayor_deudor['deudas']:,.2f})")
+            whatsapp = col2.text_input("WhatsApp")
 
-        st.divider()
-
-        ctop, cgraf = st.columns([1, 2])
-        with ctop:
-            st.subheader("🏆 Top Clientes")
-            top = df_resumen.sort_values("total_comprado", ascending=False).head(5)
-            st.dataframe(
-                top[['nombre', 'total_comprado', 'operaciones']],
-                column_config={
-                    'nombre': 'Cliente',
-                    'total_comprado': st.column_config.NumberColumn('Comprado ($)', format='%.2f'),
-                    'operaciones': 'Operaciones'
-                },
-                use_container_width=True,
-                hide_index=True
+            categoria = col3.selectbox(
+                "Categoría",
+                ["General","VIP","Revendedor"]
             )
 
-        with cgraf:
-            st.subheader("📈 Facturación por cliente")
-            top10 = df_resumen.sort_values("total_comprado", ascending=False).head(10)
-            fig_top = px.bar(top10, x='nombre', y='total_comprado')
-            fig_top.update_layout(xaxis_title='Cliente', yaxis_title='Comprado ($)')
-            st.plotly_chart(fig_top, use_container_width=True)
 
-        st.divider()
+            if st.form_submit_button("Guardar"):
 
-        st.subheader(f"📋 Directorio ({len(df_resumen)} clientes)")
+                whatsapp = "".join(
+                    filter(str.isdigit, whatsapp)
+                )
 
-        # --- EXPORTACIÓN ---
+
+                with conectar() as conn:
+
+                    conn.execute(
+
+                        """
+                        INSERT INTO clientes
+                        (nombre, whatsapp, categoria)
+                        VALUES (?,?,?)
+                        """,
+
+                        (nombre, whatsapp, categoria)
+
+                    )
+
+                    conn.commit()
+
+
+                st.success("Cliente guardado")
+
+                st.rerun()
+
+
+
+    # ============================================================
+    # 📊 DASHBOARD
+    # ============================================================
+
+
+    if not df.empty:
+
+
+        total_clientes = len(df)
+
+        total_ventas = df["total_comprado"].sum()
+
+        total_deudas = df["deudas"].sum()
+
+        ticket = df["ticket_promedio"].mean()
+
+
+
+        c1, c2, c3, c4 = st.columns(4)
+
+
+        c1.metric("Clientes", total_clientes)
+
+        c2.metric("Ventas", f"$ {total_ventas:,.2f}")
+
+        c3.metric("Cuentas por cobrar", f"$ {total_deudas:,.2f}")
+
+        c4.metric("Ticket promedio", f"$ {ticket:,.2f}")
+
+
+
+        # ============================================================
+        # 📈 GRAFICO
+        # ============================================================
+
+
+        st.subheader("Top Clientes")
+
+
+        top = df.head(10)
+
+
+        fig = px.bar(
+
+            top,
+
+            x="nombre",
+
+            y="total_comprado"
+
+        )
+
+
+        st.plotly_chart(fig, use_container_width=True)
+
+
+
+        # ============================================================
+        # 📥 EXPORTAR EXCEL
+        # ============================================================
+
+
         buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_resumen.to_excel(writer, index=False, sheet_name='Clientes')
+
+
+        with pd.ExcelWriter(
+            buffer,
+            engine="xlsxwriter"
+        ) as writer:
+
+            df.to_excel(
+                writer,
+                index=False
+            )
+
+
 
         st.download_button(
-            "📥 Descargar Lista de Clientes (Excel)",
-            data=buffer.getvalue(),
-            file_name="clientes_imperio.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+            "Descargar Excel",
+
+            buffer.getvalue(),
+
+            "clientes.xlsx"
+
         )
+
+
+
+        # ============================================================
+        # 📋 TABLA
+        # ============================================================
+
 
         st.dataframe(
-            df_resumen.sort_values(['deudas', 'total_comprado'], ascending=[False, False]),
-            column_config={
-                'id': None,
-                'nombre': 'Cliente',
-                'whatsapp': 'WhatsApp',
-                'total_comprado': st.column_config.NumberColumn('Total Comprado ($)', format='%.2f'),
-                'deudas': st.column_config.NumberColumn('Deudas ($)', format='%.2f'),
-                'operaciones': 'Operaciones',
-                'ultima_compra': 'Última compra'
-            },
-            use_container_width=True,
-            hide_index=True
+
+            df,
+
+            use_container_width=True
+
         )
 
-        with st.expander("⚙️ Acciones rápidas por cliente"):
-            cliente_accion = st.selectbox("Selecciona cliente", df_resumen['nombre'].tolist(), key='cli_accion')
-            cli_row = df_resumen[df_resumen['nombre'] == cliente_accion].iloc[0]
-            a1, a2 = st.columns(2)
-            if cli_row['whatsapp']:
-                wa_num = str(cli_row['whatsapp'])
-                if not wa_num.startswith('58'):
-                    wa_num = '58' + wa_num.lstrip('0')
-                a1.link_button("💬 Abrir chat WhatsApp", f"https://wa.me/{wa_num}")
-            else:
-                a1.info("Cliente sin número de WhatsApp")
 
-            if a2.button("🗑 Eliminar cliente", type='secondary'):
-                with conectar() as conn:
-                    tiene_ventas = conn.execute("SELECT COUNT(*) FROM ventas WHERE cliente_id = ?", (int(cli_row['id']),)).fetchone()[0]
-                    if tiene_ventas > 0:
-                        st.error("No se puede eliminar: el cliente tiene ventas asociadas.")
-                    else:
-                        conn.execute("UPDATE clientes SET activo=0 WHERE id = ?", (int(cli_row['id']),))
-                        conn.commit()
-                        st.success("Cliente eliminado correctamente.")
-                        cargar_datos()
-                        st.rerun()
+
+        # ============================================================
+        # 💬 WHATSAPP
+        # ============================================================
+
+
+        st.subheader("Acciones")
+
+
+        cliente = st.selectbox(
+
+            "Seleccionar",
+
+            df["nombre"]
+
+        )
+
+
+        row = df[
+            df["nombre"] == cliente
+        ].iloc[0]
+
+
+
+        col1, col2 = st.columns(2)
+
+
+        if row["whatsapp"]:
+
+            wa = str(row["whatsapp"])
+
+            if not wa.startswith("58"):
+
+                wa = "58" + wa
+
+
+            col1.link_button(
+
+                "WhatsApp",
+
+                f"https://wa.me/{wa}"
+
+            )
+
+
+
+        # ============================================================
+        # 🗑 ELIMINAR
+        # ============================================================
+
+
+        if col2.button("Eliminar"):
+
+
+            with conectar() as conn:
+
+
+                conn.execute(
+
+                    """
+
+                    UPDATE clientes
+
+                    SET activo=0
+
+                    WHERE id=?
+
+                    """,
+
+                    (int(row["id"]),)
+
+                )
+
+
+                conn.commit()
+
+
+            st.success("Eliminado")
+
+            st.rerun()
+
 
 
     else:
-        st.info("No hay clientes que coincidan con los filtros.")
 
+        st.info("Sin clientes")
 
 
 
@@ -6181,6 +6277,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
