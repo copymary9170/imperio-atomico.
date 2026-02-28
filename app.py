@@ -3187,8 +3187,9 @@ with tabs[3]:
             c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
             c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
 
- 
+
 # --- Kontigo --- #
+    
 elif menu == "💳 Kontigo":
     if ROL not in ["Admin", "Administracion"]:
         st.error("🚫 Acceso Denegado. Solo la Jefa o Administración pueden gestionar Kontigo.")
@@ -7324,6 +7325,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
