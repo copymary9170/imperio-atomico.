@@ -3051,25 +3051,26 @@ elif menu == "⚙️ Configuración":
             st.info("Historial aún no disponible.")
 
 # ============================================================
-# 👥 MÓDULO PROFESIONAL DE CLIENTES v4.0 ERP
-# Optimizado para papelería, sublimación e imprenta
+# 👥 MODULO CLIENTES ERP PRO v5.0
+# Nivel empresarial real — Papelería, Sublimación, Imprenta
 # ============================================================
 
 elif menu == "👥 Clientes":
 
-    import numpy as np
-    import io
+    import streamlit as st
     import pandas as pd
+    import numpy as np
     import plotly.express as px
+    import io
 
 
-    st.title("👥 Gestión Profesional de Clientes")
-    st.caption("ERP Comercial • Control financiero • Análisis inteligente")
+    st.title("👥 Clientes — ERP Profesional")
+    st.caption("CRM + Finanzas + Inteligencia Comercial")
 
 
-    # ============================================================
-    # 🚀 CARGA PROFESIONAL SQL OPTIMIZADA
-    # ============================================================
+    # ========================================================
+    # 🚀 CARGA SQL PROFESIONAL
+    # ========================================================
 
     @st.cache_data(ttl=300)
     def cargar_clientes():
@@ -3085,16 +3086,23 @@ elif menu == "👥 Clientes":
 
         COUNT(v.id) operaciones,
 
-        COALESCE(SUM(v.monto_total),0) total_comprado,
+        COALESCE(SUM(v.monto_total),0) total,
 
         COALESCE(SUM(
-            CASE
-            WHEN v.metodo LIKE '%Pendiente%'
-            OR v.metodo LIKE '%Deuda%'
-            THEN v.monto_total
-            ELSE 0
-            END
-        ),0) deudas,
+
+        CASE
+
+        WHEN v.metodo LIKE '%Pendiente%'
+        OR v.metodo LIKE '%Deuda%'
+
+        THEN v.monto_total
+
+        ELSE 0
+
+        END
+
+        ),0) deuda,
+
 
         MAX(v.fecha) ultima_compra
 
@@ -3105,11 +3113,10 @@ elif menu == "👥 Clientes":
         ON v.cliente_id = c.id
         AND COALESCE(v.activo,1)=1
 
+
         WHERE COALESCE(c.activo,1)=1
 
         GROUP BY c.id
-
-        ORDER BY total_comprado DESC
 
         """
 
@@ -3122,321 +3129,289 @@ elif menu == "👥 Clientes":
     df = cargar_clientes()
 
 
-    # ============================================================
-    # 🧠 MÉTRICAS EMPRESARIALES
-    # ============================================================
 
+    if df.empty:
 
-    if not df.empty:
+        st.warning("No hay clientes")
 
-        df["ticket_promedio"] = np.where(
-            df["operaciones"] > 0,
-            df["total_comprado"] / df["operaciones"],
-            0
-        )
-
-
-        df["ultima_compra"] = pd.to_datetime(df["ultima_compra"])
-
-
-        df["dias_sin_compra"] = (
-            pd.Timestamp.now() - df["ultima_compra"]
-        ).dt.days
-
-
-        df["estado"] = np.select(
-
-            [
-
-            df["total_comprado"] > 1000,
-
-            df["total_comprado"] > 500,
-
-            df["dias_sin_compra"] > 60
-
-            ],
-
-            [
-
-            "VIP",
-
-            "Frecuente",
-
-            "Inactivo"
-
-            ],
-
-            default="Normal"
-
-        )
+        st.stop()
 
 
 
-    # ============================================================
-    # 🔍 FILTROS
-    # ============================================================
+    # ========================================================
+    # 🧠 INTELIGENCIA COMERCIAL (RFM)
+    # ========================================================
 
-    col1, col2 = st.columns([3,1])
 
-    busqueda = col1.text_input("Buscar cliente")
+    df["ultima_compra"] = pd.to_datetime(df["ultima_compra"])
 
-    filtro_deuda = col2.checkbox("Solo morosos")
+
+    df["recencia"] = (
+
+        pd.Timestamp.now() - df["ultima_compra"]
+
+    ).dt.days
+
+
+    df["frecuencia"] = df["operaciones"]
+
+
+    df["monetario"] = df["total"]
+
+
+
+    # SCORE
+
+
+    df["score"] = (
+
+        df["monetario"] * 0.5 +
+
+        df["frecuencia"] * 20 +
+
+        (100 - df["recencia"].fillna(100)) * 0.3
+
+    )
+
+
+    # CLASIFICACION
+
+
+    condiciones = [
+
+        df["score"] > 800,
+
+        df["score"] > 400,
+
+        df["score"] > 200,
+
+        df["score"] <= 200
+
+    ]
+
+
+    categorias = [
+
+        "VIP",
+
+        "Frecuente",
+
+        "Ocasional",
+
+        "Riesgo"
+
+    ]
+
+
+    df["segmento"] = np.select(
+
+        condiciones,
+
+        categorias,
+
+        default="Nuevo"
+
+    )
+
+
+
+    # ========================================================
+    # 💰 METRICAS FINANCIERAS
+    # ========================================================
+
+
+    total_clientes = len(df)
+
+    total_ventas = df["total"].sum()
+
+    total_deuda = df["deuda"].sum()
+
+    ticket_promedio = df["total"].sum() / df["operaciones"].sum()
+
+
+
+    c1,c2,c3,c4 = st.columns(4)
+
+
+    c1.metric("Clientes", total_clientes)
+
+    c2.metric("Ventas", f"$ {total_ventas:,.2f}")
+
+    c3.metric("Cuentas por cobrar", f"$ {total_deuda:,.2f}")
+
+    c4.metric("Ticket promedio", f"$ {ticket_promedio:,.2f}")
+
+
+
+    # ========================================================
+    # 🚨 ALERTAS
+    # ========================================================
+
+
+    st.subheader("🚨 Alertas")
+
+
+    morosos = df[df["deuda"] > 0]
+
+
+    inactivos = df[df["recencia"] > 60]
+
+
+    col1,col2 = st.columns(2)
+
+
+    col1.metric("Morosos", len(morosos))
+
+    col2.metric("Inactivos", len(inactivos))
+
+
+
+    # ========================================================
+    # 📊 GRAFICO PROFESIONAL
+    # ========================================================
+
+
+    st.subheader("📊 Top Clientes")
+
+
+    fig = px.bar(
+
+        df.sort_values("total",ascending=False).head(10),
+
+        x="nombre",
+
+        y="total",
+
+        color="segmento"
+
+    )
+
+
+    st.plotly_chart(fig,use_container_width=True)
+
+
+
+    # ========================================================
+    # 🔍 BUSCAR
+    # ========================================================
+
+
+    busqueda = st.text_input("Buscar")
 
 
     if busqueda:
 
-        df = df[
-            df["nombre"].str.contains(busqueda, case=False, na=False)
-        ]
-
-
-    if filtro_deuda:
-
-        df = df[df["deudas"] > 0]
+        df = df[df["nombre"].str.contains(busqueda,case=False)]
 
 
 
-    # ============================================================
-    # ➕ REGISTRAR CLIENTE
-    # ============================================================
-
-    with st.expander("➕ Nuevo Cliente"):
-
-        with st.form("nuevo"):
-
-            col1, col2, col3 = st.columns(3)
-
-            nombre = col1.text_input("Nombre")
-
-            whatsapp = col2.text_input("WhatsApp")
-
-            categoria = col3.selectbox(
-                "Categoría",
-                ["General","VIP","Revendedor"]
-            )
+    # ========================================================
+    # 📥 EXPORTACION
+    # ========================================================
 
 
-            if st.form_submit_button("Guardar"):
-
-                whatsapp = "".join(
-                    filter(str.isdigit, whatsapp)
-                )
+    buffer = io.BytesIO()
 
 
-                with conectar() as conn:
+    with pd.ExcelWriter(buffer,engine="xlsxwriter") as writer:
 
-                    conn.execute(
-
-                        """
-                        INSERT INTO clientes
-                        (nombre, whatsapp, categoria)
-                        VALUES (?,?,?)
-                        """,
-
-                        (nombre, whatsapp, categoria)
-
-                    )
-
-                    conn.commit()
+        df.to_excel(writer,index=False)
 
 
-                st.success("Cliente guardado")
+    st.download_button(
 
-                st.rerun()
+        "📥 Exportar Excel",
+
+        buffer.getvalue(),
+
+        "clientes_erp.xlsx"
+
+    )
 
 
 
-    # ============================================================
-    # 📊 DASHBOARD
-    # ============================================================
+    # ========================================================
+    # 📋 TABLA PROFESIONAL
+    # ========================================================
 
 
-    if not df.empty:
+    st.dataframe(
 
+        df.sort_values("score",ascending=False),
 
-        total_clientes = len(df)
+        use_container_width=True
 
-        total_ventas = df["total_comprado"].sum()
-
-        total_deudas = df["deudas"].sum()
-
-        ticket = df["ticket_promedio"].mean()
+    )
 
 
 
-        c1, c2, c3, c4 = st.columns(4)
+    # ========================================================
+    # 💬 WHATSAPP
+    # ========================================================
 
 
-        c1.metric("Clientes", total_clientes)
-
-        c2.metric("Ventas", f"$ {total_ventas:,.2f}")
-
-        c3.metric("Cuentas por cobrar", f"$ {total_deudas:,.2f}")
-
-        c4.metric("Ticket promedio", f"$ {ticket:,.2f}")
+    st.subheader("Contacto")
 
 
+    cliente = st.selectbox(
 
-        # ============================================================
-        # 📈 GRAFICO
-        # ============================================================
+        "Seleccionar",
 
+        df["nombre"]
 
-        st.subheader("Top Clientes")
-
-
-        top = df.head(10)
+    )
 
 
-        fig = px.bar(
+    row = df[df["nombre"]==cliente].iloc[0]
 
-            top,
 
-            x="nombre",
+    if row["whatsapp"]:
 
-            y="total_comprado"
+
+        wa = str(row["whatsapp"])
+
+
+        if not wa.startswith("58"):
+
+            wa="58"+wa
+
+
+        st.link_button(
+
+            "WhatsApp",
+
+            f"https://wa.me/{wa}"
 
         )
 
 
-        st.plotly_chart(fig, use_container_width=True)
+
+    # ========================================================
+    # 🗑 ELIMINAR
+    # ========================================================
 
 
-
-        # ============================================================
-        # 📥 EXPORTAR EXCEL
-        # ============================================================
+    if st.button("Eliminar Cliente"):
 
 
-        buffer = io.BytesIO()
+        with conectar() as conn:
 
 
-        with pd.ExcelWriter(
-            buffer,
-            engine="xlsxwriter"
-        ) as writer:
+            conn.execute(
 
-            df.to_excel(
-                writer,
-                index=False
-            )
+            "UPDATE clientes SET activo=0 WHERE id=?",
 
-
-
-        st.download_button(
-
-            "Descargar Excel",
-
-            buffer.getvalue(),
-
-            "clientes.xlsx"
-
-        )
-
-
-
-        # ============================================================
-        # 📋 TABLA
-        # ============================================================
-
-
-        st.dataframe(
-
-            df,
-
-            use_container_width=True
-
-        )
-
-
-
-        # ============================================================
-        # 💬 WHATSAPP
-        # ============================================================
-
-
-        st.subheader("Acciones")
-
-
-        cliente = st.selectbox(
-
-            "Seleccionar",
-
-            df["nombre"]
-
-        )
-
-
-        row = df[
-            df["nombre"] == cliente
-        ].iloc[0]
-
-
-
-        col1, col2 = st.columns(2)
-
-
-        if row["whatsapp"]:
-
-            wa = str(row["whatsapp"])
-
-            if not wa.startswith("58"):
-
-                wa = "58" + wa
-
-
-            col1.link_button(
-
-                "WhatsApp",
-
-                f"https://wa.me/{wa}"
+            (int(row["id"]),)
 
             )
 
 
-
-        # ============================================================
-        # 🗑 ELIMINAR
-        # ============================================================
+            conn.commit()
 
 
-        if col2.button("Eliminar"):
+        st.success("Cliente eliminado")
 
-
-            with conectar() as conn:
-
-
-                conn.execute(
-
-                    """
-
-                    UPDATE clientes
-
-                    SET activo=0
-
-                    WHERE id=?
-
-                    """,
-
-                    (int(row["id"]),)
-
-                )
-
-
-                conn.commit()
-
-
-            st.success("Eliminado")
-
-            st.rerun()
-
-
-
-    else:
-
-        st.info("Sin clientes")
-
-
+        st.rerun()
 
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
