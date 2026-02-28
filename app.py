@@ -28,23 +28,18 @@ def conectar():
     conn = sqlite3.connect(
         db_path,
         timeout=30,
-        isolation_level=None
+        isolation_level=None,
+        detect_types=sqlite3.PARSE_DECLTYPES
     )
 
     conn.execute("PRAGMA foreign_keys = ON;")
-
     conn.execute("PRAGMA journal_mode = WAL;")
-
     conn.execute("PRAGMA synchronous = NORMAL;")
-
     conn.execute("PRAGMA temp_store = MEMORY;")
-
     conn.execute("PRAGMA cache_size = -10000;")
+    conn.execute("PRAGMA busy_timeout = 30000;")
 
     return conn
-    cantidad, factor_conversion = row
-    return float(cantidad or 0.0) * float(factor_conversion or 1.0)
-
 
 def calcular_precio_real_ml(item_id):
     with conectar() as conn:
@@ -79,31 +74,24 @@ def calcular_costo_real_ml(precio, capacidad_ml=None, rendimiento_paginas=None):
 
 
 def actualizar_costo_real_ml_inventario(conn=None):
+    def _run(cn):
+        filas = cn.execute(
+            "SELECT id, precio_usd, capacidad_ml, rendimiento_paginas FROM inventario WHERE COALESCE(activo,1)=1"
+        ).fetchall()
+        for item_id, precio_usd, capacidad_ml, rendimiento_paginas in filas:
+            costo_real_ml = calcular_costo_real_ml(precio_usd, capacidad_ml, rendimiento_paginas)
+            cn.execute(
+                "UPDATE inventario SET costo_real_ml=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
+                (float(costo_real_ml), int(item_id))
+            )
+
     if conn is None:
         with conectar() as conn_local:
-            filas = conn_local.execute(
-                "SELECT id, precio_usd, capacidad_ml, rendimiento_paginas FROM inventario"
-            ).fetchall()
-            for item_id, precio_usd, capacidad_ml, rendimiento_paginas in filas:
-                costo_real_ml = calcular_costo_real_ml(precio_usd, capacidad_ml, rendimiento_paginas)
-                conn_local.execute(
-                    "UPDATE inventario SET costo_real_ml=? WHERE id=?",
-                    (float(costo_real_ml), int(item_id))
-                )
-            registrar_log_actividad(conn_local, 'INSERT', 'ventas', usuario=usuario)
-        conn_local.commit()
+            _run(conn_local)
+            conn_local.commit()
         return
 
-    filas = conn.execute(
-        "SELECT id, precio_usd, capacidad_ml, rendimiento_paginas FROM inventario"
-    ).fetchall()
-    for item_id, precio_usd, capacidad_ml, rendimiento_paginas in filas:
-        costo_real_ml = calcular_costo_real_ml(precio_usd, capacidad_ml, rendimiento_paginas)
-        conn.execute(
-            "UPDATE inventario SET costo_real_ml=? WHERE id=?",
-            (float(costo_real_ml), int(item_id))
-        )
-
+    _run(conn)
 
 def analizar_consumo_promedio(dias=30):
     with conectar() as conn:
@@ -373,29 +361,37 @@ def actualizar_desgaste_activo(activo_id, uso):
     if uso <= 0:
         return False
 
-    with conectar() as conn:
-        row = conn.execute(
-            "SELECT vida_total, vida_restante, COALESCE(uso_actual, 0) FROM activos WHERE id=?",
-            (int(activo_id),)
-        ).fetchone()
-        if not row:
-            return False
+    try:
+        with conectar() as conn:
+            conn.execute("BEGIN IMMEDIATE TRANSACTION")
+            row = conn.execute(
+                "SELECT vida_total, vida_restante, COALESCE(uso_actual, 0), COALESCE(activo,1) FROM activos WHERE id=?",
+                (int(activo_id),)
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return False
 
-        vida_total, vida_restante, uso_actual = row
-        vida_total = float(vida_total or 0.0)
-        vida_restante = float(vida_restante if vida_restante is not None else vida_total)
-        uso_actual = float(uso_actual or 0.0)
+            vida_total, vida_restante, uso_actual, activo = row
+            if int(activo or 1) != 1:
+                conn.rollback()
+                return False
 
-        nueva_vida = max(0.0, vida_restante - uso)
-        nuevo_uso = uso_actual + uso
+            vida_total = float(vida_total or 0.0)
+            vida_restante = float(vida_restante if vida_restante is not None else vida_total)
+            uso_actual = float(uso_actual or 0.0)
 
-        conn.execute(
-            "UPDATE activos SET vida_restante=?, uso_actual=? WHERE id=?",
-            (nueva_vida, nuevo_uso, int(activo_id))
-        )
-        conn.commit()
-    return True
+            nueva_vida = max(0.0, vida_restante - uso)
+            nuevo_uso = max(0.0, uso_actual + uso)
 
+            conn.execute(
+                "UPDATE activos SET vida_restante=?, uso_actual=? WHERE id=?",
+                (nueva_vida, nuevo_uso, int(activo_id))
+            )
+            conn.commit()
+        return True
+    except Exception:
+        return False
 
 def calcular_costo_activo(activo_id, uso):
     uso = float(uso or 0.0)
@@ -404,19 +400,24 @@ def calcular_costo_activo(activo_id, uso):
 
     with conectar() as conn:
         row = conn.execute(
-            "SELECT inversion, vida_total FROM activos WHERE id=?",
+            "SELECT inversion, vida_total, COALESCE(activo,1) FROM activos WHERE id=?",
             (int(activo_id),)
         ).fetchone()
     if not row:
         return 0.0
 
-    inversion, vida_total = row
-    inversion = float(inversion or 0.0)
-    vida_total = float(vida_total or 0.0)
-    if vida_total <= 0:
+    inversion, vida_total, activo = row
+    if int(activo or 1) != 1:
         return 0.0
-    return (inversion / vida_total) * uso
 
+    inversion_d = D(inversion)
+    vida_total_d = D(vida_total)
+    uso_d = D(uso)
+    if vida_total_d <= 0:
+        return 0.0
+
+    costo = (inversion_d / vida_total_d) * uso_d
+    return money(costo)
 
 def procesar_orden_produccion(orden_id):
     with conectar() as conn:
@@ -648,15 +649,12 @@ def obtener_tintas_impresora(conn, impresora_sel):
 
         cols_act = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
         cols_inv = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
-        if not cols_act or not cols_inv or 'id' not in cols_inv or 'item' not in cols_inv:
+        if 'id' not in cols_act or 'equipo' not in cols_act or 'id' not in cols_inv or 'item' not in cols_inv:
             return pd.DataFrame()
 
-        columnas_base = [c for c in ['id', 'equipo', 'modelo', 'activo'] if c in cols_act]
-        if 'id' not in columnas_base or 'equipo' not in columnas_base:
-            return pd.DataFrame()
-
-        q_act = "SELECT " + ", ".join(columnas_base) + " FROM activos"
-        if 'activo' in columnas_base:
+        campos_act = ['id', 'equipo'] + (["modelo"] if 'modelo' in cols_act else []) + (["activo"] if 'activo' in cols_act else [])
+        q_act = "SELECT " + ", ".join(campos_act) + " FROM activos"
+        if 'activo' in cols_act:
             q_act += " WHERE COALESCE(activo,1)=1"
         df_act = pd.read_sql_query(q_act, conn)
         if df_act.empty:
@@ -669,9 +667,9 @@ def obtener_tintas_impresora(conn, impresora_sel):
             return pd.DataFrame()
 
         activo_id = int(act_row.iloc[0]['id'])
-        modelo_activo = str(act_row.iloc[0].get('modelo', '') or '').strip()
+        modelo_activo = str(act_row.iloc[0].get('modelo', '') or '').strip().lower()
 
-        # PRIORIDAD 1
+        # Prioridad 1: relación explícita activos_insumos
         existe_rel = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activos_insumos'").fetchone()
         if existe_rel:
             q_rel = """
@@ -695,48 +693,60 @@ def obtener_tintas_impresora(conn, impresora_sel):
         if df_inv.empty:
             return pd.DataFrame()
 
-        # PRIORIDAD 4 base
-        df_inv = df_inv[df_inv['item'].fillna('').str.contains('tinta', case=False, na=False)].copy()
-        if df_inv.empty:
-            return df_inv
+        # Prioridad 4 base: solo tintas
+        df_tintas = df_inv[df_inv['item'].fillna('').str.contains('tinta', case=False, na=False)].copy()
+        if df_tintas.empty:
+            return df_tintas
 
-        # PRIORIDAD 2
+        # Prioridad 2: modelo_referencia ~ modelo activo
         if modelo_activo and 'modelo_referencia' in cols_inv:
-            df_mod = df_inv[
-                df_inv['modelo_referencia'].fillna('').str.lower().str.contains(re.escape(modelo_activo.lower()), na=False)
+            df_mod = df_tintas[
+                df_tintas['modelo_referencia'].fillna('').astype(str).str.lower().str.contains(re.escape(modelo_activo), na=False)
             ].copy()
             if not df_mod.empty:
                 return df_mod.sort_values('item')
 
-        # PRIORIDAD 3
+        # Prioridad 3: equipo en item
         patron_imp = re.escape(impresora.lower())
-        df_nom = df_inv[df_inv['item'].fillna('').str.lower().str.contains(patron_imp, na=False)].copy()
+        df_nom = df_tintas[df_tintas['item'].fillna('').astype(str).str.lower().str.contains(patron_imp, na=False)].copy()
         if not df_nom.empty:
             return df_nom.sort_values('item')
 
-        return df_inv.sort_values('item')
+        return df_tintas.sort_values('item')
 
     except Exception:
         return pd.DataFrame()
 
-
 def mapear_consumos_cmyk_a_inventario(totales_cmyk, df_tintas):
     if df_tintas is None or df_tintas.empty:
         return {}
+
     alias_colores = {
         'C': ['cian', 'cyan'],
         'M': ['magenta'],
         'Y': ['amarillo', 'yellow'],
         'K': ['negro', 'black', 'key']
     }
-    consumos_ids = {}
-    base = df_tintas.copy()
-    base['item_norm'] = base['item'].fillna('').astype(str).str.lower()
 
+    base = df_tintas.copy()
+    if 'id' not in base.columns or 'item' not in base.columns:
+        return {}
+
+    for col in ['cantidad', 'precio_usd', 'costo_real_ml']:
+        if col not in base.columns:
+            base[col] = 0.0
+
+    base['item_norm'] = base['item'].fillna('').astype(str).str.lower()
+    base['cantidad'] = pd.to_numeric(base['cantidad'], errors='coerce').fillna(0.0)
+    base['precio_usd'] = pd.to_numeric(base['precio_usd'], errors='coerce').fillna(0.0)
+    base['costo_real_ml'] = pd.to_numeric(base['costo_real_ml'], errors='coerce').fillna(0.0)
+
+    consumos_ids = {}
     for color, ml in (totales_cmyk or {}).items():
         ml = float(ml or 0.0)
         if ml <= 0:
             continue
+
         aliases = alias_colores.get(str(color), [])
         if not aliases:
             continue
@@ -744,49 +754,64 @@ def mapear_consumos_cmyk_a_inventario(totales_cmyk, df_tintas):
         cand = base[base['item_norm'].str.contains(patron, na=False)]
         if cand.empty:
             continue
-        row = cand.sort_values(['cantidad', 'precio_usd'], ascending=[False, True]).iloc[0]
+
+        cand = cand.sort_values(['cantidad', 'costo_real_ml', 'precio_usd'], ascending=[False, True, True])
+        row = cand.iloc[0]
         iid = int(row['id'])
         consumos_ids[iid] = consumos_ids.get(iid, 0.0) + ml
 
     return consumos_ids
 
 def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, conn=None):
+    cantidad = float(cantidad or 0.0)
+    if cantidad <= 0:
+        return False
+
+    payload = (int(item_id), str(tipo), float(cantidad), str(motivo), str(usuario))
+
     if conn is not None:
         conn.execute(
             """
             INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (int(item_id), str(tipo), float(cantidad), str(motivo), str(usuario))
+            payload
         )
-        return
+        return True
 
     with conectar() as conn_local:
+        conn_local.execute("BEGIN IMMEDIATE TRANSACTION")
         conn_local.execute(
             """
             INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (int(item_id), str(tipo), float(cantidad), str(motivo), str(usuario))
+            payload
         )
         conn_local.commit()
-
+    return True
 
 def descontar_consumo_cmyk(consumos_dict, usuario=None, detalle="Consumo CMYK automático", metodo="Interno", monto_usd=0.01):
     consumos_limpios = {int(k): float(v) for k, v in (consumos_dict or {}).items() if float(v) > 0}
     if not consumos_limpios:
         return False, "⚠️ No hay consumos CMYK válidos para descontar"
+
     usuario_final = usuario or st.session_state.get("usuario_nombre", "Sistema")
+    monto_final = money(monto_usd)
+    if monto_final <= 0:
+        monto_final = 0.01
+
     return registrar_venta_global(
         id_cliente=None,
         nombre_cliente="Consumo Interno CMYK",
-        detalle=detalle,
-        monto_usd=float(monto_usd),
-        metodo=metodo,
+        detalle=str(detalle),
+        monto_usd=float(monto_final),
+        metodo=str(metodo),
         consumos=consumos_limpios,
-        usuario=usuario_final
+        usuario=usuario_final,
+        tiene_iva=False,
+        recargo_urgencia=0.0
     )
-
 
 def hash_password(password: str, salt: str | None = None) -> str:
     """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
@@ -3443,11 +3468,21 @@ elif menu == "🎨 Análisis CMYK":
             tintas_vinculadas = obtener_tintas_impresora(conn, impresora_sel)
 
         if tintas_vinculadas is not None and not tintas_vinculadas.empty:
-            precios_validos = pd.to_numeric(tintas_vinculadas['precio_usd'], errors='coerce').dropna()
-            precios_validos = precios_validos[precios_validos > 0]
-            if not precios_validos.empty:
-                precio_tinta_ml = float(precios_validos.mean())
-                st.success(f"💧 Costo dinámico tinta ({impresora_sel}): ${precio_tinta_ml:.4f}/ml")
+            if 'costo_real_ml' in tintas_vinculadas.columns:
+                costos_ml = pd.to_numeric(tintas_vinculadas['costo_real_ml'], errors='coerce').dropna()
+                costos_ml = costos_ml[costos_ml > 0]
+            else:
+                costos_ml = pd.Series(dtype=float)
+
+            if costos_ml.empty:
+                precios_validos = pd.to_numeric(tintas_vinculadas['precio_usd'], errors='coerce').dropna()
+                precios_validos = precios_validos[precios_validos > 0]
+                if not precios_validos.empty:
+                    precio_tinta_ml = float(precios_validos.mean())
+            else:
+                precio_tinta_ml = float(costos_ml.mean())
+
+            st.success(f"💧 Costo dinámico tinta ({impresora_sel}): ${precio_tinta_ml:.4f}/ml")
             st.caption(f"Tintas vinculadas detectadas: {len(tintas_vinculadas)}")
         else:
             st.info("No se encontró vínculo activo-insumo; se usa costo global configurado.")
@@ -6107,6 +6142,34 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
