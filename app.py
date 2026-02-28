@@ -5195,7 +5195,7 @@ elif menu == "🔥 Sublimación Industrial":
 
             "sublimacion.xlsx"
 
-        ))
+        )
 # ===========================================================
 # 🎨 MÓDULO PRODUCCIÓN MANUAL
 # ===========================================================
@@ -6672,6 +6672,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
