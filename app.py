@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -645,35 +645,31 @@ def obtener_tintas_impresora(conn, impresora_sel):
             return pd.DataFrame()
 
         cols_act = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
-        if not cols_act:
+        cols_inv = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+        if not cols_act or not cols_inv or 'id' not in cols_inv or 'item' not in cols_inv:
             return pd.DataFrame()
 
-        columnas_base = [c for c in ['id', 'equipo', 'categoria', 'activo', 'modelo'] if c in cols_act]
+        columnas_base = [c for c in ['id', 'equipo', 'modelo', 'activo'] if c in cols_act]
         if 'id' not in columnas_base or 'equipo' not in columnas_base:
             return pd.DataFrame()
 
         q_act = "SELECT " + ", ".join(columnas_base) + " FROM activos"
         if 'activo' in columnas_base:
             q_act += " WHERE COALESCE(activo,1)=1"
-
         df_act = pd.read_sql_query(q_act, conn)
         if df_act.empty:
             return pd.DataFrame()
 
         act_row = df_act[df_act['equipo'].astype(str).str.lower() == impresora.lower()]
         if act_row.empty:
-            act_row = df_act[df_act['equipo'].astype(str).str.contains(impresora, case=False, na=False)]
+            act_row = df_act[df_act['equipo'].astype(str).str.contains(re.escape(impresora), case=False, na=False)]
         if act_row.empty:
             return pd.DataFrame()
 
         activo_id = int(act_row.iloc[0]['id'])
-        modelo = str(act_row.iloc[0].get('modelo', '') or '').strip()
+        modelo_activo = str(act_row.iloc[0].get('modelo', '') or '').strip()
 
-        cols_inv = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
-        if not cols_inv or 'item' not in cols_inv:
-            return pd.DataFrame()
-        tiene_modelo_ref = 'modelo_referencia' in cols_inv
-
+        # PRIORIDAD 1
         existe_rel = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activos_insumos'").fetchone()
         if existe_rel:
             q_rel = """
@@ -683,38 +679,74 @@ def obtener_tintas_impresora(conn, impresora_sel):
                 WHERE ai.activo_id=?
                   AND COALESCE(ai.activo,1)=1
                   AND COALESCE(i.activo,1)=1
-                  AND i.item LIKE '%tinta%'
+                  AND lower(COALESCE(i.item,'')) LIKE '%tinta%'
+                ORDER BY i.item
             """
             df_rel = pd.read_sql_query(q_rel, conn, params=(activo_id,))
             if not df_rel.empty:
                 return df_rel
 
-        tokens = [t for t in re.split(r'\s+', impresora.lower()) if len(t) > 2]
-        if modelo:
-            tokens.extend([t for t in re.split(r'\s+', modelo.lower()) if len(t) > 2])
-        if not tokens:
-            return pd.DataFrame()
-        pattern = '|'.join(sorted(set(re.escape(t) for t in tokens)))
-
         q_inv = "SELECT * FROM inventario"
         if 'activo' in cols_inv:
             q_inv += " WHERE COALESCE(activo,1)=1"
         df_inv = pd.read_sql_query(q_inv, conn)
-        if not df_inv.empty:
-            filtro_base = df_inv['item'].fillna('').str.lower().str.contains('tinta', na=False)
-            if tiene_modelo_ref:
-                filtro_base = filtro_base | df_inv['modelo_referencia'].fillna('').str.lower().str.contains('tinta', na=False)
-            df_inv = df_inv[filtro_base].copy()
+        if df_inv.empty:
+            return pd.DataFrame()
+
+        # PRIORIDAD 4 base
+        df_inv = df_inv[df_inv['item'].fillna('').str.contains('tinta', case=False, na=False)].copy()
         if df_inv.empty:
             return df_inv
 
-        filtro = df_inv['item'].fillna('').str.lower().str.contains(pattern, na=False)
-        if tiene_modelo_ref:
-            filtro = filtro | df_inv['modelo_referencia'].fillna('').str.lower().str.contains(pattern, na=False)
-        return df_inv[filtro].copy()
+        # PRIORIDAD 2
+        if modelo_activo and 'modelo_referencia' in cols_inv:
+            df_mod = df_inv[
+                df_inv['modelo_referencia'].fillna('').str.lower().str.contains(re.escape(modelo_activo.lower()), na=False)
+            ].copy()
+            if not df_mod.empty:
+                return df_mod.sort_values('item')
+
+        # PRIORIDAD 3
+        patron_imp = re.escape(impresora.lower())
+        df_nom = df_inv[df_inv['item'].fillna('').str.lower().str.contains(patron_imp, na=False)].copy()
+        if not df_nom.empty:
+            return df_nom.sort_values('item')
+
+        return df_inv.sort_values('item')
 
     except Exception:
         return pd.DataFrame()
+
+
+def mapear_consumos_cmyk_a_inventario(totales_cmyk, df_tintas):
+    if df_tintas is None or df_tintas.empty:
+        return {}
+    alias_colores = {
+        'C': ['cian', 'cyan'],
+        'M': ['magenta'],
+        'Y': ['amarillo', 'yellow'],
+        'K': ['negro', 'black', 'key']
+    }
+    consumos_ids = {}
+    base = df_tintas.copy()
+    base['item_norm'] = base['item'].fillna('').astype(str).str.lower()
+
+    for color, ml in (totales_cmyk or {}).items():
+        ml = float(ml or 0.0)
+        if ml <= 0:
+            continue
+        aliases = alias_colores.get(str(color), [])
+        if not aliases:
+            continue
+        patron = '|'.join([re.escape(a) for a in aliases])
+        cand = base[base['item_norm'].str.contains(patron, na=False)]
+        if cand.empty:
+            continue
+        row = cand.sort_values(['cantidad', 'precio_usd'], ascending=[False, True]).iloc[0]
+        iid = int(row['id'])
+        consumos_ids[iid] = consumos_ids.get(iid, 0.0) + ml
+
+    return consumos_ids
 
 def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, conn=None):
     if conn is not None:
@@ -3395,6 +3427,8 @@ elif menu == "🎨 Análisis CMYK":
         else:
             st.info("No se encontró vínculo activo-insumo; se usa costo global configurado.")
 
+        consumos_ids_cmyk = mapear_consumos_cmyk_a_inventario({}, tintas_vinculadas if 'tintas_vinculadas' in locals() else pd.DataFrame())
+
         st.subheader("⚙️ Ajustes de Calibración")
 
         factor = st.slider(
@@ -3704,29 +3738,11 @@ elif menu == "🎨 Análisis CMYK":
 
                 alertas = []
 
-                stock_base = df_impresion_db[
-                    df_impresion_db['item'].str.contains(
-                        'tinta',
-                        case=False,
-                        na=False
-                    )
-                ].copy()
-
-                if usar_stock_por_impresora:
-
-                    stock_imp = stock_base[
-                        stock_base['item']
-                        .fillna('')
-                        .str.contains(
-                            '|'.join(impresora_aliases),
-                            case=False,
-                            na=False
-                        )
-                    ]
-
-                    if not stock_imp.empty:
-
-                        stock_base = stock_imp
+                stock_base = tintas_vinculadas.copy() if 'tintas_vinculadas' in locals() and tintas_vinculadas is not None else pd.DataFrame()
+                if stock_base.empty:
+                    stock_base = df_impresion_db[
+                        df_impresion_db['item'].str.contains('tinta', case=False, na=False)
+                    ].copy()
 
 
                 alias_colores = {
@@ -3791,6 +3807,11 @@ elif menu == "🎨 Análisis CMYK":
 
 
 
+            consumos_ids_cmyk = mapear_consumos_cmyk_a_inventario(
+                totales_lote_cmyk,
+                tintas_vinculadas if 'tintas_vinculadas' in locals() else pd.DataFrame()
+            )
+
             # --- ENVÍO A COTIZACIÓN ---
             if st.button("📝 ENVIAR A COTIZACIÓN", use_container_width=True):
 
@@ -3811,6 +3832,7 @@ elif menu == "🎨 Análisis CMYK":
                     'consumos_cmyk': totales_lote_cmyk,
 
                     'consumos': totales_lote_cmyk,
+                    'consumos_ids': consumos_ids_cmyk,
 
 
                     # ARCHIVOS
@@ -4789,45 +4811,24 @@ elif menu == "💰 Ventas":
 
                         conn.commit()
 
-                    # 🚀 DESCONTAR INVENTARIO AUTOMÁTICO
-                    alias_colores = {
-
-                        'C': ['cian', 'cyan'],
-                        'M': ['magenta'],
-                        'Y': ['amarillo', 'yellow'],
-                        'K': ['negro', 'negra', 'black']
-
-                    }
-
-                    for color, consumo in totales_lote_cmyk.items():
-
-                        aliases = alias_colores.get(color, [])
-
-                        if not aliases:
-                            continue
-
-                        conn.execute("""
-
-                            UPDATE inventario
-
-                            SET cantidad = MAX(cantidad - ?, 0)
-
-                            WHERE item LIKE ?
-
-                            AND activo = 1
-
-                        """, (
-
-                            consumo,
-
-                            f"%{aliases[0]}%"
-
-                        ))
-
-                    conn.commit()
-
-                    st.success("📦 Inventario descontado automáticamente")
-
+                    # 🚀 DESCONTAR INVENTARIO AUTOMÁTICO (solo si hay consumos CMYK válidos mapeables)
+                    consumos_tmp = globals().get('totales_lote_cmyk', {}) if isinstance(globals().get('totales_lote_cmyk', {}), dict) else {}
+                    if consumos_tmp:
+                        with conectar() as conn_desc:
+                            df_tintas_desc = obtener_tintas_impresora(conn_desc, str(st.session_state.get('impresora_sel', '')))
+                            consumos_ids_desc = mapear_consumos_cmyk_a_inventario(consumos_tmp, df_tintas_desc)
+                            for iid, qty in consumos_ids_desc.items():
+                                conn_desc.execute(
+                                    """
+                                    UPDATE inventario
+                                    SET cantidad = cantidad - ?,
+                                        ultima_actualizacion = CURRENT_TIMESTAMP
+                                    WHERE id = ? AND COALESCE(activo,1)=1 AND cantidad >= ?
+                                    """,
+                                    (float(qty), int(iid), float(qty))
+                                )
+                            conn_desc.commit()
+                        st.success("📦 Inventario CMYK descontado automáticamente")
 
                     st.success("Venta registrada correctamente")
 
@@ -5618,6 +5619,7 @@ elif menu == "📝 Cotizaciones":
     datos = st.session_state.get('datos_pre_cotizacion', {})
 
     consumos = datos.get('consumos', {})
+    consumos_ids_pre = datos.get('consumos_ids', {}) if isinstance(datos.get('consumos_ids', {}), dict) else {}
 
     datos_pre = {
         'trabajo': datos.get('trabajo', "Trabajo General"),
@@ -5667,22 +5669,34 @@ elif menu == "📝 Cotizaciones":
 
     if usa_tinta:
 
-        df_tintas = obtener_tintas_disponibles()
+        if consumos_ids_pre:
+            consumos_reales = {int(k): float(v) * float(unidades) for k, v in consumos_ids_pre.items() if float(v) > 0}
+            st.success("Tintas vinculadas cargadas automáticamente desde CMYK.")
+        else:
+            if datos.get('impresora'):
+                with conectar() as conn:
+                    df_tintas = obtener_tintas_impresora(conn, datos.get('impresora', ''))
+            else:
+                df_tintas = pd.DataFrame()
+            if df_tintas.empty:
+                with conectar() as conn:
+                    df_tintas = pd.read_sql_query("SELECT id, item, cantidad FROM inventario WHERE COALESCE(activo,1)=1 AND item LIKE '%tinta%'", conn)
 
-        if df_tintas.empty:
-            st.error("No hay tintas registradas en inventario.")
-            st.stop()
+            if df_tintas.empty:
+                st.error("No hay tintas registradas en inventario.")
+                st.stop()
 
-        opciones_tinta = {
-            f"{r['item']} ({r['cantidad']} ml)": r['id']
-            for _, r in df_tintas.iterrows()
-        }
+            opciones_tinta = {
+                f"{r['item']} ({r['cantidad']} ml)": r['id']
+                for _, r in df_tintas.iterrows()
+            }
 
-        st.subheader("Asignación de Tintas a Descontar")
+            st.subheader("Asignación de Tintas a Descontar")
 
-        for color in ['C', 'M', 'Y', 'K']:
-            sel = st.selectbox(f"Tinta {color}", opciones_tinta.keys(), key=color)
-            consumos_reales[opciones_tinta[sel]] = datos_pre[color] * unidades
+            for color in ['C', 'M', 'Y', 'K']:
+                sel = st.selectbox(f"Tinta {color}", opciones_tinta.keys(), key=color)
+                iid = int(opciones_tinta[sel])
+                consumos_reales[iid] = consumos_reales.get(iid, 0.0) + float(datos_pre[color]) * float(unidades)
 
     metodo_pago = st.selectbox(
         "Método de Pago",
@@ -6068,9 +6082,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
 
 
 
