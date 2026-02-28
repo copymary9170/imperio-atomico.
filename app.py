@@ -3051,8 +3051,8 @@ elif menu == "⚙️ Configuración":
             st.info("Historial aún no disponible.")
 
 # ============================================================
-# 👥 MODULO CLIENTES ERP PRO v6.0
-# CRM + Finanzas + Registro + Edición
+# 👥 MODULO CLIENTES ERP PRO v7.0 ULTRA ROBUSTO
+# Sin errores IndexError • Nivel Producción Real
 # ============================================================
 
 elif menu == "👥 Clientes":
@@ -3066,15 +3066,14 @@ elif menu == "👥 Clientes":
 
 
     st.title("👥 CRM Profesional de Clientes")
-    st.caption("Registro • Finanzas • Inteligencia Comercial")
+    st.caption("ERP • Finanzas • Inteligencia Comercial")
 
 
     # =====================================================
-    # FUNCION CARGAR CLIENTES
+    # CARGA SEGURA
     # =====================================================
 
     @st.cache_data(ttl=300)
-
     def cargar_clientes():
 
         query = """
@@ -3084,7 +3083,7 @@ elif menu == "👥 Clientes":
         c.id,
         c.nombre,
         c.whatsapp,
-        c.categoria,
+        COALESCE(c.categoria,'General') categoria,
 
         COUNT(v.id) operaciones,
 
@@ -3092,31 +3091,31 @@ elif menu == "👥 Clientes":
 
         COALESCE(SUM(
 
-        CASE
+            CASE
 
-        WHEN v.metodo LIKE '%Pendiente%'
-        OR v.metodo LIKE '%Deuda%'
+                WHEN v.metodo LIKE '%Pendiente%'
+                OR v.metodo LIKE '%Deuda%'
 
-        THEN v.monto_total
+                THEN v.monto_total
+                ELSE 0
 
-        ELSE 0
-
-        END
+            END
 
         ),0) deuda,
 
-
         MAX(v.fecha) ultima_compra
-
 
         FROM clientes c
 
         LEFT JOIN ventas v
         ON v.cliente_id = c.id
+        AND COALESCE(v.activo,1)=1
 
         WHERE COALESCE(c.activo,1)=1
 
         GROUP BY c.id
+
+        ORDER BY total DESC
 
         """
 
@@ -3128,14 +3127,12 @@ elif menu == "👥 Clientes":
     df = cargar_clientes()
 
 
-
     # =====================================================
-    # FORMULARIO PROFESIONAL
+    # REGISTRAR / EDITAR
     # =====================================================
 
     st.divider()
-
-    st.subheader("➕ Registro / Edición de Cliente")
+    st.subheader("➕ Registro y Edición")
 
 
     modo = st.radio(
@@ -3149,38 +3146,34 @@ elif menu == "👥 Clientes":
     )
 
 
-    if modo == "Registrar":
+    # REGISTRAR
 
+    if modo == "Registrar":
 
         with st.form("form_registro"):
 
-
             col1,col2,col3 = st.columns(3)
 
-
-            nombre = col1.text_input("Nombre Cliente / Empresa")
+            nombre = col1.text_input("Nombre")
 
             whatsapp = col2.text_input("WhatsApp")
 
             categoria = col3.selectbox(
 
-                "Categoría",
+                "Categoria",
 
                 ["General","VIP","Revendedor"]
 
             )
 
-
-            guardar = st.form_submit_button("Guardar Cliente")
+            guardar = st.form_submit_button("Guardar")
 
 
             if guardar:
 
-
-                if nombre == "":
+                if nombre.strip() == "":
 
                     st.error("Nombre obligatorio")
-
                     st.stop()
 
 
@@ -3189,12 +3182,11 @@ elif menu == "👥 Clientes":
 
                 with conectar() as conn:
 
-
                     existe = conn.execute(
 
-                    "SELECT COUNT(*) FROM clientes WHERE nombre=?",
+                        "SELECT COUNT(*) FROM clientes WHERE nombre=?",
 
-                    (nombre,)
+                        (nombre,)
 
                     ).fetchone()[0]
 
@@ -3202,86 +3194,81 @@ elif menu == "👥 Clientes":
                     if existe:
 
                         st.error("Cliente ya existe")
-
                         st.stop()
 
 
                     conn.execute(
 
-                    """
+                        """
 
-                    INSERT INTO clientes
+                        INSERT INTO clientes
+                        (nombre, whatsapp, categoria)
 
-                    (nombre, whatsapp, categoria)
+                        VALUES (?,?,?)
 
-                    VALUES (?,?,?)
+                        """,
 
-                    """,
-
-                    (nombre, whatsapp, categoria)
+                        (nombre, whatsapp, categoria)
 
                     )
-
 
                     conn.commit()
 
 
                 st.success("Cliente registrado")
-
                 st.rerun()
 
 
-
-    # =====================================================
     # EDITAR
-    # =====================================================
 
     else:
 
+        if df.empty:
 
-        cliente = st.selectbox(
+            st.info("No hay clientes")
+            st.stop()
 
-            "Seleccionar cliente",
 
-            df["nombre"]
+        lista = df[["id","nombre"]]
+
+        cliente_id = st.selectbox(
+
+            "Seleccionar",
+
+            lista["id"],
+
+            format_func=lambda x: lista.loc[
+                lista["id"]==x,"nombre"
+            ].values[0]
 
         )
 
 
-        row = df[df["nombre"]==cliente].iloc[0]
+        cliente_df = df[df["id"]==cliente_id]
+
+        if cliente_df.empty:
+
+            st.stop()
+
+
+        row = cliente_df.iloc[0]
 
 
         with st.form("form_editar"):
 
-
             col1,col2,col3 = st.columns(3)
 
+            nombre_n = col1.text_input("Nombre",row["nombre"])
 
-            nombre_nuevo = col1.text_input(
+            whatsapp_n = col2.text_input("WhatsApp",row["whatsapp"])
 
-            "Nombre",
+            categoria_n = col3.selectbox(
 
-            row["nombre"]
+                "Categoria",
 
-            )
+                ["General","VIP","Revendedor"],
 
-
-            whatsapp_nuevo = col2.text_input(
-
-            "WhatsApp",
-
-            row["whatsapp"]
-
-            )
-
-
-            categoria_nueva = col3.selectbox(
-
-            "Categoria",
-
-            ["General","VIP","Revendedor"],
-
-            index=["General","VIP","Revendedor"].index(row["categoria"])
+                index=["General","VIP","Revendedor"].index(row["categoria"])
 
             )
 
@@ -3291,61 +3278,48 @@ elif menu == "👥 Clientes":
 
             if actualizar:
 
-
                 with conectar() as conn:
-
 
                     conn.execute(
 
-                    """
+                        """
 
-                    UPDATE clientes
+                        UPDATE clientes
 
-                    SET nombre=?,
+                        SET nombre=?,
+                        whatsapp=?,
+                        categoria=?
 
-                    whatsapp=?,
+                        WHERE id=?
 
-                    categoria=?
+                        """,
 
-                    WHERE id=?
+                        (
 
-                    """,
+                            nombre_n,
+                            whatsapp_n,
+                            categoria_n,
+                            int(cliente_id)
 
-                    (
-
-                    nombre_nuevo,
-
-                    whatsapp_nuevo,
-
-                    categoria_nueva,
-
-                    int(row["id"])
+                        )
 
                     )
-
-                    )
-
 
                     conn.commit()
 
 
-                st.success("Actualizado")
-
+                st.success("Cliente actualizado")
                 st.rerun()
 
 
-
     # =====================================================
-    # ANALISIS FINANCIERO
+    # ANALISIS
     # =====================================================
-
 
     if df.empty:
 
-        st.warning("No hay clientes")
-
+        st.warning("Sin clientes")
         st.stop()
-
 
 
     df["ultima_compra"] = pd.to_datetime(df["ultima_compra"])
@@ -3353,158 +3327,144 @@ elif menu == "👥 Clientes":
 
     df["recencia"] = (
 
-    datetime.now() - df["ultima_compra"]
+        datetime.now() - df["ultima_compra"]
 
     ).dt.days
 
 
     df["score"] = (
 
-    df["total"] * 0.5 +
-
-    df["operaciones"] * 10 +
-
-    (100 - df["recencia"].fillna(100))
+        df["total"] * 0.5 +
+        df["operaciones"] * 10 +
+        (100 - df["recencia"].fillna(100))
 
     )
 
 
     df["segmento"] = np.select(
 
-    [
+        [
 
-    df["score"] > 1000,
+            df["score"] > 1000,
+            df["score"] > 500,
+            df["score"] > 200
 
-    df["score"] > 500,
+        ],
 
-    df["score"] > 200
+        [
 
-    ],
+            "VIP",
+            "Frecuente",
+            "Ocasional"
 
-    [
+        ],
 
-    "VIP",
-
-    "Frecuente",
-
-    "Ocasional"
-
-    ],
-
-    default="Riesgo"
+        default="Riesgo"
 
     )
-
 
 
     # =====================================================
     # DASHBOARD
     # =====================================================
 
-
     st.divider()
-
 
     c1,c2,c3,c4 = st.columns(4)
 
+    c1.metric("Clientes",len(df))
 
-    c1.metric("Clientes", len(df))
+    c2.metric("Ventas",f"$ {df['total'].sum():,.2f}")
 
-    c2.metric("Ventas", f"$ {df['total'].sum():,.2f}")
-
-    c3.metric("Deuda", f"$ {df['deuda'].sum():,.2f}")
+    c3.metric("Deuda",f"$ {df['deuda'].sum():,.2f}")
 
     c4.metric(
 
-    "Ticket",
+        "Ticket",
 
-    f"$ {(df['total'].sum()/df['operaciones'].sum()):,.2f}"
+        f"$ {(df['total'].sum()/df['operaciones'].sum()):,.2f}"
 
     )
-
 
 
     # =====================================================
     # GRAFICO
     # =====================================================
 
-
     fig = px.bar(
 
-    df.sort_values("total",ascending=False).head(10),
+        df.head(10),
 
-    x="nombre",
+        x="nombre",
 
-    y="total",
+        y="total",
 
-    color="segmento"
+        color="segmento"
 
     )
 
-
     st.plotly_chart(fig,use_container_width=True)
-
 
 
     # =====================================================
     # EXPORTAR
     # =====================================================
 
-
     buffer = io.BytesIO()
 
+    with pd.ExcelWriter(buffer):
 
-    with pd.ExcelWriter(buffer) as writer:
-
-        df.to_excel(writer,index=False)
-
+        df.to_excel(buffer,index=False)
 
     st.download_button(
 
-    "Exportar Excel",
+        "📥 Exportar Excel",
 
-    buffer.getvalue(),
+        buffer.getvalue(),
 
-    "clientes.xlsx"
+        "clientes.xlsx"
 
     )
-
 
 
     # =====================================================
     # TABLA
     # =====================================================
 
-
     st.dataframe(df,use_container_width=True)
 
 
-
     # =====================================================
-    # WHATSAPP
+    # CONTACTO SEGURO
     # =====================================================
-
 
     st.subheader("Contacto")
 
 
-    cliente = st.selectbox(
+    lista = df[["id","nombre"]]
 
-    "Seleccionar",
 
-    df["nombre"]
+    cliente_id = st.selectbox(
+
+        "Seleccionar cliente",
+
+        lista["id"],
+
+        format_func=lambda x: lista.loc[
+            lista["id"]==x,"nombre"
+        ].values[0],
+
+        key="contacto"
 
     )
 
 
-    row = df[df["nombre"]==cliente].iloc[0]
+    row = df[df["id"]==cliente_id].iloc[0]
 
 
-    if row["whatsapp"]:
+    if pd.notna(row["whatsapp"]):
 
-
-        wa = str(row["whatsapp"])
-
+        wa = "".join(filter(str.isdigit,str(row["whatsapp"])))
 
         if not wa.startswith("58"):
 
@@ -3513,39 +3473,33 @@ elif menu == "👥 Clientes":
 
         st.link_button(
 
-        "Abrir WhatsApp",
+            "💬 WhatsApp",
 
-        f"https://wa.me/{wa}"
+            f"https://wa.me/{wa}"
 
         )
-
 
 
     # =====================================================
     # ELIMINAR
     # =====================================================
 
-
-    if st.button("Eliminar Cliente"):
-
+    if st.button("🗑 Eliminar Cliente"):
 
         with conectar() as conn:
 
-
             conn.execute(
 
-            "UPDATE clientes SET activo=0 WHERE id=?",
+                "UPDATE clientes SET activo=0 WHERE id=?",
 
-            (int(row["id"]),)
+                (int(cliente_id),)
 
             )
-
 
             conn.commit()
 
 
         st.success("Cliente eliminado")
-
         st.rerun()
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
@@ -6386,6 +6340,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
