@@ -3051,8 +3051,8 @@ elif menu == "⚙️ Configuración":
             st.info("Historial aún no disponible.")
 
 # ============================================================
-# 👥 MODULO CLIENTES ERP PRO v5.0
-# Nivel empresarial real — Papelería, Sublimación, Imprenta
+# 👥 MODULO CLIENTES ERP PRO v6.0
+# CRM + Finanzas + Registro + Edición
 # ============================================================
 
 elif menu == "👥 Clientes":
@@ -3062,17 +3062,19 @@ elif menu == "👥 Clientes":
     import numpy as np
     import plotly.express as px
     import io
+    from datetime import datetime
 
 
-    st.title("👥 Clientes — ERP Profesional")
-    st.caption("CRM + Finanzas + Inteligencia Comercial")
+    st.title("👥 CRM Profesional de Clientes")
+    st.caption("Registro • Finanzas • Inteligencia Comercial")
 
 
-    # ========================================================
-    # 🚀 CARGA SQL PROFESIONAL
-    # ========================================================
+    # =====================================================
+    # FUNCION CARGAR CLIENTES
+    # =====================================================
 
     @st.cache_data(ttl=300)
+
     def cargar_clientes():
 
         query = """
@@ -3082,7 +3084,7 @@ elif menu == "👥 Clientes":
         c.id,
         c.nombre,
         c.whatsapp,
-        COALESCE(c.categoria,'General') categoria,
+        c.categoria,
 
         COUNT(v.id) operaciones,
 
@@ -3111,8 +3113,6 @@ elif menu == "👥 Clientes":
 
         LEFT JOIN ventas v
         ON v.cliente_id = c.id
-        AND COALESCE(v.activo,1)=1
-
 
         WHERE COALESCE(c.activo,1)=1
 
@@ -3125,9 +3125,219 @@ elif menu == "👥 Clientes":
             return pd.read_sql(query, conn)
 
 
-
     df = cargar_clientes()
 
+
+
+    # =====================================================
+    # FORMULARIO PROFESIONAL
+    # =====================================================
+
+    st.divider()
+
+    st.subheader("➕ Registro / Edición de Cliente")
+
+
+    modo = st.radio(
+
+        "Modo",
+
+        ["Registrar","Editar"],
+
+        horizontal=True
+
+    )
+
+
+    if modo == "Registrar":
+
+
+        with st.form("form_registro"):
+
+
+            col1,col2,col3 = st.columns(3)
+
+
+            nombre = col1.text_input("Nombre Cliente / Empresa")
+
+            whatsapp = col2.text_input("WhatsApp")
+
+            categoria = col3.selectbox(
+
+                "Categoría",
+
+                ["General","VIP","Revendedor"]
+
+            )
+
+
+            guardar = st.form_submit_button("Guardar Cliente")
+
+
+            if guardar:
+
+
+                if nombre == "":
+
+                    st.error("Nombre obligatorio")
+
+                    st.stop()
+
+
+                whatsapp = "".join(filter(str.isdigit, whatsapp))
+
+
+                with conectar() as conn:
+
+
+                    existe = conn.execute(
+
+                    "SELECT COUNT(*) FROM clientes WHERE nombre=?",
+
+                    (nombre,)
+
+                    ).fetchone()[0]
+
+
+                    if existe:
+
+                        st.error("Cliente ya existe")
+
+                        st.stop()
+
+
+                    conn.execute(
+
+                    """
+
+                    INSERT INTO clientes
+
+                    (nombre, whatsapp, categoria)
+
+                    VALUES (?,?,?)
+
+                    """,
+
+                    (nombre, whatsapp, categoria)
+
+                    )
+
+
+                    conn.commit()
+
+
+                st.success("Cliente registrado")
+
+                st.rerun()
+
+
+
+    # =====================================================
+    # EDITAR
+    # =====================================================
+
+    else:
+
+
+        cliente = st.selectbox(
+
+            "Seleccionar cliente",
+
+            df["nombre"]
+
+        )
+
+
+        row = df[df["nombre"]==cliente].iloc[0]
+
+
+        with st.form("form_editar"):
+
+
+            col1,col2,col3 = st.columns(3)
+
+
+            nombre_nuevo = col1.text_input(
+
+            "Nombre",
+
+            row["nombre"]
+
+            )
+
+
+            whatsapp_nuevo = col2.text_input(
+
+            "WhatsApp",
+
+            row["whatsapp"]
+
+            )
+
+
+            categoria_nueva = col3.selectbox(
+
+            "Categoria",
+
+            ["General","VIP","Revendedor"],
+
+            index=["General","VIP","Revendedor"].index(row["categoria"])
+
+            )
+
+
+            actualizar = st.form_submit_button("Actualizar")
+
+
+            if actualizar:
+
+
+                with conectar() as conn:
+
+
+                    conn.execute(
+
+                    """
+
+                    UPDATE clientes
+
+                    SET nombre=?,
+
+                    whatsapp=?,
+
+                    categoria=?
+
+                    WHERE id=?
+
+                    """,
+
+                    (
+
+                    nombre_nuevo,
+
+                    whatsapp_nuevo,
+
+                    categoria_nueva,
+
+                    int(row["id"])
+
+                    )
+
+                    )
+
+
+                    conn.commit()
+
+
+                st.success("Actualizado")
+
+                st.rerun()
+
+
+
+    # =====================================================
+    # ANALISIS FINANCIERO
+    # =====================================================
 
 
     if df.empty:
@@ -3138,151 +3348,96 @@ elif menu == "👥 Clientes":
 
 
 
-    # ========================================================
-    # 🧠 INTELIGENCIA COMERCIAL (RFM)
-    # ========================================================
-
-
     df["ultima_compra"] = pd.to_datetime(df["ultima_compra"])
 
 
     df["recencia"] = (
 
-        pd.Timestamp.now() - df["ultima_compra"]
+    datetime.now() - df["ultima_compra"]
 
     ).dt.days
 
 
-    df["frecuencia"] = df["operaciones"]
-
-
-    df["monetario"] = df["total"]
-
-
-
-    # SCORE
-
-
     df["score"] = (
 
-        df["monetario"] * 0.5 +
+    df["total"] * 0.5 +
 
-        df["frecuencia"] * 20 +
+    df["operaciones"] * 10 +
 
-        (100 - df["recencia"].fillna(100)) * 0.3
+    (100 - df["recencia"].fillna(100))
 
     )
-
-
-    # CLASIFICACION
-
-
-    condiciones = [
-
-        df["score"] > 800,
-
-        df["score"] > 400,
-
-        df["score"] > 200,
-
-        df["score"] <= 200
-
-    ]
-
-
-    categorias = [
-
-        "VIP",
-
-        "Frecuente",
-
-        "Ocasional",
-
-        "Riesgo"
-
-    ]
 
 
     df["segmento"] = np.select(
 
-        condiciones,
+    [
 
-        categorias,
+    df["score"] > 1000,
 
-        default="Nuevo"
+    df["score"] > 500,
+
+    df["score"] > 200
+
+    ],
+
+    [
+
+    "VIP",
+
+    "Frecuente",
+
+    "Ocasional"
+
+    ],
+
+    default="Riesgo"
 
     )
 
 
 
-    # ========================================================
-    # 💰 METRICAS FINANCIERAS
-    # ========================================================
+    # =====================================================
+    # DASHBOARD
+    # =====================================================
 
 
-    total_clientes = len(df)
-
-    total_ventas = df["total"].sum()
-
-    total_deuda = df["deuda"].sum()
-
-    ticket_promedio = df["total"].sum() / df["operaciones"].sum()
-
+    st.divider()
 
 
     c1,c2,c3,c4 = st.columns(4)
 
 
-    c1.metric("Clientes", total_clientes)
+    c1.metric("Clientes", len(df))
 
-    c2.metric("Ventas", f"$ {total_ventas:,.2f}")
+    c2.metric("Ventas", f"$ {df['total'].sum():,.2f}")
 
-    c3.metric("Cuentas por cobrar", f"$ {total_deuda:,.2f}")
+    c3.metric("Deuda", f"$ {df['deuda'].sum():,.2f}")
 
-    c4.metric("Ticket promedio", f"$ {ticket_promedio:,.2f}")
+    c4.metric(
 
+    "Ticket",
 
+    f"$ {(df['total'].sum()/df['operaciones'].sum()):,.2f}"
 
-    # ========================================================
-    # 🚨 ALERTAS
-    # ========================================================
-
-
-    st.subheader("🚨 Alertas")
-
-
-    morosos = df[df["deuda"] > 0]
-
-
-    inactivos = df[df["recencia"] > 60]
-
-
-    col1,col2 = st.columns(2)
-
-
-    col1.metric("Morosos", len(morosos))
-
-    col2.metric("Inactivos", len(inactivos))
+    )
 
 
 
-    # ========================================================
-    # 📊 GRAFICO PROFESIONAL
-    # ========================================================
-
-
-    st.subheader("📊 Top Clientes")
+    # =====================================================
+    # GRAFICO
+    # =====================================================
 
 
     fig = px.bar(
 
-        df.sort_values("total",ascending=False).head(10),
+    df.sort_values("total",ascending=False).head(10),
 
-        x="nombre",
+    x="nombre",
 
-        y="total",
+    y="total",
 
-        color="segmento"
+    color="segmento"
 
     )
 
@@ -3291,63 +3446,43 @@ elif menu == "👥 Clientes":
 
 
 
-    # ========================================================
-    # 🔍 BUSCAR
-    # ========================================================
-
-
-    busqueda = st.text_input("Buscar")
-
-
-    if busqueda:
-
-        df = df[df["nombre"].str.contains(busqueda,case=False)]
-
-
-
-    # ========================================================
-    # 📥 EXPORTACION
-    # ========================================================
+    # =====================================================
+    # EXPORTAR
+    # =====================================================
 
 
     buffer = io.BytesIO()
 
 
-    with pd.ExcelWriter(buffer,engine="xlsxwriter") as writer:
+    with pd.ExcelWriter(buffer) as writer:
 
         df.to_excel(writer,index=False)
 
 
     st.download_button(
 
-        "📥 Exportar Excel",
+    "Exportar Excel",
 
-        buffer.getvalue(),
+    buffer.getvalue(),
 
-        "clientes_erp.xlsx"
-
-    )
-
-
-
-    # ========================================================
-    # 📋 TABLA PROFESIONAL
-    # ========================================================
-
-
-    st.dataframe(
-
-        df.sort_values("score",ascending=False),
-
-        use_container_width=True
+    "clientes.xlsx"
 
     )
 
 
 
-    # ========================================================
-    # 💬 WHATSAPP
-    # ========================================================
+    # =====================================================
+    # TABLA
+    # =====================================================
+
+
+    st.dataframe(df,use_container_width=True)
+
+
+
+    # =====================================================
+    # WHATSAPP
+    # =====================================================
 
 
     st.subheader("Contacto")
@@ -3355,9 +3490,9 @@ elif menu == "👥 Clientes":
 
     cliente = st.selectbox(
 
-        "Seleccionar",
+    "Seleccionar",
 
-        df["nombre"]
+    df["nombre"]
 
     )
 
@@ -3378,17 +3513,17 @@ elif menu == "👥 Clientes":
 
         st.link_button(
 
-            "WhatsApp",
+        "Abrir WhatsApp",
 
-            f"https://wa.me/{wa}"
+        f"https://wa.me/{wa}"
 
         )
 
 
 
-    # ========================================================
-    # 🗑 ELIMINAR
-    # ========================================================
+    # =====================================================
+    # ELIMINAR
+    # =====================================================
 
 
     if st.button("Eliminar Cliente"):
@@ -3412,7 +3547,6 @@ elif menu == "👥 Clientes":
         st.success("Cliente eliminado")
 
         st.rerun()
-
 # ===========================================================
 # 10. ANALIZADOR CMYK PROFESIONAL (VERSIÓN MEJORADA 2.0)
 # ===========================================================
@@ -6252,6 +6386,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
