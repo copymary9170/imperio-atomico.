@@ -2182,230 +2182,230 @@ elif menu == "📦 Inventario":
         st.caption(f"Delivery equivalente: ${delivery:.2f}")
 
     
-            # =======================================================
-    # 🎨 GENERADOR DE VARIANTES EDITABLES (COLORES / MODELOS)
-    # =======================================================
-    
-    st.divider()
-    st.subheader("🎨 Variantes rápidas (colores, modelos, etc)")
-    
-    # crear memoria
-    if "variantes_editor" not in st.session_state:
-    
-        st.session_state.variantes_editor = {}
-    
-    
-    colv1, colv2 = st.columns([2,1])
-    
-    nombre_base_var = colv1.text_input(
-        "Nombre base del producto",
-        value=nombre_c,
-        key="base_variante"
-    )
-    
-    variantes_txt = colv1.text_input(
-        "Escribe variantes separadas por coma",
-        placeholder="Rojo, Azul, Verde, Negro",
-        key="lista_variantes"
-    )
-    
-    
-    if colv2.button("Crear barras"):
-    
-        if variantes_txt:
-    
-            lista = [v.strip() for v in variantes_txt.split(",")]
-    
-            st.session_state.variantes_editor = {
-    
-                var: 0.0 for var in lista
-    
-            }
-    
-    
-    # Mostrar barras editables
-    
-    if st.session_state.variantes_editor:
-    
-        st.write("### Cantidades por variante")
-    
-        cantidades_finales = {}
-    
-        for var in st.session_state.variantes_editor:
-    
-            cantidades_finales[var] = st.number_input(
-    
-                f"{nombre_base_var} - {var}",
-    
-                min_value=0.0,
-    
-                value=0.0,
-    
-                key=f"var_{var}"
-    
-            )
-    
-    
-        # guardar variantes
-    
-        if st.button("💾 Guardar TODAS las variantes"):
-    
-    
-            if "BCV" in moneda_pago:
-                tasa_usada = t_ref
-            elif "Binance" in moneda_pago:
-                tasa_usada = t_bin
-            else:
-                tasa_usada = 1.0
-    
-    
-            porc_impuestos = 0
-    
-            if iva_activo:
-                porc_impuestos += st.session_state.get("iva_perc",16)
-    
-            if igtf_activo:
-                porc_impuestos += st.session_state.get("igtf_perc",3)
-    
-            if banco_activo:
-                porc_impuestos += st.session_state.get("banco_perc",0.5)
-    
-    
-            with conectar() as conn:
-    
-                cur = conn.cursor()
-    
-    
-                proveedor_id = None
-    
-                if proveedor:
-    
-                    cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
-    
-                    row = cur.fetchone()
-    
-                    proveedor_id = row[0] if row else None
-    
-    
-                for var, cantidad in cantidades_finales.items():
-    
-                    if cantidad <= 0:
-                        continue
-    
-    
-                    nombre_final = f"{nombre_base_var} - {var}"
-    
-    
-                    costo_total_usd = ((monto_factura / tasa_usada) * (1 + (porc_impuestos/100))) + delivery
-    
-                    costo_unitario = costo_total_usd / max(stock_real,1)
-    
-    
-                    old = cur.execute(
-    
-                        "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
-    
-                        (nombre_final,)
-    
-                    ).fetchone()
-    
-    
-                    if old:
-    
-                        nueva_cant = old[0] + cantidad
-    
-                        precio_ponderado = (
-    
-                            (old[0]*old[1] + cantidad*costo_unitario)
-    
-                            / nueva_cant
-    
-                        )
-    
-                    else:
-    
-                        nueva_cant = cantidad
-    
-                        precio_ponderado = costo_unitario
-    
-    
-                    cur.execute("""
-    
-                    INSERT OR REPLACE INTO inventario
-    
-                    (item,cantidad,unidad,precio_usd,minimo,imprimible_cmyk,area_por_pliego_cm2,activo)
-    
-                    VALUES (?,?,?,?,?,?,?,1)
-    
-                    """,
-    
-                    (
-    
-                        nombre_final,
-    
-                        nueva_cant,
-    
-                        unidad_final,
-    
-                        precio_ponderado,
-    
-                        minimo_stock,
-    
-                        1 if imprimible_cmyk else 0,
-    
-                        area_por_pliego_val
-    
-                    ))
-    
-    
-                    cur.execute("""
-    
-                    INSERT INTO historial_compras
-    
-                    (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
-    
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
-    
-                    """,
-    
-                    (
-    
-                        nombre_final,
-    
-                        proveedor_id,
-    
-                        cantidad,
-    
-                        unidad_final,
-    
-                        costo_total_usd,
-    
-                        precio_ponderado,
-    
-                        porc_impuestos,
-    
-                        delivery,
-    
-                        tasa_usada,
-    
-                        moneda_pago,
-    
-                        usuario_actual
-    
-                    ))
-    
-    
-                conn.commit()
-    
-    
-            cargar_datos()
-    
-            st.session_state.variantes_editor = {}
-    
-            st.success("Variantes guardadas correctamente")
-    
-            st.rerun()
+                # =======================================================
+        # 🎨 GENERADOR DE VARIANTES EDITABLES (COLORES / MODELOS)
+        # =======================================================
         
+        st.divider()
+        st.subheader("🎨 Variantes rápidas (colores, modelos, etc)")
+        
+        # crear memoria
+        if "variantes_editor" not in st.session_state:
+        
+            st.session_state.variantes_editor = {}
+        
+        
+        colv1, colv2 = st.columns([2,1])
+        
+        nombre_base_var = colv1.text_input(
+            "Nombre base del producto",
+            value=nombre_c,
+            key="base_variante"
+        )
+        
+        variantes_txt = colv1.text_input(
+            "Escribe variantes separadas por coma",
+            placeholder="Rojo, Azul, Verde, Negro",
+            key="lista_variantes"
+        )
+        
+        
+        if colv2.button("Crear barras"):
+        
+            if variantes_txt:
+        
+                lista = [v.strip() for v in variantes_txt.split(",")]
+        
+                st.session_state.variantes_editor = {
+        
+                    var: 0.0 for var in lista
+        
+                }
+        
+        
+        # Mostrar barras editables
+        
+        if st.session_state.variantes_editor:
+        
+            st.write("### Cantidades por variante")
+        
+            cantidades_finales = {}
+        
+            for var in st.session_state.variantes_editor:
+        
+                cantidades_finales[var] = st.number_input(
+        
+                    f"{nombre_base_var} - {var}",
+        
+                    min_value=0.0,
+        
+                    value=0.0,
+        
+                    key=f"var_{var}"
+        
+                )
+        
+        
+            # guardar variantes
+        
+            if st.button("💾 Guardar TODAS las variantes"):
+        
+        
+                if "BCV" in moneda_pago:
+                    tasa_usada = t_ref
+                elif "Binance" in moneda_pago:
+                    tasa_usada = t_bin
+                else:
+                    tasa_usada = 1.0
+        
+        
+                porc_impuestos = 0
+        
+                if iva_activo:
+                    porc_impuestos += st.session_state.get("iva_perc",16)
+        
+                if igtf_activo:
+                    porc_impuestos += st.session_state.get("igtf_perc",3)
+        
+                if banco_activo:
+                    porc_impuestos += st.session_state.get("banco_perc",0.5)
+        
+        
+                with conectar() as conn:
+        
+                    cur = conn.cursor()
+        
+        
+                    proveedor_id = None
+        
+                    if proveedor:
+        
+                        cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
+        
+                        row = cur.fetchone()
+        
+                        proveedor_id = row[0] if row else None
+        
+        
+                    for var, cantidad in cantidades_finales.items():
+        
+                        if cantidad <= 0:
+                            continue
+        
+        
+                        nombre_final = f"{nombre_base_var} - {var}"
+        
+        
+                        costo_total_usd = ((monto_factura / tasa_usada) * (1 + (porc_impuestos/100))) + delivery
+        
+                        costo_unitario = costo_total_usd / max(stock_real,1)
+        
+        
+                        old = cur.execute(
+        
+                            "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
+        
+                            (nombre_final,)
+        
+                        ).fetchone()
+        
+        
+                        if old:
+        
+                            nueva_cant = old[0] + cantidad
+        
+                            precio_ponderado = (
+        
+                                (old[0]*old[1] + cantidad*costo_unitario)
+        
+                                / nueva_cant
+        
+                            )
+        
+                        else:
+        
+                            nueva_cant = cantidad
+        
+                            precio_ponderado = costo_unitario
+        
+        
+                        cur.execute("""
+        
+                        INSERT OR REPLACE INTO inventario
+        
+                        (item,cantidad,unidad,precio_usd,minimo,imprimible_cmyk,area_por_pliego_cm2,activo)
+        
+                        VALUES (?,?,?,?,?,?,?,1)
+        
+                        """,
+        
+                        (
+        
+                            nombre_final,
+        
+                            nueva_cant,
+        
+                            unidad_final,
+        
+                            precio_ponderado,
+        
+                            minimo_stock,
+        
+                            1 if imprimible_cmyk else 0,
+        
+                            area_por_pliego_val
+        
+                        ))
+        
+        
+                        cur.execute("""
+        
+                        INSERT INTO historial_compras
+        
+                        (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
+        
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        
+                        """,
+        
+                        (
+        
+                            nombre_final,
+        
+                            proveedor_id,
+        
+                            cantidad,
+        
+                            unidad_final,
+        
+                            costo_total_usd,
+        
+                            precio_ponderado,
+        
+                            porc_impuestos,
+        
+                            delivery,
+        
+                            tasa_usada,
+        
+                            moneda_pago,
+        
+                            usuario_actual
+        
+                        ))
+        
+        
+                    conn.commit()
+        
+        
+                cargar_datos()
+        
+                st.session_state.variantes_editor = {}
+        
+                st.success("Variantes guardadas correctamente")
+        
+                st.rerun()
+            
         # ------------------------------
         # BOTÓN GUARDAR
         # ------------------------------
@@ -7042,6 +7042,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
