@@ -4308,25 +4308,25 @@ elif menu == "🎨 Análisis CMYK":
             st.toast(f"Orden #{op_orden} movida a {op_estado}", icon='✅')
             st.rerun()
 
-            # ============================================================
-            # ENVIAR A SUBLIMACION (CMYK)
-            # ============================================================
+         # ============================================================
+        # ENVIAR A SUBLIMACION (CMYK)
+         # ============================================================
             
-            if st.button("📤 Enviar a Sublimación"):
+         if st.button("📤 Enviar a Sublimación"):
             
-                datos = {
+              datos = {
             
-                    "trabajo": nombre_trabajo,
+                "trabajo": nombre_trabajo,
             
-                    "costo_transfer_total": float(costo_total),
+                 "costo_transfer_total": float(costo_total),
             
-                    "cantidad": int(unidades),
+                "cantidad": int(unidades),
+        
+                "costo_transfer_unitario": float(costo_total / max(unidades,1)),
             
-                    "costo_transfer_unitario": float(costo_total / max(unidades,1)),
+                "fecha": datetime.now().isoformat()
             
-                    "fecha": datetime.now().isoformat()
-            
-                }
+            }
             
                 # ACUMULAR (no reemplazar)
             
@@ -6672,6 +6672,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
