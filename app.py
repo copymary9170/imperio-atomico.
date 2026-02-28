@@ -1356,6 +1356,8 @@ def inicializar_sistema():
             c.execute("ALTER TABLE ventas ADD COLUMN usuario TEXT")
 
         columnas_activos = {row[1] for row in c.execute("PRAGMA table_info(activos)").fetchall()}
+        if 'activo' not in columnas_activos:
+            c.execute("ALTER TABLE activos ADD COLUMN activo INTEGER DEFAULT 1")
         if 'vida_total' not in columnas_activos:
             c.execute("ALTER TABLE activos ADD COLUMN vida_total REAL")
         if 'vida_restante' not in columnas_activos:
@@ -1365,6 +1367,7 @@ def inicializar_sistema():
         if 'modelo' not in columnas_activos:
             c.execute("ALTER TABLE activos ADD COLUMN modelo TEXT")
         c.execute("UPDATE activos SET uso_actual = 0 WHERE uso_actual IS NULL")
+        c.execute("UPDATE activos SET activo=1 WHERE activo IS NULL")
         c.execute("UPDATE activos SET vida_total = inversion WHERE vida_total IS NULL")
         c.execute("UPDATE activos SET vida_restante = vida_total WHERE vida_restante IS NULL")
 
@@ -3315,11 +3318,26 @@ elif menu == "🎨 Análisis CMYK":
             else:
                 df_impresion_db = df_tintas_db.copy()
             try:
-                df_activos_cmyk = pd.read_sql_query(
-                    "SELECT id, equipo, categoria, unidad, COALESCE(modelo,'') AS modelo FROM activos WHERE COALESCE(activo,1)=1", conn
-                )
+                cols_act = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
+                if cols_act and 'id' in cols_act and 'equipo' in cols_act:
+                    campos = ['id', 'equipo']
+                    if 'categoria' in cols_act:
+                        campos.append('categoria')
+                    if 'unidad' in cols_act:
+                        campos.append('unidad')
+                    if 'modelo' in cols_act:
+                        campos.append('modelo')
+                    q_act = "SELECT " + ", ".join(campos) + " FROM activos"
+                    if 'activo' in cols_act:
+                        q_act += " WHERE COALESCE(activo,1)=1"
+                    df_activos_cmyk = pd.read_sql_query(q_act, conn)
+                    for col in ['categoria', 'unidad', 'modelo']:
+                        if col not in df_activos_cmyk.columns:
+                            df_activos_cmyk[col] = ''
+                else:
+                    df_activos_cmyk = pd.DataFrame(columns=['id', 'equipo', 'categoria', 'unidad', 'modelo'])
             except Exception:
-                df_activos_cmyk = pd.DataFrame(columns=['equipo', 'categoria', 'unidad'])
+                df_activos_cmyk = pd.DataFrame(columns=['id', 'equipo', 'categoria', 'unidad', 'modelo'])
 
             # Tabla histórica
             conn.execute("""
@@ -6089,9 +6107,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
 
 
 
