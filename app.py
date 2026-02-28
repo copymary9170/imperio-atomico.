@@ -4795,75 +4795,353 @@ elif menu == "✂️ Corte Industrial":
                 conn.commit()
             st.toast("Retal registrado con costo $0 para futuras ventas", icon="✅")
 
+# ===========================================================
+# 🏭🔥 MÓDULO SUBLIMACIÓN NIVEL FÁBRICA TOTAL v3.0
+# Costeo industrial real: tinta + papel + energía + mano obra + depreciación
+# ===========================================================
 
-# ===========================================================
-# 🔥 MÓDULO SUBLIMACIÓN INDUSTRIAL
-# ===========================================================
 elif menu == "🔥 Sublimación Industrial":
 
-    st.title("🔥 Sublimación Industrial")
-    st.caption("Módulo complementario industrial. No altera los flujos base del ERP.")
-    if 'datos_sublimacion_desde_cmyk' in st.session_state:
-        s_cmyk = st.session_state.get('datos_sublimacion_desde_cmyk', {})
-        st.success(f"Trabajo recibido desde CMYK: {s_cmyk.get('trabajo', 'N/D')} ({s_cmyk.get('unidades', 0)} uds)")
-        st.caption(f"Papel: {s_cmyk.get('papel', '')} | Ajuste: {s_cmyk.get('calidad', '')}")
-        st.caption(str(s_cmyk.get('observacion', '')))
-        if st.button("Usar costo base recibido en tinta/ml", key='btn_use_cmyk_cost_subl'):
-            costo_base = float(s_cmyk.get('costo_base', 0.0) or 0.0)
-            unidades = float(s_cmyk.get('unidades', 1) or 1)
-            st.session_state['subl_precio_ml_prefill'] = max(costo_base / max(unidades, 1.0), 0.0)
-            st.toast("Costo base de CMYK aplicado como referencia", icon="✅")
-        if st.button("Limpiar envío CMYK (Sublimación)", key='btn_clear_cmyk_subl'):
-            st.session_state.pop('datos_sublimacion_desde_cmyk', None)
-            st.rerun()
+    import streamlit as st
+    import pandas as pd
+    import numpy as np
+    import plotly.express as px
+    from datetime import datetime, timedelta
+    import io
 
-    up_subl = st.file_uploader("Diseño para sublimación (PNG/JPG/PDF)", type=['png', 'jpg', 'jpeg', 'pdf'], key='subl_file_ind')
+    st.title("🏭 Sublimación Industrial — Nivel Fábrica")
+    st.caption("Costos reales de producción • Rentabilidad • Punto de equilibrio")
 
-    c1, c2, c3, c4 = st.columns(4)
-    ancho_cm = c1.number_input("Ancho (cm)", min_value=1.0, value=10.0)
-    alto_cm = c2.number_input("Alto (cm)", min_value=1.0, value=10.0)
-    precio_ml = c3.number_input("Costo tinta por ml ($)", min_value=0.0, value=float(st.session_state.get('subl_precio_ml_prefill', st.session_state.get('costo_tinta_ml', 0.10))), format='%.4f')
-    costo_bajada = c4.number_input("Bajada de plancha ($/u)", min_value=0.0, value=float(st.session_state.get('costo_bajada_plancha', 0.03)), step=0.01)
 
-    with conectar() as conn:
-        try:
-            df_plancha = pd.read_sql_query("SELECT equipo, desgaste FROM activos WHERE categoria LIKE '%Sublim%' OR unidad LIKE '%Plancha%'", conn)
-        except Exception:
-            df_plancha = pd.DataFrame(columns=['equipo', 'desgaste'])
-        try:
-            df_base = pd.read_sql_query("SELECT id, item FROM inventario WHERE COALESCE(activo,1)=1", conn)
-        except Exception:
-            df_base = pd.DataFrame(columns=['id', 'item'])
+    # =====================================================
+    # PARÁMETROS PRODUCCIÓN
+    # =====================================================
 
-    desgaste_ref = float(df_plancha['desgaste'].dropna().iloc[0]) if not df_plancha.empty and not df_plancha['desgaste'].dropna().empty else 0.0
-    t1, t2, t3 = st.columns(3)
-    tiempo_calentamiento = t1.number_input("Tiempo calentamiento (min)", min_value=0.0, value=2.0)
-    tiempo_prensado = t2.number_input("Tiempo prensado (min)", min_value=0.0, value=1.0)
-    tiempo_enfriado = t3.number_input("Tiempo enfriado (min)", min_value=0.0, value=2.0)
-    tiempo_uso = float(tiempo_calentamiento + tiempo_prensado + tiempo_enfriado)
-    st.caption(f"Tiempo total de producción: {tiempo_uso:.2f} min")
-    r = calcular_sublimacion_industrial(ancho_cm, alto_cm, precio_ml, desgaste_activo=desgaste_ref, tiempo_uso_min=tiempo_uso, costo_bajada_plancha=costo_bajada)
-    st.json(r)
+    st.subheader("📐 Parámetros del trabajo")
 
-    if st.button("Guardar orden de sublimación", key='btn_guardar_orden_subl'):
-        nombre_prod = up_subl.name if up_subl is not None else 'Trabajo sublimación'
-        oid = registrar_orden_produccion('Sublimación', 'Interno', nombre_prod, 'pendiente', r['costo_total'], 'Sublimación industrial')
-        fin = datetime.now()
-        inicio = fin - timedelta(minutes=float(tiempo_uso))
-        registrar_tiempo_produccion(oid, inicio, fin)
-        st.success(f"Orden registrada #{oid}")
+    c1,c2,c3,c4 = st.columns(4)
 
-    item_opts = {f"{row['item']} (ID {int(row['id'])})": int(row['id']) for _, row in df_base.iterrows()} if not df_base.empty else {}
-    if item_opts:
-        i_papel = st.selectbox("Insumo papel/producto base", list(item_opts.keys()), key='subl_item_base')
-        if st.button("Descontar inventario sublimación", key='btn_desc_subl_inv'):
-            ok, msg = descontar_materiales_produccion({item_opts[i_papel]: float(r['area_cm2'])}, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle='Consumo sublimación industrial')
-            st.success(msg) if ok else st.warning(msg)
+    ancho = c1.number_input("Ancho (cm)",1.0,200.0,10.0)
+    alto = c2.number_input("Alto (cm)",1.0,200.0,10.0)
 
-    if st.button("Enviar a Cotización", key='btn_send_subl_cot'):
-        enviar_a_cotizacion_desde_produccion({'trabajo': 'Sublimación industrial', 'costo_base': float(r['costo_total']), 'unidades': 1, 'area_cm2': float(r['area_cm2'])})
-        st.success("Datos enviados a Cotizaciones")
+    unidades = c3.number_input("Cantidad",1,100000,1)
 
+    margen = c4.number_input("Margen ganancia %",0,500,120)
+
+
+    area_cm2 = ancho * alto
+
+
+    # =====================================================
+    # COSTOS VARIABLES
+    # =====================================================
+
+    st.subheader("🎨 Costos de insumos")
+
+    i1,i2,i3 = st.columns(3)
+
+    costo_tinta_ml = i1.number_input(
+        "Costo tinta por ml ($)",
+        value=float(st.session_state.get("costo_tinta_ml",0.10)),
+        format="%.4f"
+    )
+
+    consumo_ml = i2.number_input(
+        "Consumo tinta ml/unidad",
+        value=0.5
+    )
+
+    costo_papel = i3.number_input(
+        "Costo papel por unidad ($)",
+        value=0.05
+    )
+
+
+    costo_tinta = consumo_ml * costo_tinta_ml
+
+
+    # =====================================================
+    # COSTO ENERGÍA
+    # =====================================================
+
+    st.subheader("⚡ Energía")
+
+    e1,e2,e3 = st.columns(3)
+
+    potencia_kw = e1.number_input(
+        "Potencia plancha (kW)",
+        value=1.5
+    )
+
+    tiempo_min = e2.number_input(
+        "Tiempo por unidad (min)",
+        value=5.0
+    )
+
+    costo_kwh = e3.number_input(
+        "Costo kWh ($)",
+        value=0.15
+    )
+
+
+    costo_energia = (potencia_kw * (tiempo_min/60)) * costo_kwh
+
+
+    # =====================================================
+    # MANO DE OBRA
+    # =====================================================
+
+    st.subheader("👷 Mano de obra")
+
+    m1,m2 = st.columns(2)
+
+    salario_hora = m1.number_input(
+        "Salario operador por hora ($)",
+        value=3.0
+    )
+
+    eficiencia = m2.number_input(
+        "Unidades por hora",
+        value=12.0
+    )
+
+
+    costo_mano_obra = salario_hora / eficiencia
+
+
+    # =====================================================
+    # DEPRECIACIÓN MAQUINA
+    # =====================================================
+
+    st.subheader("🏭 Máquina")
+
+    d1,d2 = st.columns(2)
+
+    valor_maquina = d1.number_input(
+        "Valor máquina ($)",
+        value=1500.0
+    )
+
+    vida_util = d2.number_input(
+        "Vida útil (horas)",
+        value=5000.0
+    )
+
+
+    depreciacion_hora = valor_maquina / vida_util
+
+    depreciacion_unidad = depreciacion_hora / eficiencia
+
+
+    # =====================================================
+    # COSTO TOTAL
+    # =====================================================
+
+    costo_unitario = (
+
+        costo_tinta +
+        costo_papel +
+        costo_energia +
+        costo_mano_obra +
+        depreciacion_unidad
+
+    )
+
+
+    costo_total = costo_unitario * unidades
+
+
+    precio_unitario = costo_unitario * (1 + margen/100)
+
+    precio_total = precio_unitario * unidades
+
+
+    utilidad = precio_total - costo_total
+
+
+    # =====================================================
+    # PUNTO EQUILIBRIO
+    # =====================================================
+
+    gastos_fijos = salario_hora * 8
+
+    ganancia_unitaria = precio_unitario - costo_unitario
+
+
+    punto_equilibrio = (
+
+        gastos_fijos / ganancia_unitaria
+
+        if ganancia_unitaria>0 else 0
+
+    )
+
+
+    # =====================================================
+    # DASHBOARD
+    # =====================================================
+
+    st.divider()
+
+    st.subheader("📊 Resultado financiero")
+
+
+    k1,k2,k3,k4 = st.columns(4)
+
+    k1.metric("Costo unitario",f"$ {costo_unitario:,.4f}")
+
+    k2.metric("Precio unitario",f"$ {precio_unitario:,.2f}")
+
+    k3.metric("Utilidad total",f"$ {utilidad:,.2f}")
+
+    k4.metric("Punto equilibrio",f"{punto_equilibrio:,.0f} uds")
+
+
+    # =====================================================
+    # PRODUCCION
+    # =====================================================
+
+    horas_produccion = unidades / eficiencia
+
+    st.info(f"Tiempo producción: {horas_produccion:.2f} horas")
+
+
+    # =====================================================
+    # GRAFICO COSTOS
+    # =====================================================
+
+    df_costos = pd.DataFrame({
+
+        "Concepto":[
+
+            "Tinta",
+            "Papel",
+            "Energia",
+            "Mano obra",
+            "Depreciacion"
+
+        ],
+
+        "Costo":[
+
+            costo_tinta,
+            costo_papel,
+            costo_energia,
+            costo_mano_obra,
+            depreciacion_unidad
+
+        ]
+
+    })
+
+
+    fig = px.pie(
+
+        df_costos,
+        names="Concepto",
+        values="Costo",
+        title="Estructura de costos"
+
+    )
+
+
+    st.plotly_chart(fig,use_container_width=True)
+
+
+    # =====================================================
+    # GUARDAR ORDEN
+    # =====================================================
+
+    if st.button("💾 Guardar orden producción"):
+
+
+        oid = registrar_orden_produccion(
+
+            "Sublimación Industrial",
+            "Interno",
+            f"{unidades} unidades",
+            "pendiente",
+            costo_total,
+            "Nivel fábrica"
+
+        )
+
+
+        inicio = datetime.now()
+
+        fin = inicio + timedelta(hours=horas_produccion)
+
+
+        registrar_tiempo_produccion(
+
+            oid,
+            inicio,
+            fin
+
+        )
+
+
+        st.success(f"Orden #{oid} creada")
+
+
+    # =====================================================
+    # ENVIAR A COTIZACION
+    # =====================================================
+
+    if st.button("📤 Enviar a Cotización"):
+
+
+        enviar_a_cotizacion_desde_produccion({
+
+            "trabajo":"Sublimación industrial",
+
+            "costo_base":costo_total,
+
+            "precio":precio_total,
+
+            "utilidad":utilidad,
+
+            "unidades":unidades
+
+        })
+
+
+        st.success("Enviado correctamente")
+
+
+    # =====================================================
+    # EXPORTAR REPORTE
+    # =====================================================
+
+    if st.button("📥 Exportar reporte Excel"):
+
+
+        df_export = pd.DataFrame({
+
+            "Costo unitario":[costo_unitario],
+
+            "Precio unitario":[precio_unitario],
+
+            "Utilidad":[utilidad],
+
+            "Cantidad":[unidades]
+
+        })
+
+
+        buffer = io.BytesIO()
+
+        df_export.to_excel(buffer,index=False)
+
+        st.download_button(
+
+            "Descargar",
+
+            buffer.getvalue(),
+
+            "reporte_sublimacion.xlsx"
+
+        )
 # ===========================================================
 # 🎨 MÓDULO PRODUCCIÓN MANUAL
 # ===========================================================
