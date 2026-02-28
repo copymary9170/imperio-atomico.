@@ -4308,37 +4308,35 @@ elif menu == "🎨 Análisis CMYK":
             st.toast(f"Orden #{op_orden} movida a {op_estado}", icon='✅')
             st.rerun()
 
-         # ============================================================
+        # ============================================================
         # ENVIAR A SUBLIMACION (CMYK)
-         # ============================================================
-            
-         if st.button("📤 Enviar a Sublimación"):
-            
-              datos = {
-            
+        # ============================================================
+
+        if st.button("📤 Enviar a Sublimación", key="btn_enviar_subl"):
+
+            datos = {
+
                 "trabajo": nombre_trabajo,
-            
-                 "costo_transfer_total": float(costo_total),
-            
+
+                "costo_transfer_total": float(costo_total),
+
                 "cantidad": int(unidades),
-        
-                "costo_transfer_unitario": float(costo_total / max(unidades,1)),
-            
+
+                "costo_transfer_unitario": float(costo_total / max(unidades, 1)),
+
                 "fecha": datetime.now().isoformat()
-            
+
             }
-            
-                # ACUMULAR (no reemplazar)
-            
-                if "cola_sublimacion" not in st.session_state:
-            
-                    st.session_state["cola_sublimacion"] = []
-            
-            
-                st.session_state["cola_sublimacion"].append(datos)
-            
-            
-                st.success("Enviado a Sublimación")
+
+            # ACUMULAR (no reemplazar)
+
+            if "cola_sublimacion" not in st.session_state:
+
+                st.session_state["cola_sublimacion"] = []
+
+            st.session_state["cola_sublimacion"].append(datos)
+
+            st.success("Enviado a Sublimación")
     # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
     elif menu == "🏗️ Activos":
     
@@ -6672,6 +6670,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
