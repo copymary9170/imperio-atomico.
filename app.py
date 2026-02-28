@@ -4308,35 +4308,148 @@ elif menu == "🎨 Análisis CMYK":
             st.toast(f"Orden #{op_orden} movida a {op_estado}", icon='✅')
             st.rerun()
 
-        # ============================================================
-        # ENVIAR A SUBLIMACION (CMYK)
-        # ============================================================
+# ============================================================
+# 🔥 MÓDULO SUBLIMACIÓN INDUSTRIAL
+# ============================================================
 
-        if st.button("📤 Enviar a Sublimación", key="btn_enviar_subl"):
+elif menu == "🔥 Sublimación":
 
-            datos = {
+    st.title("🔥 Producción Sublimación")
 
-                "trabajo": nombre_trabajo,
+    cola = st.session_state.get("cola_sublimacion", [])
 
-                "costo_transfer_total": float(costo_total),
 
-                "cantidad": int(unidades),
+    if not cola:
 
-                "costo_transfer_unitario": float(costo_total / max(unidades, 1)),
+        st.info("No hay trabajos recibidos desde CMYK")
 
-                "fecha": datetime.now().isoformat()
+        st.stop()
 
-            }
 
-            # ACUMULAR (no reemplazar)
+    df_cola = pd.DataFrame(cola)
 
-            if "cola_sublimacion" not in st.session_state:
+    st.subheader("📥 Trabajos pendientes")
 
-                st.session_state["cola_sublimacion"] = []
+    st.dataframe(df_cola, use_container_width=True)
 
-            st.session_state["cola_sublimacion"].append(datos)
 
-            st.success("Enviado a Sublimación")
+    total_transfer = df_cola["costo_transfer_total"].sum()
+
+    total_unidades = df_cola["cantidad"].sum()
+
+    costo_unitario_transfer = total_transfer / max(total_unidades, 1)
+
+
+    # =====================================================
+    # COSTOS SUBLIMACIÓN
+    # =====================================================
+
+    st.subheader("⚙ Costos de sublimación")
+
+    c1,c2,c3 = st.columns(3)
+
+    potencia = c1.number_input("Potencia kW", value=1.5)
+
+    tiempo = c2.number_input("Min por unidad", value=5.0)
+
+    costo_kwh = c3.number_input("Costo kWh", value=0.15)
+
+
+    energia_unit = (potencia * tiempo / 60) * costo_kwh
+
+
+    salario = st.number_input("Salario hora operador", value=3.0)
+
+    prod_hora = st.number_input("Unidades por hora", value=12.0)
+
+
+    mano_unit = salario / prod_hora
+
+
+    valor_maquina = st.number_input("Valor máquina", value=1500.0)
+
+    vida = st.number_input("Vida útil horas", value=5000.0)
+
+
+    dep_unit = (valor_maquina / vida) / prod_hora
+
+
+    costo_unitario = (
+
+        costo_unitario_transfer
+        + energia_unit
+        + mano_unit
+        + dep_unit
+
+    )
+
+
+    costo_total = costo_unitario * total_unidades
+
+
+    st.divider()
+
+    m1,m2 = st.columns(2)
+
+    m1.metric("Costo unitario final", f"$ {costo_unitario:.4f}")
+
+    m2.metric("Costo total", f"$ {costo_total:.2f}")
+
+
+    # =====================================================
+    # CREAR ORDEN PRODUCCIÓN
+    # =====================================================
+
+    if st.button("🏭 Crear Orden Producción"):
+
+        try:
+
+            with conectar() as conn:
+
+                conn.execute("""
+
+                INSERT INTO ordenes_produccion
+
+                (tipo, producto, estado, costo)
+
+                VALUES (?,?,?,?)
+
+                """,
+
+                (
+
+                    "Sublimación",
+
+                    f"{total_unidades} unidades",
+
+                    "Pendiente",
+
+                    costo_total
+
+                ))
+
+                conn.commit()
+
+
+            st.success("Orden creada en Kanban")
+
+
+        except Exception as e:
+
+            st.error(e)
+
+
+    # =====================================================
+    # FINALIZAR
+    # =====================================================
+
+    if st.button("✅ Finalizar Sublimación"):
+
+        st.session_state["cola_sublimacion"] = []
+
+        st.success("Producción completada")
+
+        st.rerun()
             
  # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
 elif menu == "🏗️ Activos":
@@ -6671,6 +6784,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
