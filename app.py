@@ -4337,8 +4337,9 @@ elif menu == "🎨 Análisis CMYK":
             st.session_state["cola_sublimacion"].append(datos)
 
             st.success("Enviado a Sublimación")
-    # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
-    elif menu == "🏗️ Activos":
+            
+ # --- 9. MÓDULO PROFESIONAL DE ACTIVOS ---
+elif menu == "🏗️ Activos":
     
         if ROL != "Admin":
             st.error("🚫 Acceso Denegado. Solo Administración puede gestionar activos.")
@@ -6670,6 +6671,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
