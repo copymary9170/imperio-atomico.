@@ -2429,317 +2429,696 @@ elif menu == "📦 Inventario":
         
                 st.rerun()
         
-    # =======================================================
-    # 📊 TAB 3 — HISTORIAL DE COMPRAS
-    # =======================================================
-    with tabs[2]:
+# =======================================================
+# 📊 TAB 3 — HISTORIAL DE COMPRAS (VERSION PRO SEGURA)
+# =======================================================
+with tabs[2]:
 
-        st.subheader("📊 Historial Profesional de Compras")
+    st.subheader("📊 Historial Profesional de Compras")
 
-        with conectar() as conn:
-            df_hist = pd.read_sql("""
-                SELECT 
-                    h.id as compra_id,
-                    h.fecha,
-                    h.item,
-                    h.cantidad,
-                    h.unidad,
-                    h.costo_total_usd,
-                    h.costo_unit_usd,
-                    h.impuestos,
-                    h.delivery,
-                    h.moneda_pago,
-                    p.nombre as proveedor
-                FROM historial_compras h
-                LEFT JOIN proveedores p ON h.proveedor_id = p.id
-                WHERE COALESCE(h.activo,1)=1
-                ORDER BY h.fecha DESC
-            """, conn)
+    with conectar() as conn:
 
-        if df_hist.empty:
-            st.info("No hay compras registradas.")
-        else:
+        # ==========================================
+        # ASEGURAR COLUMNA ACTIVO
+        # ==========================================
 
-            col1, col2 = st.columns(2)
+        columnas = [
 
-            filtro_item = col1.text_input("🔍 Filtrar por Insumo")
-            filtro_proveedor = col2.text_input("👤 Filtrar por Proveedor")
+            col[1]
 
-            df_v = df_hist.copy()
+            for col in conn.execute(
 
-            if filtro_item:
-                df_v = df_v[df_v["item"].str.contains(filtro_item, case=False)]
+                "PRAGMA table_info(historial_compras)"
 
-            if filtro_proveedor:
-                df_v = df_v[df_v["proveedor"].fillna("").str.contains(filtro_proveedor, case=False)]
+            ).fetchall()
 
-            total_compras = df_v["costo_total_usd"].sum()
+        ]
 
-            st.metric("💰 Total Comprado (USD)", f"${total_compras:,.2f}")
+        if "activo" not in columnas:
 
-            st.dataframe(
-                df_v,
-                column_config={
-                    "compra_id": None,
-                    "fecha": "Fecha",
-                    "item": "Insumo",
-                    "cantidad": "Cantidad",
-                    "unidad": "Unidad",
-                    "costo_total_usd": st.column_config.NumberColumn("Costo Total ($)", format="%.2f"),
-                    "costo_unit_usd": st.column_config.NumberColumn("Costo Unit ($)", format="%.4f"),
-                    "impuestos": "Impuestos %",
-                    "delivery": "Delivery $",
-                    "moneda_pago": "Moneda",
-                    "proveedor": "Proveedor"
-                },
-                use_container_width=True,
-                hide_index=True
+            conn.execute(
+
+                "ALTER TABLE historial_compras ADD COLUMN activo INTEGER DEFAULT 1"
+
             )
 
-            st.divider()
-            st.subheader("🧹 Corregir historial de compras")
-            opciones_compra = {
-                f"#{int(r.compra_id)} | {r.fecha} | {r.item} | {r.cantidad} {r.unidad} | ${r.costo_total_usd:.2f}": int(r.compra_id)
-                for r in df_hist.itertuples(index=False)
-            }
-            compra_sel_label = st.selectbox("Selecciona la compra a corregir", list(opciones_compra.keys()))
-            compra_sel_id = opciones_compra[compra_sel_label]
-            compra_row = df_hist[df_hist["compra_id"] == compra_sel_id].iloc[0]
-            st.caption("Si eliminas la compra, el sistema descuenta esa cantidad del inventario del insumo asociado.")
+            conn.commit()
 
-            if st.button("🗑 Eliminar compra seleccionada", type="secondary"):
-                with conectar() as conn:
-                    cur = conn.cursor()
-                    actual_row = cur.execute(
-                        "SELECT id, cantidad FROM inventario WHERE item=?",
-                        (str(compra_row["item"]),)
-                    ).fetchone()
 
-                    if actual_row:
-                        item_id, cantidad_actual = actual_row
-                        nueva_cant = max(0.0, float(cantidad_actual or 0) - float(compra_row["cantidad"]))
-                        cur.execute(
-                            "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
-                            (nueva_cant, int(item_id))
-                        )
-                        registrar_movimiento_inventario(
-                            item_id=int(item_id),
-                            tipo='SALIDA',
-                            cantidad=float(compra_row["cantidad"]),
-                            motivo='Corrección: eliminación de compra',
-                            usuario=usuario_actual,
-                            conn=conn
-                        )
+        # ==========================================
+        # CARGAR DATA
+        # ==========================================
 
-                    cur.execute("UPDATE historial_compras SET activo=0 WHERE id=?", (int(compra_sel_id),))
-                    conn.commit()
+        df_hist = pd.read_sql("""
 
-                st.success("Compra eliminada y stock ajustado correctamente.")
-                cargar_datos()
-                st.rerun()
+            SELECT 
 
-            st.divider()
-            st.subheader("🧽 Limpiar historial por insumo")
-            df_hist_aux = df_hist.copy()
-            df_hist_aux["item_norm"] = df_hist_aux["item"].fillna("").str.strip().str.lower()
-            items_disponibles = sorted([i for i in df_hist_aux["item_norm"].unique().tolist() if i])
+            h.id compra_id,
 
-            if items_disponibles:
-                item_norm_sel = st.selectbox("Insumo a limpiar del historial", items_disponibles, key="hist_item_norm")
-                filas_item = df_hist_aux[df_hist_aux["item_norm"] == item_norm_sel]
-                st.caption(f"Se eliminarán {len(filas_item)} compras del historial para ese insumo.")
+            h.fecha,
 
-                confirmar_limpieza = st.checkbox("Confirmo que deseo borrar ese historial por error de carga", key="hist_confirma_limpieza")
-                if st.button("🗑 Borrar historial del insumo seleccionado", type="secondary", disabled=not confirmar_limpieza):
-                    with conectar() as conn:
-                        cur = conn.cursor()
+            h.item,
 
-                        for _, row in filas_item.iterrows():
-                            actual_row = cur.execute(
-                                "SELECT id, cantidad FROM inventario WHERE lower(trim(item))=?",
-                                (str(row["item_norm"]),)
-                            ).fetchone()
+            h.cantidad,
 
-                            if actual_row:
-                                item_id, cantidad_actual = actual_row
-                                nueva_cant = max(0.0, float(cantidad_actual or 0) - float(row["cantidad"]))
-                                cur.execute(
-                                    "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
-                                    (nueva_cant, int(item_id))
-                                )
-                                registrar_movimiento_inventario(
-                                    item_id=int(item_id),
-                                    tipo='SALIDA',
-                                    cantidad=float(row["cantidad"]),
-                                    motivo='Corrección masiva: limpieza historial por insumo',
-                                    usuario=usuario_actual,
-                                    conn=conn
-                                )
+            h.unidad,
 
-                        ids_borrar = [int(x) for x in filas_item["compra_id"].tolist()]
-                        cur.executemany("UPDATE historial_compras SET activo=0 WHERE id=?", [(i,) for i in ids_borrar])
-                        conn.commit()
+            h.costo_total_usd,
 
-                    st.success(f"Se borró el historial de '{item_norm_sel}' y se ajustó el stock donde correspondía.")
-                    cargar_datos()
-                    st.rerun()
+            h.costo_unit_usd,
 
-    # =======================================================
-    # 👤 TAB 4 — PROVEEDORES
-    # =======================================================
-    with tabs[3]:
+            h.impuestos,
 
-        st.subheader("👤 Directorio de Proveedores")
+            h.delivery,
 
-        with conectar() as conn:
-            try:
-                columnas_proveedores = {
-                    row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
-                }
-                if not columnas_proveedores:
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS proveedores (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            nombre TEXT UNIQUE,
-                            telefono TEXT,
-                            rif TEXT,
-                            contacto TEXT,
-                            observaciones TEXT,
-                            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
-                        )
-                        """
+            h.moneda_pago,
+
+            COALESCE(p.nombre,'SIN PROVEEDOR') proveedor
+
+            FROM historial_compras h
+
+            LEFT JOIN proveedores p
+
+            ON p.id = h.proveedor_id
+
+            WHERE h.activo=1
+
+            ORDER BY h.fecha DESC
+
+        """, conn)
+
+
+
+    if df_hist.empty:
+
+        st.info("Sin compras registradas")
+
+        st.stop()
+
+
+    # ==========================================
+    # FILTROS
+    # ==========================================
+
+    c1,c2 = st.columns(2)
+
+    filtro_item = c1.text_input("🔍 Filtrar Insumo")
+
+    filtro_proveedor = c2.text_input("🔍 Filtrar Proveedor")
+
+
+    df_view = df_hist.copy()
+
+
+    if filtro_item:
+
+        df_view = df_view[
+
+            df_view.item.str.contains(
+
+                filtro_item,
+
+                case=False,
+
+                na=False
+
+            )
+
+        ]
+
+
+    if filtro_proveedor:
+
+        df_view = df_view[
+
+            df_view.proveedor.str.contains(
+
+                filtro_proveedor,
+
+                case=False,
+
+                na=False
+
+            )
+
+        ]
+
+
+    # ==========================================
+    # METRICAS
+    # ==========================================
+
+    total = df_view.costo_total_usd.sum()
+
+    st.metric(
+
+        "💰 Total Comprado",
+
+        f"${total:,.2f}"
+
+    )
+
+
+    # ==========================================
+    # TABLA
+    # ==========================================
+
+    st.dataframe(
+
+        df_view,
+
+        use_container_width=True,
+
+        hide_index=True
+
+    )
+
+
+    # ==========================================
+    # ELIMINAR COMPRA
+    # ==========================================
+
+    st.divider()
+
+    st.subheader("🧹 Corregir compra")
+
+
+    opciones = {
+
+        f"#{r.compra_id} | {r.item} | {r.cantidad} {r.unidad}":
+
+        r.compra_id
+
+        for r in df_hist.itertuples()
+
+    }
+
+
+    sel = st.selectbox(
+
+        "Seleccionar",
+
+        list(opciones.keys())
+
+    )
+
+
+    id_sel = opciones[sel]
+
+
+    row = df_hist[
+
+        df_hist.compra_id == id_sel
+
+    ].iloc[0]
+
+
+    if st.button("🗑 Eliminar compra"):
+
+
+        try:
+
+
+            with conectar() as conn:
+
+
+                conn.execute("BEGIN")
+
+
+                # INVENTARIO
+
+                inv = conn.execute(
+
+                    """
+
+                    SELECT id,cantidad
+
+                    FROM inventario
+
+                    WHERE item=?
+
+                    """,
+
+                    (row.item,)
+
+                ).fetchone()
+
+
+                if inv:
+
+
+                    nueva = max(
+
+                        0,
+
+                        inv[1] - row.cantidad
+
                     )
-                    conn.commit()
-                    columnas_proveedores = {
-                        row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
-                    }
 
-                def sel_col(nombre_columna):
-                    return nombre_columna if nombre_columna in columnas_proveedores else f"NULL AS {nombre_columna}"
 
-                query_proveedores = f"""
-                    SELECT
-                        {sel_col('id')},
-                        {sel_col('nombre')},
-                        {sel_col('telefono')},
-                        {sel_col('rif')},
-                        {sel_col('contacto')},
-                        {sel_col('observaciones')},
-                        {sel_col('fecha_creacion')}
-                    FROM proveedores
-                    ORDER BY nombre ASC
-                """
-                df_prov = pd.read_sql(query_proveedores, conn)
-            except (sqlite3.DatabaseError, pd.errors.DatabaseError) as e:
-                st.error(f"No se pudo cargar la tabla de proveedores: {e}")
-                df_prov = pd.DataFrame(columns=[
-                    'id', 'nombre', 'telefono', 'rif', 'contacto', 'observaciones', 'fecha_creacion'
-                ])
+                    conn.execute(
 
-        if df_prov.empty:
-            st.info("No hay proveedores registrados todavía.")
-        else:
-            filtro_proveedor = st.text_input("🔍 Buscar proveedor")
-            df_prov_view = df_prov.copy()
+                        """
 
-            if filtro_proveedor:
-                mask_nombre = df_prov_view["nombre"].fillna("").str.contains(filtro_proveedor, case=False)
-                mask_contacto = df_prov_view["contacto"].fillna("").str.contains(filtro_proveedor, case=False)
-                mask_rif = df_prov_view["rif"].fillna("").str.contains(filtro_proveedor, case=False)
-                df_prov_view = df_prov_view[mask_nombre | mask_contacto | mask_rif]
+                        UPDATE inventario
 
-            st.dataframe(
-                df_prov_view,
-                column_config={
-                    "id": None,
-                    "nombre": "Proveedor",
-                    "telefono": "Teléfono",
-                    "rif": "RIF",
-                    "contacto": "Contacto",
-                    "observaciones": "Observaciones",
-                    "fecha_creacion": "Creado"
-                },
-                use_container_width=True,
-                hide_index=True
-            )
+                        SET cantidad=?
 
-        st.divider()
-        st.subheader("➕ Registrar / Editar proveedor")
+                        WHERE id=?
 
-        nombre_edit = st.selectbox(
-            "Proveedor a editar",
-            ["Nuevo proveedor"] + (df_prov["nombre"].tolist() if not df_prov.empty else []),
-            key="inv_proveedor_selector"
+                        """,
+
+                        (
+
+                            nueva,
+
+                            inv[0]
+
+                        )
+
+                    )
+
+
+                    registrar_movimiento_inventario(
+
+                        inv[0],
+
+                        "SALIDA",
+
+                        row.cantidad,
+
+                        "Corrección",
+
+                        usuario_actual,
+
+                        conn
+
+                    )
+
+
+                # HISTORIAL
+
+                conn.execute(
+
+                    """
+
+                    UPDATE historial_compras
+
+                    SET activo=0
+
+                    WHERE id=?
+
+                    """,
+
+                    (id_sel,)
+
+                )
+
+
+                conn.commit()
+
+
+            st.success("Compra eliminada")
+
+
+            cargar_datos()
+
+            st.rerun()
+
+
+        except Exception as e:
+
+
+            st.error(f"Error: {e}")
+
+# =======================================================
+# 👤 TAB 4 — PROVEEDORES (VERSIÓN SEGURA PRO)
+# =======================================================
+with tabs[3]:
+
+    st.subheader("👤 Directorio de Proveedores")
+
+    with conectar() as conn:
+
+        # =====================================================
+        # CREAR TABLA SI NO EXISTE (CON ACTIVO)
+        # =====================================================
+
+        conn.execute("""
+
+        CREATE TABLE IF NOT EXISTS proveedores (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            nombre TEXT UNIQUE,
+
+            telefono TEXT,
+
+            rif TEXT,
+
+            contacto TEXT,
+
+            observaciones TEXT,
+
+            activo INTEGER DEFAULT 1,
+
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+
         )
 
-        prov_actual = None
-        if nombre_edit != "Nuevo proveedor" and not df_prov.empty:
-            prov_actual = df_prov[df_prov["nombre"] == nombre_edit].iloc[0]
+        """)
 
-        with st.form("form_proveedor"):
-            c1, c2 = st.columns(2)
-            nombre_prov = c1.text_input("Nombre", value="" if prov_actual is None else str(prov_actual["nombre"] or ""))
-            telefono_prov = c2.text_input("Teléfono", value="" if prov_actual is None else str(prov_actual["telefono"] or ""))
-            c3, c4 = st.columns(2)
-            rif_prov = c3.text_input("RIF", value="" if prov_actual is None else str(prov_actual["rif"] or ""))
-            contacto_prov = c4.text_input("Persona de contacto", value="" if prov_actual is None else str(prov_actual["contacto"] or ""))
-            observaciones_prov = st.text_area("Observaciones", value="" if prov_actual is None else str(prov_actual["observaciones"] or ""))
+        conn.commit()
 
-            guardar_proveedor = st.form_submit_button("💾 Guardar proveedor", use_container_width=True)
 
-        if guardar_proveedor:
-            if not nombre_prov.strip():
-                st.error("El nombre del proveedor es obligatorio.")
-            else:
-                try:
-                    with conectar() as conn:
-                        if prov_actual is None:
-                            conn.execute(
-                                """
-                                INSERT INTO proveedores (nombre, telefono, rif, contacto, observaciones)
-                                VALUES (?, ?, ?, ?, ?)
-                                """,
-                                (nombre_prov.strip(), telefono_prov.strip(), rif_prov.strip(), contacto_prov.strip(), observaciones_prov.strip())
-                            )
-                        else:
-                            conn.execute(
-                                """
-                                UPDATE proveedores
-                                SET nombre=?, telefono=?, rif=?, contacto=?, observaciones=?
-                                WHERE id=?
-                                """,
-                                (
-                                    nombre_prov.strip(),
-                                    telefono_prov.strip(),
-                                    rif_prov.strip(),
-                                    contacto_prov.strip(),
-                                    observaciones_prov.strip(),
-                                    int(prov_actual["id"])
-                                )
-                            )
-                        conn.commit()
-                    st.success("Proveedor guardado correctamente.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Ya existe un proveedor con ese nombre.")
+        # =====================================================
+        # CREAR PROVEEDOR SEGURO ID 0
+        # =====================================================
 
-        if prov_actual is not None:
-            if st.button("🗑 Eliminar proveedor seleccionado", type="secondary"):
+        existe = conn.execute(
+
+            "SELECT id FROM proveedores WHERE id=0"
+
+        ).fetchone()
+
+        if not existe:
+
+            conn.execute("""
+
+            INSERT OR IGNORE INTO proveedores
+
+            (id,nombre,telefono,rif,contacto,observaciones,activo)
+
+            VALUES
+
+            (0,'SIN PROVEEDOR','','','','',1)
+
+            """)
+
+            conn.commit()
+
+
+        # =====================================================
+        # CARGAR DATAFRAME
+        # =====================================================
+
+        df_prov = pd.read_sql("""
+
+            SELECT
+
+            id,
+
+            nombre,
+
+            telefono,
+
+            rif,
+
+            contacto,
+
+            observaciones,
+
+            fecha_creacion
+
+            FROM proveedores
+
+            WHERE activo=1
+
+            ORDER BY nombre ASC
+
+        """, conn)
+
+
+    # =====================================================
+    # BUSCADOR
+    # =====================================================
+
+    if df_prov.empty:
+
+        st.info("No hay proveedores registrados todavía.")
+
+    else:
+
+        filtro = st.text_input("🔍 Buscar proveedor")
+
+        df_view = df_prov.copy()
+
+        if filtro:
+
+            df_view = df_view[
+
+                df_view.astype(str)
+
+                .apply(lambda x: x.str.contains(filtro, case=False))
+
+                .any(axis=1)
+
+            ]
+
+        st.dataframe(
+
+            df_view,
+
+            use_container_width=True,
+
+            hide_index=True
+
+        )
+
+
+    # =====================================================
+    # EDITOR
+    # =====================================================
+
+    st.divider()
+
+    st.subheader("➕ Registrar / Editar proveedor")
+
+
+    lista_proveedores = df_prov["nombre"].tolist()
+
+
+    nombre_edit = st.selectbox(
+
+        "Proveedor",
+
+        ["Nuevo proveedor"] + lista_proveedores
+
+    )
+
+
+    prov_actual = None
+
+    if nombre_edit != "Nuevo proveedor":
+
+        prov_actual = df_prov[
+
+            df_prov["nombre"] == nombre_edit
+
+        ].iloc[0]
+
+
+    with st.form("form_proveedor"):
+
+        c1,c2 = st.columns(2)
+
+        nombre = c1.text_input(
+
+            "Nombre",
+
+            value="" if prov_actual is None else prov_actual["nombre"]
+
+        )
+
+        telefono = c2.text_input(
+
+            "Telefono",
+
+            value="" if prov_actual is None else prov_actual["telefono"]
+
+        )
+
+
+        c3,c4 = st.columns(2)
+
+        rif = c3.text_input(
+
+            "RIF",
+
+            value="" if prov_actual is None else prov_actual["rif"]
+
+        )
+
+        contacto = c4.text_input(
+
+            "Contacto",
+
+            value="" if prov_actual is None else prov_actual["contacto"]
+
+        )
+
+
+        observaciones = st.text_area(
+
+            "Observaciones",
+
+            value="" if prov_actual is None else prov_actual["observaciones"]
+
+        )
+
+
+        guardar = st.form_submit_button(
+
+            "💾 Guardar",
+
+            use_container_width=True
+
+        )
+
+
+    # =====================================================
+    # GUARDAR
+    # =====================================================
+
+    if guardar:
+
+        if not nombre.strip():
+
+            st.error("Nombre obligatorio")
+
+        else:
+
+            try:
+
                 with conectar() as conn:
-                    compras = conn.execute(
-                        "SELECT COUNT(*) FROM historial_compras WHERE proveedor_id=?",
-                        (int(prov_actual["id"]),)
-                    ).fetchone()[0]
 
-                    if compras > 0:
-                        st.error("No se puede eliminar: el proveedor tiene compras asociadas.")
+                    if prov_actual is None:
+
+                        conn.execute("""
+
+                        INSERT INTO proveedores
+
+                        (nombre,telefono,rif,contacto,observaciones)
+
+                        VALUES (?,?,?,?,?)
+
+                        """,
+
+                        (
+
+                        nombre.strip(),
+
+                        telefono.strip(),
+
+                        rif.strip(),
+
+                        contacto.strip(),
+
+                        observaciones.strip()
+
+                        ))
+
                     else:
-                        conn.execute("UPDATE proveedores SET activo=0 WHERE id=?", (int(prov_actual["id"]),))
-                        conn.commit()
-                        st.success("Proveedor eliminado.")
-                        st.rerun()
 
+                        conn.execute("""
+
+                        UPDATE proveedores
+
+                        SET
+
+                        nombre=?,
+
+                        telefono=?,
+
+                        rif=?,
+
+                        contacto=?,
+
+                        observaciones=?
+
+                        WHERE id=?
+
+                        """,
+
+                        (
+
+                        nombre.strip(),
+
+                        telefono.strip(),
+
+                        rif.strip(),
+
+                        contacto.strip(),
+
+                        observaciones.strip(),
+
+                        int(prov_actual["id"])
+
+                        ))
+
+
+                    conn.commit()
+
+
+                st.success("Proveedor guardado")
+
+                st.rerun()
+
+
+            except sqlite3.IntegrityError:
+
+                st.error("Proveedor ya existe")
+
+
+    # =====================================================
+    # ELIMINAR
+    # =====================================================
+
+    if prov_actual is not None:
+
+        if st.button("🗑 Eliminar proveedor"):
+
+
+            with conectar() as conn:
+
+
+                compras = conn.execute(
+
+                    """
+
+                    SELECT COUNT(*)
+
+                    FROM historial_compras
+
+                    WHERE proveedor_id=?
+
+                    """,
+
+                    (int(prov_actual["id"]),)
+
+                ).fetchone()[0]
+
+
+                if compras > 0:
+
+                    st.error("Tiene compras asociadas")
+
+                else:
+
+                    conn.execute(
+
+                        "UPDATE proveedores SET activo=0 WHERE id=?",
+
+                        (int(prov_actual["id"]),)
+
+                    )
+
+                    conn.commit()
+
+
+                    st.success("Proveedor eliminado")
+
+                    st.rerun()
     # =======================================================
     # 🔧 TAB 5 — AJUSTES
     # =======================================================
@@ -6945,6 +7324,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
