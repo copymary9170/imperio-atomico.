@@ -622,59 +622,83 @@ def obtener_tintas_impresora(conn, impresora_sel):
     if not impresora:
         return pd.DataFrame()
 
-    cols_act = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
-    tiene_modelo = 'modelo' in cols_act
-    q_act = "SELECT id, equipo, categoria" + (", modelo" if tiene_modelo else "") + " FROM activos WHERE COALESCE(activo,1)=1"
-    df_act = pd.read_sql_query(q_act, conn)
-    if df_act.empty:
-        return pd.DataFrame()
+    try:
+        existe_activos = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activos'").fetchone()
+        existe_inventario = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='inventario'").fetchone()
+        if not existe_activos or not existe_inventario:
+            return pd.DataFrame()
 
-    act_row = df_act[df_act['equipo'].astype(str).str.lower() == impresora.lower()]
-    if act_row.empty:
-        act_row = df_act[df_act['equipo'].astype(str).str.contains(impresora, case=False, na=False)]
-    if act_row.empty:
-        return pd.DataFrame()
-    activo_id = int(act_row.iloc[0]['id'])
-    modelo = str(act_row.iloc[0].get('modelo', '') or '').strip()
+        cols_act = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
+        if not cols_act:
+            return pd.DataFrame()
 
-    cols_inv = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
-    tiene_modelo_ref = 'modelo_referencia' in cols_inv
+        columnas_base = [c for c in ['id', 'equipo', 'categoria', 'activo', 'modelo'] if c in cols_act]
+        if 'id' not in columnas_base or 'equipo' not in columnas_base:
+            return pd.DataFrame()
 
-    existe_rel = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activos_insumos'").fetchone()
-    if existe_rel:
-        q_rel = """
-            SELECT i.*
-            FROM activos_insumos ai
-            JOIN inventario i ON i.id = ai.inventario_id
-            WHERE ai.activo_id=?
-              AND COALESCE(ai.activo,1)=1
-              AND COALESCE(i.activo,1)=1
-              AND i.item LIKE '%tinta%'
-        """
-        df_rel = pd.read_sql_query(q_rel, conn, params=(activo_id,))
-        if not df_rel.empty:
-            return df_rel
+        q_act = "SELECT " + ", ".join(columnas_base) + " FROM activos"
+        if 'activo' in columnas_base:
+            q_act += " WHERE COALESCE(activo,1)=1"
 
-    tokens = [t for t in re.split(r'\s+', impresora.lower()) if len(t) > 2]
-    if modelo:
-        tokens.extend([t for t in re.split(r'\s+', modelo.lower()) if len(t) > 2])
-    if not tokens:
-        return pd.DataFrame()
-    pattern = '|'.join(sorted(set(re.escape(t) for t in tokens)))
+        df_act = pd.read_sql_query(q_act, conn)
+        if df_act.empty:
+            return pd.DataFrame()
 
-    df_inv = pd.read_sql_query("SELECT * FROM inventario WHERE COALESCE(activo,1)=1", conn)
-    if not df_inv.empty:
-        filtro_base = df_inv['item'].fillna('').str.lower().str.contains('tinta', na=False)
+        act_row = df_act[df_act['equipo'].astype(str).str.lower() == impresora.lower()]
+        if act_row.empty:
+            act_row = df_act[df_act['equipo'].astype(str).str.contains(impresora, case=False, na=False)]
+        if act_row.empty:
+            return pd.DataFrame()
+
+        activo_id = int(act_row.iloc[0]['id'])
+        modelo = str(act_row.iloc[0].get('modelo', '') or '').strip()
+
+        cols_inv = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+        if not cols_inv or 'item' not in cols_inv:
+            return pd.DataFrame()
+        tiene_modelo_ref = 'modelo_referencia' in cols_inv
+
+        existe_rel = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activos_insumos'").fetchone()
+        if existe_rel:
+            q_rel = """
+                SELECT i.*
+                FROM activos_insumos ai
+                JOIN inventario i ON i.id = ai.inventario_id
+                WHERE ai.activo_id=?
+                  AND COALESCE(ai.activo,1)=1
+                  AND COALESCE(i.activo,1)=1
+                  AND i.item LIKE '%tinta%'
+            """
+            df_rel = pd.read_sql_query(q_rel, conn, params=(activo_id,))
+            if not df_rel.empty:
+                return df_rel
+
+        tokens = [t for t in re.split(r'\s+', impresora.lower()) if len(t) > 2]
+        if modelo:
+            tokens.extend([t for t in re.split(r'\s+', modelo.lower()) if len(t) > 2])
+        if not tokens:
+            return pd.DataFrame()
+        pattern = '|'.join(sorted(set(re.escape(t) for t in tokens)))
+
+        q_inv = "SELECT * FROM inventario"
+        if 'activo' in cols_inv:
+            q_inv += " WHERE COALESCE(activo,1)=1"
+        df_inv = pd.read_sql_query(q_inv, conn)
+        if not df_inv.empty:
+            filtro_base = df_inv['item'].fillna('').str.lower().str.contains('tinta', na=False)
+            if tiene_modelo_ref:
+                filtro_base = filtro_base | df_inv['modelo_referencia'].fillna('').str.lower().str.contains('tinta', na=False)
+            df_inv = df_inv[filtro_base].copy()
+        if df_inv.empty:
+            return df_inv
+
+        filtro = df_inv['item'].fillna('').str.lower().str.contains(pattern, na=False)
         if tiene_modelo_ref:
-            filtro_base = filtro_base | df_inv['modelo_referencia'].fillna('').str.lower().str.contains('tinta', na=False)
-        df_inv = df_inv[filtro_base].copy()
-    if df_inv.empty:
-        return df_inv
-    filtro = df_inv['item'].fillna('').str.lower().str.contains(pattern, na=False)
-    if tiene_modelo_ref:
-        filtro = filtro | df_inv['modelo_referencia'].fillna('').str.lower().str.contains(pattern, na=False)
-    return df_inv[filtro].copy()
+            filtro = filtro | df_inv['modelo_referencia'].fillna('').str.lower().str.contains(pattern, na=False)
+        return df_inv[filtro].copy()
 
+    except Exception:
+        return pd.DataFrame()
 
 def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, conn=None):
     if conn is not None:
@@ -6020,6 +6044,23 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
