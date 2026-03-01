@@ -3252,25 +3252,25 @@ if st.button("🗑 Eliminar compra"):
             conn.execute("BEGIN")
 
 
-            # ===============================
-            # VALORES SEGUROS
-            # ===============================
+            # =====================
+            # DATOS SEGUROS
+            # =====================
 
             item_nombre = str(row["item"])
 
             cantidad_compra = float(row["cantidad"])
 
 
-            # ===============================
-            # INVENTARIO
-            # ===============================
-
             inv = conn.execute(
 
                 """
-                SELECT id,cantidad
+
+                SELECT id, cantidad
+
                 FROM inventario
+
                 WHERE item=?
+
                 """,
 
                 (item_nombre,)
@@ -3297,9 +3297,13 @@ if st.button("🗑 Eliminar compra"):
                 conn.execute(
 
                     """
+
                     UPDATE inventario
-                    SET cantidad=?
+
+                    SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP
+
                     WHERE id=?
+
                     """,
 
                     (
@@ -3315,31 +3319,31 @@ if st.button("🗑 Eliminar compra"):
 
                 registrar_movimiento_inventario(
 
-                    item_id,
+                    item_id=item_id,
 
-                    "SALIDA",
+                    tipo="SALIDA",
 
-                    cantidad_compra,
+                    cantidad=cantidad_compra,
 
-                    "Corrección compra eliminada",
+                    motivo="Corrección compra eliminada",
 
-                    usuario_actual,
+                    usuario=usuario_actual,
 
-                    conn
+                    conn=conn
 
                 )
 
 
-            # ===============================
-            # HISTORIAL
-            # ===============================
-
             conn.execute(
 
                 """
+
                 UPDATE historial_compras
+
                 SET activo=0
+
                 WHERE id=?
+
                 """,
 
                 (int(id_sel),)
@@ -3350,7 +3354,7 @@ if st.button("🗑 Eliminar compra"):
             conn.commit()
 
 
-        st.success("✅ Compra eliminada correctamente")
+        st.success("Compra eliminada correctamente")
 
         cargar_datos()
 
@@ -3359,7 +3363,7 @@ if st.button("🗑 Eliminar compra"):
 
     except Exception as e:
 
-        st.error(f"Error: {e}")
+        st.error(f"Error: {str(e)}")
     # =======================================================
     # 🔧 TAB 5 — AJUSTES INVENTARIO (VERSIÓN INDUSTRIAL PRO)
     # =======================================================
@@ -7875,6 +7879,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
