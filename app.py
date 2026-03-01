@@ -766,11 +766,19 @@ def mapear_consumos_cmyk_a_inventario(totales_cmyk, df_tintas):
         if ml <= 0:
             continue
 
-        aliases = alias_colores.get(str(color), [])
-        if not aliases:
-            continue
-        patron = '|'.join([re.escape(a) for a in aliases])
-        cand = base[base['item_norm'].str.contains(patron, na=False)]
+        color_key = str(color or '').strip().upper()
+        aliases = alias_colores.get(color_key, [])
+        cand = pd.DataFrame()
+
+        if 'color_cmyk' in base.columns:
+            serie_color = base['color_cmyk'].fillna('').astype(str).str.strip().str.upper()
+            cand = base[serie_color == color_key].copy()
+
+        if cand.empty:
+            if not aliases:
+                continue
+            patron = '|'.join([re.escape(a) for a in aliases])
+            cand = base[base['item_norm'].str.contains(patron, na=False)]
         if cand.empty:
             continue
 
@@ -1147,6 +1155,67 @@ def descontar_consumo_cmyk(consumos_dict, usuario=None, detalle="Consumo CMYK au
         recargo_urgencia=0.0
     )
 
+
+def obtener_factores_impresion(conn):
+    try:
+        df_calidad = pd.read_sql_query(
+            "SELECT nombre, multiplicador FROM calidad_impresion WHERE COALESCE(activo,1)=1 ORDER BY id",
+            conn
+        )
+    except Exception:
+        df_calidad = pd.DataFrame(columns=['nombre', 'multiplicador'])
+    try:
+        df_papel = pd.read_sql_query(
+            "SELECT nombre, factor_consumo FROM tipo_papel_impresion WHERE COALESCE(activo,1)=1 ORDER BY id",
+            conn
+        )
+    except Exception:
+        df_papel = pd.DataFrame(columns=['nombre', 'factor_consumo'])
+
+    if df_calidad.empty:
+        df_calidad = pd.DataFrame([
+            {'nombre': 'Borrador', 'multiplicador': 0.6},
+            {'nombre': 'Normal', 'multiplicador': 1.0},
+            {'nombre': 'Alta', 'multiplicador': 1.3},
+            {'nombre': 'Foto', 'multiplicador': 1.6},
+        ])
+    if df_papel.empty:
+        df_papel = pd.DataFrame([
+            {'nombre': 'Plain Paper', 'factor_consumo': 1.0},
+            {'nombre': 'Photo Paper', 'factor_consumo': 1.15},
+            {'nombre': 'Glossy', 'factor_consumo': 1.22},
+            {'nombre': 'Matte', 'factor_consumo': 1.1},
+            {'nombre': 'Premium', 'factor_consumo': 1.35},
+        ])
+
+    calidad_map = {str(r['nombre']): float(r['multiplicador'] or 1.0) for _, r in df_calidad.iterrows()}
+    papel_map = {str(r['nombre']): float(r['factor_consumo'] or 1.0) for _, r in df_papel.iterrows()}
+    return calidad_map, papel_map
+
+
+def enviar_a_inventario_universal(item_id, cantidad, costo_unitario, motivo, usuario, tipo='ENTRADA'):
+    try:
+        with conectar() as conn:
+            ok, msg = procesar_movimiento_inventario(
+                item_id=int(item_id),
+                tipo=str(tipo),
+                cantidad=float(cantidad),
+                costo_unitario=float(costo_unitario),
+                motivo=str(motivo),
+                usuario=str(usuario or 'Sistema'),
+                conn=conn
+            )
+            if ok:
+                conn.commit()
+            else:
+                conn.rollback()
+        if ok:
+            cargar_datos()
+        return ok, msg
+    except Exception as e:
+        return False, str(e)
+
+
 def hash_password(password: str, salt: str | None = None) -> str:
     """Genera hash PBKDF2 para almacenar contraseñas sin texto plano."""
     salt = salt or secrets.token_hex(16)
@@ -1374,6 +1443,35 @@ def inicializar_sistema():
                 mantenimiento REAL,
                 desgaste_real REAL,
                 fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS calidad_impresion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT UNIQUE,
+                multiplicador REAL,
+                activo INTEGER DEFAULT 1,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS tipo_papel_impresion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT UNIQUE,
+                factor_consumo REAL,
+                activo INTEGER DEFAULT 1,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS diagnosticos_impresora (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activo_id INTEGER,
+                archivo_nombre TEXT,
+                archivo_tipo TEXT,
+                archivo_blob BLOB,
+                vida_cabezal_pct REAL,
+                porcentaje_tinta REAL,
+                usuario TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(activo_id) REFERENCES activos(id)
             )""",
 
             """CREATE TABLE IF NOT EXISTS ordenes_produccion (
@@ -1662,6 +1760,7 @@ def inicializar_sistema():
 
         agregar_columna("costo_real_ml", "REAL DEFAULT NULL")
         agregar_columna("modelo_referencia", "TEXT")
+        agregar_columna("color_cmyk", "TEXT")
 
 
         # =========================
@@ -1873,6 +1972,26 @@ def inicializar_sistema():
         for p, v in config_init:
             c.execute("INSERT OR IGNORE INTO configuracion VALUES (?,?)", (p, v))
 
+        c.executemany(
+            "INSERT OR IGNORE INTO calidad_impresion (nombre, multiplicador, activo) VALUES (?, ?, 1)",
+            [
+                ("Borrador", 0.6),
+                ("Normal", 1.0),
+                ("Alta", 1.3),
+                ("Foto", 1.6),
+            ]
+        )
+        c.executemany(
+            "INSERT OR IGNORE INTO tipo_papel_impresion (nombre, factor_consumo, activo) VALUES (?, ?, 1)",
+            [
+                ("Plain Paper", 1.0),
+                ("Photo Paper", 1.15),
+                ("Glossy", 1.22),
+                ("Matte", 1.1),
+                ("Premium", 1.35),
+            ]
+        )
+
         conn.commit()
 
 
@@ -1973,6 +2092,7 @@ with st.sidebar:
             "👥 Clientes",
             "🎨 Análisis CMYK",
             "🏗️ Activos",
+            "🖨️ Diagnóstico Impresora",
             "🛠️ Otros Procesos",
             "✂️ Corte Industrial",
             "🔥 Sublimación Industrial",
@@ -2017,9 +2137,9 @@ if menu == "📊 Dashboard":
             total_clientes = 0
 
         try:
-            df_inv_dash = pd.read_sql("SELECT cantidad, precio_usd, minimo FROM inventario WHERE COALESCE(activo,1)=1", conn)
+            df_inv_dash = pd.read_sql("SELECT item, cantidad, precio_usd, minimo, COALESCE(activo,1) as activo FROM inventario WHERE COALESCE(activo,1)=1", conn)
         except Exception:
-            df_inv_dash = pd.DataFrame(columns=["cantidad", "precio_usd", "minimo"])
+            df_inv_dash = pd.DataFrame(columns=["item", "cantidad", "precio_usd", "minimo", "activo"])
         try:
             df_tiempos_dash = pd.read_sql("SELECT minutos_reales FROM tiempos_produccion", conn)
         except Exception:
@@ -2136,7 +2256,9 @@ if menu == "📊 Dashboard":
     if not df_inv_dash.empty:
         monitor = df_inv_dash.copy()
         monitor['nivel'] = np.where(monitor['cantidad'] <= monitor['minimo'], '🔴 Crítico', np.where(monitor['cantidad'] <= (monitor['minimo']*1.5), '🟡 Bajo', '🟢 OK'))
-        st.dataframe(monitor[['cantidad','minimo','nivel']].head(20), use_container_width=True, hide_index=True)
+        monitor['valor'] = pd.to_numeric(monitor['cantidad'], errors='coerce').fillna(0.0) * pd.to_numeric(monitor['precio_usd'], errors='coerce').fillna(0.0)
+        monitor['estado'] = np.where(monitor['cantidad'] <= monitor['minimo'], 'Crítico', 'Operativo')
+        st.dataframe(monitor[['item','cantidad','valor','estado','minimo','nivel']].head(20), use_container_width=True, hide_index=True)
 
     col_a, col_b = st.columns(2)
 
@@ -2319,17 +2441,29 @@ elif menu == "📦 Inventario":
             merma_qty = colC.number_input('Registrar merma (cantidad)', min_value=0.0, value=0.0, key='inv_merma_qty')
             if colC.button('⚠️ Registrar merma') and merma_qty > 0:
                 with conectar() as conn:
-                    row_item = conn.execute("SELECT id, cantidad, COALESCE(precio_usd,0) FROM inventario WHERE item=?", (insumo_sel,)).fetchone()
+                    row_item = conn.execute("SELECT id, cantidad, COALESCE(costo_promedio,COALESCE(precio_usd,0),0) FROM inventario WHERE item=?", (insumo_sel,)).fetchone()
                     if row_item:
-                        iid, cant_act, precio_u = int(row_item[0]), float(row_item[1] or 0.0), float(row_item[2] or 0.0)
-                        nueva = max(0.0, cant_act - float(merma_qty))
-                        conn.execute("UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?", (nueva, iid))
-                        registrar_movimiento_inventario(iid, 'MERMA', float(merma_qty), 'Merma/Material dañado', st.session_state.get('usuario_nombre','Sistema'), conn=conn)
-                        costo_merma = money(float(merma_qty) * precio_u)
-                        conn.execute("INSERT INTO gastos (descripcion, monto, categoria, metodo, usuario, activo) VALUES (?,?,?,?,?,1)", (f'Merma de inventario: {insumo_sel}', float(costo_merma), 'Gasto por Falla de Calidad', 'Interno', st.session_state.get('usuario_nombre','Sistema')))
-                        registrar_log_actividad(conn, 'MERMA', 'inventario')
-                        registrar_auditoria(conn, 'MERMA_INVENTARIO', cant_act, nueva)
-                        conn.commit()
+                        iid, cant_act, costo_ref = int(row_item[0]), float(row_item[1] or 0.0), float(row_item[2] or 0.0)
+                        ok_merma, msg_merma = procesar_movimiento_inventario(
+                            item_id=int(iid),
+                            tipo='MERMA',
+                            cantidad=float(merma_qty),
+                            costo_unitario=float(costo_ref),
+                            motivo='Merma/Material dañado',
+                            usuario=st.session_state.get('usuario_nombre','Sistema'),
+                            conn=conn
+                        )
+                        if ok_merma:
+                            nueva = max(0.0, cant_act - float(merma_qty))
+                            costo_merma = money(float(merma_qty) * float(costo_ref))
+                            conn.execute("INSERT INTO gastos (descripcion, monto, categoria, metodo, usuario, activo) VALUES (?,?,?,?,?,1)", (f'Merma de inventario: {insumo_sel}', float(costo_merma), 'Gasto por Falla de Calidad', 'Interno', st.session_state.get('usuario_nombre','Sistema')))
+                            registrar_log_actividad(conn, 'MERMA', 'inventario')
+                            registrar_auditoria(conn, 'MERMA_INVENTARIO', cant_act, nueva)
+                            conn.commit()
+                        else:
+                            conn.rollback()
+                            st.error(msg_merma)
+                            st.stop()
                 st.toast('Merma registrada como pérdida', icon='⚠️')
                 cargar_datos()
                 st.rerun()
@@ -4901,6 +5035,14 @@ elif menu == "🎨 Análisis CMYK":
             help="Ajuste global según rendimiento real de la impresora"
         )
 
+        with conectar() as conn:
+            calidad_map, papel_map = obtener_factores_impresion(conn)
+        calidad_sel = st.selectbox("Calidad de impresión", list(calidad_map.keys()), index=list(calidad_map.keys()).index('Normal') if 'Normal' in calidad_map else 0)
+        papel_sel = st.selectbox("Tipo de papel (driver)", list(papel_map.keys()), index=0)
+        factor_calidad = float(calidad_map.get(calidad_sel, 1.0))
+        factor_papel = float(papel_map.get(papel_sel, 1.0))
+        st.caption(f"Multiplicador calidad: x{factor_calidad:.2f} | Papel: x{factor_papel:.2f}")
+
         factor_k = 0.8
         refuerzo_negro = 0.06
         if auto_negro_inteligente:
@@ -4992,11 +5134,11 @@ elif menu == "🎨 Análisis CMYK":
                         y_media = float(np.mean(y_chan))
                         k_media = float(np.mean(k_chan))
 
-                        ml_c = c_media * ml_base_pagina * factor
-                        ml_m = m_media * ml_base_pagina * factor
-                        ml_y = y_media * ml_base_pagina * factor
+                        ml_c = c_media * ml_base_pagina * factor * factor_calidad * factor_papel
+                        ml_m = m_media * ml_base_pagina * factor * factor_calidad * factor_papel
+                        ml_y = y_media * ml_base_pagina * factor * factor_calidad * factor_papel
 
-                        ml_k_base = k_media * ml_base_pagina * factor * factor_k
+                        ml_k_base = k_media * ml_base_pagina * factor * factor_k * factor_calidad * factor_papel
                         k_extra_ml = 0.0
 
                         if auto_negro_inteligente:
@@ -5262,6 +5404,30 @@ elif menu == "🎨 Análisis CMYK":
                 totales_lote_cmyk,
                 tintas_vinculadas if 'tintas_vinculadas' in locals() else pd.DataFrame()
             )
+
+            if st.button("📦 ENVIAR A INVENTARIO", use_container_width=True, key='btn_cmyk_send_inv'):
+                if consumos_ids_cmyk:
+                    ok, msg = descontar_consumo_cmyk(
+                        consumos_ids_cmyk,
+                        usuario=st.session_state.get('usuario_nombre', 'Sistema'),
+                        detalle=f"CMYK {impresora_sel} | Calidad {calidad_sel} | Papel {papel_sel}",
+                        metodo='Interno CMYK',
+                        monto_usd=0.01
+                    )
+                    st.success(msg) if ok else st.error(msg)
+                else:
+                    st.warning("No se encontraron tintas vinculadas por activos_insumos/color_cmyk para descontar.")
+
+            if st.button("🏭 ENVIAR A PRODUCCIÓN", use_container_width=True, key='btn_cmyk_send_prod'):
+                oid = registrar_orden_produccion(
+                    'CMYK',
+                    'Interno',
+                    f"{impresora_sel} | {total_pags} pág",
+                    'Pendiente',
+                    float(total_usd_lote),
+                    f"CMYK {impresora_sel} ({calidad_sel}/{papel_sel})"
+                )
+                st.success(f"Orden de producción creada #{oid}")
 
             # --- ENVÍO A COTIZACIÓN ---
             if st.button("📝 ENVIAR A COTIZACIÓN", use_container_width=True):
@@ -5964,6 +6130,78 @@ elif menu == "🏗️ Activos":
 
 
 # ===========================================================
+# 🖨️ MÓDULO DIAGNÓSTICO DE IMPRESORA
+# ===========================================================
+elif menu == "🖨️ Diagnóstico Impresora":
+
+    st.title("🖨️ Importar diagnóstico de impresora")
+    st.caption("Carga PDF/JPG/PNG del diagnóstico Epson y registra vida de cabezal + nivel de tinta")
+
+    with conectar() as conn:
+        try:
+            df_imp = pd.read_sql_query("SELECT id, equipo FROM activos WHERE COALESCE(activo,1)=1 ORDER BY equipo", conn)
+        except Exception:
+            df_imp = pd.DataFrame(columns=['id', 'equipo'])
+
+    if df_imp.empty:
+        st.warning("No hay impresoras activas registradas en activos.")
+    else:
+        imp_map = {str(r['equipo']): int(r['id']) for _, r in df_imp.iterrows()}
+        impresora_sel = st.selectbox("Impresora", list(imp_map.keys()))
+        archivo_diag = st.file_uploader("Archivo diagnóstico", type=['pdf', 'jpg', 'jpeg', 'png'])
+        vida_cabezal_pct = st.number_input("Vida cabezal (%)", min_value=0.0, max_value=100.0, value=100.0)
+        tinta_pct = st.number_input("Porcentaje tinta (%)", min_value=0.0, max_value=100.0, value=100.0)
+
+        if st.button("💾 Guardar diagnóstico", use_container_width=True):
+            if archivo_diag is None:
+                st.error("Debes cargar un archivo diagnóstico.")
+            else:
+                activo_id = imp_map[impresora_sel]
+                usuario_diag = st.session_state.get('usuario_nombre', 'Sistema')
+                data_bytes = archivo_diag.getvalue()
+                ext = str(archivo_diag.type or '').lower()
+                with conectar() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO diagnosticos_impresora (activo_id, archivo_nombre, archivo_tipo, archivo_blob, vida_cabezal_pct, porcentaje_tinta, usuario)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (int(activo_id), str(archivo_diag.name), ext, sqlite3.Binary(data_bytes), float(vida_cabezal_pct), float(tinta_pct), usuario_diag)
+                    )
+                    conn.execute(
+                        "INSERT INTO vida_cabezal (impresora, vida_total, vida_restante) VALUES (?, ?, ?)",
+                        (impresora_sel, 100.0, float(vida_cabezal_pct))
+                    )
+                    conn.execute(
+                        "UPDATE activos SET desgaste = MAX(COALESCE(desgaste,0), ?) WHERE id=?",
+                        (float(max(0.0, 100.0 - vida_cabezal_pct)), int(activo_id))
+                    )
+
+                    tintas_vinculadas = obtener_tintas_impresora(conn, impresora_sel)
+                    if tintas_vinculadas is not None and not tintas_vinculadas.empty:
+                        consumo_total_ml = max(0.0, (100.0 - float(tinta_pct)) * 0.1)
+                        if consumo_total_ml > 0:
+                            reparto_ml = consumo_total_ml / max(len(tintas_vinculadas), 1)
+                            for _, row_t in tintas_vinculadas.iterrows():
+                                iid = int(row_t['id'])
+                                costo_ref = float(row_t.get('costo_promedio', row_t.get('precio_usd', 0.0)) or 0.0)
+                                okm, msgm = procesar_movimiento_inventario(
+                                    item_id=iid,
+                                    tipo='SALIDA',
+                                    cantidad=float(reparto_ml),
+                                    costo_unitario=float(costo_ref),
+                                    motivo=f'Diagnóstico impresora {impresora_sel}',
+                                    usuario=usuario_diag,
+                                    conn=conn
+                                )
+                                if not okm:
+                                    st.warning(f"No se pudo descontar tinta ID {iid}: {msgm}")
+                    conn.commit()
+                cargar_datos()
+                st.success("Diagnóstico registrado, vida de cabezal actualizada y consumo de tinta aplicado.")
+
+
+# ===========================================================
 # 11. MÓDULO PROFESIONAL DE OTROS PROCESOS
 # ===========================================================
 elif menu == "🛠️ Otros Procesos":
@@ -6180,6 +6418,15 @@ elif menu == "✂️ Corte Industrial":
             cant_desc = convertir_area_cm2_a_unidad_inventario(int(inv_id), float(r.get('area_cm2', 0.0)))
             ok, msg = descontar_materiales_produccion({int(inv_id): float(cant_desc)}, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f"Consumo corte industrial: {up.name}")
             st.success(msg) if ok else st.warning(msg)
+
+        if inv_id and st.button("🏭 ENVIAR A PRODUCCIÓN", key='btn_corte_prod'):
+            cant_desc = convertir_area_cm2_a_unidad_inventario(int(inv_id), float(r.get('area_cm2', 0.0)))
+            ok, msg = descontar_materiales_produccion({int(inv_id): float(cant_desc)}, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f"Producción corte: {up.name}")
+            if ok:
+                oid = registrar_orden_produccion('Corte', 'Interno', up.name, 'Pendiente', float(r.get('costo_total', 0.0)), f'Corte industrial {up.name}')
+                st.success(f"{msg}. Orden #{oid} creada")
+            else:
+                st.error(msg)
 
         if st.button("Enviar a Cotización", key='btn_send_corte_cot'):
             enviar_a_cotizacion_desde_produccion({'trabajo': f"Corte industrial {up.name}", 'costo_base': float(r.get('desgaste_real', 0.0)), 'unidades': 1, 'detalle': r})
@@ -6492,6 +6739,17 @@ elif menu == "🔥 Sublimación Industrial":
         st.success(f"Orden #{oid} creada")
 
 
+    if st.button("🏭 ENVIAR A PRODUCCIÓN", key='btn_subli_prod_universal'):
+        oid = registrar_orden_produccion(
+            "Sublimación",
+            "Interno",
+            f"{total_unidades} unidades",
+            "pendiente",
+            costo_total,
+            "Producción desde CMYK"
+        )
+        st.success(f"Orden de producción #{oid} creada")
+
     # =====================================================
     # ENVIAR A COTIZACION
     # =====================================================
@@ -6605,6 +6863,31 @@ elif menu == "🎨 Producción Manual":
 
         r = calcular_produccion_manual(materiales, activos)
         st.json(r)
+
+        st.subheader("Botones universales")
+        item_prod_dest = st.selectbox("Producto destino para inventario", list(item_opts.keys()), key='manual_dest_item')
+        qty_prod_dest = st.number_input("Cantidad producida", min_value=0.001, value=1.0, key='manual_dest_qty')
+        item_dest_id, item_dest_costo = item_opts[item_prod_dest]
+        costo_unit_prod = float(r['costo_total']) / max(float(qty_prod_dest), 1.0)
+
+        if st.button("📦 ENVIAR A INVENTARIO", key='btn_manual_send_inv'):
+            ok, msg = enviar_a_inventario_universal(
+                item_id=int(item_dest_id),
+                cantidad=float(qty_prod_dest),
+                costo_unitario=float(costo_unit_prod if costo_unit_prod > 0 else item_dest_costo),
+                motivo=f'Producción manual: {prod}',
+                usuario=st.session_state.get('usuario_nombre', 'Sistema'),
+                tipo='ENTRADA'
+            )
+            st.success(msg) if ok else st.error(msg)
+
+        if st.button("🏭 ENVIAR A PRODUCCIÓN", key='btn_manual_send_prod'):
+            ok, msg = descontar_materiales_produccion(consumos, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f'Producción manual: {prod}')
+            if ok:
+                oid = registrar_orden_produccion('Manual', 'Interno', prod, 'pendiente', float(r['costo_total']), f'Producción manual {prod}')
+                st.success(f"{msg}. Orden #{oid} registrada")
+            else:
+                st.error(msg)
 
         if st.button("Guardar receta", key='btn_guardar_receta_manual'):
             with conectar() as conn:
@@ -7962,28 +8245,22 @@ def registrar_venta_global(
                     raise ValueError(f"Stock insuficiente para: {nombre_item}")
 
             for item_id, cant in consumos_normalizados.items():
-                cursor.execute(
-                    """
-                    UPDATE inventario
-                    SET cantidad = cantidad - ?,
-                        ultima_actualizacion = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                      AND COALESCE(activo,1)=1
-                      AND cantidad >= ?
-                    """,
-                    (float(cant), int(item_id), float(cant))
-                )
-                if cursor.rowcount == 0:
-                    raise ValueError(f"Stock insuficiente para consumo concurrente (ID {item_id})")
-
-                registrar_movimiento_inventario(
+                costo_ref = cursor.execute(
+                    "SELECT COALESCE(costo_promedio,COALESCE(precio_usd,0),0) FROM inventario WHERE id=?",
+                    (int(item_id),)
+                ).fetchone()
+                costo_unit = float(costo_ref[0] or 0.0) if costo_ref else 0.0
+                ok_mov, msg_mov = procesar_movimiento_inventario(
                     item_id=int(item_id),
                     tipo='SALIDA',
                     cantidad=float(cant),
+                    costo_unitario=float(costo_unit),
                     motivo=f"Venta: {detalle_txt}",
                     usuario=usuario_final,
                     conn=conn_local
                 )
+                if not ok_mov:
+                    raise ValueError(msg_mov)
 
         cursor.execute(
             """
@@ -8038,4 +8315,3 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
