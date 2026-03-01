@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -781,49 +781,264 @@ def mapear_consumos_cmyk_a_inventario(totales_cmyk, df_tintas):
 
     return consumos_ids
 
+
+def procesar_movimiento_inventario(item_id: int, tipo: str, cantidad: float, costo_unitario: float, motivo: str, usuario: str, conn):
+    """
+    Núcleo central transaccional de inventario industrial.
+    Reglas:
+    - ENTRADA: suma stock y recalcula costo promedio ponderado.
+    - SALIDA: valida stock suficiente, descuenta y usa costo promedio actual.
+    - AJUSTE: permite sumar/restar (cantidad con signo o motivo con "resta/salida").
+    Siempre registra movimiento en inventario_movs con saldos y costos.
+    """
+    try:
+        item_id = int(item_id)
+        tipo_txt = str(tipo or "").upper().strip()
+        cantidad = float(cantidad or 0.0)
+        costo_unitario = float(costo_unitario or 0.0)
+        motivo_txt = str(motivo or "")
+        usuario_txt = str(usuario or "Sistema")
+    except (TypeError, ValueError):
+        return False, "Parámetros inválidos para procesar movimiento"
+
+    if tipo_txt not in {"ENTRADA", "SALIDA", "AJUSTE", "COMPRA", "MERMA", "VENTA"}:
+        return False, "Tipo de movimiento no válido"
+
+    if tipo_txt in {"ENTRADA", "SALIDA", "COMPRA", "MERMA", "VENTA"} and cantidad <= 0:
+        return False, "La cantidad debe ser mayor a 0"
+    if tipo_txt == "AJUSTE" and cantidad == 0:
+        return False, "El ajuste no puede ser 0"
+
+    inicio_explicito = False
+    savepoint_name = None
+    try:
+        if conn.in_transaction:
+            savepoint_name = f"sp_inv_{int(time.time() * 1000)}_{secrets.token_hex(3)}"
+            conn.execute(f"SAVEPOINT {savepoint_name}")
+        else:
+            conn.execute("BEGIN IMMEDIATE")
+            inicio_explicito = True
+
+        row = conn.execute(
+            """
+            SELECT item, COALESCE(cantidad,0), COALESCE(costo_promedio,COALESCE(precio_usd,0)),
+                   COALESCE(valor_total, COALESCE(cantidad,0)*COALESCE(costo_promedio,COALESCE(precio_usd,0)))
+            FROM inventario
+            WHERE id=? AND COALESCE(activo,1)=1
+            """,
+            (item_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Ítem no encontrado o inactivo")
+
+        item_nombre = str(row[0])
+        saldo_antes = float(row[1] or 0.0)
+        costo_prom_actual = float(row[2] or 0.0)
+        valor_total_actual = float(row[3] or 0.0)
+
+        tipo_registro = tipo_txt
+        if tipo_txt in {"COMPRA"}:
+            tipo_txt = "ENTRADA"
+        if tipo_txt in {"MERMA", "VENTA"}:
+            tipo_txt = "SALIDA"
+
+        if tipo_txt == "ENTRADA":
+            valor_nuevo = float(cantidad) * float(costo_unitario)
+            saldo_despues = saldo_antes + float(cantidad)
+            valor_total_nuevo = valor_total_actual + valor_nuevo
+            costo_prom_nuevo = (valor_total_nuevo / saldo_despues) if saldo_despues > 0 else 0.0
+            costo_unit_mov = float(costo_unitario)
+            costo_total_mov = valor_nuevo
+
+        elif tipo_txt == "SALIDA":
+            if float(cantidad) > saldo_antes:
+                raise ValueError("Stock insuficiente para salida")
+            saldo_despues = saldo_antes - float(cantidad)
+            costo_unit_mov = float(costo_prom_actual)
+            costo_total_mov = float(cantidad) * costo_unit_mov
+            valor_total_nuevo = max(0.0, valor_total_actual - costo_total_mov)
+            costo_prom_nuevo = (valor_total_nuevo / saldo_despues) if saldo_despues > 0 else 0.0
+
+        else:  # AJUSTE
+            es_resta = float(cantidad) < 0 or any(k in motivo_txt.lower() for k in ["rest", "salida", "rebaja"])
+            delta = abs(float(cantidad))
+            if es_resta:
+                if delta > saldo_antes:
+                    raise ValueError("Stock insuficiente para ajuste negativo")
+                saldo_despues = saldo_antes - delta
+                costo_unit_mov = float(costo_prom_actual)
+                costo_total_mov = delta * costo_unit_mov
+                valor_total_nuevo = max(0.0, valor_total_actual - costo_total_mov)
+                cantidad = delta
+            else:
+                costo_base_ajuste = float(costo_unitario) if float(costo_unitario) > 0 else float(costo_prom_actual)
+                saldo_despues = saldo_antes + delta
+                costo_unit_mov = costo_base_ajuste
+                costo_total_mov = delta * costo_unit_mov
+                valor_total_nuevo = valor_total_actual + costo_total_mov
+                cantidad = delta
+            costo_prom_nuevo = (valor_total_nuevo / saldo_despues) if saldo_despues > 0 else 0.0
+
+        if saldo_despues < 0:
+            raise ValueError("Stock negativo no permitido")
+
+        conn.execute(
+            """
+            UPDATE inventario
+            SET cantidad=?,
+                costo_promedio=?,
+                valor_total=?,
+                precio_usd=?,
+                ultima_actualizacion=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (
+                float(saldo_despues),
+                float(costo_prom_nuevo),
+                float(valor_total_nuevo),
+                float(costo_prom_nuevo),
+                int(item_id)
+            )
+        )
+
+        conn.execute(
+            """
+            INSERT INTO inventario_movs
+            (item_id, tipo, cantidad, saldo_antes, saldo_despues, costo_unitario, costo_total, motivo, usuario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(item_id),
+                str(tipo_registro),
+                float(cantidad),
+                float(saldo_antes),
+                float(saldo_despues),
+                float(costo_unit_mov),
+                float(costo_total_mov),
+                motivo_txt,
+                usuario_txt
+            )
+        )
+
+        registrar_kardex(
+            item_id=int(item_id),
+            item=item_nombre,
+            tipo=str(tipo_registro),
+            cantidad=float(cantidad),
+            stock_anterior=float(saldo_antes),
+            stock_nuevo=float(saldo_despues),
+            costo_unit=float(costo_unit_mov),
+            usuario=usuario_txt,
+            conn=conn
+        )
+
+        if savepoint_name:
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        elif inicio_explicito:
+            conn.commit()
+
+        return True, "Movimiento procesado correctamente"
+
+    except Exception as e:
+        try:
+            if savepoint_name:
+                conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+                conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+            elif inicio_explicito:
+                conn.rollback()
+        except Exception:
+            pass
+        return False, str(e)
+
+
+def obtener_kardex(item_id, conn):
+    return pd.read_sql_query(
+        """
+        SELECT
+            fecha,
+            tipo,
+            cantidad,
+            saldo_despues,
+            costo_unitario,
+            costo_total,
+            motivo
+        FROM inventario_movs
+        WHERE item_id = ?
+        ORDER BY datetime(fecha) ASC, id ASC
+        """,
+        conn,
+        params=(int(item_id),)
+    )
+
 def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, conn=None):
     cantidad = float(cantidad or 0.0)
     if cantidad <= 0:
         return False
+    tipo_txt = str(tipo or "").upper().strip()
 
-    payload = (int(item_id), str(tipo), float(cantidad), str(motivo), str(usuario))
+    def _insert_mov(cn):
+        row_item = cn.execute(
+            "SELECT COALESCE(cantidad,0), COALESCE(costo_promedio,COALESCE(precio_usd,0),0) FROM inventario WHERE id=?",
+            (int(item_id),)
+        ).fetchone()
+        if not row_item:
+            return False
+        saldo_despues = float(row_item[0] or 0.0)
+        costo_ref = float(row_item[1] or 0.0)
+        if tipo_txt in {"ENTRADA", "COMPRA"}:
+            saldo_antes = saldo_despues - float(cantidad)
+            costo_unit = costo_ref
+        elif tipo_txt in {"SALIDA", "MERMA", "VENTA"}:
+            saldo_antes = saldo_despues + float(cantidad)
+            costo_unit = costo_ref
+        else:
+            if "rest" in str(motivo).lower() or "salida" in str(motivo).lower():
+                saldo_antes = saldo_despues + float(cantidad)
+            else:
+                saldo_antes = saldo_despues - float(cantidad)
+            costo_unit = costo_ref
+        saldo_antes = max(0.0, float(saldo_antes))
+        costo_total = float(cantidad) * float(costo_unit)
 
-    if conn is not None:
-        conn.execute(
+        cn.execute(
             """
-            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO inventario_movs
+            (item_id, tipo, cantidad, saldo_antes, saldo_despues, costo_unitario, costo_total, motivo, usuario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            payload
+            (
+                int(item_id),
+                tipo_txt,
+                float(cantidad),
+                float(saldo_antes),
+                float(saldo_despues),
+                float(costo_unit),
+                float(costo_total),
+                str(motivo),
+                str(usuario)
+            )
         )
         registrar_kardex_desde_movimiento(
             item_id=int(item_id),
-            tipo=str(tipo),
+            tipo=tipo_txt,
             cantidad=float(cantidad),
             usuario=str(usuario),
-            conn=conn,
+            conn=cn,
             motivo=str(motivo)
         )
         return True
 
+    if conn is not None:
+        return _insert_mov(conn)
+
     with conectar() as conn_local:
         conn_local.execute("BEGIN IMMEDIATE TRANSACTION")
-        conn_local.execute(
-            """
-            INSERT INTO inventario_movs (item_id, tipo, cantidad, motivo, usuario)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            payload
-        )
-        registrar_kardex_desde_movimiento(
-            item_id=int(item_id),
-            tipo=str(tipo),
-            cantidad=float(cantidad),
-            usuario=str(usuario),
-            conn=conn_local,
-            motivo=str(motivo)
-        )
-        conn_local.commit()
+        ok = _insert_mov(conn_local)
+        if ok:
+            conn_local.commit()
+        else:
+            conn_local.rollback()
+            return False
     return True
 
 
@@ -977,6 +1192,8 @@ def inicializar_sistema():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 item TEXT UNIQUE,
                 cantidad REAL,
+                costo_promedio REAL DEFAULT 0,
+                valor_total REAL DEFAULT 0,
                 unidad TEXT,
                 precio_usd REAL,
                 minimo REAL DEFAULT 5.0,
@@ -1003,6 +1220,10 @@ def inicializar_sistema():
                 item_id INTEGER,
                 tipo TEXT,
                 cantidad REAL,
+                saldo_antes REAL,
+                saldo_despues REAL,
+                costo_unitario REAL,
+                costo_total REAL,
                 motivo TEXT,
                 usuario TEXT,
                 fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1325,6 +1546,16 @@ def inicializar_sistema():
                 "ALTER TABLE inventario_movs ADD COLUMN item_id INTEGER"
             )
 
+        columnas_requeridas_movs = {
+            'saldo_antes': 'REAL',
+            'saldo_despues': 'REAL',
+            'costo_unitario': 'REAL',
+            'costo_total': 'REAL'
+        }
+        for col, def_sql in columnas_requeridas_movs.items():
+            if col not in columnas_movs:
+                c.execute(f"ALTER TABLE inventario_movs ADD COLUMN {col} {def_sql}")
+
 
         # migración datos antiguos
         if 'item' in columnas_movs:
@@ -1391,6 +1622,8 @@ def inicializar_sistema():
         agregar_columna("unidad", "TEXT DEFAULT 'Unidad'")
 
         agregar_columna("precio_usd", "REAL DEFAULT 0")
+        agregar_columna("costo_promedio", "REAL DEFAULT 0")
+        agregar_columna("valor_total", "REAL DEFAULT 0")
 
         agregar_columna("minimo", "REAL DEFAULT 5.0")
 
@@ -1459,6 +1692,27 @@ def inicializar_sistema():
             SET factor_conversion = 1.0
             WHERE factor_conversion IS NULL
             OR factor_conversion <= 0
+            """
+        )
+
+        c.execute(
+            """
+            UPDATE inventario
+            SET costo_promedio = COALESCE(costo_promedio, COALESCE(precio_usd,0), 0)
+            WHERE costo_promedio IS NULL
+            """
+        )
+        c.execute(
+            """
+            UPDATE inventario
+            SET valor_total = COALESCE(valor_total,0)
+            WHERE valor_total IS NULL
+            """
+        )
+        c.execute(
+            """
+            UPDATE inventario
+            SET valor_total = COALESCE(cantidad,0) * COALESCE(costo_promedio,COALESCE(precio_usd,0),0)
             """
         )
 
@@ -7784,4 +8038,3 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
