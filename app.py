@@ -2813,7 +2813,7 @@ elif menu == "📦 Inventario":
 
                             """,
 
-                            (row.item,)
+                            (str(row["item"]),)
 
                         ).fetchone()
 
@@ -2825,7 +2825,7 @@ elif menu == "📦 Inventario":
 
                                 0,
 
-                                inv[1] - row.cantidad
+                                float(inv[1] or 0.0) - float(row["cantidad"] or 0.0)
 
                             )
 
@@ -2859,7 +2859,7 @@ elif menu == "📦 Inventario":
 
                                 "AJUSTE",
 
-                                row.cantidad,
+                                float(row["cantidad"] or 0.0),
 
                                 "Corrección compra (resta)",
 
@@ -7788,6 +7788,3 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
