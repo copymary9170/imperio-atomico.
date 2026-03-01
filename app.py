@@ -796,6 +796,14 @@ def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, co
             """,
             payload
         )
+        registrar_kardex_desde_movimiento(
+            item_id=int(item_id),
+            tipo=str(tipo),
+            cantidad=float(cantidad),
+            usuario=str(usuario),
+            conn=conn,
+            motivo=str(motivo)
+        )
         return True
 
     with conectar() as conn_local:
@@ -807,8 +815,100 @@ def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, co
             """,
             payload
         )
+        registrar_kardex_desde_movimiento(
+            item_id=int(item_id),
+            tipo=str(tipo),
+            cantidad=float(cantidad),
+            usuario=str(usuario),
+            conn=conn_local,
+            motivo=str(motivo)
+        )
         conn_local.commit()
     return True
+
+
+def registrar_kardex(item_id, item, tipo, cantidad, stock_anterior, stock_nuevo, costo_unit, usuario, conn=None):
+    cantidad = float(cantidad or 0.0)
+    costo_unit = float(costo_unit or 0.0)
+    costo_total = money(cantidad * costo_unit)
+
+    payload = (
+        int(item_id),
+        str(item),
+        str(tipo),
+        cantidad,
+        float(stock_anterior or 0.0),
+        float(stock_nuevo or 0.0),
+        costo_unit,
+        float(costo_total),
+        str(usuario or "Sistema")
+    )
+
+    if conn is not None:
+        conn.execute(
+            """
+            INSERT INTO kardex
+            (item_id, item, tipo, cantidad, stock_anterior, stock_nuevo, costo_unit, costo_total, usuario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            payload
+        )
+        return True
+
+    with conectar() as conn_local:
+        conn_local.execute("BEGIN IMMEDIATE TRANSACTION")
+        conn_local.execute(
+            """
+            INSERT INTO kardex
+            (item_id, item, tipo, cantidad, stock_anterior, stock_nuevo, costo_unit, costo_total, usuario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            payload
+        )
+        conn_local.commit()
+    return True
+
+
+def registrar_kardex_desde_movimiento(item_id, tipo, cantidad, usuario, conn, motivo=""):
+    row_item = conn.execute(
+        "SELECT item, COALESCE(cantidad,0), COALESCE(precio_usd,0) FROM inventario WHERE id=?",
+        (int(item_id),)
+    ).fetchone()
+    if not row_item:
+        return False
+
+    nombre_item = str(row_item[0])
+    stock_nuevo = float(row_item[1] or 0.0)
+    costo_unit = float(row_item[2] or 0.0)
+    cantidad = float(cantidad or 0.0)
+    tipo_txt = str(tipo or "").upper().strip()
+
+    if tipo_txt in {"ENTRADA", "COMPRA"}:
+        stock_anterior = stock_nuevo - cantidad
+    elif tipo_txt in {"SALIDA", "MERMA", "VENTA"}:
+        stock_anterior = stock_nuevo + cantidad
+    elif tipo_txt == "AJUSTE":
+        if "rest" in str(motivo).lower() or "salida" in str(motivo).lower():
+            stock_anterior = stock_nuevo + cantidad
+        else:
+            stock_anterior = stock_nuevo - cantidad
+    else:
+        stock_anterior = stock_nuevo - cantidad
+
+    if stock_anterior < 0:
+        stock_anterior = 0.0
+
+    return registrar_kardex(
+        item_id=int(item_id),
+        item=nombre_item,
+        tipo=tipo_txt,
+        cantidad=cantidad,
+        stock_anterior=float(stock_anterior),
+        stock_nuevo=float(stock_nuevo),
+        costo_unit=float(costo_unit),
+        usuario=str(usuario or "Sistema"),
+        conn=conn
+    )
 
 def descontar_consumo_cmyk(consumos_dict, usuario=None, detalle="Consumo CMYK automático", metodo="Interno", monto_usd=0.01):
     consumos_limpios = {int(k): float(v) for k, v in (consumos_dict or {}).items() if float(v) > 0}
@@ -907,6 +1007,20 @@ def inicializar_sistema():
                 usuario TEXT,
                 fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(item_id) REFERENCES inventario(id)
+            )""",
+
+            """CREATE TABLE IF NOT EXISTS kardex (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER,
+                item TEXT,
+                tipo TEXT,
+                cantidad REAL,
+                stock_anterior REAL,
+                stock_nuevo REAL,
+                costo_unit REAL,
+                costo_total REAL,
+                usuario TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
             )""",
 
             # PROVEEDORES
@@ -1233,6 +1347,23 @@ def inicializar_sistema():
                 """
             )
 
+        columnas_kardex = {row[1] for row in c.execute("PRAGMA table_info(kardex)").fetchall()}
+        columnas_requeridas_kardex = {
+            'item_id': 'INTEGER',
+            'item': 'TEXT',
+            'tipo': 'TEXT',
+            'cantidad': 'REAL',
+            'stock_anterior': 'REAL',
+            'stock_nuevo': 'REAL',
+            'costo_unit': 'REAL',
+            'costo_total': 'REAL',
+            'usuario': 'TEXT',
+            'fecha': 'DATETIME DEFAULT CURRENT_TIMESTAMP'
+        }
+        for col, def_sql in columnas_requeridas_kardex.items():
+            if col not in columnas_kardex:
+                c.execute(f"ALTER TABLE kardex ADD COLUMN {col} {def_sql}")
+
 
         # =========================
         # TABLA INVENTARIO
@@ -1372,6 +1503,12 @@ def inicializar_sistema():
             """
             CREATE INDEX IF NOT EXISTS idx_inventario_movs_item_id
             ON inventario_movs(item_id)
+            """
+        )
+        c.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_kardex_item_fecha
+            ON kardex(item_id, fecha)
             """
         )
 
@@ -1578,6 +1715,7 @@ with st.sidebar:
             "📊 Dashboard",
             "🛒 Venta Directa",
             "📦 Inventario",
+            "📊 Kardex",
             "👥 Clientes",
             "🎨 Análisis CMYK",
             "🏗️ Activos",
@@ -1932,7 +2070,7 @@ elif menu == "📦 Inventario":
                         iid, cant_act, precio_u = int(row_item[0]), float(row_item[1] or 0.0), float(row_item[2] or 0.0)
                         nueva = max(0.0, cant_act - float(merma_qty))
                         conn.execute("UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?", (nueva, iid))
-                        registrar_movimiento_inventario(iid, 'SALIDA', float(merma_qty), 'Merma/Material dañado', st.session_state.get('usuario_nombre','Sistema'), conn=conn)
+                        registrar_movimiento_inventario(iid, 'MERMA', float(merma_qty), 'Merma/Material dañado', st.session_state.get('usuario_nombre','Sistema'), conn=conn)
                         costo_merma = money(float(merma_qty) * precio_u)
                         conn.execute("INSERT INTO gastos (descripcion, monto, categoria, metodo, usuario, activo) VALUES (?,?,?,?,?,1)", (f'Merma de inventario: {insumo_sel}', float(costo_merma), 'Gasto por Falla de Calidad', 'Interno', st.session_state.get('usuario_nombre','Sistema')))
                         registrar_log_actividad(conn, 'MERMA', 'inventario')
@@ -1956,14 +2094,16 @@ elif menu == "📦 Inventario":
                         )
                         item_row = conn.execute("SELECT id FROM inventario WHERE item=?", (insumo_sel,)).fetchone()
                         if item_row:
-                            registrar_movimiento_inventario(
-                                item_id=int(item_row[0]),
-                                tipo='AJUSTE',
-                                cantidad=float(pliegos),
-                                motivo='Conversión cm2 -> pliegos',
-                                usuario=st.session_state.get("usuario_nombre", "Sistema"),
-                                conn=conn
-                            )
+                            ajuste_delta = abs(float(pliegos) - float(fila_sel.get('cantidad', 0) or 0))
+                            if ajuste_delta > 0:
+                                registrar_movimiento_inventario(
+                                    item_id=int(item_row[0]),
+                                    tipo='AJUSTE',
+                                    cantidad=float(ajuste_delta),
+                                    motivo='Conversión cm2 -> pliegos',
+                                    usuario=st.session_state.get("usuario_nombre", "Sistema"),
+                                    conn=conn
+                                )
                         conn.commit()
                     st.success(f"Convertido a {pliegos:.3f} pliegos.")
                     cargar_datos()
@@ -2375,10 +2515,24 @@ elif menu == "📦 Inventario":
                             1 if imprimible_cmyk else 0,
         
                             area_por_pliego_val
-        
+
                         ))
-        
-        
+
+                        item_db = cur.execute(
+                            "SELECT id FROM inventario WHERE item=?",
+                            (nombre_final,)
+                        ).fetchone()
+                        if item_db:
+                            registrar_movimiento_inventario(
+                                item_id=int(item_db[0]),
+                                tipo='COMPRA',
+                                cantidad=float(cantidad),
+                                motivo=f"Compra proveedor: {proveedor or 'N/A'}",
+                                usuario=usuario_actual,
+                                conn=conn
+                            )
+
+
                         # HISTORIAL
         
                         cur.execute("""
@@ -2703,11 +2857,11 @@ elif menu == "📦 Inventario":
 
                                 inv[0],
 
-                                "SALIDA",
+                                "AJUSTE",
 
                                 row.cantidad,
 
-                                "Corrección",
+                                "Corrección compra (resta)",
 
                                 usuario_actual,
 
@@ -3325,6 +3479,177 @@ with tabs[4]:
         except Exception as e:
 
             st.error(f"Error guardando: {e}")
+
+
+# --- Kardex --- #
+
+if menu == "📊 Kardex":
+    st.title("📊 Kardex Profesional")
+    st.caption("Trazabilidad cronológica de entradas, salidas, ajustes, mermas y compras.")
+
+    with conectar() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS kardex (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER,
+                item TEXT,
+                tipo TEXT,
+                cantidad REAL,
+                stock_anterior REAL,
+                stock_nuevo REAL,
+                costo_unit REAL,
+                costo_total REAL,
+                usuario TEXT,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.commit()
+
+        df_items = pd.read_sql(
+            """
+            SELECT id, item
+            FROM inventario
+            WHERE COALESCE(activo,1)=1
+            ORDER BY item ASC
+            """,
+            conn
+        )
+
+    if df_items.empty:
+        st.info("No hay productos activos en inventario.")
+        st.stop()
+
+    item_sel = st.selectbox("Producto", df_items["item"].tolist())
+    item_id_sel = int(df_items.loc[df_items["item"] == item_sel, "id"].iloc[0])
+
+    f1, f2, f3 = st.columns(3)
+    fecha_inicio = f1.date_input("Desde", value=(datetime.now() - timedelta(days=30)).date(), key="kdx_desde")
+    fecha_fin = f2.date_input("Hasta", value=datetime.now().date(), key="kdx_hasta")
+    tipo_filtro = f3.multiselect(
+        "Tipo",
+        ["ENTRADA", "SALIDA", "MERMA", "AJUSTE", "COMPRA"],
+        default=["ENTRADA", "SALIDA", "MERMA", "AJUSTE", "COMPRA"]
+    )
+
+    if fecha_inicio > fecha_fin:
+        st.error("La fecha inicial no puede ser mayor a la fecha final.")
+        st.stop()
+
+    query = """
+        SELECT fecha, tipo, cantidad, stock_anterior, stock_nuevo, costo_unit, costo_total, usuario
+        FROM kardex
+        WHERE item_id = ?
+          AND date(fecha) BETWEEN date(?) AND date(?)
+    """
+    params = [item_id_sel, str(fecha_inicio), str(fecha_fin)]
+    if tipo_filtro:
+        placeholders = ",".join(["?"] * len(tipo_filtro))
+        query += f" AND UPPER(tipo) IN ({placeholders})"
+        params.extend([t.upper() for t in tipo_filtro])
+    query += " ORDER BY datetime(fecha) ASC, id ASC"
+
+    with conectar() as conn:
+        df_kardex = pd.read_sql(query, conn, params=tuple(params))
+        row_inv = conn.execute(
+            "SELECT COALESCE(cantidad,0), COALESCE(precio_usd,0) FROM inventario WHERE id=?",
+            (item_id_sel,)
+        ).fetchone()
+        stock_actual = float(row_inv[0] or 0.0) if row_inv else 0.0
+        costo_ref = float(row_inv[1] or 0.0) if row_inv else 0.0
+
+    costo_promedio = float(df_kardex["costo_unit"].mean()) if not df_kardex.empty else costo_ref
+    total_invertido = float(df_kardex[df_kardex["tipo"].str.upper().isin(["ENTRADA", "COMPRA"])]["costo_total"].sum()) if not df_kardex.empty else 0.0
+    valor_total_actual = money(stock_actual * costo_promedio)
+
+    salidas_periodo = 0.0
+    if not df_kardex.empty:
+        salidas_periodo = float(df_kardex[df_kardex["tipo"].str.upper().isin(["SALIDA", "MERMA"])]["cantidad"].sum())
+        stock_promedio = float(df_kardex[["stock_anterior", "stock_nuevo"]].mean().mean())
+        rotacion = (salidas_periodo / stock_promedio) if stock_promedio > 0 else 0.0
+    else:
+        rotacion = 0.0
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Stock actual", f"{stock_actual:,.2f}")
+    k2.metric("Costo promedio", f"$ {costo_promedio:,.4f}")
+    k3.metric("Total invertido", f"$ {total_invertido:,.2f}")
+    k4.metric("Valor total actual", f"$ {valor_total_actual:,.2f}")
+    k5.metric("Rotación inventario", f"{rotacion:,.2f}")
+
+    if df_kardex.empty:
+        st.info("Sin movimientos para los filtros seleccionados.")
+    else:
+        st.dataframe(
+            df_kardex.rename(columns={
+                "fecha": "Fecha",
+                "tipo": "Tipo",
+                "cantidad": "Cantidad",
+                "stock_anterior": "Stock anterior",
+                "stock_nuevo": "Stock nuevo",
+                "costo_unit": "Costo unit",
+                "costo_total": "Costo total",
+                "usuario": "Usuario"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        output = io.BytesIO()
+        try:
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df_kardex.to_excel(writer, index=False, sheet_name="Kardex")
+            st.download_button(
+                "📥 Exportar Excel",
+                data=output.getvalue(),
+                file_name=f"kardex_{item_sel}_{fecha_inicio}_{fecha_fin}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        except Exception as e:
+            st.warning(f"No se pudo exportar a Excel en este entorno: {e}")
+
+    st.divider()
+    st.subheader("🔧 Ajuste manual")
+    a1, a2, a3, a4 = st.columns([1, 1, 1, 2])
+    accion_ajuste = a1.selectbox("Acción", ["Sumar stock", "Restar stock"], key="kdx_accion")
+    cantidad_ajuste = a2.number_input("Cantidad", min_value=0.0, value=0.0, key="kdx_cantidad")
+    usuario_ajuste = a3.text_input("Usuario", value=st.session_state.get("usuario_nombre", "Sistema"), key="kdx_usuario")
+    motivo_ajuste = a4.text_input("Motivo", value="Ajuste manual desde Kardex", key="kdx_motivo")
+
+    if st.button("💾 Aplicar ajuste manual", use_container_width=True) and cantidad_ajuste > 0:
+        with conectar() as conn:
+            row_prev = conn.execute(
+                "SELECT COALESCE(cantidad,0) FROM inventario WHERE id=?",
+                (item_id_sel,)
+            ).fetchone()
+            if not row_prev:
+                st.error("No se encontró el producto seleccionado.")
+            else:
+                stock_prev = float(row_prev[0] or 0.0)
+                if accion_ajuste == "Sumar stock":
+                    stock_nuevo = stock_prev + float(cantidad_ajuste)
+                    motivo_final = f"{motivo_ajuste} | Ajuste entrada"
+                else:
+                    stock_nuevo = max(0.0, stock_prev - float(cantidad_ajuste))
+                    motivo_final = f"{motivo_ajuste} | Ajuste resta"
+
+                conn.execute(
+                    "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
+                    (stock_nuevo, item_id_sel)
+                )
+                registrar_movimiento_inventario(
+                    item_id=item_id_sel,
+                    tipo="AJUSTE",
+                    cantidad=float(cantidad_ajuste),
+                    motivo=motivo_final,
+                    usuario=usuario_ajuste,
+                    conn=conn
+                )
+                conn.commit()
+        cargar_datos()
+        st.success("Ajuste aplicado y registrado en Kardex.")
+        st.rerun()
 
 
 # --- Kontigo --- #
@@ -7464,9 +7789,5 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
 
 
