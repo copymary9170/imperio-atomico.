@@ -2770,24 +2770,24 @@ elif menu == "📦 Inventario":
 
             sel = st.selectbox(
 
-                "Seleccionar",
+    "Seleccionar",
 
-                list(opciones.keys())
+    list(opciones.keys())
 
-            )
-
-
-            id_sel = opciones[sel]
+)
 
 
-            row = df_hist[
-
-                df_hist.compra_id == id_sel
-
-            ].iloc[0]
+id_sel = opciones[sel]
 
 
-            if st.button("🗑 Eliminar compra"):
+row = df_hist[
+
+    df_hist.compra_id == id_sel
+
+].iloc[0]
+
+
+if st.button("🗑 Eliminar compra"):
 
     try:
 
@@ -2796,21 +2796,29 @@ elif menu == "📦 Inventario":
             conn.execute("BEGIN")
 
 
+            # ==========================
             # VALORES SEGUROS
+            # ==========================
 
             item_nombre = str(row["item"])
 
             cantidad_compra = float(row["cantidad"])
 
 
+            # ==========================
             # BUSCAR INVENTARIO
+            # ==========================
 
             inv = conn.execute(
 
                 """
-                SELECT id,cantidad
+
+                SELECT id, cantidad
+
                 FROM inventario
+
                 WHERE item=?
+
                 """,
 
                 (item_nombre,)
@@ -2837,9 +2845,13 @@ elif menu == "📦 Inventario":
                 conn.execute(
 
                     """
+
                     UPDATE inventario
-                    SET cantidad=?
+
+                    SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP
+
                     WHERE id=?
+
                     """,
 
                     (
@@ -2855,29 +2867,35 @@ elif menu == "📦 Inventario":
 
                 registrar_movimiento_inventario(
 
-                    item_id,
+                    item_id=item_id,
 
-                    "SALIDA",
+                    tipo="SALIDA",
 
-                    cantidad_compra,
+                    cantidad=cantidad_compra,
 
-                    "Corrección compra eliminada",
+                    motivo="Corrección compra eliminada",
 
-                    usuario_actual,
+                    usuario=usuario_actual,
 
-                    conn
+                    conn=conn
 
                 )
 
 
-            # DESACTIVAR HISTORIAL
+            # ==========================
+            # DESACTIVAR COMPRA
+            # ==========================
 
             conn.execute(
 
                 """
+
                 UPDATE historial_compras
+
                 SET activo=0
+
                 WHERE id=?
+
                 """,
 
                 (int(id_sel),)
@@ -2888,7 +2906,8 @@ elif menu == "📦 Inventario":
             conn.commit()
 
 
-        st.success("Compra eliminada correctamente")
+        st.success("✅ Compra eliminada correctamente")
+
 
         cargar_datos()
 
@@ -2897,7 +2916,7 @@ elif menu == "📦 Inventario":
 
     except Exception as e:
 
-        st.error(f"Error: {e}")
+        st.error(f"Error: {str(e)}")
 
     # =======================================================
     # 👤 TAB 4 — PROVEEDORES (VERSIÓN SEGURA PRO)
@@ -7856,6 +7875,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
