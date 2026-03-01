@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -2513,243 +2513,243 @@ elif menu == "📦 Inventario":
 
             st.info("Sin compras registradas")
 
-            st.stop()
+        else:
 
 
-        # ==========================================
-        # FILTROS
-        # ==========================================
+            # ==========================================
+            # FILTROS
+            # ==========================================
 
-        c1,c2 = st.columns(2)
+            c1,c2 = st.columns(2)
 
-        filtro_item = c1.text_input("🔍 Filtrar Insumo")
+            filtro_item = c1.text_input("🔍 Filtrar Insumo")
 
-        filtro_proveedor = c2.text_input("🔍 Filtrar Proveedor")
+            filtro_proveedor = c2.text_input("🔍 Filtrar Proveedor")
 
 
-        df_view = df_hist.copy()
+            df_view = df_hist.copy()
 
 
-        if filtro_item:
+            if filtro_item:
 
-            df_view = df_view[
+                df_view = df_view[
 
-                df_view.item.str.contains(
+                    df_view.item.str.contains(
 
-                    filtro_item,
+                        filtro_item,
 
-                    case=False,
+                        case=False,
 
-                    na=False
+                        na=False
 
-                )
+                    )
 
-            ]
+                ]
 
 
-        if filtro_proveedor:
+            if filtro_proveedor:
 
-            df_view = df_view[
+                df_view = df_view[
 
-                df_view.proveedor.str.contains(
+                    df_view.proveedor.str.contains(
 
-                    filtro_proveedor,
+                        filtro_proveedor,
 
-                    case=False,
+                        case=False,
 
-                    na=False
+                        na=False
 
-                )
+                    )
 
-            ]
+                ]
 
 
-        # ==========================================
-        # METRICAS
-        # ==========================================
+            # ==========================================
+            # METRICAS
+            # ==========================================
 
-        total = df_view.costo_total_usd.sum()
+            total = df_view.costo_total_usd.sum()
 
-        st.metric(
+            st.metric(
 
-            "💰 Total Comprado",
+                "💰 Total Comprado",
 
-            f"${total:,.2f}"
+                f"${total:,.2f}"
 
-        )
+            )
 
 
-        # ==========================================
-        # TABLA
-        # ==========================================
+            # ==========================================
+            # TABLA
+            # ==========================================
 
-        st.dataframe(
+            st.dataframe(
 
-            df_view,
+                df_view,
 
-            use_container_width=True,
+                use_container_width=True,
 
-            hide_index=True
+                hide_index=True
 
-        )
+            )
 
 
-        # ==========================================
-        # ELIMINAR COMPRA
-        # ==========================================
+            # ==========================================
+            # ELIMINAR COMPRA
+            # ==========================================
 
-        st.divider()
+            st.divider()
 
-        st.subheader("🧹 Corregir compra")
+            st.subheader("🧹 Corregir compra")
 
 
-        opciones = {
+            opciones = {
 
-            f"#{r.compra_id} | {r.item} | {r.cantidad} {r.unidad}":
+                f"#{r.compra_id} | {r.item} | {r.cantidad} {r.unidad}":
 
-            r.compra_id
+                r.compra_id
 
-            for r in df_hist.itertuples()
+                for r in df_hist.itertuples()
 
-        }
+            }
 
 
-        sel = st.selectbox(
+            sel = st.selectbox(
 
-            "Seleccionar",
+                "Seleccionar",
 
-            list(opciones.keys())
+                list(opciones.keys())
 
-        )
+            )
 
 
-        id_sel = opciones[sel]
+            id_sel = opciones[sel]
 
 
-        row = df_hist[
+            row = df_hist[
 
-            df_hist.compra_id == id_sel
+                df_hist.compra_id == id_sel
 
-        ].iloc[0]
+            ].iloc[0]
 
 
-        if st.button("🗑 Eliminar compra"):
+            if st.button("🗑 Eliminar compra"):
 
 
-            try:
+                try:
 
 
-                with conectar() as conn:
+                    with conectar() as conn:
 
 
-                    conn.execute("BEGIN")
+                        conn.execute("BEGIN")
 
 
-                    # INVENTARIO
+                        # INVENTARIO
 
-                    inv = conn.execute(
+                        inv = conn.execute(
 
-                        """
+                            """
 
-                        SELECT id,cantidad
+                            SELECT id,cantidad
 
-                        FROM inventario
+                            FROM inventario
 
-                        WHERE item=?
+                            WHERE item=?
 
-                        """,
+                            """,
 
-                        (row.item,)
+                            (row.item,)
 
-                    ).fetchone()
+                        ).fetchone()
 
 
-                    if inv:
+                        if inv:
 
 
-                        nueva = max(
+                            nueva = max(
 
-                            0,
+                                0,
 
-                            inv[1] - row.cantidad
+                                inv[1] - row.cantidad
 
-                        )
+                            )
 
+
+                            conn.execute(
+
+                                """
+
+                                UPDATE inventario
+
+                                SET cantidad=?
+
+                                WHERE id=?
+
+                                """,
+
+                                (
+
+                                    nueva,
+
+                                    inv[0]
+
+                                )
+
+                            )
+
+
+                            registrar_movimiento_inventario(
+
+                                inv[0],
+
+                                "SALIDA",
+
+                                row.cantidad,
+
+                                "Corrección",
+
+                                usuario_actual,
+
+                                conn
+
+                            )
+
+
+                        # HISTORIAL
 
                         conn.execute(
 
                             """
 
-                            UPDATE inventario
+                            UPDATE historial_compras
 
-                            SET cantidad=?
+                            SET activo=0
 
                             WHERE id=?
 
                             """,
 
-                            (
-
-                                nueva,
-
-                                inv[0]
-
-                            )
+                            (id_sel,)
 
                         )
 
 
-                        registrar_movimiento_inventario(
-
-                            inv[0],
-
-                            "SALIDA",
-
-                            row.cantidad,
-
-                            "Corrección",
-
-                            usuario_actual,
-
-                            conn
-
-                        )
+                        conn.commit()
 
 
-                    # HISTORIAL
-
-                    conn.execute(
-
-                        """
-
-                        UPDATE historial_compras
-
-                        SET activo=0
-
-                        WHERE id=?
-
-                        """,
-
-                        (id_sel,)
-
-                    )
+                    st.success("Compra eliminada")
 
 
-                    conn.commit()
+                    cargar_datos()
+
+                    st.rerun()
 
 
-                st.success("Compra eliminada")
+                except Exception as e:
 
 
-                cargar_datos()
-
-                st.rerun()
-
-
-            except Exception as e:
-
-
-                st.error(f"Error: {e}")
+                    st.error(f"Error: {e}")
 
     # =======================================================
     # 👤 TAB 4 — PROVEEDORES (VERSIÓN SEGURA PRO)
@@ -7325,10 +7325,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
 
 
 
