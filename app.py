@@ -2776,16 +2776,14 @@ elif menu == "📦 Inventario":
 
 )
 
-
 id_sel = opciones[sel]
 
-
 row = df_hist[
-
     df_hist.compra_id == id_sel
-
 ].iloc[0]
 
+
+# BOTON ELIMINAR
 
 if st.button("🗑 Eliminar compra"):
 
@@ -2796,18 +2794,14 @@ if st.button("🗑 Eliminar compra"):
             conn.execute("BEGIN")
 
 
-            # ==========================
-            # VALORES SEGUROS
-            # ==========================
+            # ======================
+            # DATOS SEGUROS
+            # ======================
 
             item_nombre = str(row["item"])
 
             cantidad_compra = float(row["cantidad"])
 
-
-            # ==========================
-            # BUSCAR INVENTARIO
-            # ==========================
 
             inv = conn.execute(
 
@@ -2848,7 +2842,9 @@ if st.button("🗑 Eliminar compra"):
 
                     UPDATE inventario
 
-                    SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP
+                    SET cantidad=?,
+
+                        ultima_actualizacion=CURRENT_TIMESTAMP
 
                     WHERE id=?
 
@@ -2882,10 +2878,6 @@ if st.button("🗑 Eliminar compra"):
                 )
 
 
-            # ==========================
-            # DESACTIVAR COMPRA
-            # ==========================
-
             conn.execute(
 
                 """
@@ -2906,8 +2898,7 @@ if st.button("🗑 Eliminar compra"):
             conn.commit()
 
 
-        st.success("✅ Compra eliminada correctamente")
-
+        st.success("Compra eliminada correctamente")
 
         cargar_datos()
 
@@ -2917,7 +2908,6 @@ if st.button("🗑 Eliminar compra"):
     except Exception as e:
 
         st.error(f"Error: {str(e)}")
-
     # =======================================================
     # 👤 TAB 4 — PROVEEDORES (VERSIÓN SEGURA PRO)
     # =======================================================
@@ -7879,6 +7869,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
