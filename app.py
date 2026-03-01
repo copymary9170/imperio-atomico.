@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -2770,144 +2770,141 @@ elif menu == "📦 Inventario":
 
             sel = st.selectbox(
 
-    "Seleccionar",
+                "Seleccionar",
 
-    list(opciones.keys())
-
-)
-
-id_sel = opciones[sel]
-
-row = df_hist[
-    df_hist.compra_id == id_sel
-].iloc[0]
-
-
-# BOTON ELIMINAR
-
-if st.button("🗑 Eliminar compra"):
-
-    try:
-
-        with conectar() as conn:
-
-            conn.execute("BEGIN")
-
-
-            # ======================
-            # DATOS SEGUROS
-            # ======================
-
-            item_nombre = str(row["item"])
-
-            cantidad_compra = float(row["cantidad"])
-
-
-            inv = conn.execute(
-
-                """
-
-                SELECT id, cantidad
-
-                FROM inventario
-
-                WHERE item=?
-
-                """,
-
-                (item_nombre,)
-
-            ).fetchone()
-
-
-            if inv:
-
-                item_id = int(inv[0])
-
-                stock_actual = float(inv[1])
-
-
-                nuevo_stock = max(
-
-                    0,
-
-                    stock_actual - cantidad_compra
-
-                )
-
-
-                conn.execute(
-
-                    """
-
-                    UPDATE inventario
-
-                    SET cantidad=?,
-
-                        ultima_actualizacion=CURRENT_TIMESTAMP
-
-                    WHERE id=?
-
-                    """,
-
-                    (
-
-                        nuevo_stock,
-
-                        item_id
-
-                    )
-
-                )
-
-
-                registrar_movimiento_inventario(
-
-                    item_id=item_id,
-
-                    tipo="SALIDA",
-
-                    cantidad=cantidad_compra,
-
-                    motivo="Corrección compra eliminada",
-
-                    usuario=usuario_actual,
-
-                    conn=conn
-
-                )
-
-
-            conn.execute(
-
-                """
-
-                UPDATE historial_compras
-
-                SET activo=0
-
-                WHERE id=?
-
-                """,
-
-                (int(id_sel),)
+                list(opciones.keys())
 
             )
 
 
-            conn.commit()
+            id_sel = opciones[sel]
 
 
-        st.success("Compra eliminada correctamente")
+            row = df_hist[
 
-        cargar_datos()
+                df_hist.compra_id == id_sel
 
-        st.rerun()
+            ].iloc[0]
 
 
-    except Exception as e:
+            if st.button("🗑 Eliminar compra"):
 
-        st.error(f"Error: {str(e)}")
+
+                try:
+
+
+                    with conectar() as conn:
+
+
+                        conn.execute("BEGIN")
+
+
+                        # INVENTARIO
+
+                        inv = conn.execute(
+
+                            """
+
+                            SELECT id,cantidad
+
+                            FROM inventario
+
+                            WHERE item=?
+
+                            """,
+
+                            (row.item,)
+
+                        ).fetchone()
+
+
+                        if inv:
+
+
+                            nueva = max(
+
+                                0,
+
+                                inv[1] - row.cantidad
+
+                            )
+
+
+                            conn.execute(
+
+                                """
+
+                                UPDATE inventario
+
+                                SET cantidad=?
+
+                                WHERE id=?
+
+                                """,
+
+                                (
+
+                                    nueva,
+
+                                    inv[0]
+
+                                )
+
+                            )
+
+
+                            registrar_movimiento_inventario(
+
+                                inv[0],
+
+                                "AJUSTE",
+
+                                row.cantidad,
+
+                                "Corrección compra (resta)",
+
+                                usuario_actual,
+
+                                conn
+
+                            )
+
+
+                        # HISTORIAL
+
+                        conn.execute(
+
+                            """
+
+                            UPDATE historial_compras
+
+                            SET activo=0
+
+                            WHERE id=?
+
+                            """,
+
+                            (id_sel,)
+
+                        )
+
+
+                        conn.commit()
+
+
+                    st.success("Compra eliminada")
+
+
+                    cargar_datos()
+
+                    st.rerun()
+
+
+                except Exception as e:
+
+
+                    st.error(f"Error: {e}")
+
     # =======================================================
     # 👤 TAB 4 — PROVEEDORES (VERSIÓN SEGURA PRO)
     # =======================================================
@@ -3233,127 +3230,49 @@ if st.button("🗑 Eliminar compra"):
 
         if prov_actual is not None:
 
-            if st.button("🗑 Eliminar compra"):
+            if st.button("🗑 Eliminar proveedor"):
 
-    try:
 
-        with conectar() as conn:
+                with conectar() as conn:
 
-            conn.execute("BEGIN")
 
+                    compras = conn.execute(
 
-            # =====================
-            # DATOS SEGUROS
-            # =====================
+                        """
 
-            item_nombre = str(row["item"])
+                        SELECT COUNT(*)
 
-            cantidad_compra = float(row["cantidad"])
+                        FROM historial_compras
 
+                        WHERE proveedor_id=?
 
-            inv = conn.execute(
+                        """,
 
-                """
+                        (int(prov_actual["id"]),)
 
-                SELECT id, cantidad
+                    ).fetchone()[0]
 
-                FROM inventario
 
-                WHERE item=?
+                    if compras > 0:
 
-                """,
+                        st.error("Tiene compras asociadas")
 
-                (item_nombre,)
+                    else:
 
-            ).fetchone()
+                        conn.execute(
 
+                            "UPDATE proveedores SET activo=0 WHERE id=?",
 
-            if inv:
+                            (int(prov_actual["id"]),)
 
-                item_id = int(inv[0])
+                        )
 
-                stock_actual = float(inv[1])
+                        conn.commit()
 
 
-                nuevo_stock = max(
+                        st.success("Proveedor eliminado")
 
-                    0,
-
-                    stock_actual - cantidad_compra
-
-                )
-
-
-                conn.execute(
-
-                    """
-
-                    UPDATE inventario
-
-                    SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP
-
-                    WHERE id=?
-
-                    """,
-
-                    (
-
-                        nuevo_stock,
-
-                        item_id
-
-                    )
-
-                )
-
-
-                registrar_movimiento_inventario(
-
-                    item_id=item_id,
-
-                    tipo="SALIDA",
-
-                    cantidad=cantidad_compra,
-
-                    motivo="Corrección compra eliminada",
-
-                    usuario=usuario_actual,
-
-                    conn=conn
-
-                )
-
-
-            conn.execute(
-
-                """
-
-                UPDATE historial_compras
-
-                SET activo=0
-
-                WHERE id=?
-
-                """,
-
-                (int(id_sel),)
-
-            )
-
-
-            conn.commit()
-
-
-        st.success("Compra eliminada correctamente")
-
-        cargar_datos()
-
-        st.rerun()
-
-
-    except Exception as e:
-
-        st.error(f"Error: {str(e)}")
+                        st.rerun()
     # =======================================================
     # 🔧 TAB 5 — AJUSTES INVENTARIO (VERSIÓN INDUSTRIAL PRO)
     # =======================================================
@@ -7869,10 +7788,5 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
-
 
 
