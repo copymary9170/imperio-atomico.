@@ -2491,31 +2491,27 @@ elif menu == "📦 Inventario":
                         # INVENTARIO
         
                         cur.execute("""
-        
-                        INSERT OR REPLACE INTO inventario
-        
-                        (item,cantidad,unidad,precio_usd,minimo,imprimible_cmyk,area_por_pliego_cm2,activo)
-        
-                        VALUES (?,?,?,?,?,?,?,1)
-        
+                        INSERT INTO inventario
+                        (item,cantidad,unidad,precio_usd,minimo,imprimible_cmyk,area_por_pliego_cm2,activo,ultima_actualizacion)
+                        VALUES (?,?,?,?,?,?,?,1,CURRENT_TIMESTAMP)
+                        ON CONFLICT(item) DO UPDATE SET
+                            cantidad=excluded.cantidad,
+                            unidad=excluded.unidad,
+                            precio_usd=excluded.precio_usd,
+                            minimo=excluded.minimo,
+                            imprimible_cmyk=excluded.imprimible_cmyk,
+                            area_por_pliego_cm2=excluded.area_por_pliego_cm2,
+                            activo=1,
+                            ultima_actualizacion=CURRENT_TIMESTAMP
                         """,
-        
                         (
-        
                             nombre_final,
-        
                             nueva_cant,
-        
                             unidad_final,
-        
                             precio_ponderado,
-        
                             minimo_stock,
-        
                             1 if imprimible_cmyk else 0,
-        
                             area_por_pliego_val
-
                         ))
 
                         item_db = cur.execute(
@@ -7788,3 +7784,4 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
