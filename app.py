@@ -3119,73 +3119,212 @@ elif menu == "📦 Inventario":
                         st.success("Proveedor eliminado")
 
                         st.rerun()
-        # =======================================================
-        # 🔧 TAB 5 — AJUSTES
-        # =======================================================
-        with tabs[4]:
+# =======================================================
+# 🔧 TAB 5 — AJUSTES INVENTARIO (VERSIÓN INDUSTRIAL PRO)
+# =======================================================
+with tabs[4]:
 
-            st.subheader("🔧 Ajustes del módulo de inventario")
-            st.caption("Estos parámetros precargan valores al registrar compras y ayudan al control de inventario.")
+    st.subheader("🔧 Configuración estratégica del Inventario")
+
+    usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
+
+    # =====================================================
+    # CREAR PARAMETROS SI NO EXISTEN
+    # =====================================================
+
+    PARAMS_DEFAULT = {
+
+        "inv_alerta_dias": 14,
+        "inv_impuesto_default": 16.0,
+        "inv_delivery_default": 0.0
+
+    }
+
+    with conectar() as conn:
+
+        for param, val in PARAMS_DEFAULT.items():
+
+            existe = conn.execute(
+                "SELECT 1 FROM configuracion WHERE parametro=?",
+                (param,)
+            ).fetchone()
+
+            if not existe:
+
+                conn.execute(
+                    "INSERT INTO configuracion (parametro, valor) VALUES (?,?)",
+                    (param, val)
+                )
+
+        conn.commit()
+
+
+        # cargar config
+        cfg = pd.read_sql(
+            "SELECT parametro, valor FROM configuracion",
+            conn
+        )
+
+    cfg_map = {
+
+        row.parametro: float(row.valor)
+
+        for row in cfg.itertuples()
+
+    }
+
+    # =====================================================
+    # PANEL VISUAL
+    # =====================================================
+
+    c1,c2,c3 = st.columns(3)
+
+    c1.metric(
+        "⏱️ Alerta reposición",
+        f"{int(cfg_map.get('inv_alerta_dias'))} días"
+    )
+
+    c2.metric(
+        "🛡️ Impuesto sugerido",
+        f"{cfg_map.get('inv_impuesto_default'):.2f}%"
+    )
+
+    c3.metric(
+        "🚚 Delivery sugerido",
+        f"${cfg_map.get('inv_delivery_default'):.2f}"
+    )
+
+    st.divider()
+
+    # =====================================================
+    # FORMULARIO
+    # =====================================================
+
+    with st.form("form_config_inventario", clear_on_submit=False):
+
+        alerta = st.number_input(
+
+            "Días alerta reposición",
+
+            min_value=1,
+
+            max_value=365,
+
+            value=int(cfg_map.get("inv_alerta_dias"))
+
+        )
+
+        impuesto = st.number_input(
+
+            "Impuesto default compras (%)",
+
+            min_value=0.0,
+
+            max_value=100.0,
+
+            value=cfg_map.get("inv_impuesto_default"),
+
+            format="%.2f"
+
+        )
+
+        delivery = st.number_input(
+
+            "Delivery default ($)",
+
+            min_value=0.0,
+
+            value=cfg_map.get("inv_delivery_default"),
+
+            format="%.2f"
+
+        )
+
+        guardar = st.form_submit_button(
+            "💾 Guardar Configuración",
+            use_container_width=True
+        )
+
+    # =====================================================
+    # GUARDAR
+    # =====================================================
+
+    if guardar:
+
+        try:
 
             with conectar() as conn:
-                cfg_inv = pd.read_sql(
-                    """
-                    SELECT parametro, valor
-                    FROM configuracion
-                    WHERE parametro IN ('inv_alerta_dias', 'inv_impuesto_default', 'inv_delivery_default')
+
+                conn.execute("BEGIN")
+
+
+                cambios = [
+
+                    ("inv_alerta_dias", alerta),
+
+                    ("inv_impuesto_default", impuesto),
+
+                    ("inv_delivery_default", delivery)
+
+                ]
+
+
+                for param, nuevo in cambios:
+
+
+                    viejo = conn.execute(
+
+                        "SELECT valor FROM configuracion WHERE parametro=?",
+
+                        (param,)
+
+                    ).fetchone()[0]
+
+
+                    conn.execute(
+
+                        "UPDATE configuracion SET valor=? WHERE parametro=?",
+
+                        (nuevo, param)
+
+                    )
+
+
+                    # HISTORIAL
+
+                    conn.execute("""
+
+                    INSERT INTO historial_config
+
+                    (parametro,valor_anterior,valor_nuevo,usuario)
+
+                    VALUES (?,?,?,?)
+
                     """,
-                    conn
-                )
 
-            cfg_map = {row["parametro"]: float(row["valor"]) for _, row in cfg_inv.iterrows()}
+                    (param, viejo, nuevo, usuario_actual))
 
-            with st.form("form_ajustes_inventario"):
-                alerta_dias = st.number_input(
-                    "Días para alerta de reposición",
-                    min_value=1,
-                    max_value=120,
-                    value=int(cfg_map.get("inv_alerta_dias", 14)),
-                    help="Referencia para revisar proveedores y planificar compras preventivas."
-                )
-                impuesto_default = st.number_input(
-                    "Impuesto por defecto en compras (%)",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=float(cfg_map.get("inv_impuesto_default", 16.0)),
-                    format="%.2f"
-                )
-                delivery_default = st.number_input(
-                    "Delivery por defecto por compra ($)",
-                    min_value=0.0,
-                    value=float(cfg_map.get("inv_delivery_default", 0.0)),
-                    format="%.2f"
-                )
 
-                guardar_ajustes = st.form_submit_button("💾 Guardar ajustes", use_container_width=True)
+                conn.commit()
 
-            if guardar_ajustes:
-                with conectar() as conn:
-                    ajustes = [
-                        ("inv_alerta_dias", float(alerta_dias)),
-                        ("inv_impuesto_default", float(impuesto_default)),
-                        ("inv_delivery_default", float(delivery_default))
-                    ]
-                    for parametro, valor in ajustes:
-                        conn.execute(
-                            "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES (?, ?)",
-                            (parametro, valor)
-                        )
-                    conn.commit()
 
-                st.session_state["inv_alerta_dias"] = float(alerta_dias)
-                st.session_state["inv_impuesto_default"] = float(impuesto_default)
-                st.session_state["inv_delivery_default"] = float(delivery_default)
-                st.success("Ajustes de inventario actualizados.")
+            # actualizar cache
 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("⏱️ Alerta reposición", f"{int(cfg_map.get('inv_alerta_dias', 14))} días")
-                c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
-                c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
+            st.session_state.inv_alerta_dias = alerta
+
+            st.session_state.inv_impuesto_default = impuesto
+
+            st.session_state.inv_delivery_default = delivery
+
+
+            st.success("✅ Configuración actualizada correctamente")
+
+            st.rerun()
+
+
+        except Exception as e:
+
+            st.error(f"Error guardando: {e}")
 
 
 # --- Kontigo --- #
@@ -7325,6 +7464,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
