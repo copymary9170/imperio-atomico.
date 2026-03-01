@@ -2789,121 +2789,115 @@ elif menu == "📦 Inventario":
 
             if st.button("🗑 Eliminar compra"):
 
+    try:
 
-                try:
+        with conectar() as conn:
 
+            conn.execute("BEGIN")
 
-                    with conectar() as conn:
 
+            # VALORES SEGUROS
 
-                        conn.execute("BEGIN")
+            item_nombre = str(row["item"])
 
+            cantidad_compra = float(row["cantidad"])
 
-                        # INVENTARIO
 
-                        inv = conn.execute(
+            # BUSCAR INVENTARIO
 
-                            """
+            inv = conn.execute(
 
-                            SELECT id,cantidad
+                """
+                SELECT id,cantidad
+                FROM inventario
+                WHERE item=?
+                """,
 
-                            FROM inventario
+                (item_nombre,)
 
-                            WHERE item=?
+            ).fetchone()
 
-                            """,
 
-                            (row.item,)
+            if inv:
 
-                        ).fetchone()
+                item_id = int(inv[0])
 
+                stock_actual = float(inv[1])
 
-                        if inv:
 
+                nuevo_stock = max(
 
-                            nueva = max(
+                    0,
 
-                                0,
+                    stock_actual - cantidad_compra
 
-                                inv[1] - row.cantidad
+                )
 
-                            )
 
+                conn.execute(
 
-                            conn.execute(
+                    """
+                    UPDATE inventario
+                    SET cantidad=?
+                    WHERE id=?
+                    """,
 
-                                """
+                    (
 
-                                UPDATE inventario
+                        nuevo_stock,
 
-                                SET cantidad=?
+                        item_id
 
-                                WHERE id=?
+                    )
 
-                                """,
+                )
 
-                                (
 
-                                    nueva,
+                registrar_movimiento_inventario(
 
-                                    inv[0]
+                    item_id,
 
-                                )
+                    "SALIDA",
 
-                            )
+                    cantidad_compra,
 
+                    "Corrección compra eliminada",
 
-                            registrar_movimiento_inventario(
+                    usuario_actual,
 
-                                inv[0],
+                    conn
 
-                                "AJUSTE",
+                )
 
-                                row.cantidad,
 
-                                "Corrección compra (resta)",
+            # DESACTIVAR HISTORIAL
 
-                                usuario_actual,
+            conn.execute(
 
-                                conn
+                """
+                UPDATE historial_compras
+                SET activo=0
+                WHERE id=?
+                """,
 
-                            )
+                (int(id_sel),)
 
+            )
 
-                        # HISTORIAL
 
-                        conn.execute(
+            conn.commit()
 
-                            """
 
-                            UPDATE historial_compras
+        st.success("Compra eliminada correctamente")
 
-                            SET activo=0
+        cargar_datos()
 
-                            WHERE id=?
+        st.rerun()
 
-                            """,
 
-                            (id_sel,)
+    except Exception as e:
 
-                        )
-
-
-                        conn.commit()
-
-
-                    st.success("Compra eliminada")
-
-
-                    cargar_datos()
-
-                    st.rerun()
-
-
-                except Exception as e:
-
-
-                    st.error(f"Error: {e}")
+        st.error(f"Error: {e}")
 
     # =======================================================
     # 👤 TAB 4 — PROVEEDORES (VERSIÓN SEGURA PRO)
@@ -7862,6 +7856,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
