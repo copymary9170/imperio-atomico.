@@ -2098,7 +2098,7 @@ def inicializar_sistema():
         
         add_col("nivel_y","REAL")
 
-add_col("nivel_k","REAL")
+        add_col("nivel_k","REAL")
         
 
         conn.commit()
@@ -8603,6 +8603,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
