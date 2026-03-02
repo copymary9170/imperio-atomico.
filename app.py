@@ -2031,6 +2031,74 @@ def inicializar_sistema():
         ON diagnosticos_impresora(activo_id)
         
         """)
+
+
+        # ===========================================================
+        # CREAR TABLA SI NO EXISTE
+        # ===========================================================
+        
+        c.execute("""
+        
+        CREATE TABLE IF NOT EXISTS diagnosticos_impresora (
+        
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        
+        activo_id INTEGER,
+        
+        archivo_nombre TEXT,
+        
+        archivo_blob BLOB,
+        
+        vida_cabezal_pct REAL,
+        
+        usuario TEXT,
+        
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        
+        )
+        
+        """)
+        
+        
+        # ===========================================================
+        # MIGRACIÓN SEGURA DE COLUMNAS NUEVAS
+        # ===========================================================
+        
+        cols_diag = {
+        
+        row[1]
+        
+        for row in c.execute(
+        
+        "PRAGMA table_info(diagnosticos_impresora)"
+        
+        ).fetchall()
+        
+        }
+        
+        
+        def add_col(col, tipo):
+        
+            if col not in cols_diag:
+        
+                c.execute(
+        
+                    f"ALTER TABLE diagnosticos_impresora ADD COLUMN {col} {tipo}"
+        
+                )
+        
+        
+        add_col("tinta_restante_ml","REAL")
+        
+        add_col("paginas_impresas","INTEGER")
+        
+        add_col("nivel_c","REAL")
+        
+        add_col("nivel_m","REAL")
+        
+        add_col("nivel_y","REAL")
+
+add_col("nivel_k","REAL")
         
 
         conn.commit()
@@ -8535,6 +8603,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
