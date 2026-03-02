@@ -6333,36 +6333,41 @@ elif menu == "🧠 Diagnóstico IA":
         return [int(p) for p in porcentajes]
 
 
-# ===========================================================
-# DETECTAR POR FOTO REAL
-# ===========================================================
+    # ===========================================================
+    # DETECTAR NIVEL POR FOTO REAL HP SMART TANK
+    # ===========================================================
 
     def detectar_por_foto(img):
 
         altura, ancho, _ = img.shape
 
-    zonas = {
+        zonas = {
 
-        "Black": img[:, 0:int(ancho*0.25)],
-        "Cyan": img[:, int(ancho*0.25):int(ancho*0.50)],
-        "Magenta": img[:, int(ancho*0.50):int(ancho*0.75)],
-        "Yellow": img[:, int(ancho*0.75):ancho]
+            "Black": img[:, 0:int(ancho * 0.25)],
+            "Cyan": img[:, int(ancho * 0.25):int(ancho * 0.50)],
+            "Magenta": img[:, int(ancho * 0.50):int(ancho * 0.75)],
+            "Yellow": img[:, int(ancho * 0.75):ancho]
 
-    }
+        }
 
-    niveles = {}
+        niveles = {}
 
-    for color, zona in zonas.items():
+        for color, zona in zonas.items():
 
-        gray = cv2.cvtColor(zona, cv2.COLOR_BGR2GRAY)
+            gray = cv2.cvtColor(zona, cv2.COLOR_BGR2GRAY)
 
-        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+            _, thresh = cv2.threshold(
+                gray,
+                200,
+                255,
+                cv2.THRESH_BINARY_INV
+            )
 
-        porcentaje = np.sum(thresh > 0) / thresh.size
+            porcentaje = np.sum(thresh > 0) / thresh.size
 
-        niveles[color] = porcentaje * 100
+            niveles[color] = porcentaje
 
-    return niveles
+        return niveles
 
 
 # ===========================================================
@@ -8664,6 +8669,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
