@@ -6339,17 +6339,30 @@ elif menu == "🧠 Diagnóstico IA":
 
     def detectar_por_foto(img):
 
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    altura, ancho, _ = img.shape
 
-        lower = np.array([0,0,180])
+    zonas = {
 
-        upper = np.array([255,60,255])
+        "Black": img[:, 0:int(ancho*0.25)],
+        "Cyan": img[:, int(ancho*0.25):int(ancho*0.50)],
+        "Magenta": img[:, int(ancho*0.50):int(ancho*0.75)],
+        "Yellow": img[:, int(ancho*0.75):ancho]
 
-        mask = cv2.inRange(hsv, lower, upper)
+    }
 
-        porcentaje = np.sum(mask == 0) / mask.size
+    niveles = {}
 
-        return porcentaje * 100
+    for color, zona in zonas.items():
+
+        gray = cv2.cvtColor(zona, cv2.COLOR_BGR2GRAY)
+
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+
+        porcentaje = np.sum(thresh > 0) / thresh.size
+
+        niveles[color] = porcentaje * 100
+
+    return niveles
 
 
 # ===========================================================
@@ -6444,7 +6457,9 @@ elif menu == "🧠 Diagnóstico IA":
 
             img_tanque = convertir_imagen(archivo_tanque)
 
-            porcentaje_foto = detectar_por_foto(img_tanque)
+            for color in capacidad:
+
+                p_foto = porcentaje_foto.get(color, None)
 
         else:
 
@@ -8649,6 +8664,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
