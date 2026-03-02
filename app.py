@@ -6464,11 +6464,20 @@ elif menu == "🧠 Diagnóstico IA":
 
             for color in capacidad:
 
-                p_foto = porcentaje_foto.get(color, None)
+               porcentaje_foto = None
 
-        else:
+if foto_tanque:
 
-            porcentaje_foto = None
+    img_tanque = cv2.imdecode(
+        np.frombuffer(foto_tanque.read(), np.uint8),
+        cv2.IMREAD_COLOR
+    )
+
+    porcentaje_foto = detectar_por_foto(img_tanque)
+
+else:
+
+    porcentaje_foto = {}
 
 
 # ===========================================================
@@ -6508,6 +6517,21 @@ elif menu == "🧠 Diagnóstico IA":
             if porcentaje:
 
                 resultados[color] = cap * porcentaje / 100
+
+            niveles_final = {}
+                
+              for color in ["Black","Cyan","Magenta","Yellow"]:
+                
+                   p_foto = porcentaje_foto.get(color, None)
+                
+                  if p_foto is not None:
+                
+                       niveles_final[color] = p_foto * capacidad_ml
+                
+                else:
+                
+                       niveles_final[color] = None
+
 
 
 # ===========================================================
@@ -8669,6 +8693,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
