@@ -6237,7 +6237,7 @@ elif menu == "🏗️ Activos":
 
 
 # ===========================================================
-# 🧠 DIAGNÓSTICO IA REAL POR TANQUE
+# 🧠 DIAGNÓSTICO IA INDUSTRIAL COMPLETO
 # ===========================================================
 
 elif menu == "🧠 Diagnóstico IA":
@@ -6248,11 +6248,10 @@ elif menu == "🧠 Diagnóstico IA":
     from pdf2image import convert_from_bytes
     import re
 
-    st.title("Diagnóstico Inteligente REAL")
-
+    st.title("🧠 Diagnóstico Inteligente Industrial")
 
 # ===========================================================
-# CARGAR IMPRESORA
+# CARGAR IMPRESORAS
 # ===========================================================
 
     with conectar() as conn:
@@ -6262,179 +6261,279 @@ elif menu == "🧠 Diagnóstico IA":
             conn
         )
 
+    if df_imp.empty:
+
+        st.error("No hay impresoras registradas")
+
+        st.stop()
+
     impresora_sel = st.selectbox(
-        "Impresora",
+
+        "Seleccionar impresora",
+
         df_imp["equipo"]
-    )
 
-    archivo = st.file_uploader(
-        "Archivo diagnóstico",
-        type=["pdf","jpg","png"]
     )
 
 
 # ===========================================================
-# CONVERTIR PDF
+# SUBIR ARCHIVOS
 # ===========================================================
 
-    def convertir(file):
+    archivo_diag = st.file_uploader(
 
-        if archivo.type=="application/pdf":
+        "📄 Hoja diagnóstico",
 
-            pages=convert_from_bytes(file)
+        type=["pdf","png","jpg"]
 
-            img=np.array(pages[0])
+    )
+
+    archivo_tanque = st.file_uploader(
+
+        "🖼 Foto de tanques",
+
+        type=["png","jpg"]
+
+    )
+
+
+# ===========================================================
+# FUNCIONES
+# ===========================================================
+
+    def convertir_imagen(file):
+
+        if file.type == "application/pdf":
+
+            pages = convert_from_bytes(file.read())
+
+            return np.array(pages[0])
 
         else:
 
-            img=cv2.imdecode(
-                np.frombuffer(file,np.uint8),
+            return cv2.imdecode(
+
+                np.frombuffer(file.read(), np.uint8),
+
                 cv2.IMREAD_COLOR
+
             )
 
-        return img
+
+# ===========================================================
+# DETECTAR POR TEXTO
+# ===========================================================
+
+    def detectar_por_texto(img):
+
+        texto = pytesseract.image_to_string(img)
+
+        porcentajes = re.findall(r'(\d+)%', texto)
+
+        return [int(p) for p in porcentajes]
 
 
 # ===========================================================
-# DETECTAR PORCENTAJE REAL
+# DETECTAR POR FOTO REAL
 # ===========================================================
 
-    def detectar_porcentaje(img):
+    def detectar_por_foto(img):
 
-        texto=pytesseract.image_to_string(img)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        porcentajes=re.findall(r'(\d+)%',texto)
+        lower = np.array([0,0,180])
 
-        if porcentajes:
+        upper = np.array([255,60,255])
 
-            return [int(p) for p in porcentajes]
+        mask = cv2.inRange(hsv, lower, upper)
 
-        return []
+        porcentaje = np.sum(mask == 0) / mask.size
+
+        return porcentaje * 100
 
 
 # ===========================================================
 # CAPACIDAD REAL
 # ===========================================================
 
-    def capacidad():
+    def obtener_capacidad():
 
-        if "580" in impresora_sel.lower():
+        nombre = impresora_sel.lower()
 
-            return {
-
-            "Black":70,
-
-            "Cyan":70,
-
-            "Magenta":70,
-
-            "Yellow":70
-
-            }
-
-        if "122" in impresora_sel:
+        if "580" in nombre:
 
             return {
 
-            "Black":12.4,
+                "Black":70,
 
-            "Color":14
+                "Cyan":70,
+
+                "Magenta":70,
+
+                "Yellow":70
 
             }
 
-        return {}
+        elif "122" in nombre:
+
+            return {
+
+                "Black":12.4,
+
+                "Color":14
+
+            }
+
+        elif "1250" in nombre:
+
+            return {
+
+                "Black":70,
+
+                "Cyan":70,
+
+                "Magenta":70,
+
+                "Yellow":70
+
+            }
+
+        else:
+
+            return {}
 
 
 # ===========================================================
 # ANALIZAR
 # ===========================================================
 
-    if st.button("ANALIZAR"):
+    if st.button("🚀 ANALIZAR"):
 
-        if archivo is None:
+        if archivo_diag is None and archivo_tanque is None:
 
-            st.error("Sube archivo")
-
-            st.stop()
-
-
-        img=convertir(archivo.read())
-
-        porcentajes=detectar_porcentaje(img)
-
-        cap=capacidad()
-
-
-        if not porcentajes:
-
-            st.error("No se detectaron niveles")
+            st.error("Sube al menos un archivo")
 
             st.stop()
 
 
+        capacidad = obtener_capacidad()
+
+        resultados = {}
+
+
 # ===========================================================
-# CALCULAR ML REAL
+# ANALISIS HOJA
 # ===========================================================
 
-        resultados={}
+        if archivo_diag:
 
-        colores=list(cap.keys())
+            img_diag = convertir_imagen(archivo_diag)
+
+            porcentajes = detectar_por_texto(img_diag)
+
+        else:
+
+            porcentajes = []
 
 
-        for i,p in enumerate(porcentajes):
+# ===========================================================
+# ANALISIS FOTO
+# ===========================================================
 
-            if i<len(colores):
+        if archivo_tanque:
 
-                color=colores[i]
+            img_tanque = convertir_imagen(archivo_tanque)
 
-                resultados[color]=cap[color]*(p/100)
+            porcentaje_foto = detectar_por_foto(img_tanque)
+
+        else:
+
+            porcentaje_foto = None
+
+
+# ===========================================================
+# CALCULO FINAL
+# ===========================================================
+
+        colores = list(capacidad.keys())
+
+        for i,color in enumerate(colores):
+
+            cap = capacidad[color]
+
+            p_texto = porcentajes[i] if i < len(porcentajes) else None
+
+            p_foto = porcentaje_foto
+
+
+            # PROMEDIO INTELIGENTE
+
+            if p_texto and p_foto:
+
+                porcentaje = (p_texto + p_foto) / 2
+
+            elif p_texto:
+
+                porcentaje = p_texto
+
+            elif p_foto:
+
+                porcentaje = p_foto
+
+            else:
+
+                porcentaje = None
+
+
+            if porcentaje:
+
+                resultados[color] = cap * porcentaje / 100
 
 
 # ===========================================================
 # MOSTRAR RESULTADOS
 # ===========================================================
 
-        st.subheader("Nivel real por tanque")
+        st.subheader("Resultado final")
 
         for color,ml in resultados.items():
 
-            st.write(color,round(ml,2),"ml")
+            st.write(f"{color}: {ml:.2f} ml")
 
 
 # ===========================================================
-# GUARDAR EN INVENTARIO
+# GUARDAR
 # ===========================================================
 
         with conectar() as conn:
 
+            activo_id = df_imp[df_imp["equipo"] == impresora_sel]["id"].values[0]
+
             for color,ml in resultados.items():
 
-                nombre=f"Tinta {color} {impresora_sel}"
+                nombre = f"Tinta {color} {impresora_sel}"
 
-                row=conn.execute(
+                row = conn.execute(
 
-                "SELECT id,cantidad FROM inventario WHERE item=?",
+                    "SELECT id FROM inventario WHERE item=?",
 
-                (nombre,)
+                    (nombre,)
 
                 ).fetchone()
-
 
                 if row:
 
                     conn.execute(
 
-                    "UPDATE inventario SET cantidad=? WHERE id=?",
+                        "UPDATE inventario SET cantidad=? WHERE id=?",
 
-                    (ml,row[0])
+                        (ml,row[0])
 
                     )
 
-
             conn.commit()
 
-
-        st.success("Inventario actualizado correctamente")
+        st.success("Diagnóstico guardado correctamente")
             
 # ===========================================================
 # 11. MÓDULO PROFESIONAL DE OTROS PROCESOS
@@ -8550,6 +8649,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
