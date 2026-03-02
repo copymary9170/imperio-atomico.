@@ -15,13 +15,6 @@ import secrets
 import re
 from decimal import Decimal, ROUND_HALF_UP
 
-pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
-
-image = Image.open("test.png")
-
-text = pytesseract.image_to_string(image)
-
-st.write(text)
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_icon="⚛️")
@@ -8552,5 +8545,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
