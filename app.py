@@ -1993,6 +1993,46 @@ def inicializar_sistema():
             ]
         )
 
+
+        # ===========================================================
+        # TABLA DIAGNOSTICOS IMPRESORA IA
+        # ===========================================================
+        
+        c.execute("""
+        
+        CREATE TABLE IF NOT EXISTS diagnosticos_impresora (
+        
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        
+        activo_id INTEGER,
+        
+        tinta_restante_ml REAL,
+        
+        vida_cabezal_pct REAL,
+        
+        archivo_nombre TEXT,
+        
+        archivo_blob BLOB,
+        
+        fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+        
+        usuario TEXT,
+        
+        FOREIGN KEY(activo_id) REFERENCES activos(id)
+        
+        )
+        
+        """)
+
+        c.execute("""
+
+        CREATE INDEX IF NOT EXISTS idx_diag_activo
+        
+        ON diagnosticos_impresora(activo_id)
+        
+        """)
+        
+
         conn.commit()
 
 
@@ -8495,6 +8535,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
