@@ -6339,7 +6339,7 @@ elif menu == "🧠 Diagnóstico IA":
 
     def detectar_por_foto(img):
 
-    altura, ancho, _ = img.shape
+        altura, ancho, _ = img.shape
 
     zonas = {
 
@@ -8664,6 +8664,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
