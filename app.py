@@ -6127,79 +6127,308 @@ elif menu == "🏗️ Activos":
         st.info("No hay activos registrados todavía.")
 
 
-
-
 # ===========================================================
-# 🖨️ MÓDULO DIAGNÓSTICO DE IMPRESORA
+# 🖨️ MÓDULO DIAGNÓSTICO DE IMPRESORA — NIVEL INDUSTRIAL PRO
 # ===========================================================
 elif menu == "🖨️ Diagnóstico Impresora":
 
-    st.title("🖨️ Importar diagnóstico de impresora")
-    st.caption("Carga PDF/JPG/PNG del diagnóstico Epson y registra vida de cabezal + nivel de tinta")
+    st.title("🖨️ Diagnóstico Inteligente de Impresora")
+
+    import pytesseract
+    import re
+    from PIL import Image
+    import io
+
+    usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
+
+    # =====================================================
+    # CARGAR IMPRESORAS
+    # =====================================================
 
     with conectar() as conn:
-        try:
-            df_imp = pd.read_sql_query("SELECT id, equipo FROM activos WHERE COALESCE(activo,1)=1 ORDER BY equipo", conn)
-        except Exception:
-            df_imp = pd.DataFrame(columns=['id', 'equipo'])
+
+        df_imp = pd.read_sql("""
+
+            SELECT id, equipo, modelo
+
+            FROM activos
+
+            WHERE activo = 1
+
+            ORDER BY equipo
+
+        """, conn)
+
 
     if df_imp.empty:
-        st.warning("No hay impresoras activas registradas en activos.")
-    else:
-        imp_map = {str(r['equipo']): int(r['id']) for _, r in df_imp.iterrows()}
-        impresora_sel = st.selectbox("Impresora", list(imp_map.keys()))
-        archivo_diag = st.file_uploader("Archivo diagnóstico", type=['pdf', 'jpg', 'jpeg', 'png'])
-        vida_cabezal_pct = st.number_input("Vida cabezal (%)", min_value=0.0, max_value=100.0, value=100.0)
-        tinta_pct = st.number_input("Porcentaje tinta (%)", min_value=0.0, max_value=100.0, value=100.0)
 
-        if st.button("💾 Guardar diagnóstico", use_container_width=True):
-            if archivo_diag is None:
-                st.error("Debes cargar un archivo diagnóstico.")
-            else:
-                activo_id = imp_map[impresora_sel]
-                usuario_diag = st.session_state.get('usuario_nombre', 'Sistema')
-                data_bytes = archivo_diag.getvalue()
-                ext = str(archivo_diag.type or '').lower()
-                with conectar() as conn:
-                    conn.execute(
-                        """
-                        INSERT INTO diagnosticos_impresora (activo_id, archivo_nombre, archivo_tipo, archivo_blob, vida_cabezal_pct, porcentaje_tinta, usuario)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (int(activo_id), str(archivo_diag.name), ext, sqlite3.Binary(data_bytes), float(vida_cabezal_pct), float(tinta_pct), usuario_diag)
-                    )
-                    conn.execute(
-                        "INSERT INTO vida_cabezal (impresora, vida_total, vida_restante) VALUES (?, ?, ?)",
-                        (impresora_sel, 100.0, float(vida_cabezal_pct))
-                    )
-                    conn.execute(
-                        "UPDATE activos SET desgaste = MAX(COALESCE(desgaste,0), ?) WHERE id=?",
-                        (float(max(0.0, 100.0 - vida_cabezal_pct)), int(activo_id))
+        st.warning("No hay impresoras registradas")
+
+        st.stop()
+
+
+    imp_map = {
+
+        f"{r.equipo} ({r.modelo})": r.id
+
+        for r in df_imp.itertuples()
+
+    }
+
+
+    impresora_sel = st.selectbox(
+
+        "Seleccionar impresora",
+
+        list(imp_map.keys())
+
+    )
+
+
+    activo_id = imp_map[impresora_sel]
+
+
+    archivo = st.file_uploader(
+
+        "Subir hoja diagnóstico",
+
+        type=["png","jpg","jpeg","pdf"]
+
+    )
+
+
+    foto_tanques = st.file_uploader(
+
+        "Foto opcional de tanques",
+
+        type=["png","jpg","jpeg"]
+
+    )
+
+
+    # =====================================================
+    # ANALISIS OCR
+    # =====================================================
+
+    def analizar_imagen(img):
+
+        texto = pytesseract.image_to_string(img)
+
+        texto = texto.upper()
+
+        resultado = {}
+
+        patron = r'(\d+)%'
+
+        porcentajes = re.findall(patron, texto)
+
+        if len(porcentajes) >= 4:
+
+            resultado["C"] = float(porcentajes[0])
+            resultado["M"] = float(porcentajes[1])
+            resultado["Y"] = float(porcentajes[2])
+            resultado["K"] = float(porcentajes[3])
+
+        vida = re.search(r'HEAD.*?(\d+)%', texto)
+
+        if vida:
+
+            resultado["VIDA"] = float(vida.group(1))
+
+        return resultado
+
+
+    # =====================================================
+    # BOTON ANALIZAR
+    # =====================================================
+
+    if st.button("🔎 Analizar diagnóstico", use_container_width=True):
+
+        if archivo is None:
+
+            st.error("Sube archivo")
+
+            st.stop()
+
+
+        img = Image.open(archivo)
+
+
+        datos = analizar_imagen(img)
+
+
+        if not datos:
+
+            st.error("No se pudo detectar información")
+
+            st.stop()
+
+
+        st.success("Diagnóstico detectado")
+
+        st.write(datos)
+
+
+        with conectar() as conn:
+
+
+            # =====================================================
+            # GUARDAR VIDA CABEZAL
+            # =====================================================
+
+            vida = datos.get("VIDA", 100)
+
+
+            conn.execute("""
+
+                INSERT INTO vida_cabezal
+
+                (impresora, vida_total, vida_restante)
+
+                VALUES (?,?,?)
+
+            """,(impresora_sel,100,vida))
+
+
+            # =====================================================
+            # DESCONTAR INVENTARIO
+            # =====================================================
+
+            tintas = pd.read_sql("""
+
+                SELECT i.id,
+
+                i.capacidad_ml,
+
+                i.cantidad,
+
+                i.color_cmyk,
+
+                i.costo_promedio
+
+                FROM inventario i
+
+                JOIN activos_insumos ai
+
+                ON ai.inventario_id = i.id
+
+                WHERE ai.activo_id = ?
+
+                AND i.tipo_material='tinta'
+
+            """,conn,params=(activo_id,))
+
+
+            for t in tintas.itertuples():
+
+                color = t.color_cmyk
+
+                if color in datos:
+
+                    porcentaje = datos[color]
+
+                    ml_restante = (
+
+                        t.capacidad_ml
+
+                        * porcentaje
+
+                        / 100
+
                     )
 
-                    tintas_vinculadas = obtener_tintas_impresora(conn, impresora_sel)
-                    if tintas_vinculadas is not None and not tintas_vinculadas.empty:
-                        consumo_total_ml = max(0.0, (100.0 - float(tinta_pct)) * 0.1)
-                        if consumo_total_ml > 0:
-                            reparto_ml = consumo_total_ml / max(len(tintas_vinculadas), 1)
-                            for _, row_t in tintas_vinculadas.iterrows():
-                                iid = int(row_t['id'])
-                                costo_ref = float(row_t.get('costo_promedio', row_t.get('precio_usd', 0.0)) or 0.0)
-                                okm, msgm = procesar_movimiento_inventario(
-                                    item_id=iid,
-                                    tipo='SALIDA',
-                                    cantidad=float(reparto_ml),
-                                    costo_unitario=float(costo_ref),
-                                    motivo=f'Diagnóstico impresora {impresora_sel}',
-                                    usuario=usuario_diag,
-                                    conn=conn
-                                )
-                                if not okm:
-                                    st.warning(f"No se pudo descontar tinta ID {iid}: {msgm}")
-                    conn.commit()
-                cargar_datos()
-                st.success("Diagnóstico registrado, vida de cabezal actualizada y consumo de tinta aplicado.")
+                    ml_consumido = (
 
+                        t.capacidad_ml
+
+                        - ml_restante
+
+                    )
+
+                    nueva = max(
+
+                        0,
+
+                        t.cantidad
+
+                        - ml_consumido
+
+                    )
+
+
+                    conn.execute("""
+
+                        UPDATE inventario
+
+                        SET cantidad = ?
+
+                        WHERE id = ?
+
+                    """,(nueva,t.id))
+
+
+                    conn.execute("""
+
+                        INSERT INTO kardex
+
+                        (
+
+                        item_id,
+
+                        item,
+
+                        tipo,
+
+                        cantidad,
+
+                        stock_anterior,
+
+                        stock_nuevo,
+
+                        costo_unit,
+
+                        costo_total,
+
+                        usuario
+
+                        )
+
+                        VALUES
+
+                        (?,?,?,?,?,?,?,?,?)
+
+                    """,(
+
+                        t.id,
+
+                        color,
+
+                        "DIAGNOSTICO",
+
+                        ml_consumido,
+
+                        t.cantidad,
+
+                        nueva,
+
+                        t.costo_promedio,
+
+                        ml_consumido
+
+                        * t.costo_promedio,
+
+                        usuario_actual
+
+                    ))
+
+
+            conn.commit()
+
+
+        cargar_datos()
+
+
+        st.success("Inventario actualizado correctamente")
 
 # ===========================================================
 # 11. MÓDULO PROFESIONAL DE OTROS PROCESOS
@@ -8315,3 +8544,4 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
