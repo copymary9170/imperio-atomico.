@@ -2093,7 +2093,7 @@ with st.sidebar:
             "👥 Clientes",
             "🎨 Análisis CMYK",
             "🏗️ Activos",
-            "🖨️ Diagnóstico Impresora",
+            "🧠 Diagnóstico IA",
             "🛠️ Otros Procesos",
             "✂️ Corte Industrial",
             "🔥 Sublimación Industrial",
@@ -6129,307 +6129,257 @@ elif menu == "🏗️ Activos":
 
 
 # ===========================================================
-# 🖨️ MÓDULO DIAGNÓSTICO DE IMPRESORA — NIVEL INDUSTRIAL PRO
+# 🧠 DIAGNÓSTICO IMPRESORA IA INDUSTRIAL
 # ===========================================================
-elif menu == "🖨️ Diagnóstico Impresora":
 
-    st.title("🖨️ Diagnóstico Inteligente de Impresora")
+elif menu == "🧠 Diagnóstico IA":
 
+    import cv2
+    import numpy as np
     import pytesseract
-    import re
+    from pdf2image import convert_from_bytes
     from PIL import Image
-    import io
 
-    usuario_actual = st.session_state.get("usuario_nombre", "Sistema")
-
-    # =====================================================
-    # CARGAR IMPRESORAS
-    # =====================================================
+    st.title("🧠 Diagnóstico Inteligente de Impresora")
 
     with conectar() as conn:
 
-        df_imp = pd.read_sql("""
-
-            SELECT id, equipo, modelo
-
-            FROM activos
-
-            WHERE activo = 1
-
-            ORDER BY equipo
-
-        """, conn)
-
+        df_imp = pd.read_sql(
+            "SELECT id, equipo FROM activos WHERE activo=1",
+            conn
+        )
 
     if df_imp.empty:
 
-        st.warning("No hay impresoras registradas")
+        st.error("No hay impresoras")
 
         st.stop()
 
-
-    imp_map = {
-
-        f"{r.equipo} ({r.modelo})": r.id
-
-        for r in df_imp.itertuples()
-
-    }
-
-
     impresora_sel = st.selectbox(
 
-        "Seleccionar impresora",
+        "Selecciona impresora",
 
-        list(imp_map.keys())
-
-    )
-
-
-    activo_id = imp_map[impresora_sel]
-
-
-    archivo = st.file_uploader(
-
-        "Subir hoja diagnóstico",
-
-        type=["png","jpg","jpeg","pdf"]
+        df_imp["equipo"]
 
     )
 
+    archivo_diag = st.file_uploader(
 
-    foto_tanques = st.file_uploader(
+        "Hoja diagnóstico",
 
-        "Foto opcional de tanques",
-
-        type=["png","jpg","jpeg"]
+        type=["pdf","png","jpg"]
 
     )
 
+    foto_tanque = st.file_uploader(
 
-    # =====================================================
-    # ANALISIS OCR
-    # =====================================================
+        "Foto real de tanques",
 
-    def analizar_imagen(img):
+        type=["png","jpg"]
+
+    )
+
+# ===========================================================
+# FUNCIONES IA
+# ===========================================================
+
+    def pdf_to_image(file):
+
+        images = convert_from_bytes(file)
+
+        return np.array(images[0])
+
+
+    def detectar_barras(img):
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        blur = cv2.GaussianBlur(gray,(5,5),0)
+
+        thresh = cv2.threshold(
+
+            blur,0,255,
+
+            cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU
+
+        )[1]
+
+        contours,_ = cv2.findContours(
+
+            thresh,
+
+            cv2.RETR_EXTERNAL,
+
+            cv2.CHAIN_APPROX_SIMPLE
+
+        )
+
+        niveles=[]
+
+        for c in contours:
+
+            x,y,w,h = cv2.boundingRect(c)
+
+            if w>50 and h<50:
+
+                niveles.append(w)
+
+        if niveles:
+
+            return max(niveles)/300
+
+        return None
+
+
+    def detectar_texto(img):
 
         texto = pytesseract.image_to_string(img)
 
-        texto = texto.upper()
-
-        resultado = {}
-
-        patron = r'(\d+)%'
-
-        porcentajes = re.findall(patron, texto)
-
-        if len(porcentajes) >= 4:
-
-            resultado["C"] = float(porcentajes[0])
-            resultado["M"] = float(porcentajes[1])
-            resultado["Y"] = float(porcentajes[2])
-            resultado["K"] = float(porcentajes[3])
-
-        vida = re.search(r'HEAD.*?(\d+)%', texto)
-
-        if vida:
-
-            resultado["VIDA"] = float(vida.group(1))
-
-        return resultado
+        return texto
 
 
-    # =====================================================
-    # BOTON ANALIZAR
-    # =====================================================
+    def detectar_porcentaje_tanque(img):
 
-    if st.button("🔎 Analizar diagnóstico", use_container_width=True):
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        if archivo is None:
+        lower = np.array([0,0,200])
 
-            st.error("Sube archivo")
+        upper = np.array([255,50,255])
+
+        mask = cv2.inRange(hsv,lower,upper)
+
+        porcentaje = np.sum(mask==0)/mask.size
+
+        return porcentaje
+
+
+# ===========================================================
+# ANALISIS
+# ===========================================================
+
+    if st.button("ANALIZAR"):
+
+        if archivo_diag is None:
+
+            st.error("Carga diagnóstico")
 
             st.stop()
 
+        bytes_data = archivo_diag.read()
 
-        img = Image.open(archivo)
+        if archivo_diag.type=="application/pdf":
 
+            img = pdf_to_image(bytes_data)
 
-        datos = analizar_imagen(img)
+        else:
 
+            img = cv2.imdecode(
 
-        if not datos:
+                np.frombuffer(bytes_data,np.uint8),
 
-            st.error("No se pudo detectar información")
+                cv2.IMREAD_COLOR
 
-            st.stop()
+            )
 
+        texto = detectar_texto(img)
 
-        st.success("Diagnóstico detectado")
+        barras = detectar_barras(img)
 
-        st.write(datos)
+        tinta_visual=None
 
+        if foto_tanque:
 
-        with conectar() as conn:
+            tank = cv2.imdecode(
 
+                np.frombuffer(foto_tanque.read(),np.uint8),
 
-            # =====================================================
-            # GUARDAR VIDA CABEZAL
-            # =====================================================
+                cv2.IMREAD_COLOR
 
-            vida = datos.get("VIDA", 100)
+            )
 
+            tinta_visual=detectar_porcentaje_tanque(tank)
 
-            conn.execute("""
+# ===========================================================
+# RESULTADOS
+# ===========================================================
 
-                INSERT INTO vida_cabezal
+        st.write("Texto detectado")
 
-                (impresora, vida_total, vida_restante)
+        st.code(texto)
 
-                VALUES (?,?,?)
+        st.write("Nivel barras")
 
-            """,(impresora_sel,100,vida))
+        st.write(barras)
 
+        st.write("Nivel visual")
 
-            # =====================================================
-            # DESCONTAR INVENTARIO
-            # =====================================================
+        st.write(tinta_visual)
 
-            tintas = pd.read_sql("""
+# ===========================================================
+# CALCULO ML REAL
+# ===========================================================
 
-                SELECT i.id,
+        if "580" in impresora_sel:
 
-                i.capacidad_ml,
+            capacidad=70
 
-                i.cantidad,
+        elif "122" in impresora_sel:
 
-                i.color_cmyk,
+            capacidad=12.4
 
-                i.costo_promedio
+        else:
 
-                FROM inventario i
+            capacidad=70
 
-                JOIN activos_insumos ai
+        if tinta_visual:
 
-                ON ai.inventario_id = i.id
+            ml_restante = tinta_visual * capacidad
 
-                WHERE ai.activo_id = ?
+        elif barras:
 
-                AND i.tipo_material='tinta'
+            ml_restante = barras * capacidad
 
-            """,conn,params=(activo_id,))
+        else:
 
+            ml_restante=None
 
-            for t in tintas.itertuples():
+        st.write("ML restante")
 
-                color = t.color_cmyk
+        st.write(ml_restante)
 
-                if color in datos:
+# ===========================================================
+# GUARDAR
+# ===========================================================
 
-                    porcentaje = datos[color]
+        if ml_restante:
 
-                    ml_restante = (
+            with conectar() as conn:
 
-                        t.capacidad_ml
+                conn.execute("""
 
-                        * porcentaje
+                INSERT INTO diagnosticos_impresora
 
-                        / 100
+                (activo_id,tinta_restante_ml)
 
-                    )
+                VALUES (?,?)
 
-                    ml_consumido = (
+                """,
 
-                        t.capacidad_ml
+                (
 
-                        - ml_restante
+                df_imp[df_imp["equipo"]
 
-                    )
+                ==impresora_sel]["id"].values[0],
 
-                    nueva = max(
+                ml_restante
 
-                        0,
+                )
 
-                        t.cantidad
+                )
 
-                        - ml_consumido
+                conn.commit()
 
-                    )
-
-
-                    conn.execute("""
-
-                        UPDATE inventario
-
-                        SET cantidad = ?
-
-                        WHERE id = ?
-
-                    """,(nueva,t.id))
-
-
-                    conn.execute("""
-
-                        INSERT INTO kardex
-
-                        (
-
-                        item_id,
-
-                        item,
-
-                        tipo,
-
-                        cantidad,
-
-                        stock_anterior,
-
-                        stock_nuevo,
-
-                        costo_unit,
-
-                        costo_total,
-
-                        usuario
-
-                        )
-
-                        VALUES
-
-                        (?,?,?,?,?,?,?,?,?)
-
-                    """,(
-
-                        t.id,
-
-                        color,
-
-                        "DIAGNOSTICO",
-
-                        ml_consumido,
-
-                        t.cantidad,
-
-                        nueva,
-
-                        t.costo_promedio,
-
-                        ml_consumido
-
-                        * t.costo_promedio,
-
-                        usuario_actual
-
-                    ))
-
-
-            conn.commit()
-
-
-        cargar_datos()
-
-
-        st.success("Inventario actualizado correctamente")
+            st.success("Guardado")
         
 # ===========================================================
 # 11. MÓDULO PROFESIONAL DE OTROS PROCESOS
@@ -8545,6 +8495,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
