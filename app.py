@@ -6458,20 +6458,11 @@ elif menu == "🧠 Diagnóstico IA":
 # ANALISIS FOTO
 # ===========================================================
 
-        if archivo_tanque:
+porcentaje_foto = {}
 
-            img_tanque = convertir_imagen(archivo_tanque)
+if archivo_tanque is not None:
 
-            for color in capacidad:
-
-               porcentaje_foto = None
-
-if foto_tanque:
-
-    img_tanque = cv2.imdecode(
-        np.frombuffer(foto_tanque.read(), np.uint8),
-        cv2.IMREAD_COLOR
-    )
+    img_tanque = convertir_imagen(archivo_tanque)
 
     porcentaje_foto = detectar_por_foto(img_tanque)
 
@@ -6484,66 +6475,70 @@ else:
 # CALCULO FINAL
 # ===========================================================
 
-        colores = list(capacidad.keys())
+resultados = {}
 
-        for i,color in enumerate(colores):
+colores = list(capacidad.keys())
 
-            cap = capacidad[color]
+for i, color in enumerate(colores):
 
-            p_texto = porcentajes[i] if i < len(porcentajes) else None
+    cap = capacidad[color]
 
-            p_foto = porcentaje_foto
-
-
-            # PROMEDIO INTELIGENTE
-
-            if p_texto and p_foto:
-
-                porcentaje = (p_texto + p_foto) / 2
-
-            elif p_texto:
-
-                porcentaje = p_texto
-
-            elif p_foto:
-
-                porcentaje = p_foto
-
-            else:
-
-                porcentaje = None
+    # TEXTO
+    if 'porcentajes' in locals():
+        p_texto = porcentajes[i] if i < len(porcentajes) else None
+    else:
+        p_texto = None
 
 
-            if porcentaje:
+    # FOTO
+    p_foto = porcentaje_foto.get(color, None)
 
-                resultados[color] = cap * porcentaje / 100
 
-            niveles_final = {}
-                
-              for color in ["Black","Cyan","Magenta","Yellow"]:
-                
-                   p_foto = porcentaje_foto.get(color, None)
-                
-                  if p_foto is not None:
-                
-                       niveles_final[color] = p_foto * capacidad_ml
-                
-                else:
-                
-                       niveles_final[color] = None
+    # PROMEDIO
 
+    if p_texto is not None and p_foto is not None:
+
+        porcentaje = (p_texto + p_foto) / 2
+
+    elif p_texto is not None:
+
+        porcentaje = p_texto
+
+    elif p_foto is not None:
+
+        porcentaje = p_foto
+
+    else:
+
+        porcentaje = None
+
+
+    # CALCULO ML
+
+    if porcentaje is not None:
+
+        resultados[color] = cap * porcentaje / 100
+
+    else:
+
+        resultados[color] = None
 
 
 # ===========================================================
-# MOSTRAR RESULTADOS
+# MOSTRAR RESULTADO
 # ===========================================================
 
-        st.subheader("Resultado final")
+st.subheader("Resultado final")
 
-        for color,ml in resultados.items():
+for color, ml in resultados.items():
 
-            st.write(f"{color}: {ml:.2f} ml")
+    if ml is not None:
 
+        st.write(f"{color}: {ml:.2f} ml")
+
+    else:
+
+        st.write(f"{color}: No detectado")
 
 # ===========================================================
 # GUARDAR
@@ -8693,6 +8688,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
