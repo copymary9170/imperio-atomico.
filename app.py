@@ -929,6 +929,14 @@ def procesar_movimiento_inventario(item_id: int, tipo: str, cantidad: float, cos
             )
         )
 
+        registrar_auditoria(
+            conn,
+            accion=f"MOV_INVENTARIO_{tipo_registro}",
+            valor_anterior=f"item={item_nombre}; saldo={saldo_antes:.6f}; costo_prom={costo_prom_actual:.6f}",
+            valor_nuevo=f"item={item_nombre}; saldo={saldo_despues:.6f}; costo_prom={costo_prom_nuevo:.6f}; motivo={motivo_txt}",
+            usuario=usuario_txt
+        )
+
         registrar_kardex(
             item_id=int(item_id),
             item=item_nombre,
@@ -2583,24 +2591,30 @@ elif menu == "📦 Inventario":
                 ref_default = float(fila_sel.get('area_por_pliego_cm2') or fila_sel.get('cantidad', 1) or 1)
                 cm2_por_hoja = colC.number_input("cm² por pliego", min_value=1.0, value=ref_default)
                 if colC.button("🔄 Convertir stock cm2 → pliegos"):
-                    pliegos = float(fila_sel.get('cantidad', 0)) / float(cm2_por_hoja)
+                    stock_actual = float(fila_sel.get('cantidad', 0) or 0.0)
+                    pliegos = stock_actual / float(cm2_por_hoja)
+                    delta_ajuste = float(pliegos) - stock_actual
                     with conectar() as conn:
-                        conn.execute(
-                            "UPDATE inventario SET cantidad=?, unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE item=?",
-                            (pliegos, cm2_por_hoja, insumo_sel)
-                        )
                         item_row = conn.execute("SELECT id FROM inventario WHERE item=?", (insumo_sel,)).fetchone()
                         if item_row:
-                            ajuste_delta = abs(float(pliegos) - float(fila_sel.get('cantidad', 0) or 0))
-                            if ajuste_delta > 0:
-                                registrar_movimiento_inventario(
+                            if abs(delta_ajuste) > 0:
+                                ok_conv, msg_conv = procesar_movimiento_inventario(
                                     item_id=int(item_row[0]),
                                     tipo='AJUSTE',
-                                    cantidad=float(ajuste_delta),
+                                    cantidad=float(delta_ajuste),
+                                    costo_unitario=float(fila_sel.get('costo_promedio', fila_sel.get('precio_usd', 0)) or 0.0),
                                     motivo='Conversión cm2 -> pliegos',
                                     usuario=st.session_state.get("usuario_nombre", "Sistema"),
                                     conn=conn
                                 )
+                                if not ok_conv:
+                                    conn.rollback()
+                                    st.error(msg_conv)
+                                    st.stop()
+                            conn.execute(
+                                "UPDATE inventario SET unidad='pliegos', area_por_pliego_cm2=?, activo=1 WHERE id=?",
+                                (cm2_por_hoja, int(item_row[0]))
+                            )
                         conn.commit()
                     st.success(f"Convertido a {pliegos:.3f} pliegos.")
                     cargar_datos()
@@ -4112,32 +4126,34 @@ if menu == "📊 Kardex":
     if st.button("💾 Aplicar ajuste manual", use_container_width=True) and cantidad_ajuste > 0:
         with conectar() as conn:
             row_prev = conn.execute(
-                "SELECT COALESCE(cantidad,0) FROM inventario WHERE id=?",
+                "SELECT COALESCE(cantidad,0), COALESCE(costo_promedio,COALESCE(precio_usd,0),0) FROM inventario WHERE id=?",
                 (item_id_sel,)
             ).fetchone()
             if not row_prev:
                 st.error("No se encontró el producto seleccionado.")
             else:
                 stock_prev = float(row_prev[0] or 0.0)
+                costo_ref = float(row_prev[1] or 0.0)
                 if accion_ajuste == "Sumar stock":
-                    stock_nuevo = stock_prev + float(cantidad_ajuste)
+                    delta_ajuste = float(cantidad_ajuste)
                     motivo_final = f"{motivo_ajuste} | Ajuste entrada"
                 else:
-                    stock_nuevo = max(0.0, stock_prev - float(cantidad_ajuste))
+                    delta_ajuste = -float(cantidad_ajuste)
                     motivo_final = f"{motivo_ajuste} | Ajuste resta"
 
-                conn.execute(
-                    "UPDATE inventario SET cantidad=?, ultima_actualizacion=CURRENT_TIMESTAMP WHERE id=?",
-                    (stock_nuevo, item_id_sel)
-                )
-                registrar_movimiento_inventario(
+                ok_adj, msg_adj = procesar_movimiento_inventario(
                     item_id=item_id_sel,
                     tipo="AJUSTE",
-                    cantidad=float(cantidad_ajuste),
+                    cantidad=float(delta_ajuste),
+                    costo_unitario=float(costo_ref),
                     motivo=motivo_final,
                     usuario=usuario_ajuste,
                     conn=conn
                 )
+                if not ok_adj:
+                    conn.rollback()
+                    st.error(msg_adj)
+                    st.stop()
                 conn.commit()
         cargar_datos()
         st.success("Ajuste aplicado y registrado en Kardex.")
@@ -6250,333 +6266,183 @@ elif menu == "🧠 Diagnóstico IA":
 
     st.title("🧠 Diagnóstico Inteligente Industrial")
 
-# ===========================================================
-# CARGAR IMPRESORAS
-# ===========================================================
-
     with conectar() as conn:
-
-        df_imp = pd.read_sql(
-            "SELECT id,equipo FROM activos WHERE activo=1",
-            conn
-        )
+        df_imp = pd.read_sql("SELECT id, equipo FROM activos WHERE COALESCE(activo,1)=1", conn)
 
     if df_imp.empty:
-
         st.error("No hay impresoras registradas")
-
         st.stop()
 
-    impresora_sel = st.selectbox(
-
-        "Seleccionar impresora",
-
-        df_imp["equipo"]
-
-    )
-
-
-# ===========================================================
-# SUBIR ARCHIVOS
-# ===========================================================
-
-    archivo_diag = st.file_uploader(
-
-        "📄 Hoja diagnóstico",
-
-        type=["pdf","png","jpg"]
-
-    )
-
-    archivo_tanque = st.file_uploader(
-
-        "🖼 Foto de tanques",
-
-        type=["png","jpg"]
-
-    )
-
-
-# ===========================================================
-# FUNCIONES
-# ===========================================================
+    impresora_sel = st.selectbox("Seleccionar impresora", df_imp["equipo"])
+    archivo_diag = st.file_uploader("📄 Hoja diagnóstico", type=["pdf", "png", "jpg", "jpeg"])
+    archivo_tanque = st.file_uploader("🖼 Foto de tanques", type=["png", "jpg", "jpeg"])
 
     def convertir_imagen(file):
-
+        if file is None:
+            return None
+        file_bytes = file.read()
         if file.type == "application/pdf":
-
-            pages = convert_from_bytes(file.read())
-
-            return np.array(pages[0])
-
-        else:
-
-            return cv2.imdecode(
-
-                np.frombuffer(file.read(), np.uint8),
-
-                cv2.IMREAD_COLOR
-
-            )
-
-
-# ===========================================================
-# DETECTAR POR TEXTO
-# ===========================================================
+            pages = convert_from_bytes(file_bytes)
+            return np.array(pages[0]) if pages else None
+        return cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
 
     def detectar_por_texto(img):
-
+        if img is None:
+            return []
         texto = pytesseract.image_to_string(img)
-
         porcentajes = re.findall(r'(\d+)%', texto)
+        return [float(p) for p in porcentajes]
 
-        return [int(p) for p in porcentajes]
-
-
-    # ===========================================================
-    # DETECTAR NIVEL POR FOTO REAL HP SMART TANK
-    # ===========================================================
+    def detectar_vida_cabezal(img):
+        if img is None:
+            return None
+        texto = pytesseract.image_to_string(img)
+        m = re.search(r'(?:head|cabezal)[^\d]{0,15}(\d{1,3})\s*%', texto, flags=re.IGNORECASE)
+        if m:
+            return max(0.0, min(100.0, float(m.group(1))))
+        return None
 
     def detectar_por_foto(img):
-
-        altura, ancho, _ = img.shape
-
+        if img is None or len(img.shape) < 3:
+            return {}
+        h, w, _ = img.shape
         zonas = {
-
-            "Black": img[:, 0:int(ancho * 0.25)],
-            "Cyan": img[:, int(ancho * 0.25):int(ancho * 0.50)],
-            "Magenta": img[:, int(ancho * 0.50):int(ancho * 0.75)],
-            "Yellow": img[:, int(ancho * 0.75):ancho]
-
+            "Black": img[:, 0:int(w * 0.25)],
+            "Cyan": img[:, int(w * 0.25):int(w * 0.50)],
+            "Magenta": img[:, int(w * 0.50):int(w * 0.75)],
+            "Yellow": img[:, int(w * 0.75):w],
         }
-
         niveles = {}
-
         for color, zona in zonas.items():
-
             gray = cv2.cvtColor(zona, cv2.COLOR_BGR2GRAY)
-
-            _, thresh = cv2.threshold(
-                gray,
-                200,
-                255,
-                cv2.THRESH_BINARY_INV
-            )
-
-            porcentaje = np.sum(thresh > 0) / thresh.size
-
-            niveles[color] = porcentaje
-
+            _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+            cobertura = float(np.sum(thresh > 0) / max(1, thresh.size))
+            niveles[color] = max(0.0, min(100.0, cobertura * 100.0))
         return niveles
 
-
-# ===========================================================
-# CAPACIDAD REAL
-# ===========================================================
-
-    def obtener_capacidad():
-
-        nombre = impresora_sel.lower()
-
-        if "580" in nombre:
-
-            return {
-
-                "Black":70,
-
-                "Cyan":70,
-
-                "Magenta":70,
-
-                "Yellow":70
-
-            }
-
-        elif "122" in nombre:
-
-            return {
-
-                "Black":12.4,
-
-                "Color":14
-
-            }
-
-        elif "1250" in nombre:
-
-            return {
-
-                "Black":70,
-
-                "Cyan":70,
-
-                "Magenta":70,
-
-                "Yellow":70
-
-            }
-
-        else:
-
-            return {}
-
-
-# ===========================================================
-# ANALIZAR
-# ===========================================================
+    def obtener_capacidad(nombre_impresora):
+        nombre = str(nombre_impresora or '').lower()
+        if "122" in nombre:
+            return {"Black": 12.4, "Cyan": 14.0, "Magenta": 14.0, "Yellow": 14.0}
+        return {"Black": 70.0, "Cyan": 70.0, "Magenta": 70.0, "Yellow": 70.0}
 
     if st.button("🚀 ANALIZAR"):
-
         if archivo_diag is None and archivo_tanque is None:
-
             st.error("Sube al menos un archivo")
-
             st.stop()
 
+        capacidad = obtener_capacidad(impresora_sel)
+        img_diag = convertir_imagen(archivo_diag) if archivo_diag is not None else None
+        img_tanque = convertir_imagen(archivo_tanque) if archivo_tanque is not None else None
 
-        capacidad = obtener_capacidad()
+        porcentajes = detectar_por_texto(img_diag)
+        porcentaje_foto = detectar_por_foto(img_tanque)
 
         resultados = {}
+        for i, color in enumerate(capacidad.keys()):
+            p_texto = porcentajes[i] if i < len(porcentajes) else None
+            p_foto = porcentaje_foto.get(color)
+            if p_texto is not None and p_foto is not None:
+                porcentaje = (float(p_texto) + float(p_foto)) / 2.0
+            elif p_texto is not None:
+                porcentaje = float(p_texto)
+            elif p_foto is not None:
+                porcentaje = float(p_foto)
+            else:
+                porcentaje = None
 
+            resultados[color] = (float(capacidad[color]) * porcentaje / 100.0) if porcentaje is not None else None
 
-# ===========================================================
-# ANALISIS HOJA
-# ===========================================================
+        st.subheader("Resultado final")
+        for color, ml in resultados.items():
+            if ml is not None:
+                st.write(f"{color}: {ml:.2f} ml")
+            else:
+                st.write(f"{color}: No detectado")
 
-        if archivo_diag:
-
-            img_diag = convertir_imagen(archivo_diag)
-
-            porcentajes = detectar_por_texto(img_diag)
-
-        else:
-
-            porcentajes = []
-
-
-# ===========================================================
-# ANALISIS FOTO
-# ===========================================================
-
-porcentaje_foto = {}
-
-if archivo_tanque is not None:
-
-    img_tanque = convertir_imagen(archivo_tanque)
-
-    porcentaje_foto = detectar_por_foto(img_tanque)
-
-else:
-
-    porcentaje_foto = {}
-
-
-# ===========================================================
-# CALCULO FINAL
-# ===========================================================
-
-resultados = {}
-
-colores = list(capacidad.keys())
-
-for i, color in enumerate(colores):
-
-    cap = capacidad[color]
-
-    # TEXTO
-    if 'porcentajes' in locals():
-        p_texto = porcentajes[i] if i < len(porcentajes) else None
-    else:
-        p_texto = None
-
-
-    # FOTO
-    p_foto = porcentaje_foto.get(color, None)
-
-
-    # PROMEDIO
-
-    if p_texto is not None and p_foto is not None:
-
-        porcentaje = (p_texto + p_foto) / 2
-
-    elif p_texto is not None:
-
-        porcentaje = p_texto
-
-    elif p_foto is not None:
-
-        porcentaje = p_foto
-
-    else:
-
-        porcentaje = None
-
-
-    # CALCULO ML
-
-    if porcentaje is not None:
-
-        resultados[color] = cap * porcentaje / 100
-
-    else:
-
-        resultados[color] = None
-
-
-# ===========================================================
-# MOSTRAR RESULTADO
-# ===========================================================
-
-st.subheader("Resultado final")
-
-for color, ml in resultados.items():
-
-    if ml is not None:
-
-        st.write(f"{color}: {ml:.2f} ml")
-
-    else:
-
-        st.write(f"{color}: No detectado")
-
-# ===========================================================
-# GUARDAR
-# ===========================================================
+        vida_cabezal_pct = detectar_vida_cabezal(img_diag)
+        if vida_cabezal_pct is None:
+            cobertura_ref = np.mean([v for v in porcentaje_foto.values()]) if porcentaje_foto else 75.0
+            vida_cabezal_pct = max(5.0, min(100.0, 100.0 - (100.0 - float(cobertura_ref)) * 0.6))
 
         with conectar() as conn:
+            row_imp = conn.execute(
+                "SELECT id FROM activos WHERE equipo=? AND COALESCE(activo,1)=1 LIMIT 1",
+                (impresora_sel,)
+            ).fetchone()
+            if not row_imp:
+                st.error("La impresora seleccionada no está activa")
+                st.stop()
 
-            activo_id = df_imp[df_imp["equipo"] == impresora_sel]["id"].values[0]
+            activo_id = int(row_imp[0])
+            usuario_diag = st.session_state.get('usuario_nombre', 'Sistema')
+            total_consumido_ml = 0.0
 
-            for color,ml in resultados.items():
-
+            for color, ml_detectado in resultados.items():
+                if ml_detectado is None:
+                    continue
                 nombre = f"Tinta {color} {impresora_sel}"
-
-                row = conn.execute(
-
-                    "SELECT id FROM inventario WHERE item=?",
-
+                inv_row = conn.execute(
+                    "SELECT id, COALESCE(cantidad,0), COALESCE(costo_promedio,COALESCE(precio_usd,0),0) FROM inventario WHERE item=? AND COALESCE(activo,1)=1 LIMIT 1",
                     (nombre,)
-
                 ).fetchone()
-
-                if row:
-
-                    conn.execute(
-
-                        "UPDATE inventario SET cantidad=? WHERE id=?",
-
-                        (ml,row[0])
-
+                if not inv_row:
+                    continue
+                item_id, stock_actual, costo_ref = int(inv_row[0]), float(inv_row[1] or 0.0), float(inv_row[2] or 0.0)
+                consumo = max(0.0, stock_actual - float(ml_detectado))
+                if consumo > 0:
+                    ok_salida, msg_salida = procesar_movimiento_inventario(
+                        item_id=item_id,
+                        tipo='SALIDA',
+                        cantidad=float(consumo),
+                        costo_unitario=float(costo_ref),
+                        motivo=f'Diagnóstico IA {impresora_sel} - ajuste nivel {color}',
+                        usuario=usuario_diag,
+                        conn=conn
                     )
+                    if not ok_salida:
+                        conn.rollback()
+                        st.error(msg_salida)
+                        st.stop()
+                    total_consumido_ml += float(consumo)
 
+            conn.execute(
+                """
+                INSERT INTO diagnosticos_impresora (
+                    activo_id, archivo_nombre, archivo_blob, vida_cabezal_pct, usuario,
+                    tinta_restante_ml, nivel_c, nivel_m, nivel_y, nivel_k
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    activo_id,
+                    (archivo_diag.name if archivo_diag is not None else (archivo_tanque.name if archivo_tanque is not None else 'diagnostico_sin_archivo')),
+                    None,
+                    float(vida_cabezal_pct),
+                    usuario_diag,
+                    float(sum(v for v in resultados.values() if v is not None)),
+                    float(resultados.get('Cyan') or 0.0),
+                    float(resultados.get('Magenta') or 0.0),
+                    float(resultados.get('Yellow') or 0.0),
+                    float(resultados.get('Black') or 0.0),
+                )
+            )
+
+            actualizar_desgaste_activo(activo_id, max(1.0, total_consumido_ml))
+            conn.execute(
+                """
+                UPDATE activos
+                SET vida_restante = CASE
+                    WHEN vida_total IS NULL OR vida_total <= 0 THEN vida_restante
+                    ELSE MAX(0, MIN(COALESCE(vida_restante, vida_total), vida_total * (? / 100.0)))
+                END
+                WHERE id = ?
+                """,
+                (float(vida_cabezal_pct), activo_id)
+            )
             conn.commit()
 
         st.success("Diagnóstico guardado correctamente")
-            
-# ===========================================================
-# 11. MÓDULO PROFESIONAL DE OTROS PROCESOS
-# ===========================================================
+
 elif menu == "🛠️ Otros Procesos":
 
     st.title("🛠️ Calculadora de Procesos Especiales")
@@ -8688,12 +8554,5 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
-
-
-
 
 
