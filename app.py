@@ -14,6 +14,10 @@ import hmac
 import secrets
 import re
 from decimal import Decimal, ROUND_HALF_UP
+from db.connection import connect as db_connect
+from services.inventory_service import InventoryMovement, InventoryService
+from services.diagnostics_service import DiagnosticsService
+from ui.state import SessionStateService
 
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
@@ -21,26 +25,7 @@ st.set_page_config(page_title="Imperio Atómico - ERP Pro", layout="wide", page_
 
 # --- 2. MOTOR DE BASE DE DATOS ---
 def conectar():
-
-    import sqlite3
-
-    db_path = DATABASE if str(DATABASE or '').strip() else "database.db"
-
-    conn = sqlite3.connect(
-        db_path,
-        timeout=30,
-        isolation_level=None,
-        detect_types=sqlite3.PARSE_DECLTYPES
-    )
-
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
-    conn.execute("PRAGMA temp_store = MEMORY;")
-    conn.execute("PRAGMA cache_size = -10000;")
-    conn.execute("PRAGMA busy_timeout = 30000;")
-
-    return conn
+    return db_connect()
 
 def calcular_precio_real_ml(item_id):
     with conectar() as conn:
@@ -142,6 +127,8 @@ def money(v):
     return float(D(v).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
+inventory_service = InventoryService(money_fn=money, audit_fn=lambda conn, accion, valor_anterior, valor_nuevo, usuario=None: registrar_auditoria(conn, accion, valor_anterior, valor_nuevo, usuario))
+
 KANBAN_ESTADOS = ['Cotización', 'Pendiente', 'Diseño', 'Producción', 'Control de Calidad', 'Listo', 'Entregado']
 
 
@@ -163,7 +150,7 @@ def normalizar_estado_kanban(estado):
 
 
 def registrar_log_actividad(conn, accion, tabla_afectada, usuario=None):
-    usuario_final = str(usuario or st.session_state.get('usuario_nombre', 'Sistema'))
+    usuario_final = str(usuario or SessionStateService.get_current_user('Sistema'))
     conn.execute(
         """
         INSERT INTO logs_actividad (usuario, accion, tabla_afectada)
@@ -175,7 +162,7 @@ def registrar_log_actividad(conn, accion, tabla_afectada, usuario=None):
 
 
 def registrar_auditoria(conn, accion, valor_anterior, valor_nuevo, usuario=None):
-    usuario_final = str(usuario or st.session_state.get('usuario_nombre', 'Sistema'))
+    usuario_final = str(usuario or SessionStateService.get_current_user('Sistema'))
     conn.execute(
         """
         INSERT INTO auditoria (usuario, accion, valor_anterior, valor_nuevo)
@@ -459,7 +446,7 @@ def procesar_orden_produccion(orden_id):
         if consumos:
             ok, msg = descontar_materiales_produccion(
                 consumos,
-                usuario=st.session_state.get('usuario_nombre', 'Sistema'),
+                usuario=SessionStateService.get_current_user('Sistema'),
                 detalle=f"Consumo orden #{int(oid)} - {producto}"
             )
             if not ok:
@@ -565,7 +552,7 @@ def registrar_orden_produccion(tipo, cliente, producto, estado='Cotización', co
         oid = int(cur.lastrowid)
         conn.execute(
             "INSERT INTO ordenes_estado_historial (orden_id, estado_anterior, estado_nuevo, usuario) VALUES (?, ?, ?, ?)",
-            (oid, None, normalizar_estado_kanban(estado), st.session_state.get('usuario_nombre', 'Sistema'))
+            (oid, None, normalizar_estado_kanban(estado), SessionStateService.get_current_user('Sistema'))
         )
         conn.commit()
         return oid
@@ -606,7 +593,7 @@ def descontar_materiales_produccion(consumos, usuario=None, detalle='Consumo de 
         monto_usd=0.01,
         metodo='Interno',
         consumos=consumos_limpios,
-        usuario=usuario or st.session_state.get('usuario_nombre', 'Sistema')
+        usuario=usuario or SessionStateService.get_current_user('Sistema')
     )
 
 
@@ -792,180 +779,15 @@ def mapear_consumos_cmyk_a_inventario(totales_cmyk, df_tintas):
 
 
 def procesar_movimiento_inventario(item_id: int, tipo: str, cantidad: float, costo_unitario: float, motivo: str, usuario: str, conn):
-    """
-    Núcleo central transaccional de inventario industrial.
-    Reglas:
-    - ENTRADA: suma stock y recalcula costo promedio ponderado.
-    - SALIDA: valida stock suficiente, descuenta y usa costo promedio actual.
-    - AJUSTE: permite sumar/restar (cantidad con signo o motivo con "resta/salida").
-    Siempre registra movimiento en inventario_movs con saldos y costos.
-    """
-    try:
-        item_id = int(item_id)
-        tipo_txt = str(tipo or "").upper().strip()
-        cantidad = float(cantidad or 0.0)
-        costo_unitario = float(costo_unitario or 0.0)
-        motivo_txt = str(motivo or "")
-        usuario_txt = str(usuario or "Sistema")
-    except (TypeError, ValueError):
-        return False, "Parámetros inválidos para procesar movimiento"
-
-    if tipo_txt not in {"ENTRADA", "SALIDA", "AJUSTE", "COMPRA", "MERMA", "VENTA"}:
-        return False, "Tipo de movimiento no válido"
-
-    if tipo_txt in {"ENTRADA", "SALIDA", "COMPRA", "MERMA", "VENTA"} and cantidad <= 0:
-        return False, "La cantidad debe ser mayor a 0"
-    if tipo_txt == "AJUSTE" and cantidad == 0:
-        return False, "El ajuste no puede ser 0"
-
-    inicio_explicito = False
-    savepoint_name = None
-    try:
-        if conn.in_transaction:
-            savepoint_name = f"sp_inv_{int(time.time() * 1000)}_{secrets.token_hex(3)}"
-            conn.execute(f"SAVEPOINT {savepoint_name}")
-        else:
-            conn.execute("BEGIN IMMEDIATE")
-            inicio_explicito = True
-
-        row = conn.execute(
-            """
-            SELECT item, COALESCE(cantidad,0), COALESCE(costo_promedio,COALESCE(precio_usd,0)),
-                   COALESCE(valor_total, COALESCE(cantidad,0)*COALESCE(costo_promedio,COALESCE(precio_usd,0)))
-            FROM inventario
-            WHERE id=? AND COALESCE(activo,1)=1
-            """,
-            (item_id,)
-        ).fetchone()
-        if not row:
-            raise ValueError("Ítem no encontrado o inactivo")
-
-        item_nombre = str(row[0])
-        saldo_antes = float(row[1] or 0.0)
-        costo_prom_actual = float(row[2] or 0.0)
-        valor_total_actual = float(row[3] or 0.0)
-
-        tipo_registro = tipo_txt
-        if tipo_txt in {"COMPRA"}:
-            tipo_txt = "ENTRADA"
-        if tipo_txt in {"MERMA", "VENTA"}:
-            tipo_txt = "SALIDA"
-
-        if tipo_txt == "ENTRADA":
-            valor_nuevo = float(cantidad) * float(costo_unitario)
-            saldo_despues = saldo_antes + float(cantidad)
-            valor_total_nuevo = valor_total_actual + valor_nuevo
-            costo_prom_nuevo = (valor_total_nuevo / saldo_despues) if saldo_despues > 0 else 0.0
-            costo_unit_mov = float(costo_unitario)
-            costo_total_mov = valor_nuevo
-
-        elif tipo_txt == "SALIDA":
-            if float(cantidad) > saldo_antes:
-                raise ValueError("Stock insuficiente para salida")
-            saldo_despues = saldo_antes - float(cantidad)
-            costo_unit_mov = float(costo_prom_actual)
-            costo_total_mov = float(cantidad) * costo_unit_mov
-            valor_total_nuevo = max(0.0, valor_total_actual - costo_total_mov)
-            costo_prom_nuevo = (valor_total_nuevo / saldo_despues) if saldo_despues > 0 else 0.0
-
-        else:  # AJUSTE
-            es_resta = float(cantidad) < 0 or any(k in motivo_txt.lower() for k in ["rest", "salida", "rebaja"])
-            delta = abs(float(cantidad))
-            if es_resta:
-                if delta > saldo_antes:
-                    raise ValueError("Stock insuficiente para ajuste negativo")
-                saldo_despues = saldo_antes - delta
-                costo_unit_mov = float(costo_prom_actual)
-                costo_total_mov = delta * costo_unit_mov
-                valor_total_nuevo = max(0.0, valor_total_actual - costo_total_mov)
-                cantidad = delta
-            else:
-                costo_base_ajuste = float(costo_unitario) if float(costo_unitario) > 0 else float(costo_prom_actual)
-                saldo_despues = saldo_antes + delta
-                costo_unit_mov = costo_base_ajuste
-                costo_total_mov = delta * costo_unit_mov
-                valor_total_nuevo = valor_total_actual + costo_total_mov
-                cantidad = delta
-            costo_prom_nuevo = (valor_total_nuevo / saldo_despues) if saldo_despues > 0 else 0.0
-
-        if saldo_despues < 0:
-            raise ValueError("Stock negativo no permitido")
-
-        conn.execute(
-            """
-            UPDATE inventario
-            SET cantidad=?,
-                costo_promedio=?,
-                valor_total=?,
-                precio_usd=?,
-                ultima_actualizacion=CURRENT_TIMESTAMP
-            WHERE id=?
-            """,
-            (
-                float(saldo_despues),
-                float(costo_prom_nuevo),
-                float(valor_total_nuevo),
-                float(costo_prom_nuevo),
-                int(item_id)
-            )
-        )
-
-        conn.execute(
-            """
-            INSERT INTO inventario_movs
-            (item_id, tipo, cantidad, saldo_antes, saldo_despues, costo_unitario, costo_total, motivo, usuario)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                int(item_id),
-                str(tipo_registro),
-                float(cantidad),
-                float(saldo_antes),
-                float(saldo_despues),
-                float(costo_unit_mov),
-                float(costo_total_mov),
-                motivo_txt,
-                usuario_txt
-            )
-        )
-
-        registrar_auditoria(
-            conn,
-            accion=f"MOV_INVENTARIO_{tipo_registro}",
-            valor_anterior=f"item={item_nombre}; saldo={saldo_antes:.6f}; costo_prom={costo_prom_actual:.6f}",
-            valor_nuevo=f"item={item_nombre}; saldo={saldo_despues:.6f}; costo_prom={costo_prom_nuevo:.6f}; motivo={motivo_txt}",
-            usuario=usuario_txt
-        )
-
-        registrar_kardex(
-            item_id=int(item_id),
-            item=item_nombre,
-            tipo=str(tipo_registro),
-            cantidad=float(cantidad),
-            stock_anterior=float(saldo_antes),
-            stock_nuevo=float(saldo_despues),
-            costo_unit=float(costo_unit_mov),
-            usuario=usuario_txt,
-            conn=conn
-        )
-
-        if savepoint_name:
-            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
-        elif inicio_explicito:
-            conn.commit()
-
-        return True, "Movimiento procesado correctamente"
-
-    except Exception as e:
-        try:
-            if savepoint_name:
-                conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
-                conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
-            elif inicio_explicito:
-                conn.rollback()
-        except Exception:
-            pass
-        return False, str(e)
+    movement = InventoryMovement(
+        item_id=int(item_id),
+        tipo=str(tipo),
+        cantidad=float(cantidad),
+        costo_unitario=float(costo_unitario or 0.0),
+        motivo=str(motivo or ''),
+        usuario=str(usuario or SessionStateService.get_current_user('Sistema')),
+    )
+    return inventory_service.procesar_movimiento(conn=conn, movement=movement)
 
 
 def obtener_kardex(item_id, conn):
@@ -1060,43 +882,23 @@ def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo, usuario, co
 
 
 def registrar_kardex(item_id, item, tipo, cantidad, stock_anterior, stock_nuevo, costo_unit, usuario, conn=None):
-    cantidad = float(cantidad or 0.0)
-    costo_unit = float(costo_unit or 0.0)
-    costo_total = money(cantidad * costo_unit)
-
-    payload = (
-        int(item_id),
-        str(item),
-        str(tipo),
-        cantidad,
-        float(stock_anterior or 0.0),
-        float(stock_nuevo or 0.0),
-        costo_unit,
-        float(costo_total),
-        str(usuario or "Sistema")
+    payload = dict(
+        item_id=int(item_id),
+        item=str(item),
+        tipo=str(tipo),
+        cantidad=float(cantidad or 0.0),
+        stock_anterior=float(stock_anterior or 0.0),
+        stock_nuevo=float(stock_nuevo or 0.0),
+        costo_unit=float(costo_unit or 0.0),
+        usuario=str(usuario or SessionStateService.get_current_user('Sistema')),
     )
 
     if conn is not None:
-        conn.execute(
-            """
-            INSERT INTO kardex
-            (item_id, item, tipo, cantidad, stock_anterior, stock_nuevo, costo_unit, costo_total, usuario)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            payload
-        )
-        return True
+        return inventory_service.registrar_kardex(conn=conn, **payload)
 
     with conectar() as conn_local:
         conn_local.execute("BEGIN IMMEDIATE TRANSACTION")
-        conn_local.execute(
-            """
-            INSERT INTO kardex
-            (item_id, item, tipo, cantidad, stock_anterior, stock_nuevo, costo_unit, costo_total, usuario)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            payload
-        )
+        inventory_service.registrar_kardex(conn=conn_local, **payload)
         conn_local.commit()
     return True
 
@@ -5534,7 +5336,7 @@ elif menu == "🎨 Análisis CMYK":
                 if consumos_ids_cmyk:
                     ok, msg = descontar_consumo_cmyk(
                         consumos_ids_cmyk,
-                        usuario=st.session_state.get('usuario_nombre', 'Sistema'),
+                        usuario=SessionStateService.get_current_user('Sistema'),
                         detalle=f"CMYK {impresora_sel} | Calidad {calidad_sel} | Papel {papel_sel}",
                         metodo='Interno CMYK',
                         monto_usd=0.01
@@ -5812,7 +5614,7 @@ elif menu == "🎨 Análisis CMYK":
                 conn.execute("UPDATE ordenes_produccion SET estado=? WHERE id=?", (op_estado, int(op_orden)))
                 conn.execute(
                     "INSERT INTO ordenes_estado_historial (orden_id, estado_anterior, estado_nuevo, usuario) VALUES (?, ?, ?, ?)",
-                    (int(op_orden), estado_prev, op_estado, st.session_state.get('usuario_nombre', 'Sistema'))
+                    (int(op_orden), estado_prev, op_estado, SessionStateService.get_current_user('Sistema'))
                 )
                 registrar_log_actividad(conn, 'UPDATE_ESTADO', 'ordenes_produccion')
                 registrar_auditoria(conn, 'CAMBIO_ESTADO_ORDEN', estado_prev, op_estado)
@@ -6338,20 +6140,11 @@ elif menu == "🧠 Diagnóstico IA":
         porcentajes = detectar_por_texto(img_diag)
         porcentaje_foto = detectar_por_foto(img_tanque)
 
-        resultados = {}
-        for i, color in enumerate(capacidad.keys()):
-            p_texto = porcentajes[i] if i < len(porcentajes) else None
-            p_foto = porcentaje_foto.get(color)
-            if p_texto is not None and p_foto is not None:
-                porcentaje = (float(p_texto) + float(p_foto)) / 2.0
-            elif p_texto is not None:
-                porcentaje = float(p_texto)
-            elif p_foto is not None:
-                porcentaje = float(p_foto)
-            else:
-                porcentaje = None
-
-            resultados[color] = (float(capacidad[color]) * porcentaje / 100.0) if porcentaje is not None else None
+        resultados = DiagnosticsService.merge_levels(
+            capacidad=capacidad,
+            porcentajes_texto=porcentajes,
+            porcentajes_foto=porcentaje_foto,
+        )
 
         st.subheader("Resultado final")
         for color, ml in resultados.items():
@@ -6360,10 +6153,11 @@ elif menu == "🧠 Diagnóstico IA":
             else:
                 st.write(f"{color}: No detectado")
 
-        vida_cabezal_pct = detectar_vida_cabezal(img_diag)
-        if vida_cabezal_pct is None:
-            cobertura_ref = np.mean([v for v in porcentaje_foto.values()]) if porcentaje_foto else 75.0
-            vida_cabezal_pct = max(5.0, min(100.0, 100.0 - (100.0 - float(cobertura_ref)) * 0.6))
+        vida_cabezal_pct = DiagnosticsService.resolve_head_life(
+            detected_value=detectar_vida_cabezal(img_diag),
+            porcentajes_foto=porcentaje_foto,
+        )
+        resumen_diag = DiagnosticsService.summarize(resultados=resultados, vida_cabezal_pct=vida_cabezal_pct)
 
         with conectar() as conn:
             row_imp = conn.execute(
@@ -6375,7 +6169,7 @@ elif menu == "🧠 Diagnóstico IA":
                 st.stop()
 
             activo_id = int(row_imp[0])
-            usuario_diag = st.session_state.get('usuario_nombre', 'Sistema')
+            usuario_diag = SessionStateService.get_current_user('Sistema')
             total_consumido_ml = 0.0
 
             for color, ml_detectado in resultados.items():
@@ -6419,7 +6213,7 @@ elif menu == "🧠 Diagnóstico IA":
                     None,
                     float(vida_cabezal_pct),
                     usuario_diag,
-                    float(sum(v for v in resultados.values() if v is not None)),
+                    float(resumen_diag.tinta_restante_ml),
                     float(resultados.get('Cyan') or 0.0),
                     float(resultados.get('Magenta') or 0.0),
                     float(resultados.get('Yellow') or 0.0),
@@ -6655,12 +6449,12 @@ elif menu == "✂️ Corte Industrial":
 
         if inv_id and st.button("Descontar material de inventario", key='btn_desc_mat_corte'):
             cant_desc = convertir_area_cm2_a_unidad_inventario(int(inv_id), float(r.get('area_cm2', 0.0)))
-            ok, msg = descontar_materiales_produccion({int(inv_id): float(cant_desc)}, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f"Consumo corte industrial: {up.name}")
+            ok, msg = descontar_materiales_produccion({int(inv_id): float(cant_desc)}, usuario=SessionStateService.get_current_user('Sistema'), detalle=f"Consumo corte industrial: {up.name}")
             st.success(msg) if ok else st.warning(msg)
 
         if inv_id and st.button("🏭 ENVIAR A PRODUCCIÓN", key='btn_corte_prod'):
             cant_desc = convertir_area_cm2_a_unidad_inventario(int(inv_id), float(r.get('area_cm2', 0.0)))
-            ok, msg = descontar_materiales_produccion({int(inv_id): float(cant_desc)}, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f"Producción corte: {up.name}")
+            ok, msg = descontar_materiales_produccion({int(inv_id): float(cant_desc)}, usuario=SessionStateService.get_current_user('Sistema'), detalle=f"Producción corte: {up.name}")
             if ok:
                 oid = registrar_orden_produccion('Corte', 'Interno', up.name, 'Pendiente', float(r.get('costo_total', 0.0)), f'Corte industrial {up.name}')
                 st.success(f"{msg}. Orden #{oid} creada")
@@ -7115,13 +6909,13 @@ elif menu == "🎨 Producción Manual":
                 cantidad=float(qty_prod_dest),
                 costo_unitario=float(costo_unit_prod if costo_unit_prod > 0 else item_dest_costo),
                 motivo=f'Producción manual: {prod}',
-                usuario=st.session_state.get('usuario_nombre', 'Sistema'),
+                usuario=SessionStateService.get_current_user('Sistema'),
                 tipo='ENTRADA'
             )
             st.success(msg) if ok else st.error(msg)
 
         if st.button("🏭 ENVIAR A PRODUCCIÓN", key='btn_manual_send_prod'):
-            ok, msg = descontar_materiales_produccion(consumos, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f'Producción manual: {prod}')
+            ok, msg = descontar_materiales_produccion(consumos, usuario=SessionStateService.get_current_user('Sistema'), detalle=f'Producción manual: {prod}')
             if ok:
                 oid = registrar_orden_produccion('Manual', 'Interno', prod, 'pendiente', float(r['costo_total']), f'Producción manual {prod}')
                 st.success(f"{msg}. Orden #{oid} registrada")
@@ -7137,7 +6931,7 @@ elif menu == "🎨 Producción Manual":
             st.success("Receta guardada")
 
         if st.button("Descontar inventario producción manual", key='btn_desc_manual_inv'):
-            ok, msg = descontar_materiales_produccion(consumos, usuario=st.session_state.get('usuario_nombre', 'Sistema'), detalle=f'Producción manual: {prod}')
+            ok, msg = descontar_materiales_produccion(consumos, usuario=SessionStateService.get_current_user('Sistema'), detalle=f'Producción manual: {prod}')
             st.success(msg) if ok else st.warning(msg)
 
         if st.button("Guardar orden manual", key='btn_guardar_orden_manual'):
@@ -8554,5 +8348,12 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
+
+
+
+
+
+
 
 
