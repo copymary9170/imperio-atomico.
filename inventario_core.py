@@ -85,3 +85,10 @@ def alertas_minimos():
         return conn.execute(
             'SELECT id, item, variante, cantidad, minimo, unidad FROM inventario WHERE activo=1 AND cantidad <= minimo ORDER BY cantidad ASC'
         ).fetchall()
+main_app.py
+main_app.py
++294
+-155
+
+produccion_core.py
+produccion_core.py
