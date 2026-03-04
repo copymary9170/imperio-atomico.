@@ -1,3 +1,4 @@
+
         'Y': r'(?:amarillo|yellow|y)\s*[:=\-]?\s*(\d{1,3})\s*%?',
         'K': r'(?:negro|black|k)\s*[:=\-]?\s*(\d{1,3})\s*%?',
     }
