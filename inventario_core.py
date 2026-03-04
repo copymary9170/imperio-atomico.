@@ -1,4 +1,7 @@
-rom funciones_db import get_conn, get_config, registrar_auditoria, now_iso
+from funciones_db import get_conn, get_config, registrar_auditoria, now_iso
+
+
+TIPOS_VALIDOS = ('ENTRADA', 'SALIDA', 'AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO', 'MERMA', 'COMPRA', 'ENVIO')
 
 
 def obtener_stock(item_id):
@@ -13,7 +16,7 @@ def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo='', referenc
         raise ValueError('La cantidad debe ser mayor a cero.')
 
     tipo = str(tipo).upper().strip()
-    if tipo not in ('ENTRADA', 'SALIDA', 'AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO', 'MERMA'):
+    if tipo not in TIPOS_VALIDOS:
         raise ValueError('Tipo de movimiento inválido.')
 
     with get_conn() as conn:
@@ -22,34 +25,29 @@ def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo='', referenc
             raise ValueError('Insumo no encontrado en inventario.')
 
         anterior = float(item['cantidad'] or 0)
-        signo = -1 if tipo in ('SALIDA', 'AJUSTE_NEGATIVO', 'MERMA') else 1
+        signo = -1 if tipo in ('SALIDA', 'AJUSTE_NEGATIVO', 'MERMA', 'ENVIO') else 1
         nuevo = anterior + (signo * cantidad)
 
         no_negativo = get_config('stock_no_negativo', '1') == '1'
         if no_negativo and nuevo < 0:
             raise ValueError('Stock insuficiente: el stock no puede ser negativo.')
 
+        saldo = max(nuevo, 0.0) if no_negativo else nuevo
         conn.execute(
             'UPDATE inventario SET cantidad=?, ultima_actualizacion=? WHERE id=?',
-            (max(nuevo, 0.0) if no_negativo else nuevo, now_iso(), item_id),
+            (saldo, now_iso(), item_id),
         )
 
         conn.execute(
-            '''
-            INSERT INTO inventario_movs(item_id, tipo, cantidad, motivo, referencia, usuario)
-            VALUES (?,?,?,?,?,?)
-            ''',
+            'INSERT INTO inventario_movs(item_id, tipo, cantidad, motivo, referencia, usuario) VALUES (?,?,?,?,?,?)',
             (item_id, tipo, cantidad, motivo, referencia, usuario),
         )
 
         entrada = cantidad if signo > 0 else 0
         salida = cantidad if signo < 0 else 0
         conn.execute(
-            '''
-            INSERT INTO kardex(item_id, entrada, salida, saldo, costo_unitario, referencia)
-            VALUES (?,?,?,?,?,?)
-            ''',
-            (item_id, entrada, salida, max(nuevo, 0.0) if no_negativo else nuevo, float(item['precio_usd'] or 0), referencia),
+            'INSERT INTO kardex(item_id, entrada, salida, saldo, costo_unitario, referencia) VALUES (?,?,?,?,?,?)',
+            (item_id, entrada, salida, saldo, float(item['precio_usd'] or 0), referencia),
         )
 
         registrar_auditoria(
@@ -57,7 +55,7 @@ def registrar_movimiento_inventario(item_id, tipo, cantidad, motivo='', referenc
             usuario=usuario,
             accion=f'Movimiento inventario {tipo}',
             valor_anterior=f'item_id={item_id},stock={anterior}',
-            valor_nuevo=f'item_id={item_id},stock={nuevo},cantidad={cantidad},motivo={motivo}',
+            valor_nuevo=f'item_id={item_id},stock={saldo},cantidad={cantidad},motivo={motivo},ref={referencia}',
         )
 
 
@@ -70,8 +68,20 @@ def aplicar_ajuste(item_id, nuevo_stock, motivo='Ajuste manual', usuario='Sistem
         registrar_movimiento_inventario(item_id, 'AJUSTE_NEGATIVO', abs(delta), motivo=motivo, referencia='AJUSTE', usuario=usuario)
 
 
+def registrar_compra(item_id, cantidad, usuario='Sistema', referencia='COMPRA', motivo='Compra proveedor'):
+    registrar_movimiento_inventario(item_id, 'COMPRA', cantidad, motivo=motivo, referencia=referencia, usuario=usuario)
+
+
+def registrar_merma(item_id, cantidad, usuario='Sistema', motivo='Merma operativa'):
+    registrar_movimiento_inventario(item_id, 'MERMA', cantidad, motivo=motivo, referencia='MERMA', usuario=usuario)
+
+
+def enviar_inventario(item_id, cantidad, destino='Proceso externo', usuario='Sistema'):
+    registrar_movimiento_inventario(item_id, 'ENVIO', cantidad, motivo=f'Envío manual a {destino}', referencia='ENVIO_MANUAL', usuario=usuario)
+
+
 def alertas_minimos():
     with get_conn() as conn:
         return conn.execute(
-            'SELECT id, item, cantidad, minimo, unidad FROM inventario WHERE activo=1 AND cantidad <= minimo ORDER BY cantidad ASC'
+            'SELECT id, item, variante, cantidad, minimo, unidad FROM inventario WHERE activo=1 AND cantidad <= minimo ORDER BY cantidad ASC'
         ).fetchall()
