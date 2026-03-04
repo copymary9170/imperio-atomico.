@@ -13,7 +13,14 @@ import hashlib
 import hmac
 import secrets
 import re
+import sys
+from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from db.connection import connect as db_connect
 from services.inventory_service import InventoryMovement, InventoryService
 from services.diagnostics_service import DiagnosticsService
@@ -8348,7 +8355,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
 
 
 
