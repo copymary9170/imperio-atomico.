@@ -103,3 +103,4 @@ def registrar_diagnostico_impresora(
         referencia="DIAGNOSTICO_IA",
     )
     return niveles
+    
