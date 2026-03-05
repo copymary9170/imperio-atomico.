@@ -673,6 +673,7 @@ class DiagnosticsService:
         cobertura_ref = np.mean([v for v in porcentajes_foto.values()]) if porcentajes_foto else 75.0
         return max(5.0, min(100.0, 100.0 - (100.0 - float(cobertura_ref)) * 0.6))
 
+
     @staticmethod
     def summarize(resultados: Dict[str, Optional[float]], vida_cabezal_pct: float) -> PrinterDiagnosisResult:
         alias_colores = {
@@ -697,76 +698,3 @@ class DiagnosticsService:
             vida_cabezal_pct=max(0.0, min(100.0, float(vida_cabezal_pct))),
             tinta_restante_ml=tinta_restante_ml,
         )
-
-```
-
-## 2) Bloque de variantes en `app.py` (reemplazo sugerido)
-
-```python
-        # =======================================================
-        # 🎨 GENERADOR DE VARIANTES EDITABLES (COLORES / MODELOS)
-        # =======================================================
-        if not hay_variantes:
-            st.caption("Si activas '¿Hay variantes?' podrás guardar por colores/modelos.")
-        
-        st.divider()
-        st.subheader("🎨 Variantes rápidas (colores, modelos, etc)")
-        
-        # crear memoria
-        if "variantes_editor" not in st.session_state:
-            st.session_state.variantes_editor = {}
-
-        colv1, colv2 = st.columns([2, 1])
-
-        nombre_base_var = colv1.text_input(
-            "Nombre base del producto",
-            value=nombre_c,
-            key="base_variante"
-        )
-
-        variantes_txt = colv1.text_input(
-            "Escribe variantes separadas por coma",
-            placeholder="Rojo, Azul, Verde, Negro",
-            key="lista_variantes"
-        )
-
-        if colv2.button("Crear barras"):
-            if variantes_txt:
-                lista = [v.strip() for v in variantes_txt.split(",")]
-                st.session_state.variantes_editor = {
-                    var: 0.0 for var in lista
-                }
-        
-        
-        # Mostrar barras editables
-        
-        if st.session_state.variantes_editor:
-        
-            st.write("### Cantidades por variante")
-        
-            cantidades_finales = {}
-        
-            for var in st.session_state.variantes_editor:
-        
-                cantidades_finales[var] = st.number_input(
-        
-                    f"{nombre_base_var} - {var}",
-        
-                    min_value=0.0,
-        
-                    value=0.0,
-        
-                    key=f"var_{var}"
-        
-                )
-        
-        
-            # guardar variantes
-        
-            if st.button("💾 Guardar TODAS las variantes"):
-        
-        
-                if "BCV" in moneda_pago:
-                    tasa_usada = t_ref
-                elif "Binance" in moneda_pago:
-```
