@@ -242,7 +242,6 @@ def analizar_hoja_diagnostico(path_archivo: str | Path) -> Dict[str, Any]:
 # OpenCV tank analysis
 # -----------------------------
 
-
 def leer_hoja_diagnostico(path_archivo: str | Path) -> Dict[str, Any]:
     """Alias público para análisis OCR completo de hoja de diagnóstico."""
     return analizar_hoja_diagnostico(path_archivo)
@@ -673,7 +672,6 @@ class DiagnosticsService:
             return max(0.0, min(100.0, float(detected_value)))
         cobertura_ref = np.mean([v for v in porcentajes_foto.values()]) if porcentajes_foto else 75.0
         return max(5.0, min(100.0, 100.0 - (100.0 - float(cobertura_ref)) * 0.6))
-
 
     @staticmethod
     def summarize(resultados: Dict[str, Optional[float]], vida_cabezal_pct: float) -> PrinterDiagnosisResult:
