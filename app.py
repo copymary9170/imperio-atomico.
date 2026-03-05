@@ -2785,7 +2785,8 @@ elif menu == "📦 Inventario":
             placeholder="Rojo, Azul, Verde, Negro",
             key="lista_variantes"
         )
-
+        
+        
 # --- 🧠 Diagnóstico IA" --- #       
 elif menu == "🧠 Diagnóstico IA":
         
@@ -2994,7 +2995,7 @@ elif menu == "🧠 Diagnóstico IA":
                             costo_total_item,
         
                             costo_unitario,
-        
+          
                             porc_impuestos,
         
                             delivery,
@@ -3019,10 +3020,10 @@ elif menu == "🧠 Diagnóstico IA":
         
                 st.rerun()
         
-# =======================================================
-# 📊 TAB 3 — HISTORIAL DE COMPRAS (VERSION PRO SEGURA)
-# =======================================================
-    with tabs[2]:
+    # =======================================================
+    # 📊 TAB 3 — HISTORIAL DE COMPRAS (VERSION PRO SEGURA)
+    # =======================================================
+    with tabs[2]:␊
 
         st.subheader("📊 Historial Profesional de Compras")
 
@@ -8499,6 +8500,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
