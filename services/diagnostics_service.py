@@ -108,10 +108,104 @@ def _extract_percent_by_label(text: str, labels: Iterable[str]) -> Optional[floa
     return None
 
 
+def extraer_texto_diagnostico(path_archivo: str | Path) -> str:
+    """Extrae texto OCR desde hoja de diagnóstico (PDF o imagen)."""
+    image = _load_first_page_as_bgr(path_archivo)
+    return _read_image_for_ocr(image)
+
+
+def _extract_int_by_patterns(text: str, patterns: Iterable[str]) -> int:
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            token = re.sub(r"[^\d]", "", str(match.group(1)))
+            if token:
+                return int(token)
+    return 0
+
+
+def extraer_contador_impresiones(texto_ocr: str) -> Dict[str, int]:
+    """Extrae contadores clave desde texto OCR de diagnóstico."""
+    text = _normalize_ocr_text(texto_ocr)
+    metrics = {
+        "contador_impresiones": _extract_int_by_patterns(
+            text,
+            [
+                r"total\s*prints?\s*[:=\-]?\s*([\d\.,]+)",
+                r"print\s*counter\s*[:=\-]?\s*([\d\.,]+)",
+                r"contador\s*impresiones\s*[:=\-]?\s*([\d\.,]+)",
+            ],
+        ),
+        "total_pages": _extract_int_by_patterns(
+            text,
+            [
+                r"total\s*pages\s*printed\s*[:=\-]?\s*([\d\.,]+)",
+                r"total\s*pages\s*[:=\-]?\s*([\d\.,]+)",
+                r"pages\s*printed\s*[:=\-]?\s*([\d\.,]+)",
+            ],
+        ),
+        "pages_printed": _extract_int_by_patterns(
+            text,
+            [r"pages\s*printed\s*[:=\-]?\s*([\d\.,]+)"],
+        ),
+        "print_counter": _extract_int_by_patterns(
+            text,
+            [r"print\s*counter\s*[:=\-]?\s*([\d\.,]+)"],
+        ),
+        "cleaning_count": _extract_int_by_patterns(
+            text,
+            [
+                r"head\s*cleaning\s*count\s*[:=\-]?\s*([\d\.,]+)",
+                r"cleaning\s*count\s*[:=\-]?\s*([\d\.,]+)",
+                r"cleaning\s*cycles?\s*[:=\-]?\s*([\d\.,]+)",
+            ],
+        ),
+    }
+
+    if metrics["contador_impresiones"] <= 0:
+        metrics["contador_impresiones"] = max(metrics["print_counter"], metrics["total_pages"], metrics["pages_printed"])
+
+    return metrics
+
+
+def actualizar_activo_impresora(conn: sqlite3.Connection, impresora: str, contador_impresiones: int) -> bool:
+    """Actualiza activos.contador_impresiones y vida_restante = vida_total - contador_impresiones."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()]
+    if "contador_impresiones" not in cols:
+        conn.execute("ALTER TABLE activos ADD COLUMN contador_impresiones INTEGER DEFAULT 0")
+
+    row = conn.execute(
+        """
+        SELECT id, COALESCE(vida_total, 0)
+        FROM activos
+        WHERE equipo=? AND COALESCE(activo,1)=1
+        LIMIT 1
+        """,
+        (impresora,),
+    ).fetchone()
+    if not row:
+        return False
+
+    activo_id = int(row[0])
+    vida_total = _safe_float(row[1], 0.0)
+    contador = max(0, int(contador_impresiones or 0))
+    vida_restante = max(0.0, vida_total - float(contador))
+
+    conn.execute(
+        """
+        UPDATE activos
+        SET contador_impresiones=?, vida_restante=?
+        WHERE id=?
+        """,
+        (contador, float(vida_restante), activo_id),
+    )
+    return True
+
+
 def analizar_hoja_diagnostico(path_archivo: str | Path) -> Dict[str, Any]:
     """Lee hoja de diagnóstico (PDF/imagen) y extrae métricas por OCR."""
-    image = _load_first_page_as_bgr(path_archivo)
-    text = _read_image_for_ocr(image)
+    text = extraer_texto_diagnostico(path_archivo)
+    contadores = extraer_contador_impresiones(text)
 
     niveles_pct = {
         "C": _extract_percent_by_label(text, COLOR_KEYWORDS["C"]),
@@ -133,9 +227,12 @@ def analizar_hoja_diagnostico(path_archivo: str | Path) -> Dict[str, Any]:
     return {
         "ocr_text": text,
         "niveles_pct": niveles_pct,
-        "paginas_impresas": int(paginas or 0),
+        "paginas_impresas": int(contadores["total_pages"] or contadores["pages_printed"] or paginas or 0),
+        "contador_impresiones": int(contadores["contador_impresiones"]),
+        "print_counter": int(contadores["print_counter"]),
+        "cleaning_count": int(contadores["cleaning_count"]),
         "vida_cabezal_pct": max(0.0, min(100.0, _safe_float(vida_cabezal, 0.0))),
-        "ciclos_limpieza": int(ciclos_limpieza or 0),
+        "ciclos_limpieza": int(contadores["cleaning_count"] or ciclos_limpieza or 0),
         "errores": sorted(set(errores)),
         "fecha_reporte": fecha_str,
     }
@@ -459,6 +556,11 @@ def procesar_diagnostico_impresora(
         vida_cabezal_pct=data_ocr["vida_cabezal_pct"],
         paginas_impresas=data_ocr["paginas_impresas"],
         riesgo_falla=pred.riesgo_falla,
+    )
+    actualizar_activo_impresora(
+        conn=conn,
+        impresora=impresora,
+        contador_impresiones=int(data_ocr.get("contador_impresiones", 0)),
     )
     conn.commit()
 
