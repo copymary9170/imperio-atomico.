@@ -23,7 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from db.connection import connect as db_connect
 from services.inventory_service import InventoryMovement, InventoryService
-from services.diagnostics_service import DiagnosticsService
+from services.diagnostics_service import DiagnosticsService, extraer_contador_impresiones
 from ui.state import SessionStateService
 
 
@@ -6097,10 +6097,12 @@ elif menu == "🧠 Diagnóstico IA":
 
     def detectar_por_texto(img):
         if img is None:
-            return []
+            return [], "", 0
         texto = pytesseract.image_to_string(img)
         porcentajes = re.findall(r'(\d+)%', texto)
-        return [float(p) for p in porcentajes]
+        contadores = extraer_contador_impresiones(texto)
+        contador_impresiones = int(contadores.get('contador_impresiones') or 0)
+        return [float(p) for p in porcentajes], texto, contador_impresiones
 
     def detectar_vida_cabezal(img):
         if img is None:
@@ -6135,16 +6137,25 @@ elif menu == "🧠 Diagnóstico IA":
             return {"Black": 12.4, "Cyan": 14.0, "Magenta": 14.0, "Yellow": 14.0}
         return {"Black": 70.0, "Cyan": 70.0, "Magenta": 70.0, "Yellow": 70.0}
 
+    st.subheader("⚙️ Configuración de capacidad de tanques (ml)")
+    capacidad_default = obtener_capacidad(impresora_sel)
+    c1, c2, c3, c4 = st.columns(4)
+    capacidad = {
+        "Cyan": c1.number_input("Cyan (ml)", min_value=0.0, value=float(capacidad_default["Cyan"]), step=1.0),
+        "Magenta": c2.number_input("Magenta (ml)", min_value=0.0, value=float(capacidad_default["Magenta"]), step=1.0),
+        "Yellow": c3.number_input("Yellow (ml)", min_value=0.0, value=float(capacidad_default["Yellow"]), step=1.0),
+        "Black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["Black"]), step=1.0),
+    }
+
     if st.button("🚀 ANALIZAR"):
         if archivo_diag is None and archivo_tanque is None:
             st.error("Sube al menos un archivo")
             st.stop()
 
-        capacidad = obtener_capacidad(impresora_sel)
         img_diag = convertir_imagen(archivo_diag) if archivo_diag is not None else None
         img_tanque = convertir_imagen(archivo_tanque) if archivo_tanque is not None else None
 
-        porcentajes = detectar_por_texto(img_diag)
+        porcentajes, _texto_ocr_diag, contador_impresiones = detectar_por_texto(img_diag)
         porcentaje_foto = detectar_por_foto(img_tanque)
 
         resultados = DiagnosticsService.merge_levels(
@@ -6159,6 +6170,9 @@ elif menu == "🧠 Diagnóstico IA":
                 st.write(f"{color}: {ml:.2f} ml")
             else:
                 st.write(f"{color}: No detectado")
+
+        if contador_impresiones > 0:
+            st.info(f"📌 Total Prints detectado: {contador_impresiones}")
 
         vida_cabezal_pct = DiagnosticsService.resolve_head_life(
             detected_value=detectar_vida_cabezal(img_diag),
@@ -6189,15 +6203,16 @@ elif menu == "🧠 Diagnóstico IA":
                 ).fetchone()
                 if not inv_row:
                     continue
-                item_id, stock_actual, costo_ref = int(inv_row[0]), float(inv_row[1] or 0.0), float(inv_row[2] or 0.0)
-                consumo = max(0.0, stock_actual - float(ml_detectado))
+                item_id, _stock_actual, costo_ref = int(inv_row[0]), float(inv_row[1] or 0.0), float(inv_row[2] or 0.0)
+                capacidad_color = float(capacidad.get(color, 0.0) or 0.0)
+                consumo = max(0.0, capacidad_color - float(ml_detectado or 0.0))
                 if consumo > 0:
                     ok_salida, msg_salida = procesar_movimiento_inventario(
                         item_id=item_id,
                         tipo='SALIDA',
                         cantidad=float(consumo),
                         costo_unitario=float(costo_ref),
-                        motivo=f'Diagnóstico IA {impresora_sel} - ajuste nivel {color}',
+                        motivo='Consumo detectado por diagnóstico de impresora',
                         usuario=usuario_diag,
                         conn=conn
                     )
@@ -6229,9 +6244,9 @@ elif menu == "🧠 Diagnóstico IA":
             )
 
             actualizar_desgaste_activo(activo_id, max(1.0, total_consumido_ml))
-            conn.execute(
-                """
-                UPDATE activos
+            conn.execute(␊
+                """␊
+                UPDATE activos␊
                 SET vida_restante = CASE
                     WHEN vida_total IS NULL OR vida_total <= 0 THEN vida_restante
                     ELSE MAX(0, MIN(COALESCE(vida_restante, vida_total), vida_total * (? / 100.0)))
@@ -6240,6 +6255,15 @@ elif menu == "🧠 Diagnóstico IA":
                 """,
                 (float(vida_cabezal_pct), activo_id)
             )
+
+            if contador_impresiones > 0:
+                cols_activos = [r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()]
+                if "contador_impresiones" not in cols_activos:
+                    conn.execute("ALTER TABLE activos ADD COLUMN contador_impresiones INTEGER DEFAULT 0")
+                conn.execute(
+                    "UPDATE activos SET contador_impresiones=? WHERE id=?",
+                    (int(contador_impresiones), int(activo_id)),
+                )
             conn.commit()
 
         st.success("Diagnóstico guardado correctamente")
@@ -8355,6 +8379,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
