@@ -2768,36 +2768,27 @@ elif menu == "📦 Inventario":
         
         # crear memoria
         if "variantes_editor" not in st.session_state:
-        
             st.session_state.variantes_editor = {}
-        
-        
-        colv1, colv2 = st.columns([2,1])
-        
+
+        colv1, colv2 = st.columns([2, 1])
+
         nombre_base_var = colv1.text_input(
             "Nombre base del producto",
             value=nombre_c,
             key="base_variante"
         )
-        
+
         variantes_txt = colv1.text_input(
             "Escribe variantes separadas por coma",
             placeholder="Rojo, Azul, Verde, Negro",
             key="lista_variantes"
         )
-        
-        
-       if colv2.button("Crear barras"):
 
-        
+        if colv2.button("Crear barras"):
             if variantes_txt:
-        
                 lista = [v.strip() for v in variantes_txt.split(",")]
-        
                 st.session_state.variantes_editor = {
-        
                     var: 0.0 for var in lista
-        
                 }
         
         
@@ -8497,6 +8488,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
