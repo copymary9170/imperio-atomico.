@@ -2787,11 +2787,8 @@ elif menu == "📦 Inventario":
         )
         
         
-# --- 🧠 Diagnóstico IA" --- #       
-elif menu == "🧠 Diagnóstico IA":
-        
-        
-        if colv2.button("Crear barras"):
+       if colv2.button("Crear barras"):
+
         
             if variantes_txt:
         
@@ -8500,6 +8497,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
