@@ -327,7 +327,215 @@ def analizar_imagen_tanques(path_imagen: str | Path) -> Dict[str, float]:
         clean = cv2.morphologyEx(clean, cv2.MORPH_CLOSE, kernel)
         coords = cv2.findNonZero(clean)
         if coords is None:
-@@ -478,53 +539,54 @@ def actualizar_estado_activo_impresora(
+            levels[color] = 0.0
+            continue
+
+        x, y, w, h = cv2.boundingRect(coords)
+        tank_roi = clean[y : y + h, x : x + w]
+        col_sum = np.sum(tank_roi > 0, axis=1)
+        active_rows = np.where(col_sum > max(3, int(w * 0.05)))[0]
+        if active_rows.size == 0:
+            levels[color] = 0.0
+            continue
+
+        filled_height = int(active_rows.max() - active_rows.min() + 1)
+        levels[color] = max(0.0, min(100.0, (filled_height / max(1, h)) * 100.0))
+
+    return levels
+
+
+def calcular_ml_restantes(niveles_pct: Dict[str, float], capacidad_tanques_ml: Dict[str, float]) -> Dict[str, float]:
+    return {
+        color: max(0.0, _safe_float(capacidad_tanques_ml.get(color, 0.0)) * (_safe_float(niveles_pct.get(color, 0.0)) / 100.0))
+        for color in ["C", "M", "Y", "K"]
+    }
+
+
+# -----------------------------
+# DB integration + predictive intelligence
+# -----------------------------
+def _ensure_diagnosticos_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS diagnosticos_impresora (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            impresora TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+            nivel_c REAL,
+            nivel_m REAL,
+            nivel_y REAL,
+            nivel_k REAL,
+            vida_cabezal REAL,
+            paginas_impresas INTEGER,
+            ciclos_limpieza INTEGER DEFAULT 0,
+            riesgo_falla TEXT,
+            consumo_ml_estimado REAL DEFAULT 0
+        )
+        """
+    )
+
+
+def _find_inventory_row(conn: sqlite3.Connection, printer_name: str, color: str) -> Optional[Tuple[int, float, float]]:
+    names = [
+        f"Tinta {color} {printer_name}",
+        f"Tinta {color}",
+        f"Ink {color} {printer_name}",
+        f"Ink {color}",
+    ]
+    for name in names:
+        row = conn.execute(
+            """
+            SELECT id, COALESCE(cantidad,0), COALESCE(costo_promedio, COALESCE(precio_usd,0), 0)
+            FROM inventario
+            WHERE item=? AND COALESCE(activo,1)=1
+            LIMIT 1
+            """,
+            (name,),
+        ).fetchone()
+        if row:
+            return int(row[0]), _safe_float(row[1]), _safe_float(row[2])
+    return None
+
+
+def actualizar_inventario_diagnostico(
+    conn: sqlite3.Connection,
+    impresora: str,
+    niveles_ml_detectados: Dict[str, float],
+    usuario: str,
+    procesar_movimiento_inventario_fn: Callable[..., Tuple[bool, str]],
+) -> Dict[str, float]:
+    """Ajusta inventario con movimiento SALIDA por diagnóstico."""
+    consumos: Dict[str, float] = {"C": 0.0, "M": 0.0, "Y": 0.0, "K": 0.0}
+    for color in ["C", "M", "Y", "K"]:
+        row = _find_inventory_row(conn, impresora, color)
+        if not row:
+            continue
+
+        item_id, stock_actual, costo = row
+        nivel_detectado = max(0.0, _safe_float(niveles_ml_detectados.get(color, 0.0)))
+        consumo = max(0.0, stock_actual - nivel_detectado)
+        if consumo <= 0:
+            continue
+
+        ok, msg = procesar_movimiento_inventario_fn(
+            item_id=item_id,
+            tipo="SALIDA",
+            cantidad=float(consumo),
+            costo_unitario=float(costo),
+            motivo="Ajuste automático por diagnóstico de impresora",
+            usuario=str(usuario or "Sistema"),
+            conn=conn,
+        )
+        if not ok:
+            raise RuntimeError(f"Error ajustando inventario {color}: {msg}")
+        consumos[color] = float(consumo)
+
+    return consumos
+
+
+def _risk_label(vida_cabezal: float, min_tanque_pct: float, limpiezas_por_1000: float) -> str:
+    score = 0
+    if vida_cabezal < 20:
+        score += 2
+    elif vida_cabezal < 35:
+        score += 1
+
+    if min_tanque_pct < 15:
+        score += 2
+    elif min_tanque_pct < 25:
+        score += 1
+
+    if limpiezas_por_1000 > 25:
+        score += 2
+    elif limpiezas_por_1000 > 12:
+        score += 1
+
+    if score >= 4:
+        return "ALTO"
+    if score >= 2:
+        return "MEDIO"
+    return "BAJO"
+
+
+def _build_predictive_summary(actual: Dict[str, Any], historico: pd.DataFrame) -> PredictiveSummary:
+    alertas: List[str] = []
+
+    vida_cabezal = _safe_float(actual.get("vida_cabezal_pct", 0.0))
+    niveles_pct = actual.get("niveles_pct", {})
+    min_tanque_pct = min((_safe_float(v, 100.0) for v in niveles_pct.values()), default=100.0)
+
+    consumo_prom_ml_pag = 0.0
+    degradacion_vida = 0.0
+    limpiezas_por_1000 = 0.0
+    paginas_hasta_mant: Optional[float] = None
+
+    if not historico.empty and len(historico) >= 2:
+        hist = historico.sort_values("paginas_impresas")
+        d_pag = max(1.0, _safe_float(hist["paginas_impresas"].iloc[-1] - hist["paginas_impresas"].iloc[0], 1.0))
+        d_cons = max(0.0, _safe_float(hist["consumo_ml_estimado"].iloc[-1] - hist["consumo_ml_estimado"].iloc[0], 0.0))
+        consumo_prom_ml_pag = d_cons / d_pag
+
+        d_vida = max(0.0, _safe_float(hist["vida_cabezal"].iloc[0] - hist["vida_cabezal"].iloc[-1], 0.0))
+        degradacion_vida = (d_vida / d_pag) * 1000.0
+
+        d_clean = max(0.0, _safe_float(hist["ciclos_limpieza"].iloc[-1] - hist["ciclos_limpieza"].iloc[0], 0.0))
+        limpiezas_por_1000 = (d_clean / d_pag) * 1000.0
+
+        vida_drop_per_page = d_vida / d_pag if d_pag > 0 else 0.0
+        if vida_drop_per_page > 0:
+            paginas_hasta_mant = max(0.0, (vida_cabezal - 20.0) / vida_drop_per_page)
+
+    riesgo = _risk_label(vida_cabezal, min_tanque_pct, limpiezas_por_1000)
+
+    if vida_cabezal < 20:
+        alertas.append("Cabezal por debajo de 20% de vida")
+    if min_tanque_pct < 15:
+        alertas.append("Tanque de tinta por debajo de 15%")
+    if limpiezas_por_1000 > 20:
+        alertas.append("Limpiezas excesivas detectadas")
+
+    return PredictiveSummary(
+        consumo_promedio_ml_pag=float(consumo_prom_ml_pag),
+        paginas_hasta_mantenimiento=paginas_hasta_mant,
+        degradacion_vida_pct_por_1000_pag=float(degradacion_vida),
+        limpiezas_por_1000_pag=float(limpiezas_por_1000),
+        riesgo_falla=riesgo,
+        alertas=alertas,
+    )
+
+
+def actualizar_estado_activo_impresora(
+    conn: sqlite3.Connection,
+    impresora: str,
+    vida_cabezal_pct: float,
+    paginas_impresas: int,
+    riesgo_falla: str,
+) -> None:
+    row = conn.execute(
+        "SELECT id, vida_total FROM activos WHERE equipo=? AND COALESCE(activo,1)=1 LIMIT 1",
+        (impresora,),
+    ).fetchone()
+    if not row:
+        return
+
+    activo_id = int(row[0])
+    vida_total = _safe_float(row[1], 100.0)
+    vida_restante = max(0.0, min(vida_total, vida_total * (_safe_float(vida_cabezal_pct, 0.0) / 100.0)))
+    estado = "Operativo" if riesgo_falla == "BAJO" else "Mantenimiento Preventivo" if riesgo_falla == "MEDIO" else "Riesgo Alto"
+
+    conn.execute(
+        """
+        UPDATE activos
+        SET vida_restante=?, desgaste=?, observaciones=TRIM(COALESCE(observaciones,'') || ' | Diagnóstico: riesgo=' || ? || ', páginas=' || ?)
+        WHERE id=?
+        """,
+        (float(vida_restante), float(100.0 - _safe_float(vida_cabezal_pct, 0.0)), str(riesgo_falla), int(paginas_impresas), activo_id),
+    )
+
+    # Si existe columna estado en esta instalación, actualizarla.
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()]
+    if "estado" in cols:
+        conn.execute("UPDATE activos SET estado=? WHERE id=?", (estado, activo_id))
 
 
 def procesar_diagnostico_impresora(
@@ -382,7 +590,10 @@ def procesar_diagnostico_impresora(
     }
     pred = _build_predictive_summary(actual_payload, historico)
 
-@@ -535,78 +597,103 @@ def procesar_diagnostico_impresora(
+    conn.execute(
+        """
+        INSERT INTO diagnosticos_impresora (
+            impresora, fecha, nivel_c, nivel_m, nivel_y, nivel_k,
             vida_cabezal, paginas_impresas, ciclos_limpieza, riesgo_falla, consumo_ml_estimado
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
@@ -486,3 +697,76 @@ class DiagnosticsService:
             vida_cabezal_pct=max(0.0, min(100.0, float(vida_cabezal_pct))),
             tinta_restante_ml=tinta_restante_ml,
         )
+
+```
+
+## 2) Bloque de variantes en `app.py` (reemplazo sugerido)
+
+```python
+        # =======================================================
+        # 🎨 GENERADOR DE VARIANTES EDITABLES (COLORES / MODELOS)
+        # =======================================================
+        if not hay_variantes:
+            st.caption("Si activas '¿Hay variantes?' podrás guardar por colores/modelos.")
+        
+        st.divider()
+        st.subheader("🎨 Variantes rápidas (colores, modelos, etc)")
+        
+        # crear memoria
+        if "variantes_editor" not in st.session_state:
+            st.session_state.variantes_editor = {}
+
+        colv1, colv2 = st.columns([2, 1])
+
+        nombre_base_var = colv1.text_input(
+            "Nombre base del producto",
+            value=nombre_c,
+            key="base_variante"
+        )
+
+        variantes_txt = colv1.text_input(
+            "Escribe variantes separadas por coma",
+            placeholder="Rojo, Azul, Verde, Negro",
+            key="lista_variantes"
+        )
+
+        if colv2.button("Crear barras"):
+            if variantes_txt:
+                lista = [v.strip() for v in variantes_txt.split(",")]
+                st.session_state.variantes_editor = {
+                    var: 0.0 for var in lista
+                }
+        
+        
+        # Mostrar barras editables
+        
+        if st.session_state.variantes_editor:
+        
+            st.write("### Cantidades por variante")
+        
+            cantidades_finales = {}
+        
+            for var in st.session_state.variantes_editor:
+        
+                cantidades_finales[var] = st.number_input(
+        
+                    f"{nombre_base_var} - {var}",
+        
+                    min_value=0.0,
+        
+                    value=0.0,
+        
+                    key=f"var_{var}"
+        
+                )
+        
+        
+            # guardar variantes
+        
+            if st.button("💾 Guardar TODAS las variantes"):
+        
+        
+                if "BCV" in moneda_pago:
+                    tasa_usada = t_ref
+                elif "Binance" in moneda_pago:
+```
