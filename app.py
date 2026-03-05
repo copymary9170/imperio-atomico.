@@ -3023,7 +3023,7 @@ elif menu == "🧠 Diagnóstico IA":
     # =======================================================
     # 📊 TAB 3 — HISTORIAL DE COMPRAS (VERSION PRO SEGURA)
     # =======================================================
-    with tabs[2]:␊
+    with tabs[2]:
 
         st.subheader("📊 Historial Profesional de Compras")
 
@@ -6365,9 +6365,9 @@ elif menu == "🧠 Diagnóstico IA":
             )
 
             actualizar_desgaste_activo(activo_id, max(1.0, total_consumido_ml))
-            conn.execute(␊
-                """␊
-                UPDATE activos␊
+            conn.execute(
+                """
+                UPDATE activos
                 SET vida_restante = CASE
                     WHEN vida_total IS NULL OR vida_total <= 0 THEN vida_restante
                     ELSE MAX(0, MIN(COALESCE(vida_restante, vida_total), vida_total * (? / 100.0)))
@@ -8500,6 +8500,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
