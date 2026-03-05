@@ -3023,7 +3023,7 @@ elif menu == "🧠 Diagnóstico IA":
     # =======================================================
     # 📊 TAB 3 — HISTORIAL DE COMPRAS (VERSION PRO SEGURA)
     # =======================================================
-        with tabs[2]:
+    with tabs[2]:
 
         st.subheader("📊 Historial Profesional de Compras")
 
@@ -8500,6 +8500,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
