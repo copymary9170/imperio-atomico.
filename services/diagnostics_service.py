@@ -610,3 +610,29 @@ class DiagnosticsService:
             return max(0.0, min(100.0, float(detected_value)))
         cobertura_ref = np.mean([v for v in porcentajes_foto.values()]) if porcentajes_foto else 75.0
         return max(5.0, min(100.0, 100.0 - (100.0 - float(cobertura_ref)) * 0.6))
+
+
+    @staticmethod
+    def summarize(resultados: Dict[str, Optional[float]], vida_cabezal_pct: float) -> PrinterDiagnosisResult:
+        alias_colores = {
+            "C": ["C", "Cyan"],
+            "M": ["M", "Magenta"],
+            "Y": ["Y", "Yellow"],
+            "K": ["K", "Black", "BK"],
+        }
+
+        niveles_ml: Dict[str, Optional[float]] = {}
+        for color, aliases in alias_colores.items():
+            valor = None
+            for key in aliases:
+                if key in resultados and resultados.get(key) is not None:
+                    valor = float(resultados[key])
+                    break
+            niveles_ml[color] = valor
+
+        tinta_restante_ml = float(sum(v for v in niveles_ml.values() if v is not None))
+        return PrinterDiagnosisResult(
+            niveles_ml=niveles_ml,
+            vida_cabezal_pct=max(0.0, min(100.0, float(vida_cabezal_pct))),
+            tinta_restante_ml=tinta_restante_ml,
+        )
