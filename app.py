@@ -2785,10 +2785,9 @@ elif menu == "📦 Inventario":
             placeholder="Rojo, Azul, Verde, Negro",
             key="lista_variantes"
         )
-        
-        
-@@ -6073,196 +6190,220 @@ elif menu == "🧠 Diagnóstico IA":
-        )
+
+# --- 🧠 Diagnóstico IA" --- #       
+ elif menu == "🧠 Diagnóstico IA":
         
         
         if colv2.button("Crear barras"):
@@ -8500,6 +8499,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
