@@ -48,7 +48,7 @@ def calcular_precio_real_ml(item_id):
     if capacidad_ml and capacidad_ml > 0:
         return precio_usd / capacidad_ml
     return precio_usd
-
+    
 
 def calcular_costo_real_ml(precio, capacidad_ml=None, rendimiento_paginas=None):
     precio = float(precio or 0.0)
@@ -2641,10 +2641,127 @@ elif menu == "📦 Inventario":
 
         st.caption(f"Delivery equivalente: ${delivery:.2f}")
 
-        
+        hay_variantes = st.checkbox("¿Hay variantes?", value=False, help="Si no hay variantes, usa el botón Guardar sin variantes.")
+
+        if not hay_variantes:
+            if st.button("💾 Guardar sin variantes"):
+                nombre_item = str(nombre_c or "").strip()
+                if not nombre_item:
+                    st.error("Debes colocar el nombre del insumo")
+                    st.stop()
+
+                if stock_real <= 0:
+                    st.error("Debes colocar una cantidad válida")
+                    st.stop()
+
+                if "BCV" in moneda_pago:
+                    tasa_usada = t_ref
+                elif "Binance" in moneda_pago:
+                    tasa_usada = t_bin
+                else:
+                    tasa_usada = 1.0
+
+                porc_impuestos = 0
+                if iva_activo:
+                    porc_impuestos += st.session_state.get("iva_perc", 16)
+                if igtf_activo:
+                    porc_impuestos += st.session_state.get("igtf_perc", 3)
+                if banco_activo:
+                    porc_impuestos += st.session_state.get("banco_perc", 0.5)
+
+                costo_factura_total = ((monto_factura / tasa_usada) * (1 + (porc_impuestos / 100))) + delivery
+                costo_unitario = (costo_factura_total / stock_real) if stock_real > 0 else 0.0
+
+                with conectar() as conn:
+                    cur = conn.cursor()
+
+                    proveedor_id = None
+                    if proveedor:
+                        cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor,))
+                        row = cur.fetchone()
+                        proveedor_id = row[0] if row else None
+
+                    old = cur.execute(
+                        "SELECT cantidad, precio_usd FROM inventario WHERE item=?",
+                        (nombre_item,),
+                    ).fetchone()
+
+                    if old:
+                        nueva_cant = float(old[0] or 0.0) + float(stock_real)
+                        precio_ponderado = ((float(old[0] or 0.0) * float(old[1] or 0.0)) + (float(stock_real) * float(costo_unitario))) / max(0.000001, nueva_cant)
+                    else:
+                        nueva_cant = float(stock_real)
+                        precio_ponderado = float(costo_unitario)
+
+                    cur.execute(
+                        """
+                        INSERT INTO inventario
+                        (item,cantidad,unidad,precio_usd,minimo,imprimible_cmyk,area_por_pliego_cm2,activo,ultima_actualizacion)
+                        VALUES (?,?,?,?,?,?,?,1,CURRENT_TIMESTAMP)
+                        ON CONFLICT(item) DO UPDATE SET
+                            cantidad=excluded.cantidad,
+                            unidad=excluded.unidad,
+                            precio_usd=excluded.precio_usd,
+                            minimo=excluded.minimo,
+                            imprimible_cmyk=excluded.imprimible_cmyk,
+                            area_por_pliego_cm2=excluded.area_por_pliego_cm2,
+                            activo=1,
+                            ultima_actualizacion=CURRENT_TIMESTAMP
+                        """,
+                        (
+                            nombre_item,
+                            nueva_cant,
+                            unidad_final,
+                            precio_ponderado,
+                            minimo_stock,
+                            1 if imprimible_cmyk else 0,
+                            area_por_pliego_val,
+                        ),
+                    )
+
+                    item_db = cur.execute("SELECT id FROM inventario WHERE item=?", (nombre_item,)).fetchone()
+                    if item_db:
+                        registrar_movimiento_inventario(
+                            item_id=int(item_db[0]),
+                            tipo='COMPRA',
+                            cantidad=float(stock_real),
+                            motivo=f"Compra proveedor: {proveedor or 'N/A'}",
+                            usuario=usuario_actual,
+                            conn=conn,
+                        )
+
+                    cur.execute(
+                        """
+                        INSERT INTO historial_compras
+                        (item, proveedor_id, cantidad, unidad, costo_total_usd, costo_unit_usd, impuestos, delivery, tasa_usada, moneda_pago, usuario)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            nombre_item,
+                            proveedor_id,
+                            float(stock_real),
+                            unidad_final,
+                            float(costo_factura_total),
+                            float(costo_unitario),
+                            float(porc_impuestos),
+                            float(delivery),
+                            float(tasa_usada),
+                            moneda_pago,
+                            usuario_actual,
+                        ),
+                    )
+
+                    conn.commit()
+
+                cargar_datos()
+                st.success("✅ Insumo guardado correctamente (sin variantes)")
+                st.rerun()
+
         # =======================================================
         # 🎨 GENERADOR DE VARIANTES EDITABLES (COLORES / MODELOS)
         # =======================================================
+        if not hay_variantes:
+            st.caption("Si activas '¿Hay variantes?' podrás guardar por colores/modelos.")
         
         st.divider()
         st.subheader("🎨 Variantes rápidas (colores, modelos, etc)")
@@ -2667,6 +2784,10 @@ elif menu == "📦 Inventario":
             "Escribe variantes separadas por coma",
             placeholder="Rojo, Azul, Verde, Negro",
             key="lista_variantes"
+        )
+        
+        
+@@ -6073,196 +6190,220 @@ elif menu == "🧠 Diagnóstico IA":
         )
         
         
@@ -6244,9 +6365,9 @@ elif menu == "🧠 Diagnóstico IA":
             )
 
             actualizar_desgaste_activo(activo_id, max(1.0, total_consumido_ml))
-            conn.execute(
-                """
-                UPDATE activos
+            conn.execute(␊
+                """␊
+                UPDATE activos␊
                 SET vida_restante = CASE
                     WHEN vida_total IS NULL OR vida_total <= 0 THEN vida_restante
                     ELSE MAX(0, MIN(COALESCE(vida_restante, vida_total), vida_total * (? / 100.0)))
@@ -8379,6 +8500,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
