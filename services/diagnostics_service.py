@@ -241,6 +241,68 @@ def analizar_hoja_diagnostico(path_archivo: str | Path) -> Dict[str, Any]:
 # -----------------------------
 # OpenCV tank analysis
 # -----------------------------
+
+
+def leer_hoja_diagnostico(path_archivo: str | Path) -> Dict[str, Any]:
+    """Alias público para análisis OCR completo de hoja de diagnóstico."""
+    return analizar_hoja_diagnostico(path_archivo)
+
+
+def calcular_consumo_tinta(capacidad: float, nivel_actual: float) -> float:
+    """Calcula consumo real en ml con piso en cero."""
+    return max(0.0, _safe_float(capacidad, 0.0) - _safe_float(nivel_actual, 0.0))
+
+
+def actualizar_activos_impresora(conn: sqlite3.Connection, impresora: str, texto_ocr: str) -> bool:
+    """Extrae contadores del OCR y actualiza `activos` para la impresora."""
+    contadores = extraer_contador_impresiones(texto_ocr)
+    return actualizar_activo_impresora(
+        conn=conn,
+        impresora=impresora,
+        contador_impresiones=int(contadores.get("contador_impresiones", 0)),
+    )
+
+
+def actualizar_inventario_tintas(
+    conn: sqlite3.Connection,
+    impresora: str,
+    capacidad_tanques_ml: Dict[str, float],
+    niveles_ml_detectados: Dict[str, float],
+    usuario: str,
+    procesar_movimiento_inventario_fn: Callable[..., Tuple[bool, str]],
+) -> Dict[str, float]:
+    """Descarga inventario por consumo detectado: consumo = capacidad - nivel actual."""
+    consumos: Dict[str, float] = {"C": 0.0, "M": 0.0, "Y": 0.0, "K": 0.0}
+
+    for color in ["C", "M", "Y", "K"]:
+        row = _find_inventory_row(conn, impresora, color)
+        if not row:
+            continue
+
+        item_id, _stock_actual, costo = row
+        capacidad_ml = _safe_float(capacidad_tanques_ml.get(color, 0.0), 0.0)
+        nivel_detectado_ml = _safe_float(niveles_ml_detectados.get(color, 0.0), 0.0)
+        consumo = calcular_consumo_tinta(capacidad=capacidad_ml, nivel_actual=nivel_detectado_ml)
+
+        if consumo <= 0:
+            continue
+
+        ok, msg = procesar_movimiento_inventario_fn(
+            item_id=item_id,
+            tipo="SALIDA",
+            cantidad=float(consumo),
+            costo_unitario=float(costo),
+            motivo="Consumo detectado por diagnóstico de impresora",
+            usuario=str(usuario or "Sistema"),
+            conn=conn,
+        )
+        if not ok:
+            raise RuntimeError(f"Error ajustando inventario {color}: {msg}")
+
+        consumos[color] = float(consumo)
+
+    return consumos
+
 def analizar_imagen_tanques(path_imagen: str | Path) -> Dict[str, float]:
     """Detecta niveles (%) C/M/Y/K en foto de tanques usando segmentación HSV."""
     try:
@@ -500,9 +562,10 @@ def procesar_diagnostico_impresora(
     }
 
     niveles_ml = calcular_ml_restantes(niveles_pct=niveles_pct, capacidad_tanques_ml=capacidad_tanques_ml)
-    consumos = actualizar_inventario_diagnostico(
+    consumos = actualizar_inventario_tintas(
         conn=conn,
         impresora=impresora,
+        capacidad_tanques_ml=capacidad_tanques_ml,
         niveles_ml_detectados=niveles_ml,
         usuario=usuario,
         procesar_movimiento_inventario_fn=procesar_movimiento_inventario_fn,
@@ -557,10 +620,10 @@ def procesar_diagnostico_impresora(
         paginas_impresas=data_ocr["paginas_impresas"],
         riesgo_falla=pred.riesgo_falla,
     )
-    actualizar_activo_impresora(
+    actualizar_activos_impresora(
         conn=conn,
         impresora=impresora,
-        contador_impresiones=int(data_ocr.get("contador_impresiones", 0)),
+        texto_ocr=str(data_ocr.get("ocr_text", "")),
     )
     conn.commit()
 
