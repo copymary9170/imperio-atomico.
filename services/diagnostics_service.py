@@ -46,15 +46,12 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return float(default)
 
-def _round2(value: Any) -> float:
-    return round(_safe_float(value, 0.0), 2)
-
 
 def _extract_first_number(text: str, pattern: str, multiplier: float = 1.0) -> Optional[float]:
     match = re.search(pattern, text, flags=re.IGNORECASE)
     if not match:
         return None
- return _round2(_safe_float(match.group(1)) * multiplier)
+    return _safe_float(match.group(1)) * multiplier
 
 
 def _normalize_ocr_text(text: str) -> str:
@@ -107,7 +104,7 @@ def _extract_percent_by_label(text: str, labels: Iterable[str]) -> Optional[floa
         pattern = rf"{re.escape(label)}[^\d%]{{0,20}}(\d{{1,3}}(?:[\.,]\d+)?)\s*%"
         val = _extract_first_number(text, pattern)
         if val is not None:
-            return _round2(max(0.0, min(100.0, val)))
+            return max(0.0, min(100.0, val))
     return None
 
 
@@ -192,7 +189,7 @@ def actualizar_activo_impresora(conn: sqlite3.Connection, impresora: str, contad
     activo_id = int(row[0])
     vida_total = _safe_float(row[1], 0.0)
     contador = max(0, int(contador_impresiones or 0))
-    vida_restante = _round2(max(0.0, vida_total - float(contador)))
+    vida_restante = max(0.0, vida_total - float(contador))
 
     conn.execute(
         """
@@ -200,7 +197,7 @@ def actualizar_activo_impresora(conn: sqlite3.Connection, impresora: str, contad
         SET contador_impresiones=?, vida_restante=?
         WHERE id=?
         """,
-        (contador, _round2(vida_restante), activo_id),
+        (contador, float(vida_restante), activo_id),
     )
     return True
 
@@ -244,67 +241,6 @@ def analizar_hoja_diagnostico(path_archivo: str | Path) -> Dict[str, Any]:
 # -----------------------------
 # OpenCV tank analysis
 # -----------------------------
-
-def leer_hoja_diagnostico(path_archivo: str | Path) -> Dict[str, Any]:
-    """Alias público para análisis OCR completo de hoja de diagnóstico."""
-    return analizar_hoja_diagnostico(path_archivo)
-
-
-def calcular_consumo_tinta(capacidad: float, nivel_actual: float) -> float:
-    """Calcula consumo real en ml con piso en cero."""
-    return max(0.0, _safe_float(capacidad, 0.0) - _safe_float(nivel_actual, 0.0))
-
-
-def actualizar_activos_impresora(conn: sqlite3.Connection, impresora: str, texto_ocr: str) -> bool:
-    """Extrae contadores del OCR y actualiza `activos` para la impresora."""
-    contadores = extraer_contador_impresiones(texto_ocr)
-    return actualizar_activo_impresora(
-        conn=conn,
-        impresora=impresora,
-        contador_impresiones=int(contadores.get("contador_impresiones", 0)),
-    )
-
-
-def actualizar_inventario_tintas(
-    conn: sqlite3.Connection,
-    impresora: str,
-    capacidad_tanques_ml: Dict[str, float],
-    niveles_ml_detectados: Dict[str, float],
-    usuario: str,
-    procesar_movimiento_inventario_fn: Callable[..., Tuple[bool, str]],
-) -> Dict[str, float]:
-    """Descarga inventario por consumo detectado: consumo = capacidad - nivel actual."""
-    consumos: Dict[str, float] = {"C": 0.0, "M": 0.0, "Y": 0.0, "K": 0.0}
-
-    for color in ["C", "M", "Y", "K"]:
-        row = _find_inventory_row(conn, impresora, color)
-        if not row:
-            continue
-
-        item_id, _stock_actual, costo = row
-        capacidad_ml = _safe_float(capacidad_tanques_ml.get(color, 0.0), 0.0)
-        nivel_detectado_ml = _safe_float(niveles_ml_detectados.get(color, 0.0), 0.0)
-        consumo = calcular_consumo_tinta(capacidad=capacidad_ml, nivel_actual=nivel_detectado_ml)
-
-        if consumo <= 0:
-            continue
-
-        ok, msg = procesar_movimiento_inventario_fn(
-            item_id=item_id,
-            tipo="SALIDA",
-            cantidad=float(consumo),
-            costo_unitario=float(costo),
-            motivo="Consumo detectado por diagnóstico de impresora",
-            usuario=str(usuario or "Sistema"),
-            conn=conn,
-        )
-        if not ok:
-            raise RuntimeError(f"Error ajustando inventario {color}: {msg}")
-
-        consumos[color] = float(consumo)
-
-    return consumos
-
 def analizar_imagen_tanques(path_imagen: str | Path) -> Dict[str, float]:
     """Detecta niveles (%) C/M/Y/K en foto de tanques usando segmentación HSV."""
     try:
@@ -342,15 +278,14 @@ def analizar_imagen_tanques(path_imagen: str | Path) -> Dict[str, float]:
             continue
 
         filled_height = int(active_rows.max() - active_rows.min() + 1)
-       levels[color] = _round2(max(0.0, min(100.0, (filled_height / max(1, h)) * 100.0)))
-
+        levels[color] = max(0.0, min(100.0, (filled_height / max(1, h)) * 100.0))
 
     return levels
 
 
 def calcular_ml_restantes(niveles_pct: Dict[str, float], capacidad_tanques_ml: Dict[str, float]) -> Dict[str, float]:
     return {
-        color: _round2(max(0.0, _safe_float(capacidad_tanques_ml.get(color, 0.0)) * (_safe_float(niveles_pct.get(color, 0.0)) / 100.0)))
+        color: max(0.0, _safe_float(capacidad_tanques_ml.get(color, 0.0)) * (_safe_float(niveles_pct.get(color, 0.0)) / 100.0))
         for color in ["C", "M", "Y", "K"]
     }
 
@@ -416,23 +351,23 @@ def actualizar_inventario_diagnostico(
             continue
 
         item_id, stock_actual, costo = row
-        nivel_detectado = _round2(max(0.0, _safe_float(niveles_ml_detectados.get(color, 0.0))))
-        consumo = _round2(max(0.0, stock_actual - nivel_detectado))
+        nivel_detectado = max(0.0, _safe_float(niveles_ml_detectados.get(color, 0.0)))
+        consumo = max(0.0, stock_actual - nivel_detectado)
         if consumo <= 0:
             continue
 
         ok, msg = procesar_movimiento_inventario_fn(
             item_id=item_id,
             tipo="SALIDA",
-            cantidad=_round2(consumo),
-            costo_unitario=_round2(costo),
+            cantidad=float(consumo),
+            costo_unitario=float(costo),
             motivo="Ajuste automático por diagnóstico de impresora",
             usuario=str(usuario or "Sistema"),
             conn=conn,
         )
         if not ok:
             raise RuntimeError(f"Error ajustando inventario {color}: {msg}")
-        consumos[color] = _round2(consumo)
+        consumos[color] = float(consumo)
 
     return consumos
 
@@ -477,17 +412,17 @@ def _build_predictive_summary(actual: Dict[str, Any], historico: pd.DataFrame) -
         hist = historico.sort_values("paginas_impresas")
         d_pag = max(1.0, _safe_float(hist["paginas_impresas"].iloc[-1] - hist["paginas_impresas"].iloc[0], 1.0))
         d_cons = max(0.0, _safe_float(hist["consumo_ml_estimado"].iloc[-1] - hist["consumo_ml_estimado"].iloc[0], 0.0))
-        consumo_prom_ml_pag = _round2(d_cons / d_pag)
+        consumo_prom_ml_pag = d_cons / d_pag
 
         d_vida = max(0.0, _safe_float(hist["vida_cabezal"].iloc[0] - hist["vida_cabezal"].iloc[-1], 0.0))
-        degradacion_vida = _round2((d_vida / d_pag) * 1000.0)
+        degradacion_vida = (d_vida / d_pag) * 1000.0
 
         d_clean = max(0.0, _safe_float(hist["ciclos_limpieza"].iloc[-1] - hist["ciclos_limpieza"].iloc[0], 0.0))
-        limpiezas_por_1000 = _round2((d_clean / d_pag) * 1000.0)
+        limpiezas_por_1000 = (d_clean / d_pag) * 1000.0
 
         vida_drop_per_page = d_vida / d_pag if d_pag > 0 else 0.0
         if vida_drop_per_page > 0:
-            paginas_hasta_mant = _round2(max(0.0, (vida_cabezal - 20.0) / vida_drop_per_page))
+            paginas_hasta_mant = max(0.0, (vida_cabezal - 20.0) / vida_drop_per_page)
 
     riesgo = _risk_label(vida_cabezal, min_tanque_pct, limpiezas_por_1000)
 
@@ -499,10 +434,10 @@ def _build_predictive_summary(actual: Dict[str, Any], historico: pd.DataFrame) -
         alertas.append("Limpiezas excesivas detectadas")
 
     return PredictiveSummary(
-        consumo_promedio_ml_pag=_round2(consumo_prom_ml_pag),
-        paginas_hasta_mantenimiento=_round2(paginas_hasta_mant) if paginas_hasta_mant is not None else None,
-        degradacion_vida_pct_por_1000_pag=_round2(degradacion_vida),
-        limpiezas_por_1000_pag=_round2(limpiezas_por_1000),
+        consumo_promedio_ml_pag=float(consumo_prom_ml_pag),
+        paginas_hasta_mantenimiento=paginas_hasta_mant,
+        degradacion_vida_pct_por_1000_pag=float(degradacion_vida),
+        limpiezas_por_1000_pag=float(limpiezas_por_1000),
         riesgo_falla=riesgo,
         alertas=alertas,
     )
@@ -524,7 +459,7 @@ def actualizar_estado_activo_impresora(
 
     activo_id = int(row[0])
     vida_total = _safe_float(row[1], 100.0)
-    vida_restante = _round2(max(0.0, min(vida_total, vida_total * (_safe_float(vida_cabezal_pct, 0.0) / 100.0))))
+    vida_restante = max(0.0, min(vida_total, vida_total * (_safe_float(vida_cabezal_pct, 0.0) / 100.0)))
     estado = "Operativo" if riesgo_falla == "BAJO" else "Mantenimiento Preventivo" if riesgo_falla == "MEDIO" else "Riesgo Alto"
 
     conn.execute(
@@ -533,7 +468,7 @@ def actualizar_estado_activo_impresora(
         SET vida_restante=?, desgaste=?, observaciones=TRIM(COALESCE(observaciones,'') || ' | Diagnóstico: riesgo=' || ? || ', páginas=' || ?)
         WHERE id=?
         """,
-        (_round2(vida_restante), _round2(100.0 - _safe_float(vida_cabezal_pct, 0.0)), str(riesgo_falla), int(paginas_impresas), activo_id),
+        (float(vida_restante), float(100.0 - _safe_float(vida_cabezal_pct, 0.0)), str(riesgo_falla), int(paginas_impresas), activo_id),
     )
 
     # Si existe columna estado en esta instalación, actualizarla.
@@ -558,23 +493,22 @@ def procesar_diagnostico_impresora(
     data_img = analizar_imagen_tanques(foto_tanques)
 
     niveles_pct = {
-        c: _round2(np.mean([v for v in [data_ocr["niveles_pct"].get(c), data_img.get(c)] if v is not None]))
+        c: float(np.mean([v for v in [data_ocr["niveles_pct"].get(c), data_img.get(c)] if v is not None]))
         if any(v is not None for v in [data_ocr["niveles_pct"].get(c), data_img.get(c)])
         else 0.0
         for c in ["C", "M", "Y", "K"]
     }
 
     niveles_ml = calcular_ml_restantes(niveles_pct=niveles_pct, capacidad_tanques_ml=capacidad_tanques_ml)
-    consumos = actualizar_inventario_tintas(
+    consumos = actualizar_inventario_diagnostico(
         conn=conn,
         impresora=impresora,
-        capacidad_tanques_ml=capacidad_tanques_ml,
         niveles_ml_detectados=niveles_ml,
         usuario=usuario,
         procesar_movimiento_inventario_fn=procesar_movimiento_inventario_fn,
     )
 
-    consumo_estimado_total = _round2(sum(consumos.values()))
+    consumo_estimado_total = float(sum(consumos.values()))
 
     historico = pd.read_sql_query(
         """
@@ -604,15 +538,15 @@ def procesar_diagnostico_impresora(
         (
             impresora,
             datetime.now().isoformat(timespec="seconds"),
-            _round2(niveles_pct["C"]),
-            _round2(niveles_pct["M"]),
-            _round2(niveles_pct["Y"]),
-            _round2(niveles_pct["K"]),
-            _round2(data_ocr["vida_cabezal_pct"]),
+            float(niveles_pct["C"]),
+            float(niveles_pct["M"]),
+            float(niveles_pct["Y"]),
+            float(niveles_pct["K"]),
+            float(data_ocr["vida_cabezal_pct"]),
             int(data_ocr["paginas_impresas"]),
             int(data_ocr["ciclos_limpieza"]),
             pred.riesgo_falla,
-            _round2(consumo_estimado_total),
+            float(consumo_estimado_total),
         ),
     )
 
@@ -623,10 +557,10 @@ def procesar_diagnostico_impresora(
         paginas_impresas=data_ocr["paginas_impresas"],
         riesgo_falla=pred.riesgo_falla,
     )
-    actualizar_activos_impresora(
+    actualizar_activo_impresora(
         conn=conn,
         impresora=impresora,
-        texto_ocr=str(data_ocr.get("ocr_text", "")),
+        contador_impresiones=int(data_ocr.get("contador_impresiones", 0)),
     )
     conn.commit()
 
@@ -667,37 +601,12 @@ class DiagnosticsService:
                 porcentaje = float(p_foto)
             else:
                 porcentaje = None
-            resultados[color] = _round2(float(capacidad[color]) * porcentaje / 100.0) if porcentaje is not None else None
+            resultados[color] = (float(capacidad[color]) * porcentaje / 100.0) if porcentaje is not None else None
         return resultados
 
     @staticmethod
     def resolve_head_life(detected_value: Optional[float], porcentajes_foto: Dict[str, float]) -> float:
         if detected_value is not None:
-            return _round2(max(0.0, min(100.0, float(detected_value))))
+            return max(0.0, min(100.0, float(detected_value)))
         cobertura_ref = np.mean([v for v in porcentajes_foto.values()]) if porcentajes_foto else 75.0
-        return _round2(max(5.0, min(100.0, 100.0 - (100.0 - float(cobertura_ref)) * 0.6)))
-
-    @staticmethod
-    def summarize(resultados: Dict[str, Optional[float]], vida_cabezal_pct: float) -> PrinterDiagnosisResult:
-        alias_colores = {
-            "C": ["C", "Cyan"],
-            "M": ["M", "Magenta"],
-            "Y": ["Y", "Yellow"],
-            "K": ["K", "Black", "BK"],
-        }
-
-        niveles_ml: Dict[str, Optional[float]] = {}
-        for color, aliases in alias_colores.items():
-            valor = None
-            for key in aliases:
-                if key in resultados and resultados.get(key) is not None:
-                    valor = _round2(resultados[key])
-                    break
-            niveles_ml[color] = valor
-
-        tinta_restante_ml = _round2(sum(v for v in niveles_ml.values() if v is not None))
-        return PrinterDiagnosisResult(
-            niveles_ml=niveles_ml,
-            vida_cabezal_pct=_round2(max(0.0, min(100.0, float(vida_cabezal_pct)))),
-            tinta_restante_ml=tinta_restante_ml,
-        )
+        return max(5.0, min(100.0, 100.0 - (100.0 - float(cobertura_ref)) * 0.6))
