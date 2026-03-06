@@ -4627,7 +4627,6 @@ elif menu == "👥 Clientes":
             st.info("No hay clientes")
             st.stop()
 
-@@ -4529,111 +4530,148 @@ elif menu == "👥 Clientes":
             format_func=lambda x: lista.loc[
                 lista["id"]==x,"nombre"
             ].values[0]
@@ -8509,6 +8508,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
