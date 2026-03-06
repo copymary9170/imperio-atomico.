@@ -4471,17 +4471,17 @@ elif menu == "👥 Clientes":
     # CARGA SEGURA
     # =====================================================
 
-    @st.cache_data(ttl=300)
-    def cargar_clientes():
+    @st.cache_data(ttl=300)␊
+    def cargar_clientes():␊
 
         query = """
 
         SELECT
 
-        c.id,
-        c.nombre,
-        c.whatsapp,
-        COALESCE(c.categoria,'General') categoria,
+        c.id,␊
+        c.nombre,␊
+        COALESCE(c.whatsapp,'') whatsapp,
+        COALESCE(c.categoria,'General') categoria,␊
 
         COUNT(v.id) operaciones,
 
@@ -4522,7 +4522,7 @@ elif menu == "👥 Clientes":
             return pd.read_sql(query, conn)
 
 
-    df = cargar_clientes()
+    df = cargar_clientes()␊
 
 
     # =====================================================
@@ -4567,7 +4567,7 @@ elif menu == "👥 Clientes":
             guardar = st.form_submit_button("Guardar")
 
 
-            if guardar:
+            if guardar:␊
 
                 if nombre.strip() == "":
 
@@ -4576,6 +4576,7 @@ elif menu == "👥 Clientes":
 
 
                 whatsapp = "".join(filter(str.isdigit, whatsapp))
+                nombre = str(nombre).strip()
 
 
                 with conectar() as conn:
@@ -4584,7 +4585,7 @@ elif menu == "👥 Clientes":
 
                         "SELECT COUNT(*) FROM clientes WHERE nombre=?",
 
-                        (nombre,)
+                        (nombre,)␊
 
                     ).fetchone()[0]
 
@@ -4600,7 +4601,7 @@ elif menu == "👥 Clientes":
                         """
 
                         INSERT INTO clientes
-                        (nombre, whatsapp, categoria)
+                        (nombre, whatsapp, categoria)␊
 
                         VALUES (?,?,?)
 
@@ -4626,15 +4627,7 @@ elif menu == "👥 Clientes":
             st.info("No hay clientes")
             st.stop()
 
-
-        lista = df[["id","nombre"]]
-
-        cliente_id = st.selectbox(
-
-            "Seleccionar",
-
-            lista["id"],
-
+@@ -4529,111 +4530,145 @@ elif menu == "👥 Clientes":
             format_func=lambda x: lista.loc[
                 lista["id"]==x,"nombre"
             ].values[0]
@@ -4660,13 +4653,12 @@ elif menu == "👥 Clientes":
 
             whatsapp_n = col2.text_input("WhatsApp",row["whatsapp"])
 
-            categoria_n = col3.selectbox(
+            categoria_n = col3.selectbox(␊
 
                 "Categoria",
 
                 ["General","VIP","Revendedor"],
-
-                index=["General","VIP","Revendedor"].index(row["categoria"])
+                index=["General","VIP","Revendedor"].index(row["categoria"]) if row["categoria"] in ["General","VIP","Revendedor"] else 0
 
             )
 
@@ -4676,7 +4668,21 @@ elif menu == "👥 Clientes":
 
             if actualizar:
 
+                nombre_n = str(nombre_n).strip()
+                whatsapp_n = "".join(filter(str.isdigit, str(whatsapp_n or "")))
+                if nombre_n == "":
+                    st.error("Nombre obligatorio")
+                    st.stop()
+
                 with conectar() as conn:
+
+                    existe_otro = conn.execute(
+                        "SELECT COUNT(*) FROM clientes WHERE nombre=? AND id<>? AND COALESCE(activo,1)=1",
+                        (nombre_n, int(cliente_id))
+                    ).fetchone()[0]
+                    if existe_otro:
+                        st.error("Ya existe otro cliente con ese nombre")
+                        st.stop()
 
                     conn.execute(
 
@@ -4714,13 +4720,34 @@ elif menu == "👥 Clientes":
     # ANALISIS
     # =====================================================
 
-    if df.empty:
+    if df.empty:␊
 
         st.warning("Sin clientes")
         st.stop()
 
+    st.divider()
+    st.subheader("🔎 Búsqueda y filtros")
+    colf1, colf2 = st.columns([2, 1])
+    buscador_cliente = colf1.text_input("Buscar por nombre o WhatsApp", placeholder="Ej: Juan / 58412...")
+    categorias_disponibles = ["Todas"] + sorted([str(x) for x in df["categoria"].dropna().unique().tolist()])
+    filtro_categoria = colf2.selectbox("Categoría", categorias_disponibles)
 
-    df["ultima_compra"] = pd.to_datetime(df["ultima_compra"])
+    if buscador_cliente:
+        q = str(buscador_cliente).strip()
+        df = df[
+            df["nombre"].astype(str).str.contains(q, case=False, na=False)
+            | df["whatsapp"].astype(str).str.contains(q, case=False, na=False)
+        ]
+
+    if filtro_categoria != "Todas":
+        df = df[df["categoria"].astype(str) == str(filtro_categoria)]
+
+    if df.empty:
+        st.info("No hay clientes para los filtros seleccionados")
+        st.stop()
+
+
+    df["ultima_compra"] = pd.to_datetime(df["ultima_compra"], errors="coerce")
 
 
     df["recencia"] = (
@@ -4746,11 +4773,7 @@ elif menu == "👥 Clientes":
             df["score"] > 1000,
             df["score"] > 500,
             df["score"] > 200
-
-        ],
-
-        [
-
+@@ -4645,57 +4680,53 @@ elif menu == "👥 Clientes":
             "VIP",
             "Frecuente",
             "Ocasional"
@@ -4776,13 +4799,9 @@ elif menu == "👥 Clientes":
 
     c3.metric("Deuda",f"$ {df['deuda'].sum():,.2f}")
 
-    c4.metric(
-
-        "Ticket",
-
-        f"$ {(df['total'].sum()/df['operaciones'].sum()):,.2f}"
-
-    )
+    operaciones_total = float(df['operaciones'].sum() or 0)
+    ticket_promedio = (float(df['total'].sum()) / operaciones_total) if operaciones_total > 0 else 0.0
+    c4.metric("Ticket", f"$ {ticket_promedio:,.2f}")
 
 
     # =====================================================
@@ -4802,6 +4821,7 @@ elif menu == "👥 Clientes":
     )
 
     st.plotly_chart(fig,use_container_width=True)
+
 
 
     # =====================================================
@@ -8488,6 +8508,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
