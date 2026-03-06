@@ -4773,7 +4773,7 @@ elif menu == "👥 Clientes":
 
             df["score"] > 1000,
             df["score"] > 500,
-            df["score"] > 200
+            df["score"] > 200,
 
             "VIP",
             "Frecuente",
@@ -8507,6 +8507,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
