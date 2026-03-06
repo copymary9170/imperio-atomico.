@@ -4471,17 +4471,17 @@ elif menu == "👥 Clientes":
     # CARGA SEGURA
     # =====================================================
 
-    @st.cache_data(ttl=300)
-    def cargar_clientes():
+    @st.cache_data(ttl=300)␊
+    def cargar_clientes():␊
 
         query = """
 
         SELECT
 
-        c.id,
-        c.nombre,
+        c.id,␊
+        c.nombre,␊
         COALESCE(c.whatsapp,'') whatsapp,
-        COALESCE(c.categoria,'General') categoria,
+        COALESCE(c.categoria,'General') categoria,␊
 
         COUNT(v.id) operaciones,
 
@@ -4522,7 +4522,7 @@ elif menu == "👥 Clientes":
             return pd.read_sql(query, conn)
 
 
-    df = cargar_clientes()
+    df = cargar_clientes()␊
 
 
     # =====================================================
@@ -4567,7 +4567,7 @@ elif menu == "👥 Clientes":
             guardar = st.form_submit_button("Guardar")
 
 
-            if guardar:
+            if guardar:␊
 
                 if nombre.strip() == "":
 
@@ -4585,7 +4585,7 @@ elif menu == "👥 Clientes":
 
                         "SELECT COUNT(*) FROM clientes WHERE nombre=?",
 
-                        (nombre,)
+                        (nombre,)␊
 
                     ).fetchone()[0]
 
@@ -4601,7 +4601,7 @@ elif menu == "👥 Clientes":
                         """
 
                         INSERT INTO clientes
-                        (nombre, whatsapp, categoria)
+                        (nombre, whatsapp, categoria)␊
 
                         VALUES (?,?,?)
 
@@ -4627,6 +4627,7 @@ elif menu == "👥 Clientes":
             st.info("No hay clientes")
             st.stop()
 
+@@ -4529,111 +4530,148 @@ elif menu == "👥 Clientes":
             format_func=lambda x: lista.loc[
                 lista["id"]==x,"nombre"
             ].values[0]
@@ -4652,7 +4653,7 @@ elif menu == "👥 Clientes":
 
             whatsapp_n = col2.text_input("WhatsApp",row["whatsapp"])
 
-            categoria_n = col3.selectbox(
+            categoria_n = col3.selectbox(␊
 
                 "Categoria",
 
@@ -4720,26 +4721,29 @@ elif menu == "👥 Clientes":
     # =====================================================
 
     if df.empty:
-
         st.warning("Sin clientes")
         st.stop()
 
     st.divider()
     st.subheader("🔎 Búsqueda y filtros")
     colf1, colf2 = st.columns([2, 1])
-    buscador_cliente = colf1.text_input("Buscar por nombre o WhatsApp", placeholder="Ej: Juan / 58412...")
-    categorias_disponibles = ["Todas"] + sorted([str(x) for x in df["categoria"].dropna().unique().tolist()])
+    buscador_cliente = colf1.text_input(
+        "Buscar por nombre o WhatsApp",
+        placeholder="Ej: Juan / 58412...",
+    )
+    categorias_disponibles = ["Todas"] + sorted(
+        [str(x) for x in df["categoria"].dropna().unique().tolist()]
+    )
     filtro_categoria = colf2.selectbox("Categoría", categorias_disponibles)
 
-    if buscador_cliente:
+    if str(buscador_cliente or "").strip():
         q = str(buscador_cliente).strip()
-        df = df[
-            df["nombre"].astype(str).str.contains(q, case=False, na=False)
-            | df["whatsapp"].astype(str).str.contains(q, case=False, na=False)
-        ]
+        mask_nombre = df["nombre"].astype(str).str.contains(q, case=False, na=False)
+        mask_whatsapp = df["whatsapp"].astype(str).str.contains(q, case=False, na=False)
+        df = df[mask_nombre | mask_whatsapp]
 
     if filtro_categoria != "Todas":
-        df = df[df["categoria"].astype(str) == str(filtro_categoria)]
+        df = df[df["categoria"].astype(str).eq(str(filtro_categoria))]
 
     if df.empty:
         st.info("No hay clientes para los filtros seleccionados")
@@ -4772,7 +4776,7 @@ elif menu == "👥 Clientes":
             df["score"] > 1000,
             df["score"] > 500,
             df["score"] > 200
-@@ -4645,57 +4680,53 @@ elif menu == "👥 Clientes":
+@@ -4645,57 +4683,53 @@ elif menu == "👥 Clientes":
             "VIP",
             "Frecuente",
             "Ocasional"
@@ -4820,7 +4824,6 @@ elif menu == "👥 Clientes":
     )
 
     st.plotly_chart(fig,use_container_width=True)
-
 
     # =====================================================
     # EXPORTAR
@@ -8506,6 +8509,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
