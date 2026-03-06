@@ -4819,12 +4819,37 @@ elif menu == "👥 Clientes":
     # =====================================================
     # EXPORTAR
     # =====================================================
-        buffer.getvalue(),
+    if st.button("📥 Exportar Excel", key="exportar_clientes_excel"):
 
-        "clientes.xlsx"
+        columnas_export = [
+            "id",
+            "nombre",
+            "whatsapp",
+            "categoria",
+            "operaciones",
+            "total",
+            "deuda",
+            "ultima_compra",
+            "segmento",
+            "score",
+        ]
 
-    )
+        df_export = df.copy()
+        disponibles = [c for c in columnas_export if c in df_export.columns]
+        df_export = df_export[disponibles]
 
+        buffer = io.BytesIO()
+        df_export.to_excel(buffer, index=False)
+
+        st.download_button(
+
+            "Descargar Excel",
+
+            buffer.getvalue(),
+
+            "clientes.xlsx"
+
+        )
 
     # =====================================================
     # TABLA
@@ -8482,6 +8507,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
