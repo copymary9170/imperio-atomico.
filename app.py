@@ -4471,17 +4471,17 @@ elif menu == "👥 Clientes":
     # CARGA SEGURA
     # =====================================================
 
-    @st.cache_data(ttl=300)␊
-    def cargar_clientes():␊
+    @st.cache_data(ttl=300)
+    def cargar_clientes():
 
         query = """
 
         SELECT
 
-        c.id,␊
-        c.nombre,␊
+        c.id,
+        c.nombre,
         COALESCE(c.whatsapp,'') whatsapp,
-        COALESCE(c.categoria,'General') categoria,␊
+        COALESCE(c.categoria,'General') categoria,
 
         COUNT(v.id) operaciones,
 
@@ -4522,7 +4522,7 @@ elif menu == "👥 Clientes":
             return pd.read_sql(query, conn)
 
 
-    df = cargar_clientes()␊
+    df = cargar_clientes()
 
 
     # =====================================================
@@ -4567,7 +4567,7 @@ elif menu == "👥 Clientes":
             guardar = st.form_submit_button("Guardar")
 
 
-            if guardar:␊
+            if guardar:
 
                 if nombre.strip() == "":
 
@@ -4585,7 +4585,7 @@ elif menu == "👥 Clientes":
 
                         "SELECT COUNT(*) FROM clientes WHERE nombre=?",
 
-                        (nombre,)␊
+                        (nombre,)
 
                     ).fetchone()[0]
 
@@ -4601,7 +4601,7 @@ elif menu == "👥 Clientes":
                         """
 
                         INSERT INTO clientes
-                        (nombre, whatsapp, categoria)␊
+                        (nombre, whatsapp, categoria)
 
                         VALUES (?,?,?)
 
@@ -4673,7 +4673,7 @@ elif menu == "👥 Clientes":
 
             whatsapp_n = col2.text_input("WhatsApp",row["whatsapp"])
 
-            categoria_n = col3.selectbox(␊
+            categoria_n = col3.selectbox(
 
                 "Categoria",
 
@@ -8502,6 +8502,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
