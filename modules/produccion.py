@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from modules.common import as_positive, clean_text
 from services.inventory_service import InventoryService
 from services.produccion_service import ConsumoInsumo, ProduccionService
 
@@ -25,11 +26,18 @@ def render_produccion(usuario: str) -> None:
         submit = st.form_submit_button("Crear orden")
 
     if submit:
-        orden_id = service.registrar_orden(
-            usuario=usuario,
-            tipo_produccion=tipo,
-            referencia=referencia,
-            costo_estimado=costo_estimado,
-            insumos=[ConsumoInsumo(inventario_id=int(inventario_id), cantidad=float(cantidad), costo_unitario=float(costo_u))],
-        )
-        st.success(f"Orden de producción #{orden_id} registrada")
+        try:
+            referencia = clean_text(referencia) or f"Orden {tipo}"
+            costo_estimado = as_positive(costo_estimado, "Costo estimado")
+            cantidad = as_positive(cantidad, "Cantidad insumo", allow_zero=False)
+            costo_u = as_positive(costo_u, "Costo unitario")
+            orden_id = service.registrar_orden(
+                usuario=usuario,
+                tipo_produccion=tipo,
+                referencia=referencia,
+                costo_estimado=costo_estimado,
+                insumos=[ConsumoInsumo(inventario_id=int(inventario_id), cantidad=float(cantidad), costo_unitario=float(costo_u))],
+            )
+            st.success(f"Orden de producción #{orden_id} registrada")
+        except ValueError as exc:
+            st.error(str(exc))
