@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from database.connection import db_transaction
+from modules.common import as_positive, require_text
 from utils.currency import convert_to_bs, convert_to_usd
 
 
@@ -15,6 +16,12 @@ def registrar_gasto(
     tasa_cambio: float,
     monto: float,
 ) -> int:
+    descripcion = require_text(descripcion, "Descripción")
+    categoria = require_text(categoria, "Categoría")
+    metodo_pago = require_text(metodo_pago, "Método de pago")
+    tasa_cambio = as_positive(tasa_cambio, "Tasa de cambio", allow_zero=False)
+    monto = as_positive(monto, "Monto", allow_zero=False)
+
     monto_usd = convert_to_usd(monto, moneda, tasa_cambio)
     monto_bs = convert_to_bs(monto_usd, tasa_cambio)
     with db_transaction() as conn:
@@ -47,11 +54,31 @@ def render_gastos(usuario: str) -> None:
         monto = st.number_input("Monto", min_value=0.0)
         submit = st.form_submit_button("Registrar gasto")
     if submit:
-        gid = registrar_gasto(usuario, descripcion, categoria, metodo, moneda, tasa, monto)
-        st.success(f"Gasto #{gid} registrado")
+        try:
+            gid = registrar_gasto(usuario, descripcion, categoria, metodo, moneda, tasa, monto)
+            st.success(f"Gasto #{gid} registrado")
+        except ValueError as exc:
+            st.error(str(exc))
 
     with db_transaction() as conn:
+        resumen = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(monto_usd), 0) AS total,
+                COALESCE(SUM(CASE WHEN date(fecha)=date('now') THEN monto_usd ELSE 0 END), 0) AS hoy,
+                COUNT(*) AS cantidad
+            FROM gastos
+            WHERE estado='activo'
+            """
+        ).fetchone()
         rows = conn.execute(
             "SELECT id, fecha, descripcion, categoria, metodo_pago, monto_usd, estado FROM gastos ORDER BY id DESC"
         ).fetchall()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Gastos activos", int(resumen["cantidad"] or 0))
+    c2.metric("Gasto de hoy", f"$ {float(resumen['hoy'] or 0):,.2f}")
+    c3.metric("Gasto acumulado", f"$ {float(resumen['total'] or 0):,.2f}")
     st.dataframe(rows, use_container_width=True)
+modules/inventario.py
+modules/inventario.py
