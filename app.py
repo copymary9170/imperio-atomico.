@@ -122,6 +122,13 @@ def _safe_float(valor, default=0.0):
     except (TypeError, ValueError):
         return float(default)
 
+def _safe_div(numerador, denominador, default=0.0):
+    num = _safe_float(numerador, 0.0)
+    den = _safe_float(denominador, 0.0)
+    if den == 0:
+        return float(default)
+    return float(num / den)
+
 
 def D(v, default='0'):
     try:
@@ -3579,7 +3586,7 @@ elif menu == "📦 Inventario":
 
                             (nombre,telefono,rif,contacto,observaciones)
 
-                            VALUES (?,?,?,?,?)
+                            VALUES (?,?,?,?,?,?,1)
 
                             """,
 
@@ -4819,7 +4826,7 @@ elif menu == "👥 Clientes":
  # =====================================================
     # EXPORTAR
     # =====================================================
-    if st.button("📥 Exportar Excel", key="exportar_clientes_excel"):
+   if st.button("📥 Exportar Excel", key="exportar_clientes_excel"):
 
         columnas_export = [
             "id",
@@ -5271,7 +5278,8 @@ elif menu == "🎨 Análisis CMYK":
 
             total_usd_lote = sum(r['Costo $'] for r in resultados)
 
-            costo_promedio_pagina = (total_usd_lote / total_pags) if total_pags > 0 else 0
+            costo_promedio_pagina = _safe_div(total_usd_lote, total_pags)
+            total_ml_lote = float(sum(totales_lote_cmyk.values()))
             st.metric(
                 "💰 Costo Total Estimado de Producción",
                 f"$ {total_usd_lote:.2f}",
@@ -5280,12 +5288,23 @@ elif menu == "🎨 Análisis CMYK":
 
             st.subheader("🚀 Inteligencia de Producción CMYK")
             k1, k2, k3 = st.columns(3)
-            ml_por_pagina = (float(sum(totales_lote_cmyk.values())) / float(total_pags)) if total_pags else 0.0
-            paginas_por_dolar = (float(total_pags) / float(total_usd_lote)) if total_usd_lote > 0 else 0.0
-            peso_negro = (totales_lote_cmyk['K'] / float(sum(totales_lote_cmyk.values()))) if sum(totales_lote_cmyk.values()) > 0 else 0.0
+            ml_por_pagina = _safe_div(total_ml_lote, total_pags)
+            paginas_por_dolar = _safe_div(total_pags, total_usd_lote)
+            peso_negro = _safe_div(totales_lote_cmyk['K'], total_ml_lote)
             k1.metric("Consumo promedio", f"{ml_por_pagina:.4f} ml/pág")
             k2.metric("Rendimiento", f"{paginas_por_dolar:.2f} pág/$")
             k3.metric("Participación K", f"{peso_negro * 100:.1f}%")
+
+            st.session_state['resumen_cmyk_actual'] = {
+                'impresora': impresora_sel,
+                'paginas': int(total_pags),
+                'consumo_ml_total': float(total_ml_lote),
+                'costo_total': float(total_usd_lote),
+                'costo_por_pagina': float(costo_promedio_pagina),
+                'consumos_cmyk': {k: float(v) for k, v in totales_lote_cmyk.items()},
+                'fecha': datetime.now().isoformat(),
+            }
+
 
             if costo_promedio_pagina > 0.35:
                 st.warning("Costo por página alto: considera calidad 'Normal/Borrador' o papel de menor costo para mejorar margen.")
@@ -5954,11 +5973,19 @@ elif menu == "🏗️ Activos":
                     inversion REAL,
                     unidad TEXT,
                     desgaste REAL,
+                    desgaste_por_cm REAL DEFAULT 0,
+                    activo INTEGER DEFAULT 1,
                     fecha DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            df = pd.read_sql_query("SELECT * FROM activos", conn)
-            
+            cols_activos = [r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()]
+            if 'desgaste_por_cm' not in cols_activos:
+                conn.execute("ALTER TABLE activos ADD COLUMN desgaste_por_cm REAL DEFAULT 0")
+            if 'activo' not in cols_activos:
+                conn.execute("ALTER TABLE activos ADD COLUMN activo INTEGER DEFAULT 1")
+            conn.commit()
+            df = pd.read_sql_query("SELECT * FROM activos WHERE COALESCE(activo,1)=1", conn)
+
             # Crear tabla de historial si no existe
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS activos_historial (
@@ -5980,12 +6007,16 @@ elif menu == "🏗️ Activos":
         df['riesgo'] = np.where(ranking_riesgo >= 0.80, '🔴 Alto', np.where(ranking_riesgo >= 0.50, '🟠 Medio', '🟢 Bajo'))
 
         st.subheader("🧠 Salud de Activos")
-        m1, m2, m3, m4 = st.columns(4)
+        if 'desgaste_por_cm' not in df.columns:
+            df['desgaste_por_cm'] = 0.0
+        df['desgaste_por_cm'] = pd.to_numeric(df['desgaste_por_cm'], errors='coerce').fillna(0.0)
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Inversión instalada", f"$ {df['inversion'].sum():,.2f}")
         m2.metric("Desgaste promedio", f"$ {df['desgaste'].mean():.4f}/uso")
         m3.metric("Activos en riesgo alto", int((df['riesgo'] == '🔴 Alto').sum()))
         activo_critico = df.sort_values('desgaste', ascending=False).iloc[0]['equipo']
         m4.metric("Activo más crítico", str(activo_critico))
+        m5.metric("Desgaste/cm promedio", f"$ {df['desgaste_por_cm'].mean():.6f}")
 
         with st.expander("🔎 Activos con prioridad de mantenimiento", expanded=False):
             st.dataframe(
@@ -6012,7 +6043,7 @@ elif menu == "🏗️ Activos":
                 "Otro"
             ])
 
-            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 
             monto_inv = col_m1.number_input("Inversión ($)", min_value=0.0)
             vida_util = col_m2.number_input("Vida Útil (Usos)", min_value=1, value=1000)
@@ -6021,6 +6052,8 @@ elif menu == "🏗️ Activos":
                 "Categoría",
                 ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"]
             )
+
+            desgaste_cm = col_m4.number_input("Desgaste por cm ($)", min_value=0.0, value=0.0, format="%.6f")
 
             if st.form_submit_button("🚀 Guardar Activo"):
 
@@ -6038,14 +6071,15 @@ elif menu == "🏗️ Activos":
                     with conectar() as conn:
                         conn.execute("""
                             INSERT INTO activos 
-                            (equipo, categoria, inversion, unidad, desgaste) 
-                            VALUES (?,?,?,?,?)
+                            (equipo, categoria, inversion, unidad, desgaste, desgaste_por_cm, activo) 
+                            VALUES (?,?,?,?,?,?,1)
                         """, (
                             nombre_eq,
                             categoria_especifica,
                             monto_inv,
                             tipo_seccion,
-                            desgaste_u
+                            desgaste_u,
+                            float(desgaste_cm)
                         ))
 
                         conn.execute("""
@@ -6076,7 +6110,7 @@ elif menu == "🏗️ Activos":
 
             with st.form("editar_activo"):
 
-                c1, c2, c3 = st.columns(3)
+                c1, c2, c3, c4 = st.columns(4)
 
                 categorias_activo = ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"]
                 categoria_actual = str(datos.get('categoria', 'Otro'))
@@ -6090,6 +6124,7 @@ elif menu == "🏗️ Activos":
                     categorias_activo,
                     index=idx_categoria
                 )
+                nuevo_desgaste_cm = c4.number_input("Desgaste por cm ($)", min_value=0.0, value=_safe_float(datos.get('desgaste_por_cm', 0.0)), format="%.6f")
 
                 if st.form_submit_button("💾 Guardar Cambios"):
 
@@ -6098,9 +6133,9 @@ elif menu == "🏗️ Activos":
                         with conectar() as conn:
                             conn.execute("""
                                 UPDATE activos
-                                SET inversion = ?, categoria = ?, desgaste = ?
+                                SET inversion = ?, categoria = ?, desgaste = ?, desgaste_por_cm = ?
                                 WHERE id = ?
-                            """, (nueva_inv, nueva_cat, nuevo_desgaste, int(datos['id'])))
+                            """, (nueva_inv, nueva_cat, nuevo_desgaste, float(nuevo_desgaste_cm), int(datos['id'])))
 
                             conn.execute("""
                                 INSERT INTO activos_historial 
@@ -6463,15 +6498,22 @@ elif menu == "🛠️ Otros Procesos":
             value=1.0
         )
 
+        p_cfg1, p_cfg2 = st.columns(2)
+        tiempo_min = p_cfg1.number_input("Tiempo estimado (min)", min_value=0.0, value=0.0, step=1.0)
+        costo_operador_hora = p_cfg2.number_input("Costo operador/hora ($)", min_value=0.0, value=0.0, step=0.1)
+
         # Conversión segura del desgaste
         costo_unitario = float(datos_eq.get('desgaste', 0.0))
-        costo_total = costo_unitario * cantidad
+        costo_base = costo_unitario * cantidad
+        costo_operador = (float(tiempo_min) / 60.0) * float(costo_operador_hora)
+        costo_total = costo_base + costo_operador
 
         st.divider()
 
-        r1, r2 = st.columns(2)
+        r1, r2, r3 = st.columns(3)
         r1.metric("Costo Unitario", f"$ {costo_unitario:.4f}")
-        r2.metric("Costo Total", f"$ {costo_total:.2f}")
+        r2.metric("Costo Operador", f"$ {costo_operador:.2f}")
+        r3.metric("Costo Total", f"$ {costo_total:.2f}")
 
         if st.button("➕ Agregar Proceso"):
             st.session_state.lista_procesos.append({
@@ -6479,6 +6521,8 @@ elif menu == "🛠️ Otros Procesos":
                 "cantidad": cantidad,
                            "costo_unitario": costo_unitario,
                 "costo": costo_total,
+                "tiempo_min": float(tiempo_min),
+                "costo_operador": float(costo_operador),
                 "fecha": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
             })
             st.toast("Proceso añadido")
@@ -6503,7 +6547,7 @@ elif menu == "🛠️ Otros Procesos":
         
         with col1:
             if st.button("📝 Enviar a Cotización", use_container_width=True):
-
+                
                 st.session_state['datos_pre_cotizacion'] = {
                     'trabajo': " + ".join(df_proc["equipo"].tolist()),
                     'costo_base': float(total),
@@ -6819,6 +6863,7 @@ elif menu == "✂️ Corte Industrial":
     else:
         st.info("Sin resultados aún. Usa el botón 'Analizar diseño'.")
 
+
 # ===========================================================
 # 🔥 SUBLIMACIÓN INDUSTRIAL PRO v4.0
 # Recibe transfer desde CMYK y suma costos reales
@@ -6941,12 +6986,14 @@ elif menu == "🔥 Sublimación Industrial":
 
         "Unidades por hora",
 
+        min_value=0.1,
+
         value=12.0
 
     )
 
 
-    mano_obra_unitaria = salario_hora / unidades_hora
+    mano_obra_unitaria = _safe_div(salario_hora, unidades_hora)
 
 
     # DEPRECIACION
@@ -6968,18 +7015,19 @@ elif menu == "🔥 Sublimación Industrial":
 
         "Vida útil horas",
 
+        min_value=1.0,
+
         value=5000.0
 
     )
 
+    if unidades_hora <= 0:
+        st.warning("Unidades por hora debe ser mayor a 0 para un cálculo realista.")
 
-    depreciacion_unitaria = (
+    depreciacion_hora = _safe_div(valor_maquina, vida_util)
+    depreciacion_unitaria = _safe_div(depreciacion_hora, unidades_hora)
 
-        valor_maquina / vida_util
-
-    ) / unidades_hora
-
-
+    
     # =====================================================
     # COSTO FINAL
     # =====================================================
@@ -7003,7 +7051,7 @@ elif menu == "🔥 Sublimación Industrial":
     st.divider()
 
 
-    r1,r2 = st.columns(2)
+    r1,r2,r3 = st.columns(3)
 
 
     r1.metric(
@@ -7020,6 +7068,14 @@ elif menu == "🔥 Sublimación Industrial":
         "Costo total producción",
 
         f"$ {costo_total:,.2f}"
+
+    )
+
+    r3.metric(
+
+        "Tiempo lote (h)",
+
+        f"{_safe_div(total_unidades, unidades_hora):,.2f}"
 
     )
 
@@ -7048,30 +7104,8 @@ elif menu == "🔥 Sublimación Industrial":
 
             energia_unitaria,
 
-            mano_obra_unitaria,
-
-            depreciacion_unitaria
-
-        ]
-
-    })
 
 
-    fig = px.pie(
-
-        df_costos,
-
-        names="Concepto",
-
-        values="Costo"
-
-    )
-
-
-    st.plotly_chart(fig,use_container_width=True)
-
-
-    # =====================================================
     # GUARDAR PRODUCCION
     # =====================================================
 
@@ -7097,11 +7131,8 @@ elif menu == "🔥 Sublimación Industrial":
 
         inicio = datetime.now()
 
-        fin = inicio + timedelta(
-
-            hours = total_unidades / unidades_hora
-
-        )
+        horas_estimadas = _safe_div(total_unidades, unidades_hora)
+        fin = inicio + timedelta(hours=horas_estimadas)
 
 
         registrar_tiempo_produccion(
@@ -7127,6 +7158,7 @@ elif menu == "🔥 Sublimación Industrial":
             costo_total,
             "Producción desde CMYK"
         )
+        
         st.success(f"Orden de producción #{oid} creada")
 
     # =====================================================
@@ -7241,7 +7273,12 @@ elif menu == "🎨 Producción Manual":
             activos.append({'tiempo': float(t), 'desgaste_hora': float(act_opts[a])})
 
         r = calcular_produccion_manual(materiales, activos)
-        st.json(r)
+        mm1, mm2, mm3 = st.columns(3)
+        mm1.metric("Costo materiales", f"$ {_safe_float(r.get('costo_materiales', 0.0)):.2f}")
+        mm2.metric("Costo desgaste", f"$ {_safe_float(r.get('costo_desgaste', 0.0)):.2f}")
+        mm3.metric("Costo total", f"$ {_safe_float(r.get('costo_total', 0.0)):.2f}")
+        with st.expander("Detalle cálculo manual", expanded=False):
+            st.json(r)
 
         st.subheader("Botones universales")
         item_prod_dest = st.selectbox("Producto destino para inventario", list(item_opts.keys()), key='manual_dest_item')
@@ -7261,24 +7298,44 @@ elif menu == "🎨 Producción Manual":
             st.success(msg) if ok else st.error(msg)
 
         if st.button("🏭 ENVIAR A PRODUCCIÓN", key='btn_manual_send_prod'):
-            ok, msg = descontar_materiales_produccion(consumos, usuario=SessionStateService.get_current_user('Sistema'), detalle=f'Producción manual: {prod}')
-            if ok:
-                oid = registrar_orden_produccion('Manual', 'Interno', prod, 'pendiente', float(r['costo_total']), f'Producción manual {prod}')
-                st.success(f"{msg}. Orden #{oid} registrada")
+            if not consumos:
+                st.warning("Selecciona al menos un material para enviar a producción.")
             else:
-                st.error(msg)
+                ok, msg = descontar_materiales_produccion(consumos, usuario=SessionStateService.get_current_user('Sistema'), detalle=f'Producción manual: {prod}')
+                if ok:
+                    oid = registrar_orden_produccion('Manual', 'Interno', prod, 'pendiente', float(r['costo_total']), f'Producción manual {prod}')
+                    st.success(f"{msg}. Orden #{oid} registrada")
+                else:
+                    st.error(msg)
 
         if st.button("Guardar receta", key='btn_guardar_receta_manual'):
-            with conectar() as conn:
-                for m in mat_sel:
-                    item_id, _ = item_opts[m]
-                    conn.execute("INSERT INTO recetas_produccion (producto, inventario_id, cantidad, activo_id, tiempo) VALUES (?, ?, ?, ?, ?)", (prod, int(item_id), float(consumos.get(item_id, 0.0)), None, 0.0))
-                conn.commit()
-            st.success("Receta guardada")
+            if not mat_sel:
+                st.warning("Selecciona materiales antes de guardar receta.")
+            else:
+                with conectar() as conn:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS recetas_produccion (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            producto TEXT,
+                            inventario_id INTEGER,
+                            cantidad REAL,
+                            activo_id INTEGER,
+                            tiempo REAL,
+                            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    for m in mat_sel:
+                        item_id, _ = item_opts[m]
+                        conn.execute("INSERT INTO recetas_produccion (producto, inventario_id, cantidad, activo_id, tiempo) VALUES (?, ?, ?, ?, ?)", (prod, int(item_id), float(consumos.get(item_id, 0.0)), None, 0.0))
+                    conn.commit()
+                st.success("Receta guardada")
 
         if st.button("Descontar inventario producción manual", key='btn_desc_manual_inv'):
-            ok, msg = descontar_materiales_produccion(consumos, usuario=SessionStateService.get_current_user('Sistema'), detalle=f'Producción manual: {prod}')
-            st.success(msg) if ok else st.warning(msg)
+            if not consumos:
+                st.warning("No hay consumos definidos para descontar.")
+            else:
+                ok, msg = descontar_materiales_produccion(consumos, usuario=SessionStateService.get_current_user('Sistema'), detalle=f'Producción manual: {prod}')
+                st.success(msg) if ok else st.warning(msg)
 
         if st.button("Guardar orden manual", key='btn_guardar_orden_manual'):
             oid = registrar_orden_produccion('Manual', 'Interno', prod, 'pendiente', float(r['costo_total']), f'Producción manual {prod}')
@@ -8694,6 +8751,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
