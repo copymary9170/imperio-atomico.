@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from modules.common import as_positive, require_text
 from services.cotizacion_service import CotizacionService
 
 
@@ -17,6 +18,14 @@ def render_cotizaciones(usuario: str) -> None:
         submit = st.form_submit_button("Crear cotización")
 
     if submit:
-        cid = None if cliente_id == 0 else int(cliente_id)
-        cot_id = service.crear_cotizacion(usuario, cid, descripcion, costo, margen)
-        st.success(f"Cotización #{cot_id} creada")
+        try:
+            descripcion = require_text(descripcion, "Descripción")
+            costo = as_positive(costo, "Costo")
+            margen = as_positive(margen, "Margen")
+            cid = None if cliente_id == 0 else int(cliente_id)
+            cot_id = service.crear_cotizacion(usuario, cid, descripcion, costo, margen)
+            precio_sugerido = costo * (1 + (margen / 100))
+            st.success(f"Cotización #{cot_id} creada")
+            st.info(f"Precio sugerido: $ {precio_sugerido:,.2f}")
+        except ValueError as exc:
+            st.error(str(exc))
