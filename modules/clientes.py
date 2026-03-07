@@ -3,53 +3,36 @@ from __future__ import annotations
 import streamlit as st
 
 from database.connection import db_transaction
-from utils.calculations import calculate_daily_profit
 
 
-def _scalar(conn, query: str, params: tuple = ()) -> float:
-    row = conn.execute(query, params).fetchone()
-    return float(row[0] or 0.0)
-
-
-def render_dashboard() -> None:
-    st.subheader("Dashboard Financiero")
+def create_cliente(usuario: str, nombre: str, telefono: str, email: str, direccion: str, limite_credito_usd: float) -> int:
     with db_transaction() as conn:
-        daily_revenue = _scalar(conn, "SELECT SUM(total_usd) FROM ventas WHERE date(fecha)=date('now') AND estado='registrada'")
-        daily_expenses = _scalar(conn, "SELECT SUM(monto_usd) FROM gastos WHERE date(fecha)=date('now') AND estado='activo'")
-        daily_production_cost = _scalar(
-            conn,
+        cur = conn.execute(
             """
-            SELECT SUM(costo_unitario_usd * cantidad) FROM ventas_detalle
-            WHERE date(fecha)=date('now') AND estado='activo'
+            INSERT INTO clientes (usuario, nombre, telefono, email, direccion, limite_credito_usd)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
+            (usuario, nombre, telefono, email, direccion, limite_credito_usd),
         )
-        monthly_profit = _scalar(
-            conn,
-            """
-            SELECT COALESCE(SUM(v.total_usd), 0) - COALESCE((SELECT SUM(g.monto_usd) FROM gastos g WHERE strftime('%Y-%m', g.fecha)=strftime('%Y-%m', 'now') AND g.estado='activo'), 0)
-            FROM ventas v WHERE strftime('%Y-%m', v.fecha)=strftime('%Y-%m', 'now') AND v.estado='registrada'
-            """,
-        )
-        top_expense = conn.execute(
-            "SELECT categoria, SUM(monto_usd) total FROM gastos WHERE estado='activo' GROUP BY categoria ORDER BY total DESC LIMIT 1"
-        ).fetchone()
-        best_product = conn.execute(
-            """
-            SELECT descripcion, SUM(cantidad) qty
-            FROM ventas_detalle
-            WHERE estado='activo'
-            GROUP BY descripcion
-            ORDER BY qty DESC LIMIT 1
-            """
-        ).fetchone()
+        return int(cur.lastrowid)
 
-    daily_profit = calculate_daily_profit(daily_revenue, daily_expenses, daily_production_cost)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Daily revenue", f"$ {daily_revenue:,.2f}")
-    c2.metric("Daily expenses", f"$ {daily_expenses:,.2f}")
-    c3.metric("Daily profit", f"$ {daily_profit:,.2f}")
-    c4.metric("Monthly profit", f"$ {monthly_profit:,.2f}")
+def render_clientes(usuario: str) -> None:
+    st.subheader("Clientes")
+    with st.form("form_cliente"):
+        nombre = st.text_input("Nombre")
+        telefono = st.text_input("Teléfono")
+        email = st.text_input("Email")
+        direccion = st.text_area("Dirección")
+        limite_credito = st.number_input("Límite crédito USD", min_value=0.0, step=1.0)
+        submitted = st.form_submit_button("Guardar cliente")
 
-    st.info(f"Top expenses category: {top_expense['categoria'] if top_expense else 'N/A'}")
-    st.info(f"Best selling product: {best_product['descripcion'] if best_product else 'N/A'}")
+    if submitted:
+        cid = create_cliente(usuario, nombre, telefono, email, direccion, limite_credito)
+        st.success(f"Cliente #{cid} registrado")
+
+    with db_transaction() as conn:
+        data = conn.execute(
+            "SELECT id, fecha, nombre, telefono, saldo_por_cobrar_usd, estado FROM clientes ORDER BY id DESC"
+        ).fetchall()
+    st.dataframe(data, use_container_width=True)
