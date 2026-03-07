@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from database.connection import db_transaction
+from modules.common import as_positive, clean_text
 
 
 def registrar_cierre_caja(
@@ -16,6 +17,15 @@ def registrar_cierre_caja(
     expenses_transfer: float,
     observaciones: str,
 ) -> int:
+    cash_start = as_positive(cash_start, "Caja inicial")
+    sales_cash = as_positive(sales_cash, "Ventas efectivo")
+    sales_transfer = as_positive(sales_transfer, "Ventas transferencia")
+    sales_zelle = as_positive(sales_zelle, "Ventas zelle")
+    sales_binance = as_positive(sales_binance, "Ventas binance")
+    expenses_cash = as_positive(expenses_cash, "Egresos efectivo")
+    expenses_transfer = as_positive(expenses_transfer, "Egresos transferencia")
+    observaciones = clean_text(observaciones)
+
     cash_end = cash_start + sales_cash - expenses_cash
     with db_transaction() as conn:
         cur = conn.execute(
@@ -48,6 +58,16 @@ def render_caja(usuario: str, user_role: str) -> None:
         st.warning("Solo Admin puede cerrar caja.")
         return
 
+    with db_transaction() as conn:
+        ultimo = conn.execute(
+            "SELECT fecha, cash_start, cash_end FROM cierres_caja ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    if ultimo:
+        st.info(
+            f"Último cierre: {ultimo['fecha']} | Inicio: $ {float(ultimo['cash_start']):,.2f} | Final: $ {float(ultimo['cash_end']):,.2f}"
+        )
+
     cash_start = st.number_input("cash_start", min_value=0.0)
     sales_cash = st.number_input("sales_cash", min_value=0.0)
     sales_transfer = st.number_input("sales_transfer", min_value=0.0)
@@ -58,15 +78,18 @@ def render_caja(usuario: str, user_role: str) -> None:
     observaciones = st.text_area("Observaciones")
 
     if st.button("Cerrar caja"):
-        cierre_id = registrar_cierre_caja(
-            usuario,
-            cash_start,
-            sales_cash,
-            sales_transfer,
-            sales_zelle,
-            sales_binance,
-            expenses_cash,
-            expenses_transfer,
-            observaciones,
-        )
-        st.success(f"Cierre #{cierre_id} registrado")
+        try:
+            cierre_id = registrar_cierre_caja(
+                usuario,
+                cash_start,
+                sales_cash,
+                sales_transfer,
+                sales_zelle,
+                sales_binance,
+                expenses_cash,
+                expenses_transfer,
+                observaciones,
+            )
+            st.success(f"Cierre #{cierre_id} registrado")
+        except ValueError as exc:
+            st.error(str(exc))
