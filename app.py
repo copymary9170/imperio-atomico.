@@ -3581,15 +3581,16 @@ elif menu == "📦 Inventario":
 
                             conn.execute("""
 
-                            INSERT INTO proveedores
+                            INSERT INTO proveedores␊
 
-                            (nombre,telefono,rif,contacto,observaciones)
+                            (nombre,telefono,rif,contacto,observaciones)␊
 
-                            VALUES (?,?,?,?,?,?,1)
+                            VALUES (?,?,?,?,?)
 
                             """,
 
                             (
+
 
                             nombre.strip(),
 
@@ -8796,6 +8797,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
