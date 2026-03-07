@@ -4807,20 +4807,47 @@ elif menu == "👥 Clientes":
     # GRAFICO
     # =====================================================
 
+    df_costos = pd.DataFrame({␊
+
+        "Concepto":[
+
+            "Transfer CMYK",
+
+            "Energia",
+
+            "Mano obra",
+
+            "Depreciacion"
+
+        ],
+
+        "Costo":[
+
+            costo_transfer_unitario,
+
+            energia_unitaria,
+
+            mano_obra_unitaria,
+
+            depreciacion_unitaria
+
+        ]
+
+    })
+
     fig = px.bar(
 
-        df.head(10),
+        df_costos,
 
-        x="nombre",
+        x="Concepto",
 
-        y="total",
+        y="Costo",
 
-        color="segmento"
+        color="Concepto"
 
     )
 
-    st.plotly_chart(fig,use_container_width=True)
-
+    st.plotly_chart(fig, use_container_width=True)
 
 
     # =====================================================
@@ -8749,6 +8776,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
