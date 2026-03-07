@@ -4816,7 +4816,7 @@ elif menu == "👥 Clientes":
 
 
 
-    # =====================================================
+ # =====================================================
     # EXPORTAR
     # =====================================================
     if st.button("📥 Exportar Excel", key="exportar_clientes_excel"):
@@ -4850,6 +4850,7 @@ elif menu == "👥 Clientes":
             "clientes.xlsx"
 
         )
+
 
     # =====================================================
     # TABLA
@@ -8507,6 +8508,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
