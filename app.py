@@ -4807,7 +4807,7 @@ elif menu == "👥 Clientes":
     # GRAFICO
     # =====================================================
 
-    df_costos = pd.DataFrame({
+    df_costos = pd.DataFrame(
 
         "Concepto":[
 
@@ -4851,7 +4851,7 @@ elif menu == "👥 Clientes":
 
 
     # =====================================================
-    # EXPORTAR
+    # GUARDAR PRODUCCION
     # =====================================================
     if st.button("📥 Exportar Excel", key="exportar_clientes_excel"):
 
@@ -8776,6 +8776,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
