@@ -13,7 +13,7 @@ class PrintingCostBreakdown:
     @property
     def total(self) -> float:
         return round(
-            self.paper_cost + self.ink_cost + self.machine_depreciation + self.electricity_cost,
+           self.paper_cost + self.ink_cost + self.machine_depreciation + self.electricity_cost,
             4,
         )
 
@@ -38,6 +38,3 @@ def calculate_printing_cost(
 
 def calculate_daily_profit(sales_usd: float, expenses_usd: float, production_costs_usd: float) -> float:
     return round(sales_usd - expenses_usd - production_costs_usd, 2)
-utils/currency.py
-utils/currency.py
-Nuevo
