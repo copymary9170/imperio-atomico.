@@ -4807,9 +4807,9 @@ elif menu == "👥 Clientes":
     # GRAFICO
     # =====================================================
 
-    df_costos = pd.DataFrame(
+    df_costos = pd.DataFrame({
 
-        "Concepto":[
+        "Concepto": [
 
             "Transfer CMYK",
 
@@ -4821,7 +4821,7 @@ elif menu == "👥 Clientes":
 
         ],
 
-        "Costo":[
+        "Costo": [
 
             costo_transfer_unitario,
 
@@ -7111,7 +7111,7 @@ elif menu == "🔥 Sublimación Industrial":
 
     df_costos = pd.DataFrame({
 
-        "Concepto":[
+        "Concepto": [
 
             "Transfer CMYK",
 
@@ -7123,12 +7123,33 @@ elif menu == "🔥 Sublimación Industrial":
 
         ],
 
-        "Costo":[
+        "Costo": [
 
             costo_transfer_unitario,
 
             energia_unitaria,
 
+            mano_obra_unitaria,
+
+            depreciacion_unitaria
+
+        ]
+
+    })
+
+    fig = px.bar(
+
+        df_costos,
+
+        x="Concepto",
+
+        y="Costo",
+
+        color="Concepto"
+
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 
     # GUARDAR PRODUCCION
@@ -8776,35 +8797,6 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
