@@ -30,6 +30,10 @@ def render_dashboard() -> None:
             FROM ventas v WHERE strftime('%Y-%m', v.fecha)=strftime('%Y-%m', 'now') AND v.estado='registrada'
             """,
         )
+        monthly_sales = _scalar(
+            conn,
+            "SELECT SUM(total_usd) FROM ventas WHERE strftime('%Y-%m', fecha)=strftime('%Y-%m', 'now') AND estado='registrada'",
+        )
         top_expense = conn.execute(
             "SELECT categoria, SUM(monto_usd) total FROM gastos WHERE estado='activo' GROUP BY categoria ORDER BY total DESC LIMIT 1"
         ).fetchone()
@@ -44,12 +48,17 @@ def render_dashboard() -> None:
         ).fetchone()
 
     daily_profit = calculate_daily_profit(daily_revenue, daily_expenses, daily_production_cost)
+    margin = (daily_profit / daily_revenue * 100) if daily_revenue else 0.0
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Daily revenue", f"$ {daily_revenue:,.2f}")
-    c2.metric("Daily expenses", f"$ {daily_expenses:,.2f}")
-    c3.metric("Daily profit", f"$ {daily_profit:,.2f}")
-    c4.metric("Monthly profit", f"$ {monthly_profit:,.2f}")
+    c1.metric("Ingresos diarios", f"$ {daily_revenue:,.2f}")
+    c2.metric("Gastos diarios", f"$ {daily_expenses:,.2f}")
+    c3.metric("Ganancia diaria", f"$ {daily_profit:,.2f}", delta=f"{margin:,.2f}% margen")
+    c4.metric("Ganancia mensual", f"$ {monthly_profit:,.2f}")
 
-    st.info(f"Top expenses category: {top_expense['categoria'] if top_expense else 'N/A'}")
-    st.info(f"Best selling product: {best_product['descripcion'] if best_product else 'N/A'}")
+    c5, c6 = st.columns(2)
+    c5.metric("Ventas del mes", f"$ {monthly_sales:,.2f}")
+    c6.metric("Costo productivo diario", f"$ {daily_production_cost:,.2f}")
+
+    st.info(f"Categoría de mayor gasto: {top_expense['categoria'] if top_expense else 'N/A'}")
+    st.info(f"Producto más vendido: {best_product['descripcion'] if best_product else 'N/A'}")
