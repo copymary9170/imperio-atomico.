@@ -1,23 +1,42 @@
-def has_permission(role, module):
+# ======================================================
+# CONTROL DE PERMISOS ERP
+# ======================================================
 
-    permissions = {
+PERMISSIONS = {
 
-        "Admin": ["*"],
+    "Admin": ["*"],
 
-        "Operador": [
-            "Ventas",
-            "Producción",
-            "Inventario"
-        ],
+    "Operador": [
+        "Ventas",
+        "Producción",
+        "Inventario",
+        "Corte",
+        "Sublimación"
+    ],
 
-        "Contador": [
-            "Gastos",
-            "Dashboard"
-        ]
+    "Contador": [
+        "Dashboard",
+        "Gastos",
+        "Auditoría"
+    ],
 
-    }
+    "Diseñador": [
+        "CMYK",
+        "Producción",
+        "Diagnóstico"
+    ]
 
-    if "*" in permissions.get(role, []):
+}
+
+
+def has_permission(role: str, module: str) -> bool:
+    """
+    Verifica si un rol tiene acceso a un módulo.
+    """
+
+    allowed = PERMISSIONS.get(role, [])
+
+    if "*" in allowed:
         return True
 
-    return module in permissions.get(role, [])
+    return module in allowed
