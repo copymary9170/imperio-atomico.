@@ -3837,34 +3837,63 @@ elif menu == "📦 Inventario":
 
         if guardar:
 
-            try:
+            if not nombre.strip():
 
-                with conectar() as conn:
+                st.error("Nombre obligatorio")
 
-                    conn.execute("BEGIN")
+            else:
 
+                try:
 
-                    cambios = [
+                    with conectar() as conn:
 
-                        ("inv_alerta_dias", alerta),
+                        if prov_actual is None:
 
-                        ("inv_impuesto_default", impuesto),
+                            cols_prov = {
+                                row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
+                            }
+                            data_prov = {
+                                "nombre": nombre.strip(),
+                                "telefono": telefono.strip(),
+                                "rif": rif.strip(),
+                                "contacto": contacto.strip(),
+                                "observaciones": observaciones.strip(),
+                            }
+                            insert_cols = [c for c in ("nombre", "telefono", "rif", "contacto", "observaciones") if c in cols_prov]
+                            insert_vals = [data_prov[c] for c in insert_cols]
 
-                        ("inv_delivery_default", delivery)
+                            if "activo" in cols_prov:
+                                insert_cols.append("activo")
+                                insert_vals.append(1)
 
-                    ]
+                            placeholders = ",".join(["?"] * len(insert_cols))
+                            conn.execute(
+                                f"INSERT INTO proveedores ({','.join(insert_cols)}) VALUES ({placeholders})",
+                                tuple(insert_vals),
+                            )
 
+                        else:
 
-                    for param, nuevo in cambios:
+                            cols_prov = {
+                                row[1] for row in conn.execute("PRAGMA table_info(proveedores)").fetchall()
+                            }
+                            data_prov = {
+                                "nombre": nombre.strip(),
+                                "telefono": telefono.strip(),
+                                "rif": rif.strip(),
+                                "contacto": contacto.strip(),
+                                "observaciones": observaciones.strip(),
+                            }
+                            update_cols = [c for c in ("nombre", "telefono", "rif", "contacto", "observaciones") if c in cols_prov]
+                            set_clause = ",".join([f"{c}=?" for c in update_cols])
+                            update_vals = [data_prov[c] for c in update_cols]
+                            update_vals.append(int(prov_actual["id"]))
 
+                            conn.execute(
+                                f"UPDATE proveedores SET {set_clause} WHERE id=?",
+                                tuple(update_vals),
+                            )
 
-                        viejo = conn.execute(
-
-                            "SELECT valor FROM configuracion WHERE parametro=?",
-
-                            (param,)
-
-                        ).fetchone()[0]
 
 
                         conn.execute(
@@ -8797,6 +8826,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
