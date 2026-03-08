@@ -3,6 +3,6 @@ from modules.inventario import render_inventario as inventario_module
 
 
 def render_inventario(usuario):
-    st.title("Inventario")
+    st.title("📦 Inventario")
 
     inventario_module(usuario)
