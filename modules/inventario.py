@@ -306,3 +306,61 @@ def render_inventario(usuario: str) -> None:
         use_container_width=True,
         hide_index=True
     )
+
+# ============================================================
+# KARDEX INVENTARIO
+# ============================================================
+
+def render_kardex(usuario: str) -> None:
+
+    st.subheader("📊 Kardex de Inventario")
+
+    try:
+
+        with db_transaction() as conn:
+
+            rows = conn.execute(
+                """
+                SELECT
+                    fecha,
+                    usuario,
+                    inventario_id,
+                    tipo,
+                    cantidad,
+                    costo_unitario_usd,
+                    referencia
+                FROM movimientos_inventario
+                ORDER BY fecha DESC
+                LIMIT 500
+                """
+            ).fetchall()
+
+    except Exception as e:
+
+        st.error("Error cargando kardex")
+        st.exception(e)
+        return
+
+    if not rows:
+
+        st.info("No hay movimientos registrados.")
+
+        return
+
+    df = pd.DataFrame(rows)
+
+    buscar = st.text_input("🔎 Buscar movimiento")
+
+    if buscar:
+
+        df = df[
+            df["referencia"]
+            .astype(str)
+            .str.contains(buscar, case=False, na=False)
+        ]
+
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True
+    )
