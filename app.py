@@ -26,86 +26,35 @@ st.set_page_config(
     layout="wide"
 )
 
-menu = st.sidebar.selectbox(
-    "Menú",
-    [
-        "📊 Dashboard",
-        "🛒 Venta Directa",
-        "📦 Inventario",
-        "📊 Kardex",
-        "👥 Clientes",
-        "🎨 Análisis CMYK",
-        "🏗️ Activos",
-        "🧠 Diagnóstico IA",
-        "🛠️ Otros Procesos",
-        "✂️ Corte Industrial",
-        "🔥 Sublimación Industrial",
-        "🎨 Producción Manual",
-        "💰 Ventas",
-        "📉 Gastos",
-        "🏁 Cierre de Caja",
-        "📊 Auditoría y Métricas",
-        "📝 Cotizaciones",
-        "💳 Kontigo",
-        "⚙️ Configuración"
-    ]
-)
-
 usuario = st.session_state.get("usuario", "Sistema")
 
-if menu == "📊 Dashboard":
-    render_dashboard()
+# MAPA DE MENÚ
+MENU_ROUTES = {
+    "📊 Dashboard": lambda: render_dashboard(),
+    "🛒 Venta Directa": lambda: render_venta_directa(usuario),
+    "📦 Inventario": lambda: render_inventario(usuario),
+    "📊 Kardex": lambda: render_kardex(usuario),
+    "👥 Clientes": lambda: render_clientes(usuario),
+    "🎨 Análisis CMYK": lambda: render_cmyk(usuario),
+    "🏗️ Activos": lambda: render_activos(usuario),
+    "🧠 Diagnóstico IA": lambda: render_diagnostico(usuario),
+    "🛠️ Otros Procesos": lambda: render_otros_procesos(usuario),
+    "✂️ Corte Industrial": lambda: render_corte(usuario),
+    "🔥 Sublimación Industrial": lambda: render_sublimacion(usuario),
+    "🎨 Producción Manual": lambda: render_produccion_manual(usuario),
+    "💰 Ventas": lambda: render_ventas(usuario),
+    "📉 Gastos": lambda: render_gastos(usuario),
+    "🏁 Cierre de Caja": lambda: render_caja(usuario),
+    "📊 Auditoría y Métricas": lambda: render_auditoria(usuario),
+    "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
+    "💳 Kontigo": lambda: render_kontigo(usuario),
+    "⚙️ Configuración": lambda: render_configuracion(usuario),
+}
 
-elif menu == "🛒 Venta Directa":
-    render_venta_directa(usuario)
+menu = st.sidebar.selectbox(
+    "Menú",
+    list(MENU_ROUTES.keys())
+)
 
-elif menu == "📦 Inventario":
-    render_inventario(usuario)
-
-elif menu == "📊 Kardex":
-    render_kardex(usuario)
-
-elif menu == "👥 Clientes":
-    render_clientes(usuario)
-
-elif menu == "🎨 Análisis CMYK":
-    render_cmyk(usuario)
-
-elif menu == "🏗️ Activos":
-    render_activos(usuario)
-
-elif menu == "🧠 Diagnóstico IA":
-    render_diagnostico(usuario)
-
-elif menu == "🛠️ Otros Procesos":
-    render_otros_procesos(usuario)
-
-elif menu == "✂️ Corte Industrial":
-    render_corte(usuario)
-
-elif menu == "🔥 Sublimación Industrial":
-    render_sublimacion(usuario)
-
-elif menu == "🎨 Producción Manual":
-    render_produccion_manual(usuario)
-
-elif menu == "💰 Ventas":
-    render_ventas(usuario)
-
-elif menu == "📉 Gastos":
-    render_gastos(usuario)
-
-elif menu == "🏁 Cierre de Caja":
-    render_caja(usuario)
-
-elif menu == "📊 Auditoría y Métricas":
-    render_auditoria(usuario)
-
-elif menu == "📝 Cotizaciones":
-    render_cotizaciones(usuario)
-
-elif menu == "💳 Kontigo":
-    render_kontigo(usuario)
-
-elif menu == "⚙️ Configuración":
-    render_configuracion(usuario)
+# EJECUCIÓN DE LA VISTA
+MENU_ROUTES[menu]()
