@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 def _safe(value: float | int | None) -> float:
     """
-    Garantiza que el valor sea numérico y no negativo.
+    Convierte el valor a float y evita números negativos o inválidos.
     """
     try:
         return max(0.0, float(value or 0))
@@ -16,8 +16,9 @@ def _safe(value: float | int | None) -> float:
 @dataclass
 class PrintingCostBreakdown:
     """
-    Desglose del costo de impresión.
+    Representa el desglose del costo de impresión.
     """
+
     paper_cost: float
     ink_cost: float
     machine_depreciation: float
