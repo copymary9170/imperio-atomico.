@@ -3895,14 +3895,29 @@ elif menu == "📦 Inventario":
                             )
 
 
+                        conn.commit()
 
-                        conn.execute(
 
-                            "UPDATE configuracion SET valor=? WHERE parametro=?",
+                    st.success("Proveedor guardado")
 
-                            (nuevo, param)
+                    st.rerun()
 
-                        )
+
+                except sqlite3.IntegrityError:
+
+                    st.error("Proveedor ya existe")
+
+
+        # =====================================================
+        # ELIMINAR
+        # =====================================================
+
+        if prov_actual is not None:
+
+            if st.button("🗑 Eliminar proveedor"):
+
+
+                with conectar() as conn:
 
 
                         # HISTORIAL
@@ -8826,6 +8841,7 @@ def registrar_venta_global(
     finally:
         if conn_creada and conn_local is not None:
             conn_local.close()
+
 
 
 
