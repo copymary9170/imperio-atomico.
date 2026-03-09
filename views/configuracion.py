@@ -1,7 +1,9 @@
 import streamlit as st
+from modules.configuracion import render_configuracion as configuracion_module
 
 
 def render_configuracion(usuario):
+
     st.title("⚙️ Configuración")
 
-    st.info("Panel de configuración del sistema")
+    configuracion_module(usuario)
