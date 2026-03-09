@@ -142,13 +142,16 @@ CREATE TABLE IF NOT EXISTS cierres_caja (
     FOREIGN KEY(usuario) REFERENCES usuarios(usuario)
 );
 
+CREATE TABLE IF NOT EXISTS auditoria (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT,
+    accion TEXT,
+    valor_anterior TEXT,
+    valor_nuevo TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
 CREATE INDEX IF NOT EXISTS idx_gastos_fecha ON gastos(fecha);
 CREATE INDEX IF NOT EXISTS idx_movimientos_inventario_item ON movimientos_inventario(inventario_id);
 CREATE INDEX IF NOT EXISTS idx_cxc_cliente_estado ON cuentas_por_cobrar(cliente_id, estado);
-"""
-
-
-def init_schema() -> None:
-    with db_transaction() as conn:
-        conn.executescript(SCHEMA_SQL)
