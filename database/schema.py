@@ -164,6 +164,25 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
     fecha TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS cotizaciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario TEXT,
+    cliente_id INTEGER,
+    descripcion TEXT,
+    costo_estimado_usd REAL,
+    margen_pct REAL,
+    precio_final_usd REAL,
+    estado TEXT DEFAULT 'Cotización',
+    fecha TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS configuracion (
+    parametro TEXT PRIMARY KEY,
+    valor TEXT
+);
+
+"""
+
 """
 
 
