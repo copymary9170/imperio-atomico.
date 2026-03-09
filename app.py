@@ -1,16 +1,18 @@
 import streamlit as st
-from erp_v5_db import initialize_db
 
-# Inicializar base de datos
-initialize_db()
+# --------------------------------------------------
+# CONFIGURACIÓN APP
+# --------------------------------------------------
 
-# Configuración de la app
 st.set_page_config(
     page_title="Imperio Atómico ERP",
     layout="wide"
 )
 
+# --------------------------------------------------
 # IMPORTAR VISTAS
+# --------------------------------------------------
+
 from views.dashboard import render_dashboard
 from views.venta_directa import render_venta_directa
 from views.inventario import render_inventario
@@ -31,35 +33,71 @@ from views.cotizaciones import render_cotizaciones
 from views.kontigo import render_kontigo
 from views.configuracion import render_configuracion
 
+# --------------------------------------------------
+# USUARIO
+# --------------------------------------------------
+
 usuario = st.session_state.get("usuario", "Sistema")
 
-# MAPA DE MENÚ
+# --------------------------------------------------
+# MENÚ
+# --------------------------------------------------
+
 MENU_ROUTES = {
+
     "📊 Dashboard": lambda: render_dashboard(),
+
     "🛒 Venta Directa": lambda: render_venta_directa(usuario),
+
     "📦 Inventario": lambda: render_inventario(usuario),
+
     "📊 Kardex": lambda: render_kardex(usuario),
+
     "👥 Clientes": lambda: render_clientes(usuario),
+
     "🎨 Análisis CMYK": lambda: render_cmyk(usuario),
+
     "🏗️ Activos": lambda: render_activos(usuario),
+
     "🧠 Diagnóstico IA": lambda: render_diagnostico(usuario),
+
     "🛠️ Otros Procesos": lambda: render_otros_procesos(usuario),
+
     "✂️ Corte Industrial": lambda: render_corte(usuario),
+
     "🔥 Sublimación Industrial": lambda: render_sublimacion(usuario),
+
     "🎨 Producción Manual": lambda: render_produccion_manual(usuario),
+
     "💰 Ventas": lambda: render_ventas(usuario),
+
     "📉 Gastos": lambda: render_gastos(usuario),
+
     "🏁 Cierre de Caja": lambda: render_caja(usuario),
+
     "📊 Auditoría y Métricas": lambda: render_auditoria(usuario),
+
     "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
+
     "💳 Kontigo": lambda: render_kontigo(usuario),
+
     "⚙️ Configuración": lambda: render_configuracion(usuario),
+
 }
+
+# --------------------------------------------------
+# SIDEBAR
+# --------------------------------------------------
+
+st.sidebar.title("Imperio Atómico ERP")
 
 menu = st.sidebar.selectbox(
     "Menú",
     list(MENU_ROUTES.keys())
 )
 
-# Ejecutar módulo seleccionado
+# --------------------------------------------------
+# EJECUTAR VISTA
+# --------------------------------------------------
+
 MENU_ROUTES[menu]()
