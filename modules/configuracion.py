@@ -6,19 +6,23 @@ from database.connection import db_transaction
 
 def render_configuracion(usuario: str):
 
-    st.subheader("Panel de configuración del sistema")
+    st.subheader("Parámetros del sistema")
 
-    st.divider()
+    try:
+        with db_transaction() as conn:
 
-    # Cargar configuraciones actuales
-    with db_transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT parametro, valor
+                FROM configuracion
+                """
+            ).fetchall()
 
-        rows = conn.execute(
-            """
-            SELECT parametro, valor
-            FROM configuracion
-            """
-        ).fetchall()
+    except Exception as e:
+
+        st.error("Error cargando configuración")
+        st.exception(e)
+        return
 
     config = {r["parametro"]: r["valor"] for r in rows}
 
@@ -27,13 +31,13 @@ def render_configuracion(usuario: str):
         value=float(config.get("tasa_bcv", 36.5))
     )
 
-    margen_impresion = st.number_input(
+    margen = st.number_input(
         "Margen de ganancia %",
         value=float(config.get("margen_impresion", 30))
     )
 
-    costo_kwh = st.number_input(
-        "Costo electricidad (kWh)",
+    costo_luz = st.number_input(
+        "Costo electricidad kWh",
         value=float(config.get("costo_kwh", 0.10))
     )
 
@@ -48,12 +52,12 @@ def render_configuracion(usuario: str):
 
             conn.execute(
                 "INSERT OR REPLACE INTO configuracion VALUES ('margen_impresion', ?)",
-                (margen_impresion,)
+                (margen,)
             )
 
             conn.execute(
                 "INSERT OR REPLACE INTO configuracion VALUES ('costo_kwh', ?)",
-                (costo_kwh,)
+                (costo_luz,)
             )
 
         st.success("Configuración guardada correctamente")
