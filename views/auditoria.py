@@ -6,4 +6,4 @@ def render_auditoria(usuario):
 
     st.title("📊 Auditoría y Métricas")
 
-    auditoria_module()
+    auditoria_module(usuario)
