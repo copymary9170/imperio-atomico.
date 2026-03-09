@@ -1,9 +1,9 @@
 import streamlit as st
-from modules.gastos import render_gastos as gastos_module
+from modules.cotizaciones import render_cotizaciones as cotizaciones_module
 
 
-def render_gastos(usuario):
+def render_cotizaciones(usuario):
 
-    st.title("📉 Gastos")
+    st.title("📝 Cotizaciones")
 
-    gastos_module(usuario)
+    cotizaciones_module(usuario)
