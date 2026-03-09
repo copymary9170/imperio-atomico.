@@ -2,6 +2,8 @@ from erp_v5_db import initialize_db
 
 import streamlit as st
 
+set_page_config
+
 from views.dashboard import render_dashboard
 from views.venta_directa import render_venta_directa
 from views.inventario import render_inventario
@@ -60,4 +62,5 @@ menu = st.sidebar.selectbox(
 
 # EJECUCIÓN DE LA VISTA
 MENU_ROUTES[menu]()
+
 
