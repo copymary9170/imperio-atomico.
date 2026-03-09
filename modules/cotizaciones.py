@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
-
 from database.connection import db_transaction
 
 
@@ -11,7 +10,6 @@ def render_cotizaciones(usuario: str):
     st.subheader("📝 Gestión de Cotizaciones")
 
     try:
-
         with db_transaction() as conn:
 
             rows = conn.execute(
@@ -37,7 +35,6 @@ def render_cotizaciones(usuario: str):
         return
 
     if not rows:
-
         st.info("No hay cotizaciones registradas.")
         return
 
