@@ -151,6 +151,11 @@ CREATE TABLE IF NOT EXISTS auditoria (
     valor_anterior TEXT,
     valor_nuevo TEXT
 );
+
+CREATE TABLE IF NOT EXISTS configuracion (
+    parametro TEXT PRIMARY KEY,
+    valor TEXT
+);
 """
 
 
