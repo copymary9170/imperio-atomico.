@@ -9,12 +9,26 @@ from database.connection import db_transaction
 def render_auditoria(usuario: str):
 
     st.title("📊 Auditoría y Métricas")
-
     st.info("Registro de actividad del sistema.")
 
     try:
 
         with db_transaction() as conn:
+
+            # verificar si existe la tabla auditoria
+            table_exists = conn.execute(
+                """
+                SELECT name 
+                FROM sqlite_master 
+                WHERE type='table' AND name='auditoria'
+                """
+            ).fetchone()
+
+            if not table_exists:
+
+                st.warning("La tabla de auditoría aún no existe en la base de datos.")
+                st.info("Ejecuta el schema nuevamente o reinicia la base de datos.")
+                return
 
             rows = conn.execute(
                 """
