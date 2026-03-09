@@ -152,11 +152,17 @@ CREATE TABLE IF NOT EXISTS auditoria (
     valor_nuevo TEXT
 );
 
-CREATE TABLE IF NOT EXISTS configuracion (
-    parametro TEXT PRIMARY KEY,
-    valor TEXT
+CREATE TABLE IF NOT EXISTS cotizaciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario TEXT,
+    cliente_id INTEGER,
+    descripcion TEXT,
+    costo_estimado_usd REAL,
+    margen_pct REAL,
+    precio_final_usd REAL,
+    estado TEXT DEFAULT 'Cotización',
+    fecha TEXT DEFAULT CURRENT_TIMESTAMP
 );
-"""
 
 
 def init_schema() -> None:
