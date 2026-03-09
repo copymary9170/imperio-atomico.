@@ -26,8 +26,7 @@ CREATE TABLE IF NOT EXISTS clientes (
     direccion TEXT,
     limite_credito_usd REAL NOT NULL DEFAULT 0,
     saldo_por_cobrar_usd REAL NOT NULL DEFAULT 0,
-    notas TEXT,
-    FOREIGN KEY(usuario) REFERENCES usuarios(usuario)
+    notas TEXT
 );
 
 CREATE TABLE IF NOT EXISTS inventario (
@@ -42,8 +41,7 @@ CREATE TABLE IF NOT EXISTS inventario (
     stock_actual REAL NOT NULL DEFAULT 0,
     stock_minimo REAL NOT NULL DEFAULT 0,
     costo_unitario_usd REAL NOT NULL DEFAULT 0,
-    precio_venta_usd REAL NOT NULL DEFAULT 0,
-    FOREIGN KEY(usuario) REFERENCES usuarios(usuario)
+    precio_venta_usd REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS movimientos_inventario (
@@ -55,9 +53,7 @@ CREATE TABLE IF NOT EXISTS movimientos_inventario (
     tipo TEXT NOT NULL CHECK (tipo IN ('entrada','salida','ajuste')),
     cantidad REAL NOT NULL,
     costo_unitario_usd REAL NOT NULL DEFAULT 0,
-    referencia TEXT,
-    FOREIGN KEY(usuario) REFERENCES usuarios(usuario),
-    FOREIGN KEY(inventario_id) REFERENCES inventario(id)
+    referencia TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ventas (
@@ -73,9 +69,7 @@ CREATE TABLE IF NOT EXISTS ventas (
     impuesto_usd REAL NOT NULL DEFAULT 0,
     total_usd REAL NOT NULL,
     total_bs REAL NOT NULL DEFAULT 0,
-    observaciones TEXT,
-    FOREIGN KEY(usuario) REFERENCES usuarios(usuario),
-    FOREIGN KEY(cliente_id) REFERENCES clientes(id)
+    observaciones TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ventas_detalle (
@@ -89,10 +83,7 @@ CREATE TABLE IF NOT EXISTS ventas_detalle (
     cantidad REAL NOT NULL,
     precio_unitario_usd REAL NOT NULL,
     costo_unitario_usd REAL NOT NULL,
-    subtotal_usd REAL NOT NULL,
-    FOREIGN KEY(usuario) REFERENCES usuarios(usuario),
-    FOREIGN KEY(venta_id) REFERENCES ventas(id),
-    FOREIGN KEY(inventario_id) REFERENCES inventario(id)
+    subtotal_usd REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gastos (
@@ -107,8 +98,7 @@ CREATE TABLE IF NOT EXISTS gastos (
     tasa_cambio REAL NOT NULL,
     monto_usd REAL NOT NULL,
     monto_bs REAL NOT NULL,
-    cancelado_motivo TEXT,
-    FOREIGN KEY(usuario) REFERENCES usuarios(usuario)
+    cancelado_motivo TEXT
 );
 
 CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
@@ -120,10 +110,7 @@ CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
     venta_id INTEGER,
     saldo_usd REAL NOT NULL,
     fecha_vencimiento TEXT,
-    notas TEXT,
-    FOREIGN KEY(usuario) REFERENCES usuarios(usuario),
-    FOREIGN KEY(cliente_id) REFERENCES clientes(id),
-    FOREIGN KEY(venta_id) REFERENCES ventas(id)
+    notas TEXT
 );
 
 CREATE TABLE IF NOT EXISTS cierres_caja (
@@ -139,8 +126,7 @@ CREATE TABLE IF NOT EXISTS cierres_caja (
     expenses_cash REAL NOT NULL,
     expenses_transfer REAL NOT NULL,
     cash_end REAL NOT NULL,
-    observaciones TEXT,
-    FOREIGN KEY(usuario) REFERENCES usuarios(usuario)
+    observaciones TEXT
 );
 
 CREATE TABLE IF NOT EXISTS auditoria (
@@ -164,25 +150,10 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
     fecha TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS cotizaciones (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario TEXT,
-    cliente_id INTEGER,
-    descripcion TEXT,
-    costo_estimado_usd REAL,
-    margen_pct REAL,
-    precio_final_usd REAL,
-    estado TEXT DEFAULT 'Cotización',
-    fecha TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
     valor TEXT
 );
-
-"""
-
 """
 
 
