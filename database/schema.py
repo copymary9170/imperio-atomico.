@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from database.connection import db_transaction
 
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +52,7 @@ CREATE TABLE IF NOT EXISTS movimientos_inventario (
     usuario TEXT NOT NULL,
     estado TEXT NOT NULL DEFAULT 'activo',
     inventario_id INTEGER NOT NULL,
-    tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'salida', 'ajuste')),
+    tipo TEXT NOT NULL CHECK (tipo IN ('entrada','salida','ajuste')),
     cantidad REAL NOT NULL,
     costo_unitario_usd REAL NOT NULL DEFAULT 0,
     referencia TEXT,
@@ -65,7 +66,7 @@ CREATE TABLE IF NOT EXISTS ventas (
     usuario TEXT NOT NULL,
     estado TEXT NOT NULL DEFAULT 'registrada',
     cliente_id INTEGER,
-    moneda TEXT NOT NULL CHECK (moneda IN ('USD', 'BS', 'USDT', 'KONTIGO')),
+    moneda TEXT NOT NULL,
     tasa_cambio REAL NOT NULL DEFAULT 1,
     metodo_pago TEXT NOT NULL,
     subtotal_usd REAL NOT NULL,
@@ -102,7 +103,7 @@ CREATE TABLE IF NOT EXISTS gastos (
     descripcion TEXT NOT NULL,
     categoria TEXT NOT NULL,
     metodo_pago TEXT NOT NULL,
-    moneda TEXT NOT NULL CHECK (moneda IN ('USD', 'BS', 'USDT', 'KONTIGO')),
+    moneda TEXT NOT NULL,
     tasa_cambio REAL NOT NULL,
     monto_usd REAL NOT NULL,
     monto_bs REAL NOT NULL,
@@ -150,8 +151,9 @@ CREATE TABLE IF NOT EXISTS auditoria (
     valor_anterior TEXT,
     valor_nuevo TEXT
 );
+"""
 
-CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
-CREATE INDEX IF NOT EXISTS idx_gastos_fecha ON gastos(fecha);
-CREATE INDEX IF NOT EXISTS idx_movimientos_inventario_item ON movimientos_inventario(inventario_id);
-CREATE INDEX IF NOT EXISTS idx_cxc_cliente_estado ON cuentas_por_cobrar(cliente_id, estado);
+
+def init_schema() -> None:
+    with db_transaction() as conn:
+        conn.executescript(SCHEMA_SQL)
