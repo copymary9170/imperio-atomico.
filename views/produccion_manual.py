@@ -1,8 +1,9 @@
 import streamlit as st
-from modules.produccion import render_produccion_manual
+from modules.produccion import render_produccion_manual as produccion_module
 
 
 def render_produccion_manual(usuario):
+
     st.title("🎨 Producción Manual")
 
-    render_produccion_manual(usuario)
+    produccion_module(usuario)
