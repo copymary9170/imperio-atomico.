@@ -1,9 +1,16 @@
+import streamlit as st
 from erp_v5_db import initialize_db
 
-import streamlit as st
+# Inicializar base de datos
+initialize_db()
 
-set_page_config
+# Configuración de la app
+st.set_page_config(
+    page_title="Imperio Atómico ERP",
+    layout="wide"
+)
 
+# IMPORTAR VISTAS
 from views.dashboard import render_dashboard
 from views.venta_directa import render_venta_directa
 from views.inventario import render_inventario
@@ -23,12 +30,6 @@ from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
 from views.kontigo import render_kontigo
 from views.configuracion import render_configuracion
-
-
-st.set_page_config(
-    page_title="Imperio Atómico ERP",
-    layout="wide"
-)
 
 usuario = st.session_state.get("usuario", "Sistema")
 
@@ -60,7 +61,5 @@ menu = st.sidebar.selectbox(
     list(MENU_ROUTES.keys())
 )
 
-# EJECUCIÓN DE LA VISTA
+# Ejecutar módulo seleccionado
 MENU_ROUTES[menu]()
-
-
