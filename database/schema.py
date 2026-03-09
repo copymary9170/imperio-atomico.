@@ -164,6 +164,8 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
     fecha TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+"""
+
 
 def init_schema() -> None:
     with db_transaction() as conn:
