@@ -6,13 +6,11 @@ from database.connection import db_transaction
 
 def render_configuracion(usuario: str):
 
-    st.title("⚙️ Configuración")
-    st.write("Panel de configuración del sistema")
+    st.subheader("Panel de configuración del sistema")
 
     st.divider()
 
-    st.subheader("Parámetros del sistema")
-
+    # Cargar configuraciones actuales
     with db_transaction() as conn:
 
         rows = conn.execute(
@@ -30,32 +28,32 @@ def render_configuracion(usuario: str):
     )
 
     margen_impresion = st.number_input(
-        "Margen impresión %",
+        "Margen de ganancia %",
         value=float(config.get("margen_impresion", 30))
     )
 
     costo_kwh = st.number_input(
         "Costo electricidad (kWh)",
-        value=float(config.get("costo_kwh", 0.12))
+        value=float(config.get("costo_kwh", 0.10))
     )
 
-    if st.button("Guardar configuración"):
+    if st.button("💾 Guardar configuración"):
 
         with db_transaction() as conn:
 
             conn.execute(
-                "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES ('tasa_bcv', ?)",
+                "INSERT OR REPLACE INTO configuracion VALUES ('tasa_bcv', ?)",
                 (tasa_bcv,)
             )
 
             conn.execute(
-                "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES ('margen_impresion', ?)",
+                "INSERT OR REPLACE INTO configuracion VALUES ('margen_impresion', ?)",
                 (margen_impresion,)
             )
 
             conn.execute(
-                "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES ('costo_kwh', ?)",
+                "INSERT OR REPLACE INTO configuracion VALUES ('costo_kwh', ?)",
                 (costo_kwh,)
             )
 
-        st.success("Configuración guardada")
+        st.success("Configuración guardada correctamente")
