@@ -1,25 +1,26 @@
 import streamlit as st
 
-# --------------------------------------------------
-# CONFIGURACIÓN APP
-# --------------------------------------------------
+# ==================================================
+# CONFIGURACIÓN DE LA APP
+# ==================================================
 
 st.set_page_config(
     page_title="Imperio Atómico ERP",
-    layout="wide"
+    layout="wide",
+    page_icon="⚛️"
 )
 
-# --------------------------------------------------
+# ==================================================
 # INICIALIZAR BASE DE DATOS
-# --------------------------------------------------
+# ==================================================
 
 from database.schema import init_schema
 
 init_schema()
 
-# --------------------------------------------------
+# ==================================================
 # IMPORTAR VISTAS
-# --------------------------------------------------
+# ==================================================
 
 from views.dashboard import render_dashboard
 from views.venta_directa import render_venta_directa
@@ -41,15 +42,19 @@ from views.cotizaciones import render_cotizaciones
 from views.kontigo import render_kontigo
 from views.configuracion import render_configuracion
 
-# --------------------------------------------------
+# NUEVA VISTA DEL MOTOR INDUSTRIAL
+from views.engine_demo import render_engine_demo
+
+
+# ==================================================
 # USUARIO
-# --------------------------------------------------
+# ==================================================
 
 usuario = st.session_state.get("usuario", "Sistema")
 
-# --------------------------------------------------
-# MENÚ
-# --------------------------------------------------
+# ==================================================
+# MENÚ PRINCIPAL
+# ==================================================
 
 MENU_ROUTES = {
 
@@ -91,21 +96,24 @@ MENU_ROUTES = {
 
     "⚙️ Configuración": lambda: render_configuracion(usuario),
 
+    # NUEVA HERRAMIENTA DEL MOTOR
+    "⚙️ Motor Industrial": lambda: render_engine_demo(usuario),
+
 }
 
-# --------------------------------------------------
+# ==================================================
 # SIDEBAR
-# --------------------------------------------------
+# ==================================================
 
-st.sidebar.title("Imperio Atómico ERP")
+st.sidebar.title("⚛️ Imperio Atómico ERP")
 
 menu = st.sidebar.selectbox(
     "Menú",
     list(MENU_ROUTES.keys())
 )
 
-# --------------------------------------------------
+# ==================================================
 # EJECUTAR VISTA
-# --------------------------------------------------
+# ==================================================
 
 MENU_ROUTES[menu]()
