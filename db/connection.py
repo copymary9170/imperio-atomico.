@@ -1,4 +1,4 @@
-""Adaptador de compatibilidad para conexiones SQLite.
+"""Adaptador de compatibilidad para conexiones SQLite.
 
 Uso legado:
     from db.connection import connect as db_connect
