@@ -209,3 +209,4 @@ def render_kardex(usuario: str):
             st.rerun()
         except Exception as e:
             st.error(f"No se pudo aplicar el ajuste: {e}")
+            
