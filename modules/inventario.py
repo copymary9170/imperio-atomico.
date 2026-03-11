@@ -423,7 +423,17 @@ def _load_proveedores_df() -> pd.DataFrame:
         "especialidades",
         "fecha_creacion",
     ]
-    return pd.DataFrame(rows, columns=cols)
+    df = pd.DataFrame(rows, columns=cols)
+
+    # Algunas instalaciones antiguas/devuelven filas sin etiquetas (RangeIndex).
+    # Normalizamos siempre la estructura para evitar KeyError al acceder por nombre.
+    if list(df.columns) != cols:
+        if df.shape[1] == len(cols):
+            df.columns = cols
+        else:
+            df = df.reindex(columns=cols)
+
+    return df
 
 
 # ============================================================
