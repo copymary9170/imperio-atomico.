@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+
 import pandas as pd
 import streamlit as st
 
@@ -23,6 +24,13 @@ def _rate_from_label(label: str, tasa_bcv: float, tasa_binance: float) -> float:
 def _slug(text: str) -> str:
     txt = re.sub(r"[^a-zA-Z0-9]+", "-", clean_text(text).lower()).strip("-")
     return txt or "item"
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def _ensure_inventory_support_tables() -> None:
@@ -87,7 +95,7 @@ def _calc_stock_by_unit_type(tipo_unidad: str) -> tuple[float, str, str]:
         area_por_pliego = ancho * alto
         area_total = area_por_pliego * pliegos
         st.caption(f"Referencia: {area_por_pliego:,.2f} cm²/pliego | Área total: {area_total:,.2f} cm²")
-        return float(pliegos), "pliegos", f"área_ref={area_por_pliego:.2f}cm2_por_pliego"
+        return float(pliegos), "pliegos", f"area_ref={area_por_pliego:.2f}cm2_por_pliego"
 
     if tipo_unidad == "Líquido (ml)":
         c1, c2 = st.columns(2)
@@ -105,11 +113,23 @@ def _calc_stock_by_unit_type(tipo_unidad: str) -> tuple[float, str, str]:
     return float(qty), "unidad", ""
 
 
-def _resolve_delivery_usd(delivery_monto: float, delivery_moneda: str, tasa_bcv: float, tasa_binance: float, manual: bool) -> tuple[float, float]:
+def _resolve_delivery_usd(
+    delivery_monto: float,
+    delivery_moneda: str,
+    tasa_bcv: float,
+    tasa_binance: float,
+    manual: bool,
+) -> tuple[float, float]:
     auto = _rate_from_label(delivery_moneda, tasa_bcv, tasa_binance)
     tasa = auto
     if manual:
-        tasa = st.number_input("Tasa usada en delivery", min_value=0.0001, value=float(auto), format="%.4f", key="inv_tasa_delivery_manual")
+        tasa = st.number_input(
+            "Tasa usada en delivery",
+            min_value=0.0001,
+            value=float(auto),
+            format="%.4f",
+            key="inv_tasa_delivery_manual",
+        )
     delivery_usd = float(delivery_monto) / max(float(tasa), 0.0001)
     return float(delivery_usd), float(tasa)
 
@@ -198,7 +218,10 @@ def add_inventory_movement(
         delta = qty if tipo == "entrada" else -qty
 
     def _exec(connection):
-        row = connection.execute("SELECT stock_actual FROM inventario WHERE id=? AND estado='activo'", (int(inventario_id),)).fetchone()
+        row = connection.execute(
+            "SELECT stock_actual FROM inventario WHERE id=? AND estado='activo'",
+            (int(inventario_id),),
+        ).fetchone()
         if not row:
             raise ValueError("Producto no existe o está inactivo")
 
@@ -214,7 +237,10 @@ def add_inventory_movement(
             """,
             (usuario, int(inventario_id), tipo, float(delta), money(costo_unitario_usd), referencia),
         )
-        connection.execute("UPDATE inventario SET stock_actual = stock_actual + ? WHERE id=?", (float(delta), int(inventario_id)))
+        connection.execute(
+            "UPDATE inventario SET stock_actual = stock_actual + ? WHERE id=?",
+            (float(delta), int(inventario_id)),
+        )
 
     if conn is not None:
         _exec(conn)
@@ -253,7 +279,10 @@ def registrar_compra(
         nueva_cantidad = stock_actual + cantidad
         costo_promedio = (((stock_actual * costo_actual) + (cantidad * costo_unit)) / nueva_cantidad) if nueva_cantidad > 0 else costo_unit
 
-        conn.execute("UPDATE inventario SET costo_unitario_usd=? WHERE id=?", (money(costo_promedio), int(inventario_id)))
+        conn.execute(
+            "UPDATE inventario SET costo_unitario_usd=? WHERE id=?",
+            (money(costo_promedio), int(inventario_id)),
+        )
 
         ref = f"Compra proveedor: {proveedor_nombre or 'N/A'}"
         if referencia_extra:
@@ -304,7 +333,10 @@ def _create_inventory_item_for_purchase(
     precio_inicial: float,
 ) -> int:
     with db_transaction() as conn:
-        row = conn.execute("SELECT id FROM inventario WHERE nombre=? AND estado='activo'", (clean_text(nombre),)).fetchone()
+        row = conn.execute(
+            "SELECT id FROM inventario WHERE nombre=? AND estado='activo'",
+            (clean_text(nombre),),
+        ).fetchone()
         if row:
             return int(row["id"])
 
@@ -402,6 +434,7 @@ def render_inventario(usuario: str) -> None:
     c2.metric("📦 Total Ítems", total_items)
     c3.metric("🚨 Stock Bajo", criticos, delta="Revisar" if criticos else "OK", delta_color="inverse")
     c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
+    st.progress(min(max(salud / 100.0, 0.0), 1.0))
 
     tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "📊 Historial Compras", "👤 Proveedores", "🔧 Ajustes"])
 
@@ -450,6 +483,13 @@ def render_inventario(usuario: str) -> None:
                 },
             )
 
+            st.download_button(
+                "⬇️ Exportar existencias (CSV)",
+                data=df_v.to_csv(index=False).encode("utf-8"),
+                file_name="inventario_existencias.csv",
+                mime="text/csv",
+            )
+
             st.divider()
             st.subheader("🛠 Gestión de Insumo Existente")
             insumo_id = st.selectbox(
@@ -487,7 +527,14 @@ def render_inventario(usuario: str) -> None:
                     stock_actual = float(fila["stock_actual"] or 0.0)
                     pliegos = stock_actual / max(cm2_por_hoja, 0.0001)
                     delta = pliegos - stock_actual
-                    add_inventory_movement(usuario, int(insumo_id), "ajuste", float(delta), float(fila["costo_unitario_usd"] or 0.0), "Conversión cm2 -> pliegos")
+                    add_inventory_movement(
+                        usuario,
+                        int(insumo_id),
+                        "ajuste",
+                        float(delta),
+                        float(fila["costo_unitario_usd"] or 0.0),
+                        "Conversión cm2 -> pliegos",
+                    )
                     with db_transaction() as conn:
                         conn.execute("UPDATE inventario SET unidad='pliegos' WHERE id=?", (int(insumo_id),))
                     st.success(f"Convertido a {pliegos:.3f} pliegos")
@@ -496,7 +543,11 @@ def render_inventario(usuario: str) -> None:
     with tabs[1]:
         st.subheader("📥 Registrar Nueva Compra")
 
-        modo_producto = st.radio("Modo", ["Producto existente", "Crear nuevo producto"], horizontal=True)
+        if df.empty:
+            modo_producto = "Crear nuevo producto"
+            st.info("No hay productos activos: se habilita solo creación de nuevo producto.")
+        else:
+            modo_producto = st.radio("Modo", ["Producto existente", "Crear nuevo producto"], horizontal=True)
 
         with db_transaction() as conn:
             prov_rows = conn.execute("SELECT id, nombre FROM proveedores WHERE COALESCE(activo,1)=1 ORDER BY nombre").fetchall()
@@ -517,9 +568,6 @@ def render_inventario(usuario: str) -> None:
         minimo_stock = st.number_input("Stock mínimo", min_value=0.0, value=0.0)
 
         if modo_producto == "Producto existente":
-            if df.empty:
-                st.info("No hay productos para comprar. Usa 'Crear nuevo producto'.")
-                return
             producto_id = st.selectbox(
                 "Producto",
                 df["id"].tolist(),
@@ -556,6 +604,22 @@ def render_inventario(usuario: str) -> None:
         delivery_usd, tasa_delivery = _resolve_delivery_usd(delivery_monto, delivery_moneda, tasa_bcv, tasa_binance, tasa_manual)
         st.caption(f"Delivery equivalente: ${delivery_usd:.2f} | Tasa usada: {tasa_delivery:.4f}")
 
+        tasa_usada_preview = _rate_from_label(moneda_pago, tasa_bcv, tasa_binance)
+        impuestos_pct_preview = 0.0
+        if iva_activo:
+            impuestos_pct_preview += float(st.session_state.get("iva_perc", 16) or 16)
+        if igtf_activo:
+            impuestos_pct_preview += float(st.session_state.get("igtf_perc", 3) or 3)
+        if banco_activo:
+            impuestos_pct_preview += float(st.session_state.get("banco_perc", 0.5) or 0.5)
+        costo_factura_total_preview = ((monto_factura / max(tasa_usada_preview, 0.0001)) * (1 + impuestos_pct_preview / 100.0)) + float(delivery_usd)
+        costo_unit_preview = costo_factura_total_preview / max(float(stock_real), 0.0001)
+
+        pc1, pc2, pc3 = st.columns(3)
+        pc1.metric("Costo total estimado (USD)", f"${costo_factura_total_preview:,.2f}")
+        pc2.metric("Costo unitario estimado", f"${costo_unit_preview:,.4f}")
+        pc3.metric("Cantidad efectiva", f"{float(stock_real):,.3f}")
+
         hay_variantes = st.checkbox("¿Hay variantes?", value=False)
         variantes_payload: dict[str, float] = {}
 
@@ -565,7 +629,7 @@ def render_inventario(usuario: str) -> None:
                 st.session_state.variantes_editor = {}
 
             v1, v2 = st.columns([2, 1])
-            nombre_base_var = v1.text_input("Nombre base", value=producto_nombre if modo_producto == "Crear nuevo producto" else producto_nombre)
+            nombre_base_var = v1.text_input("Nombre base", value=producto_nombre)
             variantes_txt = v1.text_input("Variantes separadas por coma", placeholder="Rojo, Azul, Verde", key="inv_lista_variantes")
 
             if v2.button("Crear barras"):
@@ -713,6 +777,12 @@ def render_inventario(usuario: str) -> None:
 
             st.metric("💰 Total Comprado", f"${float(df_view['costo_total_usd'].sum()):,.2f}")
             st.dataframe(df_view, use_container_width=True, hide_index=True)
+            st.download_button(
+                "⬇️ Exportar historial compras (CSV)",
+                data=df_view.to_csv(index=False).encode("utf-8"),
+                file_name="inventario_historial_compras.csv",
+                mime="text/csv",
+            )
 
             st.divider()
             opciones = {f"#{r.compra_id} | {r.item} | {r.cantidad} {r.unidad}": int(r.compra_id) for r in df_hist.itertuples()}
@@ -793,7 +863,7 @@ def render_inventario(usuario: str) -> None:
         st.subheader("🔧 Configuración estratégica del Inventario")
         with db_transaction() as conn:
             cfg = pd.read_sql("SELECT parametro, valor FROM configuracion", conn)
-        cfg_map = {str(r.parametro): float(r.valor) for r in cfg.itertuples() if str(r.valor).strip() != ""}
+        cfg_map = {str(r.parametro): _safe_float(r.valor, 0.0) for r in cfg.itertuples() if str(r.valor).strip() != ""}
 
         c1, c2, c3 = st.columns(3)
         c1.metric("⏱️ Alerta reposición", f"{int(cfg_map.get('inv_alerta_dias', 14))} días")
