@@ -413,7 +413,17 @@ def _load_proveedores_df() -> pd.DataFrame:
             ORDER BY nombre ASC
             """
         ).fetchall()
-    return pd.DataFrame(rows)
+    cols = [
+        "id",
+        "nombre",
+        "telefono",
+        "rif",
+        "contacto",
+        "observaciones",
+        "especialidades",
+        "fecha_creacion",
+    ]
+    return pd.DataFrame(rows, columns=cols)
 
 
 # ============================================================
