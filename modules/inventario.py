@@ -44,11 +44,16 @@ def _ensure_inventory_support_tables() -> None:
                 rif TEXT,
                 contacto TEXT,
                 observaciones TEXT,
+                especialidades TEXT,
                 activo INTEGER DEFAULT 1,
                 fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+
+        prov_cols = [r[1] for r in conn.execute("PRAGMA table_info(proveedores)").fetchall()]
+        if "especialidades" not in prov_cols:
+            conn.execute("ALTER TABLE proveedores ADD COLUMN especialidades TEXT")
 
         conn.execute(
             """
@@ -402,7 +407,7 @@ def _load_proveedores_df() -> pd.DataFrame:
     with db_transaction() as conn:
         rows = conn.execute(
             """
-            SELECT id, nombre, telefono, rif, contacto, observaciones, fecha_creacion
+            SELECT id, nombre, telefono, rif, contacto, observaciones, COALESCE(especialidades,'') AS especialidades, fecha_creacion
             FROM proveedores
             WHERE COALESCE(activo,1)=1
             ORDER BY nombre ASC
@@ -812,37 +817,83 @@ def render_inventario(usuario: str) -> None:
         if df_prov.empty:
             st.info("No hay proveedores registrados todavía.")
         else:
-            filtro = st.text_input("🔍 Buscar proveedor")
+            cfp1, cfp2 = st.columns([2, 1])
+            filtro = cfp1.text_input("🔍 Buscar proveedor")
+
+            # especialidades disponibles para filtro
+            tags = set()
+            for txt in df_prov["especialidades"].fillna("").astype(str):
+                for t in [clean_text(x) for x in txt.split(",") if clean_text(x)]:
+                    tags.add(t)
+            selected_tags = cfp2.multiselect("Filtrar por especialidad", sorted(tags))
+
             df_view = df_prov.copy()
             if filtro:
                 df_view = df_view[df_view.astype(str).apply(lambda x: x.str.contains(filtro, case=False, na=False)).any(axis=1)]
+            if selected_tags:
+                df_view = df_view[
+                    df_view["especialidades"].fillna("").astype(str).apply(
+                        lambda txt: all(tag.lower() in txt.lower() for tag in selected_tags)
+                    )
+                ]
             st.dataframe(df_view, use_container_width=True, hide_index=True)
 
         st.divider()
         st.subheader("➕ Registrar / Editar proveedor")
+
+        proveedor_existente = None
+        if not df_prov.empty:
+            pid_sel = st.selectbox(
+                "Editar proveedor existente (opcional)",
+                options=[None] + df_prov["id"].tolist(),
+                format_func=lambda x: "Nuevo proveedor" if x is None else str(df_prov[df_prov["id"] == x]["nombre"].iloc[0]),
+            )
+            if pid_sel is not None:
+                proveedor_existente = df_prov[df_prov["id"] == pid_sel].iloc[0]
+
         with st.form("form_proveedor"):
-            nombre = st.text_input("Nombre")
-            telefono = st.text_input("Teléfono")
-            rif = st.text_input("RIF")
-            contacto = st.text_input("Contacto")
-            observaciones = st.text_area("Observaciones")
+            nombre = st.text_input("Nombre", value="" if proveedor_existente is None else str(proveedor_existente["nombre"]))
+            telefono = st.text_input("Teléfono", value="" if proveedor_existente is None else str(proveedor_existente["telefono"]))
+            rif = st.text_input("RIF", value="" if proveedor_existente is None else str(proveedor_existente["rif"]))
+            contacto = st.text_input("Contacto", value="" if proveedor_existente is None else str(proveedor_existente["contacto"]))
+            observaciones = st.text_area("Observaciones", value="" if proveedor_existente is None else str(proveedor_existente["observaciones"]))
+            especialidades_txt = st.text_input(
+                "Especialidades / ítems (separados por coma)",
+                placeholder="Impresoras, Tintas, Vinil, Sublimación",
+                value="" if proveedor_existente is None else str(proveedor_existente["especialidades"]),
+            )
             guardar = st.form_submit_button("💾 Guardar", use_container_width=True)
 
         if guardar:
             if not clean_text(nombre):
                 st.error("Nombre obligatorio")
             else:
+                especialidades_norm = ", ".join([clean_text(x) for x in especialidades_txt.split(",") if clean_text(x)])
                 with db_transaction() as conn:
                     exists = conn.execute("SELECT id FROM proveedores WHERE nombre=?", (clean_text(nombre),)).fetchone()
                     if exists:
                         conn.execute(
-                            "UPDATE proveedores SET telefono=?, rif=?, contacto=?, observaciones=?, activo=1 WHERE id=?",
-                            (clean_text(telefono), clean_text(rif), clean_text(contacto), clean_text(observaciones), int(exists["id"])),
+                            "UPDATE proveedores SET telefono=?, rif=?, contacto=?, observaciones=?, especialidades=?, activo=1 WHERE id=?",
+                            (
+                                clean_text(telefono),
+                                clean_text(rif),
+                                clean_text(contacto),
+                                clean_text(observaciones),
+                                especialidades_norm,
+                                int(exists["id"]),
+                            ),
                         )
                     else:
                         conn.execute(
-                            "INSERT INTO proveedores(nombre, telefono, rif, contacto, observaciones, activo) VALUES(?,?,?,?,?,1)",
-                            (clean_text(nombre), clean_text(telefono), clean_text(rif), clean_text(contacto), clean_text(observaciones)),
+                            "INSERT INTO proveedores(nombre, telefono, rif, contacto, observaciones, especialidades, activo) VALUES(?,?,?,?,?,?,1)",
+                            (
+                                clean_text(nombre),
+                                clean_text(telefono),
+                                clean_text(rif),
+                                clean_text(contacto),
+                                clean_text(observaciones),
+                                especialidades_norm,
+                            ),
                         )
                 st.success("Proveedor guardado")
                 st.rerun()
@@ -860,69 +911,120 @@ def render_inventario(usuario: str) -> None:
                         st.rerun()
 
     with tabs[4]:
-        st.subheader("🔧 Ajustes estratégicos y operativos")
+        st.subheader("🔧 Ajustes de Inventario 360°")
 
         df_adj = _load_inventory_df()
-
-        st.markdown("### 1) Ajustes operativos de inventario")
         if df_adj.empty:
             st.info("No hay productos activos para ajustar.")
         else:
-            op1, op2 = st.tabs(["🧮 Reconteo físico", "💲 Revalorización"])
+            t1, t2, t3, t4 = st.tabs([
+                "🧮 Stock",
+                "💲 Costos y Precios",
+                "📦 Políticas",
+                "🧹 Mantenimiento",
+            ])
 
-            with op1:
-                aid = st.selectbox(
-                    "Producto a ajustar",
-                    df_adj["id"].tolist(),
-                    format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
-                    key="inv_ajuste_item",
-                )
-                arow = df_adj[df_adj["id"] == aid].iloc[0]
-                stock_sistema = float(arow["stock_actual"] or 0.0)
-                stock_fisico = st.number_input("Stock físico contado", min_value=0.0, value=stock_sistema, key="inv_ajuste_stock_fisico")
-                delta = float(stock_fisico) - float(stock_sistema)
+            with t1:
+                st.caption("Ajustes de stock por reconteo individual y por lote.")
+                a1, a2 = st.tabs(["Individual", "Masivo por CSV"])
 
-                c1, c2 = st.columns(2)
-                c1.metric("Stock sistema", f"{stock_sistema:,.3f}")
-                c2.metric("Delta ajuste", f"{delta:,.3f}")
+                with a1:
+                    aid = st.selectbox(
+                        "Producto",
+                        df_adj["id"].tolist(),
+                        format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
+                        key="inv_adj_stock_item",
+                    )
+                    arow = df_adj[df_adj["id"] == aid].iloc[0]
+                    stock_sistema = float(arow["stock_actual"] or 0.0)
+                    stock_fisico = st.number_input("Stock físico contado", min_value=0.0, value=stock_sistema, key="inv_adj_stock_fisico")
+                    delta = float(stock_fisico) - stock_sistema
+                    m1, m2 = st.columns(2)
+                    m1.metric("Sistema", f"{stock_sistema:,.3f}")
+                    m2.metric("Delta", f"{delta:,.3f}")
+                    motivo = st.text_input("Motivo", value="Ajuste por reconteo físico", key="inv_adj_stock_motivo")
+                    if st.button("✅ Aplicar ajuste individual"):
+                        if abs(delta) < 1e-9:
+                            st.warning("No hay diferencia")
+                        else:
+                            add_inventory_movement(
+                                usuario=usuario,
+                                inventario_id=int(aid),
+                                tipo="ajuste",
+                                cantidad=float(delta),
+                                costo_unitario_usd=float(arow["costo_unitario_usd"] or 0.0),
+                                referencia=motivo,
+                            )
+                            st.success("Ajuste aplicado")
+                            st.rerun()
 
-                motivo = st.text_input("Motivo del ajuste", value="Ajuste por reconteo físico", key="inv_ajuste_motivo")
-                if st.button("✅ Aplicar ajuste de reconteo"):
-                    if abs(delta) < 1e-9:
-                        st.warning("No hay diferencia entre sistema y físico.")
-                    else:
-                        add_inventory_movement(
-                            usuario=usuario,
-                            inventario_id=int(aid),
-                            tipo="ajuste",
-                            cantidad=float(delta),
-                            costo_unitario_usd=float(arow["costo_unitario_usd"] or 0.0),
-                            referencia=motivo,
-                        )
-                        st.success("Ajuste de inventario aplicado")
-                        st.rerun()
+                with a2:
+                    st.caption("Carga CSV con columnas: sku, stock_fisico")
+                    template = pd.DataFrame({"sku": ["sku-ejemplo"], "stock_fisico": [10.0]})
+                    st.download_button(
+                        "⬇️ Descargar plantilla CSV",
+                        data=template.to_csv(index=False).encode("utf-8"),
+                        file_name="plantilla_reconteo.csv",
+                        mime="text/csv",
+                    )
+                    file = st.file_uploader("Subir reconteo CSV", type=["csv"], key="inv_adj_csv")
+                    if file is not None:
+                        try:
+                            recon = pd.read_csv(file)
+                            required = {"sku", "stock_fisico"}
+                            if not required.issubset(set(recon.columns)):
+                                st.error("CSV inválido. Debe tener columnas sku y stock_fisico")
+                            else:
+                                preview = recon.copy()
+                                st.dataframe(preview.head(20), use_container_width=True)
+                                if st.button("⚙️ Aplicar ajustes masivos desde CSV"):
+                                    with db_transaction() as conn:
+                                        updated = 0
+                                        for r in recon.itertuples(index=False):
+                                            sku = clean_text(getattr(r, "sku", ""))
+                                            stock_f = _safe_float(getattr(r, "stock_fisico", 0.0), 0.0)
+                                            row = conn.execute("SELECT id, stock_actual, costo_unitario_usd FROM inventario WHERE sku=? AND estado='activo'", (sku,)).fetchone()
+                                            if not row:
+                                                continue
+                                            delta = float(stock_f) - float(row["stock_actual"] or 0.0)
+                                            if abs(delta) < 1e-9:
+                                                continue
+                                            add_inventory_movement(
+                                                usuario=usuario,
+                                                inventario_id=int(row["id"]),
+                                                tipo="ajuste",
+                                                cantidad=float(delta),
+                                                costo_unitario_usd=float(row["costo_unitario_usd"] or 0.0),
+                                                referencia="Ajuste masivo por CSV",
+                                                conn=conn,
+                                            )
+                                            updated += 1
+                                    st.success(f"Ajustes aplicados en {updated} productos")
+                                    st.rerun()
+                        except Exception as exc:
+                            st.error(f"Error procesando CSV: {exc}")
 
-            with op2:
+            with t2:
                 rid = st.selectbox(
                     "Producto a revalorizar",
                     df_adj["id"].tolist(),
                     format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
-                    key="inv_reval_item",
+                    key="inv_adj_reval_item",
                 )
                 rrow = df_adj[df_adj["id"] == rid].iloc[0]
                 costo_actual = float(rrow["costo_unitario_usd"] or 0.0)
                 precio_actual = float(rrow["precio_venta_usd"] or 0.0)
-                nuevo_costo = st.number_input("Nuevo costo unitario USD", min_value=0.0, value=costo_actual, format="%.4f")
-                recalcular_precio = st.checkbox("Recalcular precio de venta por margen")
-                margen_pct = st.number_input("Margen (%)", min_value=0.0, value=30.0, disabled=not recalcular_precio)
-
-                nuevo_precio = precio_actual
-                if recalcular_precio:
-                    nuevo_precio = float(nuevo_costo) * (1 + float(margen_pct) / 100.0)
+                nuevo_costo = st.number_input("Nuevo costo USD", min_value=0.0, value=costo_actual, format="%.4f")
+                modo_precio = st.radio("Modo precio", ["Manual", "Por margen"], horizontal=True)
+                if modo_precio == "Por margen":
+                    margen = st.number_input("Margen (%)", min_value=0.0, value=30.0)
+                    nuevo_precio = float(nuevo_costo) * (1 + float(margen) / 100.0)
+                else:
+                    nuevo_precio = st.number_input("Nuevo precio venta USD", min_value=0.0, value=precio_actual, format="%.4f")
 
                 p1, p2 = st.columns(2)
                 p1.metric("Costo actual", f"${costo_actual:,.4f}")
-                p2.metric("Precio resultante", f"${nuevo_precio:,.4f}")
+                p2.metric("Precio nuevo", f"${nuevo_precio:,.4f}")
 
                 if st.button("💾 Aplicar revalorización"):
                     with db_transaction() as conn:
@@ -933,25 +1035,20 @@ def render_inventario(usuario: str) -> None:
                     st.success("Revalorización aplicada")
                     st.rerun()
 
-        st.divider()
-        st.markdown("### 2) Ajuste masivo de políticas")
-
-        with st.expander("Actualizar stock mínimo en lote"):
-            if df_adj.empty:
-                st.info("Sin productos activos")
-            else:
-                metodo = st.radio("Método", ["Incremento porcentual", "Asignar valor fijo"], horizontal=True)
+            with t3:
+                st.markdown("#### Ajuste masivo de mínimos")
+                metodo = st.radio("Método", ["Incremento porcentual", "Asignar valor fijo"], horizontal=True, key="inv_pol_metodo")
                 if metodo == "Incremento porcentual":
-                    pct = st.number_input("% a incrementar/reducir mínimos", value=10.0, format="%.2f")
+                    pct = st.number_input("% a incrementar/reducir mínimos", value=10.0, format="%.2f", key="inv_pol_pct")
+                    fijo = None
                 else:
-                    fijo = st.number_input("Nuevo mínimo fijo", min_value=0.0, value=1.0)
+                    fijo = st.number_input("Nuevo mínimo fijo", min_value=0.0, value=1.0, key="inv_pol_fijo")
+                    pct = None
 
-                aplicar_solo_criticos = st.checkbox("Aplicar solo a productos críticos")
+                aplicar_solo_criticos = st.checkbox("Aplicar solo a productos críticos", key="inv_pol_crit")
                 if st.button("⚙️ Ejecutar ajuste masivo de mínimos"):
                     with db_transaction() as conn:
-                        rows = conn.execute(
-                            "SELECT id, stock_actual, stock_minimo FROM inventario WHERE estado='activo'"
-                        ).fetchall()
+                        rows = conn.execute("SELECT id, stock_actual, stock_minimo FROM inventario WHERE estado='activo'").fetchall()
                         updated = 0
                         for r in rows:
                             sid = int(r["id"])
@@ -968,8 +1065,37 @@ def render_inventario(usuario: str) -> None:
                     st.success(f"Mínimos actualizados en {updated} productos")
                     st.rerun()
 
+            with t4:
+                st.markdown("#### Mantenimiento de estructura")
+                mid = st.selectbox(
+                    "Producto",
+                    df_adj["id"].tolist(),
+                    format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
+                    key="inv_maint_item",
+                )
+                mrow = df_adj[df_adj["id"] == mid].iloc[0]
+                nuevo_nombre = st.text_input("Nuevo nombre", value=str(mrow["nombre"]), key="inv_maint_nombre")
+                nueva_categoria = st.text_input("Nueva categoría", value=str(mrow["categoria"]), key="inv_maint_cat")
+                nueva_unidad = st.text_input("Nueva unidad", value=str(mrow["unidad"]), key="inv_maint_unidad")
+                activar = st.checkbox("Mantener activo", value=True, key="inv_maint_activo")
+
+                if st.button("💾 Guardar cambios estructurales"):
+                    with db_transaction() as conn:
+                        conn.execute(
+                            "UPDATE inventario SET nombre=?, categoria=?, unidad=?, estado=? WHERE id=?",
+                            (
+                                clean_text(nuevo_nombre),
+                                clean_text(nueva_categoria),
+                                clean_text(nueva_unidad),
+                                "activo" if activar else "inactivo",
+                                int(mid),
+                            ),
+                        )
+                    st.success("Cambios estructurales guardados")
+                    st.rerun()
+
         st.divider()
-        st.markdown("### 3) Configuración estratégica")
+        st.markdown("### Configuración estratégica")
         with db_transaction() as conn:
             cfg = pd.read_sql("SELECT parametro, valor FROM configuracion", conn)
         cfg_map = {str(r.parametro): _safe_float(r.valor, 0.0) for r in cfg.itertuples() if str(r.valor).strip() != ""}
