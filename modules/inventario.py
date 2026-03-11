@@ -860,7 +860,116 @@ def render_inventario(usuario: str) -> None:
                         st.rerun()
 
     with tabs[4]:
-        st.subheader("🔧 Configuración estratégica del Inventario")
+        st.subheader("🔧 Ajustes estratégicos y operativos")
+
+        df_adj = _load_inventory_df()
+
+        st.markdown("### 1) Ajustes operativos de inventario")
+        if df_adj.empty:
+            st.info("No hay productos activos para ajustar.")
+        else:
+            op1, op2 = st.tabs(["🧮 Reconteo físico", "💲 Revalorización"])
+
+            with op1:
+                aid = st.selectbox(
+                    "Producto a ajustar",
+                    df_adj["id"].tolist(),
+                    format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
+                    key="inv_ajuste_item",
+                )
+                arow = df_adj[df_adj["id"] == aid].iloc[0]
+                stock_sistema = float(arow["stock_actual"] or 0.0)
+                stock_fisico = st.number_input("Stock físico contado", min_value=0.0, value=stock_sistema, key="inv_ajuste_stock_fisico")
+                delta = float(stock_fisico) - float(stock_sistema)
+
+                c1, c2 = st.columns(2)
+                c1.metric("Stock sistema", f"{stock_sistema:,.3f}")
+                c2.metric("Delta ajuste", f"{delta:,.3f}")
+
+                motivo = st.text_input("Motivo del ajuste", value="Ajuste por reconteo físico", key="inv_ajuste_motivo")
+                if st.button("✅ Aplicar ajuste de reconteo"):
+                    if abs(delta) < 1e-9:
+                        st.warning("No hay diferencia entre sistema y físico.")
+                    else:
+                        add_inventory_movement(
+                            usuario=usuario,
+                            inventario_id=int(aid),
+                            tipo="ajuste",
+                            cantidad=float(delta),
+                            costo_unitario_usd=float(arow["costo_unitario_usd"] or 0.0),
+                            referencia=motivo,
+                        )
+                        st.success("Ajuste de inventario aplicado")
+                        st.rerun()
+
+            with op2:
+                rid = st.selectbox(
+                    "Producto a revalorizar",
+                    df_adj["id"].tolist(),
+                    format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
+                    key="inv_reval_item",
+                )
+                rrow = df_adj[df_adj["id"] == rid].iloc[0]
+                costo_actual = float(rrow["costo_unitario_usd"] or 0.0)
+                precio_actual = float(rrow["precio_venta_usd"] or 0.0)
+                nuevo_costo = st.number_input("Nuevo costo unitario USD", min_value=0.0, value=costo_actual, format="%.4f")
+                recalcular_precio = st.checkbox("Recalcular precio de venta por margen")
+                margen_pct = st.number_input("Margen (%)", min_value=0.0, value=30.0, disabled=not recalcular_precio)
+
+                nuevo_precio = precio_actual
+                if recalcular_precio:
+                    nuevo_precio = float(nuevo_costo) * (1 + float(margen_pct) / 100.0)
+
+                p1, p2 = st.columns(2)
+                p1.metric("Costo actual", f"${costo_actual:,.4f}")
+                p2.metric("Precio resultante", f"${nuevo_precio:,.4f}")
+
+                if st.button("💾 Aplicar revalorización"):
+                    with db_transaction() as conn:
+                        conn.execute(
+                            "UPDATE inventario SET costo_unitario_usd=?, precio_venta_usd=? WHERE id=?",
+                            (money(nuevo_costo), money(nuevo_precio), int(rid)),
+                        )
+                    st.success("Revalorización aplicada")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("### 2) Ajuste masivo de políticas")
+
+        with st.expander("Actualizar stock mínimo en lote"):
+            if df_adj.empty:
+                st.info("Sin productos activos")
+            else:
+                metodo = st.radio("Método", ["Incremento porcentual", "Asignar valor fijo"], horizontal=True)
+                if metodo == "Incremento porcentual":
+                    pct = st.number_input("% a incrementar/reducir mínimos", value=10.0, format="%.2f")
+                else:
+                    fijo = st.number_input("Nuevo mínimo fijo", min_value=0.0, value=1.0)
+
+                aplicar_solo_criticos = st.checkbox("Aplicar solo a productos críticos")
+                if st.button("⚙️ Ejecutar ajuste masivo de mínimos"):
+                    with db_transaction() as conn:
+                        rows = conn.execute(
+                            "SELECT id, stock_actual, stock_minimo FROM inventario WHERE estado='activo'"
+                        ).fetchall()
+                        updated = 0
+                        for r in rows:
+                            sid = int(r["id"])
+                            stock = float(r["stock_actual"] or 0.0)
+                            minimo = float(r["stock_minimo"] or 0.0)
+                            if aplicar_solo_criticos and stock > minimo:
+                                continue
+                            if metodo == "Incremento porcentual":
+                                nuevo_minimo = max(0.0, minimo * (1 + float(pct) / 100.0))
+                            else:
+                                nuevo_minimo = float(fijo)
+                            conn.execute("UPDATE inventario SET stock_minimo=? WHERE id=?", (nuevo_minimo, sid))
+                            updated += 1
+                    st.success(f"Mínimos actualizados en {updated} productos")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("### 3) Configuración estratégica")
         with db_transaction() as conn:
             cfg = pd.read_sql("SELECT parametro, valor FROM configuracion", conn)
         cfg_map = {str(r.parametro): _safe_float(r.valor, 0.0) for r in cfg.itertuples() if str(r.valor).strip() != ""}
