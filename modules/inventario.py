@@ -371,6 +371,19 @@ def _create_inventory_item_for_purchase(
 # ============================================================
 
 def _load_inventory_df() -> pd.DataFrame:
+    cols = [
+        "id",
+        "fecha",
+        "sku",
+        "nombre",
+        "categoria",
+        "unidad",
+        "stock_actual",
+        "stock_minimo",
+        "costo_unitario_usd",
+        "precio_venta_usd",
+        "valor_stock",
+    ]
     with db_transaction() as conn:
         rows = conn.execute(
             """
@@ -382,10 +395,22 @@ def _load_inventory_df() -> pd.DataFrame:
             ORDER BY nombre ASC
             """
         ).fetchall()
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=cols)
 
 
 def _load_movements_df(limit: int = 1000) -> pd.DataFrame:
+    cols = [
+        "id",
+        "fecha",
+        "usuario",
+        "sku",
+        "nombre",
+        "tipo",
+        "cantidad",
+        "costo_unitario_usd",
+        "costo_total_usd",
+        "referencia",
+    ]
     with db_transaction() as conn:
         rows = conn.execute(
             """
@@ -400,7 +425,7 @@ def _load_movements_df(limit: int = 1000) -> pd.DataFrame:
             """,
             (int(limit),),
         ).fetchall()
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=cols)
 
 
 def _load_proveedores_df() -> pd.DataFrame:
