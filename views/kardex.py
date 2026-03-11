@@ -27,7 +27,7 @@ def render_kardex(usuario: str):
                 """
                 SELECT
                     m.id,
-                    fecha,
+                    m.fecha AS fecha,
                     m.usuario,
                     m.inventario_id,
                     i.sku,
@@ -39,7 +39,7 @@ def render_kardex(usuario: str):
                     m.referencia
                 FROM movimientos_inventario
                 m LEFT JOIN inventario i ON i.id = m.inventario_id
-                ORDER BY fecha DESC
+                ORDER BY m.fecha DESC
                 LIMIT 2500
                 """
             ).fetchall()
@@ -209,4 +209,3 @@ def render_kardex(usuario: str):
             st.rerun()
         except Exception as e:
             st.error(f"No se pudo aplicar el ajuste: {e}")
-            
