@@ -2,7 +2,7 @@
 # CONFIGURACIÓN GLOBAL ERP IMPERIO
 # ======================================================
 
-DATABASE = "database.db"
+DATABASE = "data/imperio.db"
 
 EMPRESA = "IMPERIO ATOMICO"
 
