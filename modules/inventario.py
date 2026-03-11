@@ -1,7 +1,7 @@
-from __future__ import annotations
+rom __future__ import annotations
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, money, require_text
@@ -18,7 +18,9 @@ def create_producto(
     categoria: str,
     unidad: str,
     costo: float,
-    precio: float
+    precio: float,
+    stock_inicial: float = 0.0,
+    stock_minimo: float = 0.0,
 ) -> int:
 
     sku = require_text(sku, "SKU")
@@ -28,9 +30,10 @@ def create_producto(
 
     costo = as_positive(costo, "Costo")
     precio = as_positive(precio, "Precio")
+    stock_inicial = as_positive(stock_inicial, "Stock inicial")
+    stock_minimo = as_positive(stock_minimo, "Stock mínimo")
 
     with db_transaction() as conn:
-
         cur = conn.execute(
             """
             INSERT INTO inventario (
@@ -39,10 +42,12 @@ def create_producto(
                 nombre,
                 categoria,
                 unidad,
+                stock_actual,
+                stock_minimo,
                 costo_unitario_usd,
                 precio_venta_usd
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario,
@@ -50,8 +55,10 @@ def create_producto(
                 nombre,
                 categoria,
                 unidad,
+                stock_inicial,
+                stock_minimo,
                 money(costo),
-                money(precio)
+                money(precio),
             ),
         )
 
@@ -68,36 +75,26 @@ def add_inventory_movement(
     tipo: str,
     cantidad: float,
     costo_unitario_usd: float,
-    referencia: str
+    referencia: str,
 ) -> None:
 
     if tipo not in {"entrada", "salida", "ajuste"}:
         raise ValueError("Tipo de movimiento inválido")
 
-    cantidad = as_positive(
-        cantidad,
-        "Cantidad",
-        allow_zero=False
-    )
-
-    costo_unitario_usd = as_positive(
-        costo_unitario_usd,
-        "Costo unitario"
-    )
-
+    cantidad = as_positive(cantidad, "Cantidad", allow_zero=False)
+    costo_unitario_usd = as_positive(costo_unitario_usd, "Costo unitario")
     referencia = clean_text(referencia)
 
     sign = 1 if tipo == "entrada" else -1
 
     with db_transaction() as conn:
-
         current = conn.execute(
             """
             SELECT stock_actual
             FROM inventario
             WHERE id=? AND estado='activo'
             """,
-            (inventario_id,)
+            (inventario_id,),
         ).fetchone()
 
         if not current:
@@ -144,168 +141,215 @@ def add_inventory_movement(
 # INTERFAZ INVENTARIO
 # ============================================================
 
-def render_inventario(usuario: str) -> None:
-
-    st.subheader("📦 Inventario")
-
-    # ------------------------------------------------
-    # CREAR PRODUCTO
-    # ------------------------------------------------
-
-    with st.form("crear_producto"):
-
-        st.write("Registrar nuevo producto")
-
-        c1, c2 = st.columns(2)
-
-        sku = c1.text_input("SKU")
-
-        nombre = c1.text_input("Producto")
-
-        categoria = c2.text_input(
-            "Categoría",
-            value="Papelería"
-        )
-
-        unidad = c2.text_input(
-            "Unidad",
-            value="unidad"
-        )
-
-        costo = st.number_input(
-            "Costo USD",
-            min_value=0.0
-        )
-
-        precio = st.number_input(
-            "Precio USD",
-            min_value=0.0
-        )
-
-        save = st.form_submit_button("💾 Crear producto")
-
-    if save:
-
-        try:
-
-            pid = create_producto(
-                usuario,
+def _load_inventory_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                fecha,
                 sku,
                 nombre,
                 categoria,
                 unidad,
-                costo,
-                precio
+                stock_actual,
+                stock_minimo,
+                costo_unitario_usd,
+                precio_venta_usd,
+                (stock_actual * costo_unitario_usd) AS valor_stock
+            FROM inventario
+            WHERE estado='activo'
+            ORDER BY nombre ASC
+            """
+        ).fetchall()
+
+    return pd.DataFrame(rows)
+
+
+def _load_movements_df(limit: int = 500) -> pd.DataFrame:
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                m.id,
+                m.fecha,
+                m.usuario,
+                i.sku,
+                i.nombre,
+                m.tipo,
+                m.cantidad,
+                m.costo_unitario_usd,
+                (m.cantidad * m.costo_unitario_usd) AS costo_total_usd,
+                m.referencia
+            FROM movimientos_inventario m
+            JOIN inventario i ON i.id = m.inventario_id
+            WHERE m.estado='activo'
+            ORDER BY m.fecha DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+
+    return pd.DataFrame(rows)
+
+
+def render_inventario(usuario: str) -> None:
+
+    st.subheader("📦 Centro de Control de Inventario")
+
+    df = _load_inventory_df()
+
+    c1, c2, c3, c4 = st.columns(4)
+    total_productos = int(len(df))
+    stock_total = float(df["stock_actual"].sum()) if not df.empty else 0.0
+    valor_total = float(df["valor_stock"].sum()) if not df.empty else 0.0
+    criticos = int((df["stock_actual"] <= df["stock_minimo"]).sum()) if not df.empty else 0
+
+    c1.metric("📦 Productos activos", total_productos)
+    c2.metric("🧮 Stock total", f"{stock_total:,.2f}")
+    c3.metric("💰 Valor inventario", f"$ {valor_total:,.2f}")
+    c4.metric("🚨 Stock bajo", criticos, delta="Revisar" if criticos else "OK", delta_color="inverse")
+
+    tabs = st.tabs([
+        "📋 Existencias",
+        "➕ Producto",
+        "📥 Movimientos",
+        "📊 Kardex",
+    ])
+
+    with tabs[0]:
+        if df.empty:
+            st.info("No hay productos registrados todavía.")
+        else:
+            f1, f2, f3 = st.columns([2, 1, 1])
+            txt = f1.text_input("🔎 Buscar por SKU / nombre / categoría")
+            categoria = f2.selectbox("Categoría", ["Todas"] + sorted(df["categoria"].dropna().astype(str).unique().tolist()))
+            solo_critico = f3.checkbox("Solo críticos", value=False)
+
+            view = df.copy()
+            if txt:
+                q = txt.strip()
+                view = view[
+                    view["sku"].astype(str).str.contains(q, case=False, na=False)
+                    | view["nombre"].astype(str).str.contains(q, case=False, na=False)
+                    | view["categoria"].astype(str).str.contains(q, case=False, na=False)
+                ]
+
+            if categoria != "Todas":
+                view = view[view["categoria"] == categoria]
+
+            if solo_critico:
+                view = view[view["stock_actual"] <= view["stock_minimo"]]
+
+            st.dataframe(
+                view,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "sku": "SKU",
+                    "nombre": "Producto",
+                    "categoria": "Categoría",
+                    "unidad": "Unidad",
+                    "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
+                    "stock_minimo": st.column_config.NumberColumn("Stock mínimo", format="%.3f"),
+                    "costo_unitario_usd": st.column_config.NumberColumn("Costo USD", format="%.2f"),
+                    "precio_venta_usd": st.column_config.NumberColumn("Precio USD", format="%.2f"),
+                    "valor_stock": st.column_config.NumberColumn("Valor stock USD", format="%.2f"),
+                    "fecha": None,
+                    "id": None,
+                },
             )
 
-            st.success(f"Producto #{pid} creado")
+            st.divider()
+            st.caption("Mantenimiento rápido")
 
-            st.balloons()
+            p1, p2 = st.columns([2, 1])
+            selected = p1.selectbox(
+                "Producto",
+                options=df["id"].tolist(),
+                format_func=lambda pid: f"{df.loc[df['id'] == pid, 'sku'].iloc[0]} · {df.loc[df['id'] == pid, 'nombre'].iloc[0]}",
+            )
+            row = df[df["id"] == selected].iloc[0]
+            nuevo_min = p2.number_input("Nuevo mínimo", min_value=0.0, value=float(row["stock_minimo"] or 0.0))
 
-        except ValueError as exc:
+            m1, m2 = st.columns(2)
+            if m1.button("💾 Actualizar mínimo"):
+                with db_transaction() as conn:
+                    conn.execute(
+                        "UPDATE inventario SET stock_minimo=? WHERE id=?",
+                        (float(nuevo_min), int(selected)),
+                    )
+                st.success("Stock mínimo actualizado")
+                st.rerun()
 
-            st.error(str(exc))
+            if m2.button("🗃️ Desactivar producto"):
+                with db_transaction() as conn:
+                    conn.execute("UPDATE inventario SET estado='inactivo' WHERE id=?", (int(selected),))
+                st.success("Producto desactivado")
+                st.rerun()
 
-        except Exception as e:
+    with tabs[1]:
+        with st.form("crear_producto"):
+            st.write("Registrar nuevo producto")
+            c1, c2 = st.columns(2)
+            sku = c1.text_input("SKU")
+            nombre = c1.text_input("Producto")
+            categoria = c2.text_input("Categoría", value="General")
+            unidad = c2.text_input("Unidad", value="unidad")
+            c3, c4 = st.columns(2)
+            stock_inicial = c3.number_input("Stock inicial", min_value=0.0, value=0.0)
+            stock_minimo = c4.number_input("Stock mínimo", min_value=0.0, value=0.0)
+            costo = st.number_input("Costo USD", min_value=0.0)
+            precio = st.number_input("Precio USD", min_value=0.0)
+            save = st.form_submit_button("💾 Crear producto")
 
-            st.error("Error creando producto")
+        if save:
+            try:
+                pid = create_producto(usuario, sku, nombre, categoria, unidad, costo, precio, stock_inicial, stock_minimo)
+                st.success(f"Producto #{pid} creado")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error("Error creando producto")
+                st.exception(exc)
 
-            st.exception(e)
+    with tabs[2]:
+        if df.empty:
+            st.info("No hay productos disponibles para mover stock.")
+        else:
+            with st.form("registrar_mov"):
+                st.write("Registrar entrada / salida / ajuste")
 
-    st.divider()
+                m1, m2 = st.columns(2)
+                inventario_id = m1.selectbox(
+                    "Producto",
+                    options=df["id"].tolist(),
+                    format_func=lambda pid: f"{df.loc[df['id'] == pid, 'sku'].iloc[0]} · {df.loc[df['id'] == pid, 'nombre'].iloc[0]}",
+                )
+                tipo = m2.selectbox("Tipo", ["entrada", "salida", "ajuste"])
 
-    # ------------------------------------------------
-    # RESUMEN INVENTARIO
-    # ------------------------------------------------
+                m3, m4 = st.columns(2)
+                cantidad = m3.number_input("Cantidad", min_value=0.001, value=1.0)
+                costo_u = m4.number_input("Costo unitario USD", min_value=0.0, value=float(df[df["id"] == inventario_id]["costo_unitario_usd"].iloc[0] or 0.0))
 
-    try:
+                referencia = st.text_input("Referencia", placeholder="Compra factura #, ajuste físico, merma, etc.")
+                submit = st.form_submit_button("✅ Registrar movimiento")
 
-        with db_transaction() as conn:
+            if submit:
+                try:
+                    add_inventory_movement(usuario, int(inventario_id), tipo, cantidad, costo_u, referencia)
+                    st.success("Movimiento registrado")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    st.error("No se pudo registrar el movimiento")
+                    st.exception(exc)
 
-            totals = conn.execute(
-                """
-                SELECT
-                    COUNT(*) AS total,
-                    COALESCE(SUM(stock_actual),0) AS stock,
-                    COALESCE(SUM(stock_actual * costo_unitario_usd),0) AS valor_stock
-                FROM inventario
-                WHERE estado='activo'
-                """
-            ).fetchone()
+    with tabs[3]:
+        render_kardex(usuario)
 
-            rows = conn.execute(
-                """
-                SELECT
-                    id,
-                    sku,
-                    nombre,
-                    categoria,
-                    stock_actual,
-                    costo_unitario_usd,
-                    precio_venta_usd
-                FROM inventario
-                WHERE estado='activo'
-                ORDER BY id DESC
-                """
-            ).fetchall()
-
-    except Exception as e:
-
-        st.error("Error cargando inventario")
-
-        st.exception(e)
-
-        return
-
-    # ------------------------------------------------
-    # MÉTRICAS
-    # ------------------------------------------------
-
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric(
-        "Productos activos",
-        int(totals["total"] or 0)
-    )
-
-    c2.metric(
-        "Stock total",
-        f"{float(totals['stock'] or 0):,.2f}"
-    )
-
-    c3.metric(
-        "Valor inventario",
-        f"$ {float(totals['valor_stock'] or 0):,.2f}"
-    )
-
-    st.divider()
-
-    # ------------------------------------------------
-    # TABLA INVENTARIO
-    # ------------------------------------------------
-
-    if not rows:
-
-        st.info("No hay productos registrados.")
-
-        return
-
-    df = pd.DataFrame(rows)
-
-    buscar = st.text_input("🔎 Buscar producto")
-
-    if buscar:
-
-        df = df[
-            df["nombre"]
-            .str.contains(buscar, case=False, na=False)
-        ]
-
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True
-    )
 
 # ============================================================
 # KARDEX INVENTARIO
@@ -313,54 +357,47 @@ def render_inventario(usuario: str) -> None:
 
 def render_kardex(usuario: str) -> None:
 
-    st.subheader("📊 Kardex de Inventario")
+    _ = usuario
+    df = _load_movements_df(limit=1000)
 
-    try:
-
-        with db_transaction() as conn:
-
-            rows = conn.execute(
-                """
-                SELECT
-                    fecha,
-                    usuario,
-                    inventario_id,
-                    tipo,
-                    cantidad,
-                    costo_unitario_usd,
-                    referencia
-                FROM movimientos_inventario
-                ORDER BY fecha DESC
-                LIMIT 500
-                """
-            ).fetchall()
-
-    except Exception as e:
-
-        st.error("Error cargando kardex")
-        st.exception(e)
-        return
-
-    if not rows:
-
+    if df.empty:
         st.info("No hay movimientos registrados.")
-
         return
 
-    df = pd.DataFrame(rows)
+    f1, f2 = st.columns([2, 1])
+    buscar = f1.text_input("🔎 Buscar movimiento", placeholder="referencia, producto, usuario...")
+    tipo = f2.selectbox("Tipo", ["Todos", "entrada", "salida", "ajuste"])
 
-    buscar = st.text_input("🔎 Buscar movimiento")
-
+    view = df.copy()
     if buscar:
-
-        df = df[
-            df["referencia"]
-            .astype(str)
-            .str.contains(buscar, case=False, na=False)
+        q = buscar.strip()
+        view = view[
+            view["referencia"].astype(str).str.contains(q, case=False, na=False)
+            | view["nombre"].astype(str).str.contains(q, case=False, na=False)
+            | view["sku"].astype(str).str.contains(q, case=False, na=False)
+            | view["usuario"].astype(str).str.contains(q, case=False, na=False)
         ]
 
+    if tipo != "Todos":
+        view = view[view["tipo"] == tipo]
+
+    total_mov = float(view["costo_total_usd"].sum()) if not view.empty else 0.0
+    st.metric("💵 Valor movimientos visibles", f"$ {total_mov:,.2f}")
+
     st.dataframe(
-        df,
+        view,
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        column_config={
+            "id": "ID",
+            "fecha": "Fecha",
+            "usuario": "Usuario",
+            "sku": "SKU",
+            "nombre": "Producto",
+            "tipo": "Tipo",
+            "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
+            "costo_unitario_usd": st.column_config.NumberColumn("Costo unitario", format="%.2f"),
+            "costo_total_usd": st.column_config.NumberColumn("Costo total", format="%.2f"),
+            "referencia": "Referencia",
+        },
     )
