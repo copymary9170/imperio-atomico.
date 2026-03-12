@@ -22,6 +22,11 @@ IGNORE_COUNTER_CONTEXT = [
     re.compile(r"serial", re.I),
     re.compile(r"imei", re.I),
 ]
+COMPONENT_LIFE_PATTERNS = {
+    "cabezal": [re.compile(r"(?:head|cabezal)[^\d]{0,20}(\d{1,3})\s*%", re.I)],
+    "rodillo": [re.compile(r"(?:roller|rodillo(?:s)?)[^\d]{0,20}(\d{1,3})\s*%", re.I)],
+    "almohadillas": [re.compile(r"(?:pad(?:s)?|almohadilla(?:s)?|waste\s*ink)[^\d]{0,20}(\d{1,3})\s*%", re.I)],
+}
 
 
 def _normalizar_texto_busqueda(texto: str) -> str:
@@ -63,6 +68,22 @@ def _clamp_percentage(value: float | int | None) -> float | None:
     return max(0.0, min(100.0, float(value)))
 
 
+def extraer_desgaste_componentes(texto_ocr: str | None) -> dict[str, float | None]:
+    texto = str(texto_ocr or "")
+    componentes: dict[str, float | None] = {"cabezal": None, "rodillo": None, "almohadillas": None}
+    for nombre, patrones in COMPONENT_LIFE_PATTERNS.items():
+        for patron in patrones:
+            match = patron.search(texto)
+            if not match:
+                continue
+            try:
+                componentes[nombre] = _clamp_percentage(float(match.group(1)))
+            except Exception:
+                componentes[nombre] = None
+            break
+    return componentes
+
+
 class DiagnosticsService:
     """Utility methods to infer diagnostic metrics from OCR signals."""
 
@@ -87,7 +108,6 @@ class DiagnosticsService:
 
             capacidad_color = float(capacidad.get(color, 0.0) or 0.0)
             merged[color] = round((capacidad_color * pct) / 100.0, 2)
-
         return merged
 
     @staticmethod
@@ -204,14 +224,17 @@ def analizar_hoja_diagnostico(
         porcentajes_texto=extraido.get("porcentajes", []),
         porcentajes_foto=porcentajes_foto,
     )
+    componentes = extraer_desgaste_componentes(texto_ocr)
     vida_cabezal = DiagnosticsService.resolve_head_life(
-        detected_value=vida_cabezal_detectada,
+        detected_value=vida_cabezal_detectada if vida_cabezal_detectada is not None else componentes.get("cabezal"),
         porcentajes_foto=porcentajes_foto,
     )
+    componentes["cabezal"] = vida_cabezal
     resumen = DiagnosticsService.summarize(resultados=resultados, vida_cabezal_pct=vida_cabezal)
     return {
         "resultados": resultados,
         "vida_cabezal_pct": vida_cabezal,
+        "desgaste_componentes": componentes,
         "contador_impresiones": int(extraido.get("contadores", {}).get("contador_impresiones", 0)),
         "resumen": resumen,
     }
@@ -255,16 +278,28 @@ def _ensure_diagnostics_schema(conn) -> None:
             magenta_ml REAL,
             yellow_ml REAL,
             black_ml REAL,
-            observacion TEXT
+            observacion TEXT,
+            vida_rodillo_pct REAL,
+            vida_almohadillas_pct REAL
         )
         """
     )
+
+    diag_cols = {row[1] for row in conn.execute("PRAGMA table_info(diagnosticos_impresora)").fetchall()}
+    if "vida_rodillo_pct" not in diag_cols:
+        conn.execute("ALTER TABLE diagnosticos_impresora ADD COLUMN vida_rodillo_pct REAL")
+    if "vida_almohadillas_pct" not in diag_cols:
+        conn.execute("ALTER TABLE diagnosticos_impresora ADD COLUMN vida_almohadillas_pct REAL")
 
     activos_cols = {row[1] for row in conn.execute("PRAGMA table_info(activos)").fetchall()}
     if "paginas_impresas" not in activos_cols:
         conn.execute("ALTER TABLE activos ADD COLUMN paginas_impresas INTEGER NOT NULL DEFAULT 0")
     if "vida_cabezal_pct" not in activos_cols:
         conn.execute("ALTER TABLE activos ADD COLUMN vida_cabezal_pct REAL")
+    if "vida_rodillo_pct" not in activos_cols:
+        conn.execute("ALTER TABLE activos ADD COLUMN vida_rodillo_pct REAL")
+    if "vida_almohadillas_pct" not in activos_cols:
+        conn.execute("ALTER TABLE activos ADD COLUMN vida_almohadillas_pct REAL")
 
 
 
@@ -301,6 +336,7 @@ def aplicar_resultado_diagnostico(
     vida_cabezal_pct: float,
     contador_impresiones: int = 0,
     activo_id: int | None = None,
+    desgaste_componentes: dict[str, float | None] | None = None,
 ) -> dict[str, Any]:
     resumen = {
         "diagnostico_guardado": False,
@@ -324,11 +360,15 @@ def aplicar_resultado_diagnostico(
                 (int(activo_id),),
             ).fetchone()
 
+        componentes = dict(desgaste_componentes or {})
+        vida_rodillo = _clamp_percentage(componentes.get("rodillo"))
+        vida_almohadillas = _clamp_percentage(componentes.get("almohadillas"))
+
         conn.execute(
             """
             INSERT INTO diagnosticos_impresora
-            (usuario, activo_id, impresora, vida_cabezal_pct, contador_impresiones, cyan_ml, magenta_ml, yellow_ml, black_ml, observacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (usuario, activo_id, impresora, vida_cabezal_pct, contador_impresiones, cyan_ml, magenta_ml, yellow_ml, black_ml, observacion, vida_rodillo_pct, vida_almohadillas_pct)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario,
@@ -341,18 +381,30 @@ def aplicar_resultado_diagnostico(
                 float(resultados.get("Yellow") or 0.0),
                 float(resultados.get("Black") or 0.0),
                 "Registro automático desde Diagnóstico IA",
+                float(vida_rodillo) if vida_rodillo is not None else None,
+                float(vida_almohadillas) if vida_almohadillas is not None else None,
             ),
         )
         resumen["diagnostico_guardado"] = True
 
         if activo_id:
+            vidas_componentes = [
+                _clamp_percentage(vida_cabezal_pct),
+                vida_rodillo,
+                vida_almohadillas,
+            ]
+            vidas_validas = [float(v) for v in vidas_componentes if v is not None]
+            vida_general = min(vidas_validas) if vidas_validas else None
             conn.execute(
                 """
                 UPDATE activos
                 SET desgaste = CASE
                     WHEN ? IS NOT NULL THEN ROUND((100.0 - ?) / 100.0, 6)
                     ELSE desgaste
+                END,
                     vida_cabezal_pct = ?,
+                    vida_rodillo_pct = COALESCE(?, vida_rodillo_pct),
+                    vida_almohadillas_pct = COALESCE(?, vida_almohadillas_pct),
                     paginas_impresas = CASE
                         WHEN ? > 0 THEN ?
                         ELSE COALESCE(paginas_impresas, 0)
@@ -361,9 +413,11 @@ def aplicar_resultado_diagnostico(
                 WHERE id = ?
                 """,
                 (
+                    float(vida_general) if vida_general is not None else None,
+                    float(vida_general) if vida_general is not None else None,
                     float(vida_cabezal_pct),
-                    float(vida_cabezal_pct),
-                    float(vida_cabezal_pct),
+                    float(vida_rodillo) if vida_rodillo is not None else None,
+                    float(vida_almohadillas) if vida_almohadillas is not None else None,
                     int(contador_impresiones or 0),
                     int(contador_impresiones or 0),
                     usuario,
@@ -377,7 +431,12 @@ def aplicar_resultado_diagnostico(
                 """,
                 (
                     str(impresora),
-                    f"Vida cabezal: {float(vida_cabezal_pct):.2f}% | contador: {int(contador_impresiones or 0)}",
+                    (
+                        f"Vida cabezal: {float(vida_cabezal_pct):.2f}%"
+                        + (f" | rodillo: {float(vida_rodillo):.2f}%" if vida_rodillo is not None else "")
+                        + (f" | almohadillas: {float(vida_almohadillas):.2f}%" if vida_almohadillas is not None else "")
+                        + f" | contador: {int(contador_impresiones or 0)}"
+                    ),
                     usuario,
                 ),
             )
