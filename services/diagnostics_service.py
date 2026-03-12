@@ -80,14 +80,65 @@ class DiagnosticsService:
             pct = pct_foto if pct_foto is not None else pct_text
 
             if pct is None:
-@@ -98,66 +132,80 @@ class DiagnosticsService:
+                merged[color] = None
+                continue
+
+            capacidad_color = float(capacidad.get(color, 0.0) or 0.0)
+            merged[color] = round((capacidad_color * pct) / 100.0, 2)
+
+        return merged
+
+    @staticmethod
+    def resolve_head_life(
+        detected_value: float | int | None,
+        porcentajes_foto: dict[str, float] | None = None,
+    ) -> float:
+        detected = _clamp_percentage(detected_value)
+        if detected is not None:
+            return float(detected)
+
+        foto = dict(porcentajes_foto or {})
+        valid = [_clamp_percentage(v) for v in foto.values()]
+        valid = [float(v) for v in valid if v is not None]
+        if valid:
+            return round(sum(valid) / len(valid), 2)
+
+        return 100.0
+
+    @staticmethod
+    def summarize(resultados: dict[str, float | None], vida_cabezal_pct: float | int | None) -> dict[str, Any]:
+        valores = [float(v) for v in resultados.values() if v is not None]
+        min_ml = min(valores) if valores else 0.0
+        max_ml = max(valores) if valores else 0.0
+
+        if not valores:
+            estado_tintas = "Sin datos"
+        elif min_ml <= CRITICAL_LEVEL:
+            estado_tintas = "Crítico"
+        elif min_ml <= LOW_LEVEL:
+            estado_tintas = "Bajo"
+        else:
+            estado_tintas = "Óptimo"
+
+        vida = _clamp_percentage(vida_cabezal_pct)
+        if vida is None:
+            estado_cabezal = "Sin datos"
+            vida = 100.0
+        elif vida <= CRITICAL_LEVEL:
+            estado_cabezal = "Crítico"
+        elif vida <= LOW_LEVEL:
+            estado_cabezal = "Bajo"
+        else:
+            estado_cabezal = "Óptimo"
+
         return {
             "estado_tintas": estado_tintas,
             "estado_cabezal": estado_cabezal,
-            "vida_cabezal_pct": float(vida if vida is not None else 100.0),
+            "vida_cabezal_pct": float(vida),
             "min_ml": round(min_ml, 2),
             "max_ml": round(max_ml, 2),
         }
+
 
 
 def extraer_texto_diagnostico(texto_ocr: str | None) -> dict[str, Any]:
@@ -161,3 +212,4 @@ def analizar_hoja_diagnostico(
         "vida_cabezal_pct": vida_cabezal,
         "contador_impresiones": int(extraido.get("contadores", {}).get("contador_impresiones", 0)),
         "resumen": resumen,
+    }
