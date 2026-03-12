@@ -260,6 +260,13 @@ def _ensure_diagnostics_schema(conn) -> None:
         """
     )
 
+    activos_cols = {row[1] for row in conn.execute("PRAGMA table_info(activos)").fetchall()}
+    if "paginas_impresas" not in activos_cols:
+        conn.execute("ALTER TABLE activos ADD COLUMN paginas_impresas INTEGER NOT NULL DEFAULT 0")
+    if "vida_cabezal_pct" not in activos_cols:
+        conn.execute("ALTER TABLE activos ADD COLUMN vida_cabezal_pct REAL")
+
+
 
 def _buscar_item_tinta(conn, color: str) -> dict[str, Any] | None:
     terms = {
@@ -345,11 +352,23 @@ def aplicar_resultado_diagnostico(
                 SET desgaste = CASE
                     WHEN ? IS NOT NULL THEN ROUND((100.0 - ?) / 100.0, 6)
                     ELSE desgaste
-                END,
+                    vida_cabezal_pct = ?,
+                    paginas_impresas = CASE
+                        WHEN ? > 0 THEN ?
+                        ELSE COALESCE(paginas_impresas, 0)
+                    END,
                     usuario = ?
                 WHERE id = ?
                 """,
-                (float(vida_cabezal_pct), float(vida_cabezal_pct), usuario, int(activo_id)),
+                (
+                    float(vida_cabezal_pct),
+                    float(vida_cabezal_pct),
+                    float(vida_cabezal_pct),
+                    int(contador_impresiones or 0),
+                    int(contador_impresiones or 0),
+                    usuario,
+                    int(activo_id),
+                ),
             )
             conn.execute(
                 """
