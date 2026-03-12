@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -74,27 +76,34 @@ def _ensure_activos_schema(conn) -> None:
 
 
 def _load_activos_df() -> pd.DataFrame:
-    with db_transaction() as conn:
-        _ensure_activos_schema(conn)
-        rows = conn.execute(
-            """
-            SELECT
-                id,
-                equipo,
-                categoria,
-                inversion,
-                unidad,
-                desgaste,
-                modelo,
-                costo_hora,
-                fecha,
-                COALESCE(activo, 1) AS activo
-            FROM activos
-            WHERE COALESCE(activo, 1) = 1
-            ORDER BY id DESC
-            """
-        ).fetchall()
+    query = """
+        SELECT
+            id,
+            equipo,
+            categoria,
+            inversion,
+            unidad,
+            desgaste,
+            modelo,
+            costo_hora,
+            fecha,
+            COALESCE(activo, 1) AS activo
+        FROM activos
+        WHERE COALESCE(activo, 1) = 1
+        ORDER BY id DESC
+    """
 
+    for _ in range(2):
+        with db_transaction() as conn:
+            _ensure_activos_schema(conn)
+            try:
+                rows = conn.execute(query).fetchall()
+                break
+            except sqlite3.OperationalError as exc:
+                if "no such table: activos" not in str(exc).lower():
+                    raise
+    else:
+        rows = []
     if not rows:
         return pd.DataFrame(
             columns=["id", "equipo", "categoria", "inversion", "unidad", "desgaste", "modelo", "costo_hora", "fecha", "activo"]
