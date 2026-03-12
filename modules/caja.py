@@ -71,7 +71,6 @@ def render_caja(usuario: str, user_role: str) -> None:
                 """,
                 conn,
             )
-@@ -226,25 +232,27 @@ def render_caja(usuario: str, user_role: str) -> None:
                     ),
                 )
             st.success("✅ Cierre registrado correctamente")
