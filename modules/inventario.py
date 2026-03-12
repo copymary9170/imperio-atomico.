@@ -428,6 +428,23 @@ def _load_movements_df(limit: int = 1000) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
+
+def _load_diagnostico_movimientos(limit: int = 20) -> pd.DataFrame:
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT m.fecha, i.nombre AS insumo, m.cantidad, i.unidad, m.referencia
+            FROM movimientos_inventario m
+            JOIN inventario i ON i.id = m.inventario_id
+            WHERE m.estado='activo'
+              AND lower(COALESCE(m.referencia, '')) LIKE '%diagnóstico ia%'
+            ORDER BY m.fecha DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    return pd.DataFrame(rows, columns=["fecha", "insumo", "cantidad", "unidad", "referencia"])
+
 def _load_proveedores_df() -> pd.DataFrame:
     with db_transaction() as conn:
         rows = conn.execute(
@@ -485,6 +502,13 @@ def render_inventario(usuario: str) -> None:
     c3.metric("🚨 Stock Bajo", criticos, delta="Revisar" if criticos else "OK", delta_color="inverse")
     c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
     st.progress(min(max(salud / 100.0, 0.0), 1.0))
+  
+    with st.expander("📨 Solicitudes recibidas desde Diagnóstico IA", expanded=False):
+        df_diag_mov = _load_diagnostico_movimientos(limit=25)
+        if df_diag_mov.empty:
+            st.caption("No hay consumos enviados desde Diagnóstico IA todavía.")
+        else:
+            st.dataframe(df_diag_mov, use_container_width=True, hide_index=True)
 
     tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "📊 Historial Compras", "👤 Proveedores", "🔧 Ajustes"])
 
