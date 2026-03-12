@@ -4,6 +4,8 @@ import re
 import unicodedata
 from typing import Any
 
+from database.connection import db_transaction
+
 
 _COLOR_ORDER = ("Cyan", "Magenta", "Yellow", "Black")
 CRITICAL_LEVEL = 10
@@ -213,3 +215,200 @@ def analizar_hoja_diagnostico(
         "contador_impresiones": int(extraido.get("contadores", {}).get("contador_impresiones", 0)),
         "resumen": resumen,
     }
+
+
+def listar_impresoras_activas() -> list[dict[str, Any]]:
+    with db_transaction() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, equipo, modelo, categoria, unidad
+                FROM activos
+                WHERE COALESCE(activo, 1) = 1
+                  AND (
+                    lower(COALESCE(categoria, '')) LIKE '%impres%'
+                    OR lower(COALESCE(unidad, '')) LIKE '%impres%'
+                    OR lower(COALESCE(equipo, '')) LIKE '%epson%'
+                    OR lower(COALESCE(modelo, '')) LIKE '%epson%'
+                  )
+                ORDER BY id DESC
+                """
+            ).fetchall()
+        except Exception:
+            return []
+
+    return [dict(r) for r in rows]
+
+
+def _ensure_diagnostics_schema(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS diagnosticos_impresora (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT,
+            activo_id INTEGER,
+            impresora TEXT,
+            vida_cabezal_pct REAL,
+            contador_impresiones INTEGER DEFAULT 0,
+            cyan_ml REAL,
+            magenta_ml REAL,
+            yellow_ml REAL,
+            black_ml REAL,
+            observacion TEXT
+        )
+        """
+    )
+
+
+def _buscar_item_tinta(conn, color: str) -> dict[str, Any] | None:
+    terms = {
+        "Cyan": ["cyan", "cian", "azul"],
+        "Magenta": ["magenta", "fucsia"],
+        "Yellow": ["yellow", "amarillo"],
+        "Black": ["black", "negro"],
+    }.get(color, [color.lower()])
+
+    for term in terms:
+        row = conn.execute(
+            """
+            SELECT id, nombre, unidad, stock_actual, costo_unitario_usd
+            FROM inventario
+            WHERE estado='activo'
+              AND lower(COALESCE(categoria, '')) LIKE '%tinta%'
+              AND lower(COALESCE(nombre, '')) LIKE ?
+            ORDER BY stock_actual DESC, id DESC
+            LIMIT 1
+            """,
+            (f"%{term.lower()}%",),
+        ).fetchone()
+        if row:
+            return dict(row)
+    return None
+
+
+def aplicar_resultado_diagnostico(
+    usuario: str,
+    impresora: str,
+    resultados: dict[str, float | None],
+    vida_cabezal_pct: float,
+    contador_impresiones: int = 0,
+    activo_id: int | None = None,
+) -> dict[str, Any]:
+    resumen = {
+        "diagnostico_guardado": False,
+        "activos_actualizados": False,
+        "movimientos_tinta": [],
+    }
+
+    with db_transaction() as conn:
+        _ensure_diagnostics_schema(conn)
+
+        previo = None
+        if activo_id:
+            previo = conn.execute(
+                """
+                SELECT cyan_ml, magenta_ml, yellow_ml, black_ml
+                FROM diagnosticos_impresora
+                WHERE activo_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (int(activo_id),),
+            ).fetchone()
+
+        conn.execute(
+            """
+            INSERT INTO diagnosticos_impresora
+            (usuario, activo_id, impresora, vida_cabezal_pct, contador_impresiones, cyan_ml, magenta_ml, yellow_ml, black_ml, observacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                usuario,
+                int(activo_id) if activo_id else None,
+                str(impresora),
+                float(vida_cabezal_pct),
+                int(contador_impresiones or 0),
+                float(resultados.get("Cyan") or 0.0),
+                float(resultados.get("Magenta") or 0.0),
+                float(resultados.get("Yellow") or 0.0),
+                float(resultados.get("Black") or 0.0),
+                "Registro automático desde Diagnóstico IA",
+            ),
+        )
+        resumen["diagnostico_guardado"] = True
+
+        if activo_id:
+            conn.execute(
+                """
+                UPDATE activos
+                SET desgaste = CASE
+                    WHEN ? IS NOT NULL THEN ROUND((100.0 - ?) / 100.0, 6)
+                    ELSE desgaste
+                END,
+                    usuario = ?
+                WHERE id = ?
+                """,
+                (float(vida_cabezal_pct), float(vida_cabezal_pct), usuario, int(activo_id)),
+            )
+            conn.execute(
+                """
+                INSERT INTO activos_historial(activo, accion, detalle, costo, usuario)
+                VALUES (?, 'DIAGNÓSTICO IA', ?, 0, ?)
+                """,
+                (
+                    str(impresora),
+                    f"Vida cabezal: {float(vida_cabezal_pct):.2f}% | contador: {int(contador_impresiones or 0)}",
+                    usuario,
+                ),
+            )
+            resumen["activos_actualizados"] = True
+
+        if previo:
+            previo_map = {
+                "Cyan": float(previo["cyan_ml"] or 0.0),
+                "Magenta": float(previo["magenta_ml"] or 0.0),
+                "Yellow": float(previo["yellow_ml"] or 0.0),
+                "Black": float(previo["black_ml"] or 0.0),
+            }
+            for color in _COLOR_ORDER:
+                actual = float(resultados.get(color) or 0.0)
+                consumido = round(max(0.0, previo_map.get(color, 0.0) - actual), 2)
+                if consumido <= 0:
+                    continue
+
+                item = _buscar_item_tinta(conn, color)
+                if not item:
+                    continue
+
+                stock = float(item.get("stock_actual") or 0.0)
+                salida = min(stock, consumido)
+                if salida <= 0:
+                    continue
+
+                conn.execute(
+                    """
+                    INSERT INTO movimientos_inventario(usuario, inventario_id, tipo, cantidad, costo_unitario_usd, referencia)
+                    VALUES (?, ?, 'salida', ?, ?, ?)
+                    """,
+                    (
+                        usuario,
+                        int(item["id"]),
+                        -float(salida),
+                        float(item.get("costo_unitario_usd") or 0.0),
+                        f"Diagnóstico IA {impresora} - consumo {color}",
+                    ),
+                )
+                conn.execute(
+                    "UPDATE inventario SET stock_actual = stock_actual - ? WHERE id = ?",
+                    (float(salida), int(item["id"])),
+                )
+                resumen["movimientos_tinta"].append(
+                    {
+                        "color": color,
+                        "inventario_id": int(item["id"]),
+                        "consumo_ml": float(salida),
+                    }
+                )
+
+    return resumen
