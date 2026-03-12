@@ -194,6 +194,7 @@ def render_diagnostico(usuario: str) -> None:
             "resumen": resumen,
             "contador_impresiones": int(analisis.get("contador_impresiones", 0)),
             "vida_cabezal_pct": float(analisis["vida_cabezal_pct"]),
+            "desgaste_componentes": dict(analisis.get("desgaste_componentes", {})),
             "texto_ocr": texto_ocr,
             "porcentajes_foto": porcentajes_foto,
             "porcentajes_texto": porcentajes_texto,
@@ -215,6 +216,7 @@ def render_diagnostico(usuario: str) -> None:
                 vida_cabezal_pct=float(datos["vida_cabezal_pct"]),
                 contador_impresiones=int(datos.get("contador_impresiones", 0)),
                 activo_id=datos.get("activo_id"),
+                desgaste_componentes=datos.get("desgaste_componentes"),
             )
             st.success("✅ Diagnóstico enviado y sincronizado con Activos/Inventario.")
             if sync.get("movimientos_tinta"):
@@ -239,7 +241,6 @@ def render_diagnostico(usuario: str) -> None:
     contador_imp = int(datos.get("contador_impresiones", 0))
     if contador_imp > 0:
         st.info(f"📌 Total de páginas impresas detectado: {contador_imp}")
-
     if datos.get("texto_ocr"):
         with st.expander("Ver texto OCR usado"):
             st.code(str(datos["texto_ocr"]))
