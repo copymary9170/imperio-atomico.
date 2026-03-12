@@ -44,7 +44,6 @@ def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
 
 
 def _ocr_texto(img: np.ndarray | None) -> str:
-@@ -49,188 +50,202 @@ def _ocr_texto(img: np.ndarray | None) -> str:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     denoise = cv2.GaussianBlur(gray, (3, 3), 0)
     _, binaria = cv2.threshold(denoise, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
