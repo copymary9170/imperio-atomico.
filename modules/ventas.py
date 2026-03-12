@@ -33,15 +33,10 @@ def registrar_venta(
     metodo_pago: str,
     items: list[dict],
 ) -> int:
-
     if not items:
         raise ValueError("Debe agregar al menos un item")
 
-    tasa_cambio = as_positive(
-        tasa_cambio,
-        "Tasa de cambio",
-        allow_zero=False
-    )
+    tasa_cambio = as_positive(tasa_cambio, "Tasa de cambio", allow_zero=False)
 
     subtotal = round(
         sum(
@@ -56,9 +51,7 @@ def registrar_venta(
     total = round(subtotal + impuesto, 2)
     total_bs = round(convert_to_bs(total, tasa_cambio), 2)
 
-
     with db_transaction() as conn:
-
         cur = conn.execute(
             """
             INSERT INTO ventas
@@ -75,14 +68,13 @@ def registrar_venta(
                 subtotal,
                 impuesto,
                 total,
-                total_bs
+                total_bs,
             ),
         )
 
         venta_id = int(cur.lastrowid)
 
         for item in items:
-
             cantidad = as_positive(item["cantidad"], "Cantidad", allow_zero=False)
             precio_u = as_positive(item["precio_unitario_usd"], "Precio unitario")
             costo_u = as_positive(item["costo_unitario_usd"], "Costo unitario")
@@ -109,7 +101,6 @@ def registrar_venta(
             )
 
             if inventario_id:
-
                 current = conn.execute(
                     """
                     SELECT stock_actual
@@ -135,52 +126,7 @@ def registrar_venta(
                 )
 
         if metodo_pago == "credito" and cliente_id:
-            conn.execute(
-                """
-                INSERT INTO cuentas_por_cobrar
-                (usuario, cliente_id, venta_id, saldo_usd, estado)
-                VALUES (?, ?, ?, ?, 'pendiente')
-                """,
-                (usuario, cliente_id, venta_id, total),
-            )
-
-        return venta_id
-
-
-def _load_clientes() -> list[dict]:
-    with db_transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, nombre
-            FROM clientes
-            WHERE estado='activo'
-            ORDER BY nombre
-            """
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def _load_productos() -> list[dict]:
-    with db_transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, nombre, precio_venta_usd, costo_unitario_usd, stock_actual
-            FROM inventario
-            WHERE estado='activo'
-            ORDER BY nombre
-            """
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def _render_tab_registro(usuario: str) -> None:
-    clientes = _load_clientes()
-    productos = _load_productos()
-
-    if not productos:
-        st.warning("⚠️ No hay productos activos en inventario para vender.")
-        return
-
+@@ -184,245 +175,318 @@ def _render_tab_registro(usuario: str) -> None:
     with st.form("form_registrar_venta_pro", clear_on_submit=True):
         st.subheader("Datos de la venta")
 
@@ -206,13 +152,16 @@ def _render_tab_registro(usuario: str) -> None:
         c4, c5, c6, c7 = st.columns(4)
 
         metodo_pago = c4.selectbox("Método", METODOS_PAGO_VENTA)
-
         moneda = c5.selectbox("Moneda", ["USD", "BS", "USDT", "KONTIGO"])
-
         tasa = c6.number_input("Tasa de referencia", min_value=0.0001, value=36.5)
 
         monto_prev_usd = float(cantidad) * float(producto["precio_venta_usd"])
+        utilidad_prev = monto_prev_usd - (float(cantidad) * float(producto["costo_unitario_usd"] or 0.0))
         c7.metric("Total estimado (Bs)", f"{convert_to_bs(monto_prev_usd, float(tasa)):,.2f}")
+
+        p1, p2 = st.columns(2)
+        p1.metric("Subtotal estimado (USD)", f"$ {monto_prev_usd:,.2f}")
+        p2.metric("Utilidad estimada", f"$ {utilidad_prev:,.2f}")
 
         submit = st.form_submit_button("🚀 Registrar venta")
 
@@ -262,6 +211,7 @@ def _load_historial_ventas() -> pd.DataFrame:
                 COALESCE(c.nombre, 'Sin cliente') AS cliente,
                 vd.descripcion AS detalle,
                 vd.cantidad,
+                vd.costo_unitario_usd,
                 v.metodo_pago,
                 v.moneda,
                 v.tasa_cambio,
@@ -293,14 +243,23 @@ def _render_tab_historial() -> None:
         return
 
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+    df["metodo_pago"] = df["metodo_pago"].fillna("sin definir")
+    df["utilidad_estimada"] = (
+        df["total_usd"].fillna(0.0)
+        - (df["cantidad"].fillna(0.0) * df["costo_unitario_usd"].fillna(0.0))
+    )
 
-    c1, c2, c3 = st.columns([1, 1, 2])
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
     desde = c1.date_input("Desde", date.today() - timedelta(days=30), key="ventas_desde")
     hasta = c2.date_input("Hasta", date.today(), key="ventas_hasta")
-    buscador = c3.text_input("Buscar por cliente o detalle")
+    metodo = c3.selectbox("Método", ["Todos"] + sorted(df["metodo_pago"].str.title().unique().tolist()))
+    buscador = c4.text_input("Buscar por cliente o detalle")
 
     filtro_fecha = (df["fecha"].dt.date >= desde) & (df["fecha"].dt.date <= hasta)
     df_fil = df[filtro_fecha].copy()
+
+    if metodo != "Todos":
+        df_fil = df_fil[df_fil["metodo_pago"].str.lower() == metodo.lower()]
 
     if buscador:
         df_fil = df_fil[
@@ -308,8 +267,34 @@ def _render_tab_historial() -> None:
             | df_fil["detalle"].str.contains(buscador, case=False, na=False)
         ]
 
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Total filtrado", f"$ {float(df_fil['total_usd'].sum()):,.2f}")
+    k2.metric("N° ventas", f"{int(df_fil['id'].nunique())}")
+    ticket = float(df_fil["total_usd"].sum()) / max(int(df_fil["id"].nunique()), 1)
+    k3.metric("Ticket promedio", f"$ {ticket:,.2f}")
+
     st.dataframe(df_fil, use_container_width=True, hide_index=True)
-    st.metric("Total del periodo", f"$ {float(df_fil['total_usd'].sum()):,.2f}")
+
+    if not df_fil.empty:
+        tendencia = (
+            df_fil.assign(dia=df_fil["fecha"].dt.date)
+            .groupby("dia", as_index=False)["total_usd"]
+            .sum()
+            .sort_values("dia")
+        )
+        metodos = (
+            df_fil.groupby("metodo_pago", as_index=False)["total_usd"]
+            .sum()
+            .sort_values("total_usd", ascending=False)
+        )
+
+        g1, g2 = st.columns(2)
+        with g1:
+            st.caption("Tendencia de ventas")
+            st.line_chart(tendencia.set_index("dia")["total_usd"])
+        with g2:
+            st.caption("Participación por método")
+            st.bar_chart(metodos.set_index("metodo_pago")["total_usd"])
 
     st.subheader("Gestión de pendientes")
     pendientes = df_fil[df_fil["metodo_pago"].str.lower() == "credito"]
@@ -317,7 +302,7 @@ def _render_tab_historial() -> None:
     if pendientes.empty:
         st.info("No hay ventas a crédito en el filtro actual.")
     else:
-        for _, row in pendientes.iterrows():
+        for _, row in pendientes.drop_duplicates(subset=["id"]).iterrows():
             with st.container(border=True):
                 st.write(f"**Venta #{int(row['id'])} · {row['cliente']}**")
                 st.write(f"Total: $ {float(row['total_usd']):,.2f}")
@@ -350,7 +335,7 @@ def _render_tab_historial() -> None:
 
 
 def _render_tab_resumen() -> None:
-    st.subheader("Resumen comercial")
+    st.subheader("Resumen comercial avanzado")
 
     try:
         with db_transaction() as conn:
@@ -361,13 +346,15 @@ def _render_tab_resumen() -> None:
                     fecha,
                     metodo_pago,
                     total_usd,
+                    subtotal_usd,
+                    impuesto_usd,
                     cliente_id
                 FROM ventas
                 WHERE estado='registrada'
                 """,
                 conn,
             )
-            top = pd.read_sql_query(
+            top_clientes = pd.read_sql_query(
                 """
                 SELECT
                     COALESCE(c.nombre, 'Sin cliente') AS cliente,
@@ -380,6 +367,22 @@ def _render_tab_resumen() -> None:
                 """,
                 conn,
             )
+            top_productos = pd.read_sql_query(
+                """
+                SELECT
+                    vd.descripcion AS producto,
+                    SUM(vd.cantidad) AS unidades,
+                    SUM(vd.subtotal_usd) AS ventas_usd,
+                    SUM(vd.cantidad * vd.costo_unitario_usd) AS costo_usd
+                FROM ventas_detalle vd
+                JOIN ventas v ON v.id = vd.venta_id
+                WHERE v.estado='registrada'
+                GROUP BY vd.descripcion
+                ORDER BY ventas_usd DESC
+                LIMIT 10
+                """,
+                conn,
+            )
     except Exception as e:
         st.error("Error cargando resumen")
         st.exception(e)
@@ -389,20 +392,36 @@ def _render_tab_resumen() -> None:
         st.info("No hay ventas para analizar.")
         return
 
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
     total = float(df["total_usd"].sum())
     por_cobrar = float(df[df["metodo_pago"].str.lower() == "credito"]["total_usd"].sum())
+    ticket_promedio = total / max(int(df["id"].nunique()), 1)
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Ventas totales", f"$ {total:,.2f}")
     c2.metric("Por cobrar", f"$ {por_cobrar:,.2f}")
+    c3.metric("Ticket promedio", f"$ {ticket_promedio:,.2f}")
+    c4.metric("Mejor cliente", "N/A" if top_clientes.empty else str(top_clientes.iloc[0]["cliente"]))
 
-    if top.empty:
-        c3.metric("Mejor cliente", "N/A")
-    else:
-        c3.metric("Mejor cliente", str(top.iloc[0]["cliente"]))
+    diaria = (
+        df.assign(dia=df["fecha"].dt.date)
+        .groupby("dia", as_index=False)["total_usd"]
+        .sum()
+        .sort_values("dia")
+    )
 
-    st.subheader("Ventas por cliente")
-    st.bar_chart(top.set_index("cliente")["total"])
+    g1, g2 = st.columns(2)
+    with g1:
+        st.caption("Evolución diaria")
+        st.area_chart(diaria.set_index("dia")["total_usd"])
+    with g2:
+        st.caption("Top clientes")
+        st.bar_chart(top_clientes.head(8).set_index("cliente")["total"])
+
+    if not top_productos.empty:
+        top_productos["margen_usd"] = top_productos["ventas_usd"] - top_productos["costo_usd"].fillna(0.0)
+        st.subheader("Productos estrella")
+        st.dataframe(top_productos, use_container_width=True, hide_index=True)
 
 
 # ============================================================
