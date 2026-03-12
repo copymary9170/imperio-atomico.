@@ -18,6 +18,7 @@ from services.diagnostics_service import (
     listar_impresoras_activas,
 )
 
+
 def _obtener_capacidad_default(nombre_impresora: str) -> dict[str, float]:
     nombre = (nombre_impresora or "").upper()
     if "L805" in nombre:
@@ -43,9 +44,7 @@ def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
 
 
 def _ocr_texto(img: np.ndarray | None) -> str:
-    if img is None:
-        return ""
-
+@@ -49,188 +50,202 @@ def _ocr_texto(img: np.ndarray | None) -> str:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     denoise = cv2.GaussianBlur(gray, (3, 3), 0)
     _, binaria = cv2.threshold(denoise, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -71,10 +70,10 @@ def _detectar_niveles_por_foto(img: np.ndarray | None) -> dict[str, float]:
         return {}
 
     zonas = {
-        "Black": img[:, 0 : int(w * 0.25)],
-        "Cyan": img[:, int(w * 0.25) : int(w * 0.50)],
-        "Magenta": img[:, int(w * 0.50) : int(w * 0.75)],
-        "Yellow": img[:, int(w * 0.75) : w],
+        "Black": img[:, 0: int(w * 0.25)],
+        "Cyan": img[:, int(w * 0.25): int(w * 0.50)],
+        "Magenta": img[:, int(w * 0.50): int(w * 0.75)],
+        "Yellow": img[:, int(w * 0.75): w],
     }
 
     niveles: dict[str, float] = {}
@@ -116,7 +115,7 @@ def render_diagnostico(usuario: str) -> None:
     impresoras_activas = listar_impresoras_activas()
     if impresoras_activas:
         mapa_impresoras = {
-            f"#{row['id']} · {row.get('equipo') or 'Impresora'} {('('+str(row.get('modelo'))+')') if row.get('modelo') else ''}".strip(): row
+            f"#{row['id']} · {row.get('equipo') or 'Impresora'} {('(' + str(row.get('modelo')) + ')') if row.get('modelo') else ''}".strip(): row
             for row in impresoras_activas
         }
         etiqueta_sel = st.selectbox("Impresora (desde activos)", list(mapa_impresoras.keys()), index=0)
@@ -131,7 +130,7 @@ def render_diagnostico(usuario: str) -> None:
             index=0,
         )
         activo_id_sel = None
-        
+
     st.subheader("Entrada de diagnóstico")
     archivo_diag = st.file_uploader(
         "📄 Hoja diagnóstico (PDF/imagen)",
@@ -160,77 +159,91 @@ def render_diagnostico(usuario: str) -> None:
         "Black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["Black"]), step=1.0),
     }
 
-    if not st.button("🚀 Analizar", type="primary"):
+    analizar = st.button("🚀 Analizar", type="primary")
+    if analizar:
+        img_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
+        img_tanque = _convertir_archivo_a_imagen(archivo_tanque) if archivo_tanque else None
+
+        texto_ocr = texto_manual.strip()
+        if not texto_ocr and img_diag is not None:
+            try:
+                texto_ocr = _ocr_texto(img_diag)
+            except Exception as exc:
+                st.warning(f"No fue posible ejecutar OCR automático: {exc}")
+                texto_ocr = ""
+
+        porcentajes_foto = _detectar_niveles_por_foto(img_tanque)
+        porcentajes_texto = extraer_texto_diagnostico(texto_ocr).get("porcentajes", [])
+        vida_detectada = _detectar_vida_cabezal(texto_ocr)
+
+        analisis = analizar_hoja_diagnostico(
+            texto_ocr=texto_ocr,
+            capacidad=capacidad,
+            porcentajes_foto=porcentajes_foto,
+            vida_cabezal_detectada=vida_detectada,
+        )
+
+        resultados = analisis["resultados"]
+        resumen = DiagnosticsService.summarize(
+            resultados=resultados,
+            vida_cabezal_pct=analisis["vida_cabezal_pct"],
+        )
+        st.session_state["diag_last_analysis"] = {
+            "impresora": impresora_sel,
+            "activo_id": activo_id_sel,
+            "resultados": resultados,
+            "resumen": resumen,
+            "contador_impresiones": int(analisis.get("contador_impresiones", 0)),
+            "vida_cabezal_pct": float(analisis["vida_cabezal_pct"]),
+            "texto_ocr": texto_ocr,
+            "porcentajes_foto": porcentajes_foto,
+            "porcentajes_texto": porcentajes_texto,
+        }
+
+    datos = st.session_state.get("diag_last_analysis")
+    if not datos or datos.get("impresora") != impresora_sel:
         return
 
-    img_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
-    img_tanque = _convertir_archivo_a_imagen(archivo_tanque) if archivo_tanque else None
+    _mostrar_resultados(datos["resultados"], datos["resumen"])
+    st.info("Análisis listo. Usa el botón para enviarlo a Activos e Inventario.")
 
-    texto_ocr = texto_manual.strip()
-    if not texto_ocr and img_diag is not None:
+    if st.button("📨 Enviar análisis a Activos e Inventario"):
         try:
-            texto_ocr = _ocr_texto(img_diag)
-        except Exception as exc:
-            st.warning(f"No fue posible ejecutar OCR automático: {exc}")
-            texto_ocr = ""
-
-    porcentajes_foto = _detectar_niveles_por_foto(img_tanque)
-    porcentajes_texto = extraer_texto_diagnostico(texto_ocr).get("porcentajes", [])
-    vida_detectada = _detectar_vida_cabezal(texto_ocr)
-
-    analisis = analizar_hoja_diagnostico(
-        texto_ocr=texto_ocr,
-        capacidad=capacidad,
-        porcentajes_foto=porcentajes_foto,
-        vida_cabezal_detectada=vida_detectada,
-    )
-
-    resultados = analisis["resultados"]
-    resumen = DiagnosticsService.summarize(
-        resultados=resultados,
-        vida_cabezal_pct=analisis["vida_cabezal_pct"],
-    )
-
-    _mostrar_resultados(resultados, resumen)
-
-
-    try:
-        sync = aplicar_resultado_diagnostico(
-            usuario=usuario,
-            impresora=impresora_sel,
-            resultados=resultados,
-            vida_cabezal_pct=float(analisis["vida_cabezal_pct"]),
-            contador_impresiones=int(analisis.get("contador_impresiones", 0)),
-            activo_id=activo_id_sel,
-        )
-        st.success("✅ Diagnóstico guardado y sincronizado con Activos/Inventario.")
-        if sync.get("movimientos_tinta"):
-            st.caption(
-                "Consumo de tintas aplicado en inventario: "
-                + ", ".join(
-                    [f"{m['color']} ({float(m['consumo_ml']):.2f} ml)" for m in sync["movimientos_tinta"]]
-                )
+            sync = aplicar_resultado_diagnostico(
+                usuario=usuario,
+                impresora=impresora_sel,
+                resultados=datos["resultados"],
+                vida_cabezal_pct=float(datos["vida_cabezal_pct"]),
+                contador_impresiones=int(datos.get("contador_impresiones", 0)),
+                activo_id=datos.get("activo_id"),
             )
-        else:
-            st.caption("No se detectó consumo adicional de tintas respecto al diagnóstico anterior.")
-    except Exception as exc:
-        st.error(f"No fue posible sincronizar diagnóstico con Activos/Inventario: {exc}")
+            st.success("✅ Diagnóstico enviado y sincronizado con Activos/Inventario.")
+            if sync.get("movimientos_tinta"):
+                st.caption(
+                    "Consumo de tintas aplicado en inventario: "
+                    + ", ".join(
+                        [f"{m['color']} ({float(m['consumo_ml']):.2f} ml)" for m in sync["movimientos_tinta"]]
+                    )
+                )
+            else:
+                st.caption("No se detectó consumo adicional de tintas respecto al diagnóstico anterior.")
+        except Exception as exc:
+            st.error(f"No fue posible sincronizar diagnóstico con Activos/Inventario: {exc}")
 
-    
     st.markdown("#### Señales detectadas")
     s1, s2 = st.columns(2)
     s1.markdown("**Porcentajes desde OCR:**")
-    s1.write([round(float(v), 2) for v in porcentajes_texto])
+    s1.write([round(float(v), 2) for v in datos.get("porcentajes_texto", [])])
     s2.markdown("**Porcentajes desde foto:**")
-    s2.write({k: round(float(v), 2) for k, v in porcentajes_foto.items()})
+    s2.write({k: round(float(v), 2) for k, v in datos.get("porcentajes_foto", {}).items()})
 
-    contador_imp = int(analisis.get("contador_impresiones", 0))
+    contador_imp = int(datos.get("contador_impresiones", 0))
     if contador_imp > 0:
         st.info(f"📌 Total de páginas impresas detectado: {contador_imp}")
 
-    if texto_ocr:
+    if datos.get("texto_ocr"):
         with st.expander("Ver texto OCR usado"):
-            st.code(texto_ocr)
+            st.code(str(datos["texto_ocr"]))
 
-    if not texto_ocr and not porcentajes_foto:
+    if not datos.get("texto_ocr") and not datos.get("porcentajes_foto"):
         st.warning("No se detectaron datos automáticos. Ingresa texto OCR o una foto más clara para mejores resultados.")
