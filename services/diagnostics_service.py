@@ -16,8 +16,16 @@ LOW_LEVEL = 25
 # Regex compilados
 PERCENT_REGEX = re.compile(r"(\d{1,3})\s*%")
 COUNTER_PATTERNS = [
+    re.compile(r"(?:total\s*(?:(?:de|do)\s*)?(?:pages|paginas|p[aá]ginas)\s*impresas?)\D{0,30}(\d{1,9})", re.I),
+    re.compile(r"(?:pages\s*printed|printed\s*pages)\D{0,15}(\d{1,9})", re.I),
     re.compile(r"(?:total\s*(?:prints|impresiones)|print\s*count|contador)\D{0,10}(\d{1,9})", re.I),
-    re.compile(r"(?:pages|paginas|p[aá]ginas)\D{0,10}(\d{1,9})", re.I),
+    re.compile(r"(?:pages|paginas|p[aá]ginas)\D{0,30}(\d{1,9})", re.I),
+]
+
+IGNORE_COUNTER_CONTEXT = [
+    re.compile(r"\bpin\b", re.I),
+    re.compile(r"serial", re.I),
+    re.compile(r"imei", re.I),
 ]
 
 
@@ -43,77 +51,7 @@ class DiagnosticsService:
             if idx < len(porcentajes_texto):
                 pct_text = _clamp_percentage(porcentajes_texto[idx])
 
-            pct_photo = _clamp_percentage(porcentajes_foto.get(color))
-            if pct_photo is None:
-                pct_photo = _clamp_percentage(porcentajes_foto.get(color.lower()))
-
-            final_pct = _prefer_non_zero(pct_text, pct_photo)
-
-            capacidad_color = _safe_float(capacidad.get(color), default=0.0)
-
-            if capacidad_color <= 0 or final_pct is None:
-                merged[color] = None
-            else:
-                merged[color] = round(capacidad_color * (final_pct / 100.0), 2)
-
-        return merged
-
-
-    @staticmethod
-    def resolve_head_life(
-        detected_value: float | None,
-        porcentajes_foto: dict[str, float] | None = None,
-    ) -> float:
-
-        detected = _clamp_percentage(detected_value)
-
-        if detected is not None:
-            return detected
-
-        porcentajes_foto = dict(porcentajes_foto or {})
-
-        valores = [
-            _clamp_percentage(porcentajes_foto.get(color))
-            for color in _COLOR_ORDER
-        ]
-
-        validos = [v for v in valores if v is not None]
-
-        if not validos:
-            return 100.0
-
-        return round(sum(validos) / len(validos), 2)
-
-
-    @staticmethod
-    def summarize(resultados: dict[str, float | None], vida_cabezal_pct: float | None = None) -> dict[str, Any]:
-
-        niveles = [float(v) for v in resultados.values() if v is not None]
-
-        min_ml = min(niveles) if niveles else 0.0
-        max_ml = max(niveles) if niveles else 0.0
-
-        estado_tintas = "Sin datos"
-
-        if niveles:
-            if min_ml < CRITICAL_LEVEL:
-                estado_tintas = "Crítico"
-            elif min_ml < LOW_LEVEL:
-                estado_tintas = "Bajo"
-            else:
-                estado_tintas = "Óptimo"
-
-        vida = _clamp_percentage(vida_cabezal_pct)
-
-        if vida is None:
-            estado_cabezal = "Desconocido"
-        elif vida < 30:
-            estado_cabezal = "Reemplazo recomendado"
-        elif vida < 60:
-            estado_cabezal = "Mantenimiento preventivo"
-        else:
-            estado_cabezal = "Operativo"
-
+@@ -117,56 +125,75 @@ class DiagnosticsService:
         return {
             "estado_tintas": estado_tintas,
             "estado_cabezal": estado_cabezal,
@@ -139,12 +77,31 @@ def extraer_contador_impresiones(texto_ocr: str | None) -> dict[str, int]:
 
     texto = str(texto_ocr or "")
 
+    lineas = [ln.strip() for ln in texto.splitlines() if ln.strip()]
+
+    for linea in lineas:
+        if any(p.search(linea) for p in IGNORE_COUNTER_CONTEXT):
+            continue
+        for patron in COUNTER_PATTERNS:
+            m = patron.search(linea)
+            if not m:
+                continue
+            valor = int(m.group(1))
+            if valor <= 0:
+                continue
+            return {"contador_impresiones": valor}
+
     for patron in COUNTER_PATTERNS:
         m = patron.search(texto)
         if m:
-            return {"contador_impresiones": int(m.group(1))}
+            valor = int(m.group(1))
+            if valor > 0:
+                return {"contador_impresiones": valor}
 
-    numeros = [int(v) for v in re.findall(r"\b\d{3,9}\b", texto)]
+    texto_filtrado = "\n".join(
+        ln for ln in lineas if not any(p.search(ln) for p in IGNORE_COUNTER_CONTEXT)
+    )
+    numeros = [int(v) for v in re.findall(r"\b\d{3,9}\b", texto_filtrado)]
 
     return {"contador_impresiones": max(numeros) if numeros else 0}
 
@@ -170,52 +127,3 @@ def analizar_hoja_diagnostico(
         detected_value=vida_cabezal_detectada,
         porcentajes_foto=porcentajes_foto,
     )
-
-    resumen = DiagnosticsService.summarize(
-        resultados=resultados,
-        vida_cabezal_pct=vida_cabezal,
-    )
-
-    return {
-        "resultados": resultados,
-        "vida_cabezal_pct": vida_cabezal,
-        "resumen": resumen,
-        "contadores": extraido.get("contadores", {"contador_impresiones": 0}),
-    }
-
-
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _clamp_percentage(value: Any) -> float | None:
-
-    if value is None:
-        return None
-
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return None
-
-    if num < 0:
-        return 0.0
-
-    if num > 100:
-        return 100.0
-
-    return num
-
-
-def _prefer_non_zero(primary: float | None, secondary: float | None) -> float | None:
-
-    if primary is not None and primary > 0:
-        return primary
-
-    if secondary is not None:
-        return secondary
-
-    return primary
