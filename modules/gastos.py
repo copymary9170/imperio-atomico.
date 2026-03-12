@@ -44,7 +44,6 @@ def registrar_gasto(
     tasa_cambio: float,
     monto: float,
 ) -> int:
-
     descripcion = require_text(descripcion, "Descripción")
     categoria = require_text(categoria, "Categoría")
     metodo_pago = require_text(metodo_pago, "Método de pago")
@@ -56,7 +55,6 @@ def registrar_gasto(
     monto_bs = convert_to_bs(monto_usd, tasa_cambio)
 
     with db_transaction() as conn:
-
         cur = conn.execute(
             """
             INSERT INTO gastos (
@@ -100,7 +98,11 @@ def _render_tab_registro(usuario: str) -> None:
         tasa = c6.number_input("Tasa", min_value=0.0001, value=36.5)
 
         monto_usd = convert_to_usd(float(monto), moneda, float(tasa))
-        st.metric("Equivalente USD", f"$ {monto_usd:,.2f}")
+        monto_bs = convert_to_bs(monto_usd, float(tasa))
+
+        p1, p2 = st.columns(2)
+        p1.metric("Equivalente USD", f"$ {monto_usd:,.2f}")
+        p2.metric("Equivalente Bs", f"Bs {monto_bs:,.2f}")
 
         submit = st.form_submit_button("📉 Registrar egreso")
 
@@ -134,6 +136,7 @@ def _load_gastos() -> pd.DataFrame:
             SELECT
                 id,
                 fecha,
+                usuario,
                 descripcion,
                 categoria,
                 metodo_pago,
@@ -165,20 +168,48 @@ def _render_tab_historial() -> None:
         return
 
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+    df["metodo_pago"] = df["metodo_pago"].fillna("sin definir")
 
-    c1, c2, c3 = st.columns([1, 1, 2])
+    c1, c2, c3, c4, c5 = st.columns([1, 1, 2, 1, 1])
     desde = c1.date_input("Desde", date.today() - timedelta(days=30), key="gastos_desde")
     hasta = c2.date_input("Hasta", date.today(), key="gastos_hasta")
     buscar = c3.text_input("Buscar por descripción")
+    categoria_f = c4.selectbox("Categoría", ["Todas"] + sorted(df["categoria"].dropna().unique().tolist()))
+    metodo_f = c5.selectbox("Método", ["Todos"] + sorted(df["metodo_pago"].str.title().unique().tolist()))
 
     filtro_fecha = (df["fecha"].dt.date >= desde) & (df["fecha"].dt.date <= hasta)
     df_fil = df[filtro_fecha].copy()
 
     if buscar:
         df_fil = df_fil[df_fil["descripcion"].str.contains(buscar, case=False, na=False)]
+    if categoria_f != "Todas":
+        df_fil = df_fil[df_fil["categoria"] == categoria_f]
+    if metodo_f != "Todos":
+        df_fil = df_fil[df_fil["metodo_pago"].str.lower() == metodo_f.lower()]
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Total del periodo", f"$ {float(df_fil['monto_usd'].sum()):,.2f}")
+    k2.metric("N° gastos", str(len(df_fil)))
+    promedio = float(df_fil["monto_usd"].mean()) if not df_fil.empty else 0.0
+    k3.metric("Promedio por gasto", f"$ {promedio:,.2f}")
 
     st.dataframe(df_fil, use_container_width=True, hide_index=True)
-    st.metric("Total del periodo", f"$ {float(df_fil['monto_usd'].sum()):,.2f}")
+
+    if not df_fil.empty:
+        g1, g2 = st.columns(2)
+        with g1:
+            por_cat = df_fil.groupby("categoria", as_index=False)["monto_usd"].sum().sort_values("monto_usd", ascending=False)
+            st.caption("Distribución por categoría")
+            st.bar_chart(por_cat.set_index("categoria")["monto_usd"])
+        with g2:
+            diaria = (
+                df_fil.assign(dia=df_fil["fecha"].dt.date)
+                .groupby("dia", as_index=False)["monto_usd"]
+                .sum()
+                .sort_values("dia")
+            )
+            st.caption("Tendencia de egresos")
+            st.line_chart(diaria.set_index("dia")["monto_usd"])
 
     st.subheader("Gestión de gastos")
 
@@ -189,20 +220,39 @@ def _render_tab_historial() -> None:
 
         row = df_fil[df_fil["id"] == gasto_id].iloc[0]
 
-        with st.expander("✏️ Editar monto"):
-            nuevo_monto = st.number_input(
+        with st.expander("✏️ Editar gasto"):
+            e1, e2, e3 = st.columns(3)
+            nueva_desc = e1.text_input("Descripción", value=str(row["descripcion"]), key=f"desc_gasto_{gasto_id}")
+            nuevo_monto = e2.number_input(
                 "Nuevo monto USD",
                 min_value=0.01,
                 value=float(row["monto_usd"]),
                 format="%.2f",
+                key=f"monto_gasto_{gasto_id}",
+            )
+            nueva_cat = e3.selectbox(
+                "Categoría",
+                CATEGORIAS_GASTO,
+                index=CATEGORIAS_GASTO.index(row["categoria"]) if row["categoria"] in CATEGORIAS_GASTO else 0,
+                key=f"cat_gasto_{gasto_id}",
             )
             if st.button("💾 Guardar cambios", key=f"edit_gasto_{gasto_id}"):
                 try:
                     with db_transaction() as conn:
                         tasa = float(row["tasa_cambio"] or 1.0)
                         conn.execute(
-                            "UPDATE gastos SET monto_usd=?, monto_bs=? WHERE id=?",
-                            (float(nuevo_monto), convert_to_bs(float(nuevo_monto), tasa), int(gasto_id)),
+                            """
+                            UPDATE gastos
+                            SET descripcion=?, categoria=?, monto_usd=?, monto_bs=?
+                            WHERE id=?
+                            """,
+                            (
+                                require_text(nueva_desc, "Descripción"),
+                                nueva_cat,
+                                float(nuevo_monto),
+                                convert_to_bs(float(nuevo_monto), tasa),
+                                int(gasto_id),
+                            ),
                         )
                     st.success("Actualizado")
                     st.rerun()
@@ -240,7 +290,7 @@ def _render_tab_historial() -> None:
 
 
 def _render_tab_resumen() -> None:
-    st.subheader("Resumen de egresos")
+    st.subheader("Resumen financiero de egresos")
 
     try:
         df = _load_gastos()
@@ -253,15 +303,45 @@ def _render_tab_resumen() -> None:
         st.info("No hay gastos para analizar.")
         return
 
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+
     total = float(df["monto_usd"].sum())
     por_cat = df.groupby("categoria", as_index=False)["monto_usd"].sum().sort_values("monto_usd", ascending=False)
+    por_metodo = df.groupby("metodo_pago", as_index=False)["monto_usd"].sum().sort_values("monto_usd", ascending=False)
 
-    c1, c2 = st.columns(2)
+    periodo_30 = df[df["fecha"].dt.date >= (date.today() - timedelta(days=30))]
+    periodo_prev = df[
+        (df["fecha"].dt.date < (date.today() - timedelta(days=30)))
+        & (df["fecha"].dt.date >= (date.today() - timedelta(days=60)))
+    ]
+    actual_30 = float(periodo_30["monto_usd"].sum())
+    anterior_30 = float(periodo_prev["monto_usd"].sum())
+    delta = actual_30 - anterior_30
+
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total gastado", f"$ {total:,.2f}")
     c2.metric("Categoría principal", str(por_cat.iloc[0]["categoria"]))
+    c3.metric("Últimos 30 días", f"$ {actual_30:,.2f}", delta=f"{delta:,.2f}")
+    c4.metric("Ticket promedio", f"$ {float(df['monto_usd'].mean()):,.2f}")
 
-    st.subheader("Gastos por categoría")
-    st.bar_chart(por_cat.set_index("categoria")["monto_usd"])
+    g1, g2 = st.columns(2)
+    with g1:
+        st.caption("Gastos por categoría")
+        st.bar_chart(por_cat.set_index("categoria")["monto_usd"])
+    with g2:
+        st.caption("Gastos por método")
+        st.bar_chart(por_metodo.set_index("metodo_pago")["monto_usd"])
+
+    st.subheader("Control de presupuesto")
+    presupuesto = st.number_input("Presupuesto mensual objetivo (USD)", min_value=0.0, value=max(actual_30, 1.0), step=50.0)
+    uso = (actual_30 / presupuesto * 100) if presupuesto > 0 else 0.0
+    st.progress(min(int(uso), 100))
+    if uso >= 100:
+        st.error(f"🚨 Presupuesto excedido: {uso:,.1f}%")
+    elif uso >= 80:
+        st.warning(f"⚠️ Presupuesto en zona de riesgo: {uso:,.1f}%")
+    else:
+        st.success(f"✅ Uso saludable del presupuesto: {uso:,.1f}%")
 
 
 # ============================================================
@@ -288,5 +368,3 @@ def render_gastos(usuario: str) -> None:
     with tab2:
         _render_tab_historial()
 
-    with tab3:
-        _render_tab_resumen()
