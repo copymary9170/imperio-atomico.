@@ -4,16 +4,9 @@ import re
 from typing import Any
 
 
-# Orden de colores estándar
 _COLOR_ORDER = ("Cyan", "Magenta", "Yellow", "Black")
-
-
-# Niveles de alerta configurables
 CRITICAL_LEVEL = 10
 LOW_LEVEL = 25
-
-
-# Regex compilados
 PERCENT_REGEX = re.compile(r"(\d{1,3})\s*%")
 COUNTER_PATTERNS = [
     re.compile(r"(?:total\s*(?:(?:de|do)\s*)?(?:pages|paginas|p[aá]ginas)\s*impresas?)\D{0,30}(\d{1,9})", re.I),
@@ -21,7 +14,6 @@ COUNTER_PATTERNS = [
     re.compile(r"(?:total\s*(?:prints|impresiones)|print\s*count|contador)\D{0,10}(\d{1,9})", re.I),
     re.compile(r"(?:pages|paginas|p[aá]ginas)\D{0,30}(\d{1,9})", re.I),
 ]
-
 IGNORE_COUNTER_CONTEXT = [
     re.compile(r"\bpin\b", re.I),
     re.compile(r"serial", re.I),
@@ -29,9 +21,14 @@ IGNORE_COUNTER_CONTEXT = [
 ]
 
 
-class DiagnosticsService:
-    """Herramientas de diagnóstico para impresoras."""
+def _clamp_percentage(value: float | int | None) -> float | None:
+    if value is None:
+        return None
+    return max(0.0, min(100.0, float(value)))
 
+
+class DiagnosticsService:
+    """Utility methods to infer diagnostic metrics from OCR signals."""
 
     @staticmethod
     def merge_levels(
@@ -39,34 +36,77 @@ class DiagnosticsService:
         porcentajes_texto: list[float] | None = None,
         porcentajes_foto: dict[str, float] | None = None,
     ) -> dict[str, float | None]:
-
         porcentajes_texto = list(porcentajes_texto or [])
         porcentajes_foto = dict(porcentajes_foto or {})
 
         merged: dict[str, float | None] = {}
-
         for idx, color in enumerate(_COLOR_ORDER):
+            pct_text = _clamp_percentage(porcentajes_texto[idx]) if idx < len(porcentajes_texto) else None
+            pct_foto = _clamp_percentage(porcentajes_foto.get(color))
+            pct = pct_foto if pct_foto is not None else pct_text
 
-            pct_text = None
-            if idx < len(porcentajes_texto):
-                pct_text = _clamp_percentage(porcentajes_texto[idx])
+            if pct is None:
+                merged[color] = None
+                continue
 
-@@ -117,56 +125,75 @@ class DiagnosticsService:
+            capacidad_color = float(capacidad.get(color, 0.0) or 0.0)
+            merged[color] = round(capacidad_color * (pct / 100.0), 2)
+
+        return merged
+
+    @staticmethod
+    def resolve_head_life(
+        detected_value: float | None,
+        porcentajes_foto: dict[str, float] | None = None,
+    ) -> float:
+        detected = _clamp_percentage(detected_value)
+        if detected is not None:
+            return float(detected)
+
+        porcentajes_foto = dict(porcentajes_foto or {})
+        if porcentajes_foto:
+            values = [_clamp_percentage(v) for v in porcentajes_foto.values() if v is not None]
+            values = [v for v in values if v is not None]
+            if values:
+                return float(round(sum(values) / len(values), 2))
+
+        return 100.0
+
+    @staticmethod
+    def summarize(resultados: dict[str, float | None], vida_cabezal_pct: float | None) -> dict[str, Any]:
+        niveles = [v for v in resultados.values() if isinstance(v, (int, float))]
+        min_ml = float(min(niveles)) if niveles else 0.0
+        max_ml = float(max(niveles)) if niveles else 0.0
+
+        if min_ml <= CRITICAL_LEVEL:
+            estado_tintas = "Crítico"
+        elif min_ml <= LOW_LEVEL:
+            estado_tintas = "Bajo"
+        else:
+            estado_tintas = "Óptimo"
+
+        vida = _clamp_percentage(vida_cabezal_pct)
+        if vida is None:
+            estado_cabezal = "Desconocido"
+        elif vida < 40:
+            estado_cabezal = "Revisar"
+        elif vida < 70:
+            estado_cabezal = "Aceptable"
+        else:
+            estado_cabezal = "Óptimo"
+
         return {
             "estado_tintas": estado_tintas,
             "estado_cabezal": estado_cabezal,
-            "vida_cabezal_pct": vida if vida is not None else 100.0,
+            "vida_cabezal_pct": float(vida if vida is not None else 100.0),
             "min_ml": round(min_ml, 2),
             "max_ml": round(max_ml, 2),
         }
 
 
 def extraer_texto_diagnostico(texto_ocr: str | None) -> dict[str, Any]:
-
     texto = str(texto_ocr or "")
-
     porcentajes = [float(v) for v in PERCENT_REGEX.findall(texto)]
-
     return {
         "porcentajes": [_clamp_percentage(v) for v in porcentajes],
         "contadores": extraer_contador_impresiones(texto),
@@ -74,35 +114,28 @@ def extraer_texto_diagnostico(texto_ocr: str | None) -> dict[str, Any]:
 
 
 def extraer_contador_impresiones(texto_ocr: str | None) -> dict[str, int]:
-
     texto = str(texto_ocr or "")
-
     lineas = [ln.strip() for ln in texto.splitlines() if ln.strip()]
 
     for linea in lineas:
         if any(p.search(linea) for p in IGNORE_COUNTER_CONTEXT):
             continue
         for patron in COUNTER_PATTERNS:
-            m = patron.search(linea)
-            if not m:
-                continue
-            valor = int(m.group(1))
-            if valor <= 0:
-                continue
-            return {"contador_impresiones": valor}
+            match = patron.search(linea)
+            if match:
+                valor = int(match.group(1))
+                if valor > 0:
+                    return {"contador_impresiones": valor}
 
     for patron in COUNTER_PATTERNS:
-        m = patron.search(texto)
-        if m:
-            valor = int(m.group(1))
+        match = patron.search(texto)
+        if match:
+            valor = int(match.group(1))
             if valor > 0:
                 return {"contador_impresiones": valor}
 
-    texto_filtrado = "\n".join(
-        ln for ln in lineas if not any(p.search(ln) for p in IGNORE_COUNTER_CONTEXT)
-    )
+    texto_filtrado = "\n".join(ln for ln in lineas if not any(p.search(ln) for p in IGNORE_COUNTER_CONTEXT))
     numeros = [int(v) for v in re.findall(r"\b\d{3,9}\b", texto_filtrado)]
-
     return {"contador_impresiones": max(numeros) if numeros else 0}
 
 
@@ -112,18 +145,20 @@ def analizar_hoja_diagnostico(
     porcentajes_foto: dict[str, float] | None = None,
     vida_cabezal_detectada: float | None = None,
 ) -> dict[str, Any]:
-
     extraido = extraer_texto_diagnostico(texto_ocr)
-
-    porcentajes_texto = extraido.get("porcentajes", [])
-
     resultados = DiagnosticsService.merge_levels(
         capacidad=capacidad,
-        porcentajes_texto=porcentajes_texto,
+        porcentajes_texto=extraido.get("porcentajes", []),
         porcentajes_foto=porcentajes_foto,
     )
-
     vida_cabezal = DiagnosticsService.resolve_head_life(
         detected_value=vida_cabezal_detectada,
         porcentajes_foto=porcentajes_foto,
     )
+    resumen = DiagnosticsService.summarize(resultados=resultados, vida_cabezal_pct=vida_cabezal)
+    return {
+        "resultados": resultados,
+        "vida_cabezal_pct": vida_cabezal,
+        "contador_impresiones": int(extraido.get("contadores", {}).get("contador_impresiones", 0)),
+        "resumen": resumen,
+    }
