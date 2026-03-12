@@ -40,7 +40,6 @@ def render_caja(usuario: str, user_role: str) -> None:
                 conn,
                 params=(fecha_str,),
             )
-@@ -44,144 +50,208 @@ def render_caja(usuario: str, user_role: str) -> None:
                 conn,
                 params=(fecha_str,),
             )
