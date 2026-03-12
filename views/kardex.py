@@ -54,32 +54,35 @@ def render_kardex(usuario: str):
         st.info("No hay productos activos en inventario.")
         return
 
+   movement_columns = [
+        "id",
+        "fecha",
+        "usuario",
+        "inventario_id",
+        "sku",
+        "nombre",
+        "tipo",
+        "cantidad",
+        "costo_unitario_usd",
+        "costo_total_usd",
+        "referencia",
+    ]
+
     if not rows:
 
         st.info("No hay movimientos registrados.")
 
-        df = pd.DataFrame(
-            columns=[
-                "id",
-                "fecha",
-                "usuario",
-                "inventario_id",
-                "sku",
-                "nombre",
-                "tipo",
-                "cantidad",
-                "costo_unitario_usd",
-                "costo_total_usd",
-                "referencia",
-            ]
-        )
+        df = pd.DataFrame(columns=movement_columns)
     else:
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(rows, columns=movement_columns)
 
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
     df["tipo"] = df["tipo"].fillna("AJUSTE").astype(str).str.upper()
 
-    df_items = pd.DataFrame(productos)
+    df_items = pd.DataFrame(
+        productos,
+        columns=["id", "sku", "nombre", "stock_actual", "costo_unitario_usd"],
+    )
 
     selected_label = st.selectbox(
         "Producto",
@@ -105,6 +108,7 @@ def render_kardex(usuario: str):
     )
     tipo_filtro = f3.multiselect(
         "Tipo",
+
         ["ENTRADA", "SALIDA", "AJUSTE"],
         default=["ENTRADA", "SALIDA", "AJUSTE"],
     )
