@@ -126,6 +126,49 @@ def registrar_venta(
                 )
 
         if metodo_pago == "credito" and cliente_id:
+            conn.execute(
+                """
+                INSERT INTO cuentas_por_cobrar
+                (usuario, cliente_id, venta_id, saldo_usd, notas)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (usuario, cliente_id, venta_id, total, "Generada desde venta"),
+            )
+            conn.execute(
+                """
+                UPDATE clientes
+                SET saldo_por_cobrar_usd = COALESCE(saldo_por_cobrar_usd, 0) + ?
+                WHERE id = ?
+                """,
+                (total, cliente_id),
+            )
+
+    return venta_id
+
+
+def _render_tab_registro(usuario: str) -> None:
+    try:
+        with db_transaction() as conn:
+            clientes = conn.execute(
+                "SELECT id, nombre FROM clientes WHERE estado='activo' ORDER BY nombre"
+            ).fetchall()
+            productos = conn.execute(
+                """
+                SELECT id, nombre, stock_actual, costo_unitario_usd, precio_venta_usd
+                FROM inventario
+                WHERE estado='activo'
+                ORDER BY nombre
+                """
+            ).fetchall()
+    except Exception as e:
+        st.error("Error cargando datos para venta")
+        st.exception(e)
+        return
+
+    if not productos:
+        st.warning("No hay productos activos en inventario para vender.")
+        return
+
     with st.form("form_registrar_venta_pro", clear_on_submit=True):
         st.subheader("Datos de la venta")
 
