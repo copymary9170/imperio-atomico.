@@ -126,7 +126,6 @@ def registrar_venta(
                 )
 
         if metodo_pago == "credito" and cliente_id:
-@@ -184,245 +175,318 @@ def _render_tab_registro(usuario: str) -> None:
     with st.form("form_registrar_venta_pro", clear_on_submit=True):
         st.subheader("Datos de la venta")
 
