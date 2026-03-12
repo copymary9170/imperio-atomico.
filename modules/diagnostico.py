@@ -177,8 +177,10 @@ def render_diagnostico(usuario: str) -> None:
 
     st.markdown("#### Señales detectadas")
     s1, s2 = st.columns(2)
-    s1.write("**Porcentajes desde OCR:**", [round(float(v), 2) for v in porcentajes_texto])
-    s2.write("**Porcentajes desde foto:**", {k: round(float(v), 2) for k, v in porcentajes_foto.items()})
+    s1.markdown("**Porcentajes desde OCR:**")
+    s1.write([round(float(v), 2) for v in porcentajes_texto])
+    s2.markdown("**Porcentajes desde foto:**")
+    s2.write({k: round(float(v), 2) for k, v in porcentajes_foto.items()})
 
     contador_imp = int(analisis.get("contador_impresiones", 0))
     if contador_imp > 0:
