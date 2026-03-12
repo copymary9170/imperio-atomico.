@@ -54,7 +54,7 @@ def render_kardex(usuario: str):
         st.info("No hay productos activos en inventario.")
         return
 
-   movement_columns = [
+    movement_columns = [
         "id",
         "fecha",
         "usuario",
@@ -74,7 +74,9 @@ def render_kardex(usuario: str):
 
         df = pd.DataFrame(columns=movement_columns)
     else:
-        df = pd.DataFrame(rows, columns=movement_columns)
+        df = pd.DataFrame(rows)
+
+    df = df.reindex(columns=movement_columns)
 
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
     df["tipo"] = df["tipo"].fillna("AJUSTE").astype(str).str.upper()
