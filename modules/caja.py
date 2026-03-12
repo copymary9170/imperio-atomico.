@@ -249,5 +249,3 @@ def render_caja(usuario: str, user_role: str) -> None:
         "📥 Descargar historial de cierres",
         buffer.getvalue(),
         file_name="cierres_caja.xlsx",
-modules/gastos.py
-modules/gastos.py
