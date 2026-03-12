@@ -1,18 +1,108 @@
 from __future__ import annotations
 
-import pandas as pd
-import streamlit as st
+import re
+from typing import Any
 
-from services.diagnostics_service import DiagnosticsService, analizar_hoja_diagnostico
+import cv2
+import numpy as np
+import pandas as pd
+import pytesseract
+import streamlit as st
+from pdf2image import convert_from_bytes
+
+from services.diagnostics_service import DiagnosticsService, analizar_hoja_diagnostico, extraer_texto_diagnostico
 
 
 def _obtener_capacidad_default(nombre_impresora: str) -> dict[str, float]:
     nombre = (nombre_impresora or "").upper()
     if "L805" in nombre:
         return {"Black": 70.0, "Cyan": 70.0, "Magenta": 70.0, "Yellow": 70.0}
-    if "L3250" in nombre:
+    if "L3250" in nombre or "122" in nombre:
         return {"Black": 12.4, "Cyan": 14.0, "Magenta": 14.0, "Yellow": 14.0}
     return {"Black": 70.0, "Cyan": 70.0, "Magenta": 70.0, "Yellow": 70.0}
+
+
+def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
+    if file_obj is None:
+        return None
+
+    file_bytes = file_obj.read()
+    if not file_bytes:
+        return None
+
+    if file_obj.type == "application/pdf":
+        pages = convert_from_bytes(file_bytes, dpi=250)
+        return cv2.cvtColor(np.array(pages[0]), cv2.COLOR_RGB2BGR) if pages else None
+
+    return cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
+
+
+def _ocr_texto(img: np.ndarray | None) -> str:
+    if img is None:
+        return ""
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    denoise = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, binaria = cv2.threshold(denoise, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    texto = pytesseract.image_to_string(binaria, lang="eng+spa")
+    return str(texto or "")
+
+
+def _detectar_vida_cabezal(texto: str) -> float | None:
+    if not texto:
+        return None
+    match = re.search(r"(?:head|cabezal)[^\d]{0,15}(\d{1,3})\s*%", texto, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return max(0.0, min(100.0, float(match.group(1))))
+
+
+def _detectar_niveles_por_foto(img: np.ndarray | None) -> dict[str, float]:
+    if img is None or len(img.shape) < 3:
+        return {}
+
+    h, w, _ = img.shape
+    if h <= 0 or w <= 0:
+        return {}
+
+    zonas = {
+        "Black": img[:, 0 : int(w * 0.25)],
+        "Cyan": img[:, int(w * 0.25) : int(w * 0.50)],
+        "Magenta": img[:, int(w * 0.50) : int(w * 0.75)],
+        "Yellow": img[:, int(w * 0.75) : w],
+    }
+
+    niveles: dict[str, float] = {}
+    for color, zona in zonas.items():
+        if zona.size == 0:
+            continue
+
+        gray = cv2.cvtColor(zona, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        cobertura = float(np.sum(thresh > 0) / max(1, thresh.size))
+        niveles[color] = max(0.0, min(100.0, cobertura * 100.0))
+
+    return niveles
+
+
+def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str, Any]) -> None:
+    st.subheader("Resultado final")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"Color": c, "Nivel (ml)": v if v is not None else "No detectado"}
+                for c, v in resultados.items()
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Vida cabezal", f"{resumen['vida_cabezal_pct']:.2f}%")
+    m2.metric("Estado tintas", str(resumen.get("estado_tintas", "N/D")))
+    m3.metric("Estado cabezal", str(resumen.get("estado_cabezal", "N/D")))
+    m4.metric("Mín tinta (ml)", f"{float(resumen.get('min_ml', 0.0)):.2f}")
 
 
 def render_diagnostico(usuario: str) -> None:
@@ -23,38 +113,58 @@ def render_diagnostico(usuario: str) -> None:
         ["EPSON L805", "EPSON L3250", "Otra"],
         index=0,
     )
-    capacidad = _obtener_capacidad_default(impresora_sel)
 
     st.subheader("Entrada de diagnóstico")
-    texto_ocr = st.text_area(
-        "Texto OCR detectado",
-        placeholder="Pega aquí el texto detectado de la hoja de diagnóstico...",
+    archivo_diag = st.file_uploader(
+        "📄 Hoja diagnóstico (PDF/imagen)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        key="diag_file",
+    )
+    archivo_tanque = st.file_uploader(
+        "🖼 Foto de tanques",
+        type=["png", "jpg", "jpeg"],
+        key="tank_file",
+    )
+
+    texto_manual = st.text_area(
+        "Texto OCR (editable)",
+        placeholder="Puedes pegar/corregir el OCR aquí antes de analizar.",
         height=140,
     )
 
-    cols = st.columns(4)
-    porcentajes_foto: dict[str, float] = {}
-    for col, color in zip(cols, ["Cyan", "Magenta", "Yellow", "Black"]):
-        with col:
-            value = st.number_input(
-                f"{color} (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=0.0,
-                step=1.0,
-            )
-            porcentajes_foto[color] = value
+    capacidad_default = _obtener_capacidad_default(impresora_sel)
+    st.subheader("⚙️ Capacidad de tanques (ml)")
+    c1, c2, c3, c4 = st.columns(4)
+    capacidad = {
+        "Cyan": c1.number_input("Cyan (ml)", min_value=0.0, value=float(capacidad_default["Cyan"]), step=1.0),
+        "Magenta": c2.number_input("Magenta (ml)", min_value=0.0, value=float(capacidad_default["Magenta"]), step=1.0),
+        "Yellow": c3.number_input("Yellow (ml)", min_value=0.0, value=float(capacidad_default["Yellow"]), step=1.0),
+        "Black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["Black"]), step=1.0),
+    }
 
-    vida_cabezal = st.slider("Vida de cabezal estimada (%)", 0, 100, 100)
-
-    if not st.button("Analizar", type="primary"):
+    if not st.button("🚀 Analizar", type="primary"):
         return
+
+    img_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
+    img_tanque = _convertir_archivo_a_imagen(archivo_tanque) if archivo_tanque else None
+
+    texto_ocr = texto_manual.strip()
+    if not texto_ocr and img_diag is not None:
+        try:
+            texto_ocr = _ocr_texto(img_diag)
+        except Exception as exc:
+            st.warning(f"No fue posible ejecutar OCR automático: {exc}")
+            texto_ocr = ""
+
+    porcentajes_foto = _detectar_niveles_por_foto(img_tanque)
+    porcentajes_texto = extraer_texto_diagnostico(texto_ocr).get("porcentajes", [])
+    vida_detectada = _detectar_vida_cabezal(texto_ocr)
 
     analisis = analizar_hoja_diagnostico(
         texto_ocr=texto_ocr,
         capacidad=capacidad,
         porcentajes_foto=porcentajes_foto,
-        vida_cabezal_detectada=float(vida_cabezal),
+        vida_cabezal_detectada=vida_detectada,
     )
 
     resultados = analisis["resultados"]
@@ -63,20 +173,20 @@ def render_diagnostico(usuario: str) -> None:
         vida_cabezal_pct=analisis["vida_cabezal_pct"],
     )
 
-    st.subheader("Resultado final")
-    st.dataframe(
-        pd.DataFrame(
-            [{"Color": c, "Nivel (ml)": v if v is not None else "No detectado"} for c, v in resultados.items()]
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
+    _mostrar_resultados(resultados, resumen)
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Vida cabezal", f"{resumen['vida_cabezal_pct']:.2f}%")
-    m2.metric("Estado tintas", str(resumen.get("estado_tintas", "N/D")))
-    m3.metric("Estado cabezal", str(resumen.get("estado_cabezal", "N/D")))
+    st.markdown("#### Señales detectadas")
+    s1, s2 = st.columns(2)
+    s1.write("**Porcentajes desde OCR:**", [round(float(v), 2) for v in porcentajes_texto])
+    s2.write("**Porcentajes desde foto:**", {k: round(float(v), 2) for k, v in porcentajes_foto.items()})
 
     contador_imp = int(analisis.get("contador_impresiones", 0))
     if contador_imp > 0:
         st.info(f"📌 Total de páginas impresas detectado: {contador_imp}")
+
+    if texto_ocr:
+        with st.expander("Ver texto OCR usado"):
+            st.code(texto_ocr)
+
+    if not texto_ocr and not porcentajes_foto:
+        st.warning("No se detectaron datos automáticos. Ingresa texto OCR o una foto más clara para mejores resultados.")
