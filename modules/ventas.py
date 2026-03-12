@@ -46,7 +46,16 @@ def registrar_venta(
     subtotal = round(
         sum(
             as_positive(item["cantidad"], "Cantidad", allow_zero=False)
-@@ -46,256 +59,370 @@ def registrar_venta(
+            * as_positive(item["precio_unitario_usd"], "Precio unitario")
+            for item in items
+        ),
+        2,
+    )
+
+    impuesto = round(subtotal * 0.16, 2)
+    total = round(subtotal + impuesto, 2)
+    total_bs = round(convert_to_bs(total, tasa_cambio), 2)
+
 
     with db_transaction() as conn:
 
