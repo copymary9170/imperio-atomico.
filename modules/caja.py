@@ -1,225 +1,188 @@
 from __future__ import annotations
 
+import io
+from datetime import date
+
+import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
-from modules.common import as_positive, clean_text
 
 
 # ============================================================
-# 🏦 REGISTRAR CIERRE DE CAJA
-# ============================================================
-
-def registrar_cierre_caja(
-    usuario: str,
-    cash_start: float,
-    sales_cash: float,
-    sales_transfer: float,
-    sales_zelle: float,
-    sales_binance: float,
-    expenses_cash: float,
-    expenses_transfer: float,
-    observaciones: str,
-) -> int:
-    """
-    Registra un cierre de caja en la base de datos.
-    """
-
-    # Validaciones
-    cash_start = as_positive(cash_start, "Caja inicial")
-    sales_cash = as_positive(sales_cash, "Ventas efectivo")
-    sales_transfer = as_positive(sales_transfer, "Ventas transferencia")
-    sales_zelle = as_positive(sales_zelle, "Ventas Zelle")
-    sales_binance = as_positive(sales_binance, "Ventas Binance")
-    expenses_cash = as_positive(expenses_cash, "Egresos efectivo")
-    expenses_transfer = as_positive(expenses_transfer, "Egresos transferencia")
-
-    observaciones = clean_text(observaciones)
-
-    # Cálculo final de caja
-    cash_end = cash_start + sales_cash - expenses_cash
-
-    with db_transaction() as conn:
-
-        cur = conn.execute(
-            """
-            INSERT INTO cierres_caja (
-                usuario,
-                cash_start,
-                sales_cash,
-                sales_transfer,
-                sales_zelle,
-                sales_binance,
-                expenses_cash,
-                expenses_transfer,
-                cash_end,
-                observaciones
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                usuario,
-                cash_start,
-                sales_cash,
-                sales_transfer,
-                sales_zelle,
-                sales_binance,
-                expenses_cash,
-                expenses_transfer,
-                cash_end,
-                observaciones,
-            ),
-        )
-
-        return int(cur.lastrowid)
-
-
-# ============================================================
-# 💰 INTERFAZ DE CIERRE DE CAJA
+# INTERFAZ DE CIERRE DE CAJA
 # ============================================================
 
 def render_caja(usuario: str, user_role: str) -> None:
+    st.subheader("🏁 Cierre de caja y arqueo diario")
 
-    st.subheader("🏦 Cierre de Caja")
-
-    # Seguridad
-    if user_role != "Admin":
-        st.warning("Solo usuarios Admin pueden realizar cierres de caja.")
+    if user_role not in ["Admin", "Administration", "Administracion"]:
+        st.warning("Solo usuarios de administración pueden realizar cierres de caja.")
         return
 
-    # Mostrar último cierre
+    fecha_cierre = st.date_input("Seleccionar fecha", value=date.today())
+    fecha_str = fecha_cierre.strftime("%Y-%m-%d")
+
     try:
-
         with db_transaction() as conn:
-
-            ultimo = conn.execute(
+            ventas = pd.read_sql_query(
                 """
-                SELECT fecha, cash_start, cash_end
-                FROM cierres_caja
-                ORDER BY id DESC
-                LIMIT 1
-                """
-            ).fetchone()
-
-    except Exception:
-        ultimo = None
-
-    if ultimo:
-
-        st.info(
-            f"""
-Último cierre
-
-Fecha: {ultimo['fecha']}
-
-Inicio: $ {float(ultimo['cash_start']):,.2f}
-
-Final: $ {float(ultimo['cash_end']):,.2f}
-"""
-        )
-
-    st.divider()
-
-    st.subheader("Datos del día")
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-
-        cash_start = st.number_input(
-            "Caja inicial ($)",
-            min_value=0.0,
-            step=1.0
-        )
-
-        sales_cash = st.number_input(
-            "Ventas en efectivo ($)",
-            min_value=0.0,
-            step=1.0
-        )
-
-        sales_transfer = st.number_input(
-            "Ventas por transferencia ($)",
-            min_value=0.0,
-            step=1.0
-        )
-
-        sales_zelle = st.number_input(
-            "Ventas por Zelle ($)",
-            min_value=0.0,
-            step=1.0
-        )
-
-    with c2:
-
-        sales_binance = st.number_input(
-            "Ventas por Binance ($)",
-            min_value=0.0,
-            step=1.0
-        )
-
-        expenses_cash = st.number_input(
-            "Egresos en efectivo ($)",
-            min_value=0.0,
-            step=1.0
-        )
-
-        expenses_transfer = st.number_input(
-            "Egresos por transferencia ($)",
-            min_value=0.0,
-            step=1.0
-        )
-
-    observaciones = st.text_area(
-        "Observaciones del cierre"
-    )
-
-    st.divider()
-
-    # Cálculo en tiempo real
-    cash_end_preview = cash_start + sales_cash - expenses_cash
-
-    m1, m2 = st.columns(2)
-
-    m1.metric(
-        "Caja inicial",
-        f"$ {cash_start:,.2f}"
-    )
-
-    m2.metric(
-        "Caja final estimada",
-        f"$ {cash_end_preview:,.2f}"
-    )
-
-    st.divider()
-
-    # Botón de cierre
-    if st.button("💾 Registrar cierre de caja"):
-
-        try:
-
-            cierre_id = registrar_cierre_caja(
-                usuario,
-                cash_start,
-                sales_cash,
-                sales_transfer,
-                sales_zelle,
-                sales_binance,
-                expenses_cash,
-                expenses_transfer,
-                observaciones,
+                SELECT id, fecha, metodo_pago, total_usd
+                FROM ventas
+                WHERE estado='registrada' AND date(fecha)=?
+                """,
+                conn,
+                params=(fecha_str,),
             )
 
-            st.success(f"Cierre de caja #{cierre_id} registrado correctamente")
+            gastos = pd.read_sql_query(
+                """
+                SELECT id, fecha, metodo_pago, monto_usd
+                FROM gastos
+                WHERE estado='activo' AND date(fecha)=?
+                """,
+                conn,
+                params=(fecha_str,),
+            )
 
-            st.balloons()
+            historial = pd.read_sql_query(
+                """
+                SELECT
+                    id,
+                    fecha,
+                    usuario,
+                    cash_start,
+                    sales_cash,
+                    sales_transfer,
+                    sales_zelle,
+                    sales_binance,
+                    expenses_cash,
+                    expenses_transfer,
+                    cash_end,
+                    observaciones
+                FROM cierres_caja
+                ORDER BY id DESC
+                LIMIT 30
+                """,
+                conn,
+            )
+    except Exception as e:
+        st.error("Error cargando datos de caja")
+        st.exception(e)
+        return
 
-        except ValueError as exc:
+    ventas["metodo_pago"] = ventas.get("metodo_pago", "").fillna("") if not ventas.empty else ""
 
-            st.error(str(exc))
+    cobradas = ventas[ventas["metodo_pago"].str.lower() != "credito"] if not ventas.empty else pd.DataFrame()
+    pendientes = ventas[ventas["metodo_pago"].str.lower() == "credito"] if not ventas.empty else pd.DataFrame()
 
+    t_ventas_cobradas = float(cobradas["total_usd"].sum()) if not cobradas.empty else 0.0
+    t_pendientes = float(pendientes["total_usd"].sum()) if not pendientes.empty else 0.0
+    t_gastos = float(gastos["monto_usd"].sum()) if not gastos.empty else 0.0
+    balance_dia = t_ventas_cobradas - t_gastos
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Ingresos cobrados", f"$ {t_ventas_cobradas:,.2f}")
+    c2.metric("Cuentas pendientes", f"$ {t_pendientes:,.2f}")
+    c3.metric("Egresos del día", f"$ {t_gastos:,.2f}", delta_color="inverse")
+    c4.metric("Neto en caja", f"$ {balance_dia:,.2f}")
+
+    st.divider()
+
+    col_v, col_g = st.columns(2)
+    with col_v:
+        st.subheader("💰 Ingresos por método")
+        if cobradas.empty:
+            st.info("No hubo ingresos cobrados.")
+        else:
+            for metodo, monto in cobradas.groupby("metodo_pago")["total_usd"].sum().items():
+                st.write(f"✅ **{metodo}:** $ {float(monto):,.2f}")
+
+    with col_g:
+        st.subheader("💸 Egresos por método")
+        if gastos.empty:
+            st.info("No hubo gastos.")
+        else:
+            for metodo, monto in gastos.groupby("metodo_pago")["monto_usd"].sum().items():
+                st.write(f"❌ **{metodo}:** $ {float(monto):,.2f}")
+
+    with st.expander("📝 Ver detalle completo"):
+        st.write("### Ventas cobradas")
+        st.dataframe(cobradas, use_container_width=True, hide_index=True)
+        st.write("### Ventas pendientes")
+        st.dataframe(pendientes, use_container_width=True, hide_index=True)
+        st.write("### Gastos")
+        st.dataframe(gastos, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    cash_start = st.number_input("Caja inicial del día ($)", min_value=0.0, value=0.0, step=1.0)
+    cash_end = cash_start + balance_dia
+    st.metric("Caja final estimada", f"$ {cash_end:,.2f}")
+    obs = st.text_area("Observaciones del cierre")
+
+    if st.button("💾 Guardar cierre del día"):
+        sales_cash = float(cobradas[cobradas["metodo_pago"].str.lower() == "efectivo"]["total_usd"].sum()) if not cobradas.empty else 0.0
+        sales_transfer = float(cobradas[cobradas["metodo_pago"].str.lower() == "transferencia"]["total_usd"].sum()) if not cobradas.empty else 0.0
+        sales_zelle = float(cobradas[cobradas["metodo_pago"].str.lower() == "zelle"]["total_usd"].sum()) if not cobradas.empty else 0.0
+        sales_binance = float(cobradas[cobradas["metodo_pago"].str.lower() == "binance"]["total_usd"].sum()) if not cobradas.empty else 0.0
+
+        expenses_cash = float(gastos[gastos["metodo_pago"].str.lower() == "efectivo"]["monto_usd"].sum()) if not gastos.empty else 0.0
+        expenses_transfer = float(gastos[gastos["metodo_pago"].str.lower().isin(["transferencia", "pago móvil"])]["monto_usd"].sum()) if not gastos.empty else 0.0
+
+        try:
+            with db_transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO cierres_caja (
+                        fecha,
+                        usuario,
+                        cash_start,
+                        sales_cash,
+                        sales_transfer,
+                        sales_zelle,
+                        sales_binance,
+                        expenses_cash,
+                        expenses_transfer,
+                        cash_end,
+                        observaciones
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fecha_str,
+                        usuario,
+                        float(cash_start),
+                        sales_cash,
+                        sales_transfer,
+                        sales_zelle,
+                        sales_binance,
+                        expenses_cash,
+                        expenses_transfer,
+                        float(cash_end),
+                        obs,
+                    ),
+                )
+            st.success("✅ Cierre registrado correctamente")
+            st.rerun()
         except Exception as e:
-
-            st.error("Error registrando cierre de caja")
-
+            st.error("Error guardando cierre")
             st.exception(e)
+
+    st.divider()
+    st.subheader("📜 Historial de cierres")
+
+    if historial.empty:
+        st.info("Aún no hay cierres guardados.")
+        return
+
+    st.dataframe(historial, use_container_width=True, hide_index=True)
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        historial.to_excel(writer, index=False, sheet_name="Cierres")
+
+    st.download_button(
+        "📥 Descargar historial de cierres",
+        buffer.getvalue(),
+        file_name="cierres_caja.xlsx",
+    )
