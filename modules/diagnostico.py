@@ -1,4 +1,4 @@
-from __future__ import annotations
+rom __future__ import annotations
 
 import re
 from typing import Any
@@ -10,8 +10,13 @@ import pytesseract
 import streamlit as st
 from pdf2image import convert_from_bytes
 
-from services.diagnostics_service import DiagnosticsService, analizar_hoja_diagnostico, extraer_texto_diagnostico
-
+from services.diagnostics_service import (
+    DiagnosticsService,
+    analizar_hoja_diagnostico,
+    aplicar_resultado_diagnostico,
+    extraer_texto_diagnostico,
+    listar_impresoras_activas,
+)
 
 def _obtener_capacidad_default(nombre_impresora: str) -> dict[str, float]:
     nombre = (nombre_impresora or "").upper()
@@ -108,12 +113,25 @@ def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str, 
 def render_diagnostico(usuario: str) -> None:
     st.caption(f"Usuario activo: {usuario}")
 
-    impresora_sel = st.selectbox(
-        "Impresora",
-        ["EPSON L805", "EPSON L3250", "Otra"],
-        index=0,
-    )
-
+    impresoras_activas = listar_impresoras_activas()
+    if impresoras_activas:
+        mapa_impresoras = {
+            f"#{row['id']} · {row.get('equipo') or 'Impresora'} {('('+str(row.get('modelo'))+')') if row.get('modelo') else ''}".strip(): row
+            for row in impresoras_activas
+        }
+        etiqueta_sel = st.selectbox("Impresora (desde activos)", list(mapa_impresoras.keys()), index=0)
+        impresora_data = mapa_impresoras[etiqueta_sel]
+        impresora_sel = str(impresora_data.get("modelo") or impresora_data.get("equipo") or "Otra")
+        activo_id_sel = int(impresora_data["id"])
+    else:
+        st.warning("No hay impresoras activas en Activos. Se usará selección manual.")
+        impresora_sel = st.selectbox(
+            "Impresora",
+            ["EPSON L805", "EPSON L3250", "Otra"],
+            index=0,
+        )
+        activo_id_sel = None
+        
     st.subheader("Entrada de diagnóstico")
     archivo_diag = st.file_uploader(
         "📄 Hoja diagnóstico (PDF/imagen)",
@@ -175,6 +193,30 @@ def render_diagnostico(usuario: str) -> None:
 
     _mostrar_resultados(resultados, resumen)
 
+
+    try:
+        sync = aplicar_resultado_diagnostico(
+            usuario=usuario,
+            impresora=impresora_sel,
+            resultados=resultados,
+            vida_cabezal_pct=float(analisis["vida_cabezal_pct"]),
+            contador_impresiones=int(analisis.get("contador_impresiones", 0)),
+            activo_id=activo_id_sel,
+        )
+        st.success("✅ Diagnóstico guardado y sincronizado con Activos/Inventario.")
+        if sync.get("movimientos_tinta"):
+            st.caption(
+                "Consumo de tintas aplicado en inventario: "
+                + ", ".join(
+                    [f"{m['color']} ({float(m['consumo_ml']):.2f} ml)" for m in sync["movimientos_tinta"]]
+                )
+            )
+        else:
+            st.caption("No se detectó consumo adicional de tintas respecto al diagnóstico anterior.")
+    except Exception as exc:
+        st.error(f"No fue posible sincronizar diagnóstico con Activos/Inventario: {exc}")
+
+    
     st.markdown("#### Señales detectadas")
     s1, s2 = st.columns(2)
     s1.markdown("**Porcentajes desde OCR:**")
