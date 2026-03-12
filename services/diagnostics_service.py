@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 
@@ -9,16 +10,49 @@ CRITICAL_LEVEL = 10
 LOW_LEVEL = 25
 PERCENT_REGEX = re.compile(r"(\d{1,3})\s*%")
 COUNTER_PATTERNS = [
-    re.compile(r"(?:total\s*(?:(?:de|do)\s*)?(?:pages|paginas|p[aá]ginas)\s*impresas?)\D{0,30}(\d{1,9})", re.I),
-    re.compile(r"(?:pages\s*printed|printed\s*pages)\D{0,15}(\d{1,9})", re.I),
-    re.compile(r"(?:total\s*(?:prints|impresiones)|print\s*count|contador)\D{0,10}(\d{1,9})", re.I),
-    re.compile(r"(?:pages|paginas|p[aá]ginas)\D{0,30}(\d{1,9})", re.I),
+    re.compile(r"(?:total\s*(?:(?:de|do|ds)\s*)?(?:pages?|pags?|paginas?|p[aá]ginas?)\s*(?:imp\w*)?)\D{0,30}([\d][\d\s.,]{0,15})", re.I),
+    re.compile(r"(?:pages?\s*printed|printed\s*pages?)\D{0,15}([\d][\d\s.,]{0,15})", re.I),
+    re.compile(r"(?:total\s*(?:prints?|impresiones?)|print\s*count|contador)\D{0,10}([\d][\d\s.,]{0,15})", re.I),
+    re.compile(r"(?:pages?|pags?|paginas?|p[aá]ginas?)\D{0,30}([\d][\d\s.,]{0,15})", re.I),
 ]
 IGNORE_COUNTER_CONTEXT = [
     re.compile(r"\bpin\b", re.I),
     re.compile(r"serial", re.I),
     re.compile(r"imei", re.I),
 ]
+
+
+def _normalizar_texto_busqueda(texto: str) -> str:
+    base = unicodedata.normalize("NFKD", texto or "")
+    base = "".join(ch for ch in base if not unicodedata.combining(ch))
+    base = re.sub(r"[^a-zA-Z0-9]+", " ", base).strip().lower()
+    return re.sub(r"\s+", " ", base)
+
+
+def _extraer_numeros_linea(linea: str) -> list[int]:
+    candidatos = re.findall(r"\d[\d\s.,]{0,15}", linea or "")
+    valores: list[int] = []
+    for raw in candidatos:
+        digits = re.sub(r"\D", "", raw)
+        if not digits:
+            continue
+        try:
+            valor = int(digits)
+        except ValueError:
+            continue
+        if valor > 0:
+            valores.append(valor)
+    return valores
+
+
+def _linea_parece_contador(linea: str) -> bool:
+    normalizada = _normalizar_texto_busqueda(linea)
+    if not normalizada:
+        return False
+
+    tiene_paginas = "pag" in normalizada or "page" in normalizada
+    tiene_impresion = "imp" in normalizada or "print" in normalizada or "contador" in normalizada
+    return tiene_paginas and tiene_impresion
 
 
 def _clamp_percentage(value: float | int | None) -> float | None:
@@ -46,55 +80,7 @@ class DiagnosticsService:
             pct = pct_foto if pct_foto is not None else pct_text
 
             if pct is None:
-                merged[color] = None
-                continue
-
-            capacidad_color = float(capacidad.get(color, 0.0) or 0.0)
-            merged[color] = round(capacidad_color * (pct / 100.0), 2)
-
-        return merged
-
-    @staticmethod
-    def resolve_head_life(
-        detected_value: float | None,
-        porcentajes_foto: dict[str, float] | None = None,
-    ) -> float:
-        detected = _clamp_percentage(detected_value)
-        if detected is not None:
-            return float(detected)
-
-        porcentajes_foto = dict(porcentajes_foto or {})
-        if porcentajes_foto:
-            values = [_clamp_percentage(v) for v in porcentajes_foto.values() if v is not None]
-            values = [v for v in values if v is not None]
-            if values:
-                return float(round(sum(values) / len(values), 2))
-
-        return 100.0
-
-    @staticmethod
-    def summarize(resultados: dict[str, float | None], vida_cabezal_pct: float | None) -> dict[str, Any]:
-        niveles = [v for v in resultados.values() if isinstance(v, (int, float))]
-        min_ml = float(min(niveles)) if niveles else 0.0
-        max_ml = float(max(niveles)) if niveles else 0.0
-
-        if min_ml <= CRITICAL_LEVEL:
-            estado_tintas = "Crítico"
-        elif min_ml <= LOW_LEVEL:
-            estado_tintas = "Bajo"
-        else:
-            estado_tintas = "Óptimo"
-
-        vida = _clamp_percentage(vida_cabezal_pct)
-        if vida is None:
-            estado_cabezal = "Desconocido"
-        elif vida < 40:
-            estado_cabezal = "Revisar"
-        elif vida < 70:
-            estado_cabezal = "Aceptable"
-        else:
-            estado_cabezal = "Óptimo"
-
+@@ -98,66 +132,80 @@ class DiagnosticsService:
         return {
             "estado_tintas": estado_tintas,
             "estado_cabezal": estado_cabezal,
@@ -120,22 +106,36 @@ def extraer_contador_impresiones(texto_ocr: str | None) -> dict[str, int]:
     for linea in lineas:
         if any(p.search(linea) for p in IGNORE_COUNTER_CONTEXT):
             continue
+
+        if _linea_parece_contador(linea):
+            candidatos_linea = _extraer_numeros_linea(linea)
+            if candidatos_linea:
+                return {"contador_impresiones": max(candidatos_linea)}
+
         for patron in COUNTER_PATTERNS:
             match = patron.search(linea)
             if match:
-                valor = int(match.group(1))
-                if valor > 0:
-                    return {"contador_impresiones": valor}
+                candidatos = _extraer_numeros_linea(match.group(1))
+                if candidatos:
+                    return {"contador_impresiones": max(candidatos)}
 
     for patron in COUNTER_PATTERNS:
         match = patron.search(texto)
         if match:
-            valor = int(match.group(1))
-            if valor > 0:
-                return {"contador_impresiones": valor}
+            candidatos = _extraer_numeros_linea(match.group(1))
+            if candidatos:
+                return {"contador_impresiones": max(candidatos)}
 
-    texto_filtrado = "\n".join(ln for ln in lineas if not any(p.search(ln) for p in IGNORE_COUNTER_CONTEXT))
-    numeros = [int(v) for v in re.findall(r"\b\d{3,9}\b", texto_filtrado)]
+    lineas_sospechosas = [
+        ln
+        for ln in lineas
+        if not any(p.search(ln) for p in IGNORE_COUNTER_CONTEXT)
+        and ("pag" in _normalizar_texto_busqueda(ln) or "page" in _normalizar_texto_busqueda(ln) or "print" in _normalizar_texto_busqueda(ln))
+    ]
+    numeros: list[int] = []
+    for linea in lineas_sospechosas:
+        numeros.extend(_extraer_numeros_linea(linea))
+
     return {"contador_impresiones": max(numeros) if numeros else 0}
 
 
@@ -161,4 +161,3 @@ def analizar_hoja_diagnostico(
         "vida_cabezal_pct": vida_cabezal,
         "contador_impresiones": int(extraido.get("contadores", {}).get("contador_impresiones", 0)),
         "resumen": resumen,
-    }
