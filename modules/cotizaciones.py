@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -15,6 +17,16 @@ ESTADOS_COTIZACION = [
 ]
 
 
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if math.isnan(out) or math.isinf(out):
+        return float(default)
+    return out
+
+
 def _normalizar_payload(payload: dict) -> tuple[str, float]:
     descripcion = (
         payload.get("descripcion")
@@ -24,13 +36,13 @@ def _normalizar_payload(payload: dict) -> tuple[str, float]:
         or "Trabajo personalizado"
     )
 
-    costo_base = float(payload.get("costo_estimado") or payload.get("costo_base") or 0.0)
+    costo_base = _safe_float(payload.get("costo_estimado") or payload.get("costo_base"), 0.0)
 
-    cantidad = float(payload.get("cantidad") or payload.get("unidades") or 1)
+    cantidad = _safe_float(payload.get("cantidad") or payload.get("unidades"), 1.0)
     if cantidad > 1 and costo_base > 0 and payload.get("costo_estimado") is None:
         costo_base *= cantidad
 
-    return str(descripcion), round(float(costo_base), 2)
+    return str(descripcion), round(_safe_float(costo_base, 0.0), 2)
 
 
 def _insertar_cotizacion(
@@ -86,7 +98,7 @@ def render_cotizaciones(usuario: str):
             costo_estimado = st.number_input(
                 "Costo estimado (USD)",
                 min_value=0.0,
-                value=max(float(costo_base_pre), 0.0),
+                value=max(_safe_float(costo_base_pre, 0.0), 0.0),
                 step=0.5,
                 format="%.2f",
             )
@@ -100,8 +112,8 @@ def render_cotizaciones(usuario: str):
             )
 
         estado_nuevo = st.selectbox("Estado inicial", ESTADOS_COTIZACION, index=0)
-        subtotal = float(costo_estimado) * (1 + float(margen_pct) / 100)
-        precio_final = round(subtotal + float(ajuste_usd), 2)
+        subtotal = _safe_float(costo_estimado, 0.0) * (1 + _safe_float(margen_pct, 0.0) / 100)
+        precio_final = round(subtotal + _safe_float(ajuste_usd, 0.0), 2)
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Costo base", f"$ {float(costo_estimado):,.2f}")
@@ -117,9 +129,9 @@ def render_cotizaciones(usuario: str):
                     cid = _insertar_cotizacion(
                         usuario=usuario,
                         descripcion=descripcion.strip(),
-                        costo_estimado_usd=float(costo_estimado),
-                        margen_pct=float(margen_pct),
-                        precio_final_usd=float(precio_final),
+                        costo_estimado_usd=_safe_float(costo_estimado, 0.0),
+                        margen_pct=_safe_float(margen_pct, 0.0),
+                        precio_final_usd=_safe_float(precio_final, 0.0),
                         estado=estado_nuevo,
                     )
                     if "datos_pre_cotizacion" in st.session_state:
@@ -205,7 +217,7 @@ def render_cotizaciones(usuario: str):
     if estados_filtrados:
         df_filtrado = df_filtrado[df_filtrado["estado"].isin(estados_filtrados)]
 
-    if isinstance(rango, tuple) and len(rango) == 2:
+    if isinstance(rango, (tuple, list)) and len(rango) == 2:
         inicio, fin = pd.Timestamp(rango[0]), pd.Timestamp(rango[1])
         df_filtrado = df_filtrado[(df_filtrado["fecha"] >= inicio) & (df_filtrado["fecha"] <= fin + pd.Timedelta(days=1))]
 
