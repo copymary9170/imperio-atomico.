@@ -169,6 +169,18 @@ def render_cotizaciones(usuario: str):
 
     if not rows:
         st.info("No hay cotizaciones registradas.")
+        st.caption("Crea la primera cotización desde el generador rápido o inserta una cotización de ejemplo.")
+        if st.button("🧪 Insertar cotización de ejemplo", use_container_width=True):
+            cid = _insertar_cotizacion(
+                usuario=usuario,
+                descripcion="Cotización demo · Impresión y acabado",
+                costo_estimado_usd=25.0,
+                margen_pct=65.0,
+                precio_final_usd=41.25,
+                estado="Cotización",
+            )
+            st.success(f"Cotización demo #{cid} creada.")
+            st.rerun()
         return
 
     df = pd.DataFrame(rows)
@@ -176,6 +188,7 @@ def render_cotizaciones(usuario: str):
 
     st.divider()
     st.subheader("📊 Inteligencia de cotizaciones")
+
 
     total_cot = int(len(df))
     total_monto = float(df["precio_final_usd"].sum())
