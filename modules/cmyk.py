@@ -55,6 +55,14 @@ def _normalizar_imagenes(archivo) -> list[tuple[str, Image.Image]]:
 
     img = Image.open(io.BytesIO(bytes_data)).convert("CMYK")
     return [(nombre, img)]
+
+
+def _analizar_pagina(
+    img_obj: Image.Image,
+    ml_base_pagina: float,
+    factor_general: float,
+    factor_calidad: float,
+    factor_papel: float,
     factor_k: float,
     auto_negro_inteligente: bool,
     refuerzo_negro: float,
@@ -673,4 +681,3 @@ def render_cmyk(usuario: str):
             st.plotly_chart(fig_hist, use_container_width=True)
 
     _render_kanban(usuario)
-
