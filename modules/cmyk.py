@@ -674,3 +674,4 @@ def render_cmyk(usuario: str):
             st.plotly_chart(fig_hist, use_container_width=True)
 
     _render_kanban(usuario)
+
