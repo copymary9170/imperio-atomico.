@@ -15,8 +15,8 @@ from services.diagnostics_service import (
     analizar_hoja_diagnostico,
     aplicar_resultado_diagnostico,
     extraer_texto_diagnostico,
-    listar_impresoras_activas,
     listar_activos_disponibles,
+    listar_impresoras_activas,
 )
 
 
@@ -42,13 +42,33 @@ def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
         return cv2.cvtColor(np.array(pages[0]), cv2.COLOR_RGB2BGR) if pages else None
 
     return cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
-@@ -100,57 +101,69 @@ def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str,
-        use_container_width=True,
-        hide_index=True,
-    )
+
+
+def _extraer_porcentajes_foto(imagen: np.ndarray | None) -> dict[str, float]:
+    if imagen is None:
+        return {}
+
+    gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY)
+    texto = pytesseract.image_to_string(gris, config="--psm 6")
+    valores = [float(v) for v in re.findall(r"(\d{1,3})\s*%", texto)]
+    colores = ["Cyan", "Magenta", "Yellow", "Black"]
+    salida: dict[str, float] = {}
+    for idx, color in enumerate(colores):
+        if idx < len(valores):
+            salida[color] = max(0.0, min(100.0, valores[idx]))
+    return salida
+
+
+def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str, Any]) -> None:
+    st.subheader("📊 Resultado del análisis")
+    rows = [
+        {"Color": color, "Nivel (ml)": round(float(valor or 0.0), 2) if valor is not None else None}
+        for color, valor in resultados.items()
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Vida cabezal", f"{resumen['vida_cabezal_pct']:.2f}%")
+    m1.metric("Vida cabezal", f"{float(resumen.get('vida_cabezal_pct', 0.0)):.2f}%")
     m2.metric("Estado tintas", str(resumen.get("estado_tintas", "N/D")))
     m3.metric("Estado cabezal", str(resumen.get("estado_cabezal", "N/D")))
     m4.metric("Mín tinta (ml)", f"{float(resumen.get('min_ml', 0.0)):.2f}")
@@ -81,30 +101,13 @@ def render_diagnostico(usuario: str) -> None:
             impresora_sel = str(activo_sel.get("modelo") or activo_sel.get("equipo") or "Otra")
         else:
             st.warning("No hay activos disponibles. Se usará selección manual sin vínculo a Activos.")
-            impresora_sel = st.selectbox(
-                "Impresora",
-                ["EPSON L805", "EPSON L3250", "Otra"],
-                index=0,
-            )
+            impresora_sel = st.selectbox("Impresora", ["EPSON L805", "EPSON L3250", "Otra"], index=0)
             activo_id_sel = None
 
     st.subheader("Entrada de diagnóstico")
-    archivo_diag = st.file_uploader(
-        "📄 Hoja diagnóstico (PDF/imagen)",
-        type=["pdf", "png", "jpg", "jpeg"],
-        key="diag_file",
-    )
-    archivo_tanque = st.file_uploader(
-        "🖼 Foto de tanques",
-        type=["png", "jpg", "jpeg"],
-        key="tank_file",
-    )
-
-    texto_manual = st.text_area(
-        "Texto OCR (editable)",
-        placeholder="Puedes pegar/corregir el OCR aquí antes de analizar.",
-        height=140,
-    )
+    archivo_diag = st.file_uploader("📄 Hoja diagnóstico (PDF/imagen)", type=["pdf", "png", "jpg", "jpeg"], key="diag_file")
+    archivo_tanque = st.file_uploader("🖼 Foto de tanques", type=["png", "jpg", "jpeg"], key="tank_file")
+    texto_manual = st.text_area("Texto OCR (editable)", placeholder="Puedes pegar/corregir el OCR aquí antes de analizar.", height=140)
 
     capacidad_default = _obtener_capacidad_default(impresora_sel)
     st.subheader("⚙️ Capacidad de tanques (ml)")
@@ -112,14 +115,27 @@ def render_diagnostico(usuario: str) -> None:
     capacidad = {
         "Cyan": c1.number_input("Cyan (ml)", min_value=0.0, value=float(capacidad_default["Cyan"]), step=1.0),
         "Magenta": c2.number_input("Magenta (ml)", min_value=0.0, value=float(capacidad_default["Magenta"]), step=1.0),
-@@ -183,50 +196,52 @@ def render_diagnostico(usuario: str) -> None:
-        )
+        "Yellow": c3.number_input("Yellow (ml)", min_value=0.0, value=float(capacidad_default["Yellow"]), step=1.0),
+        "Black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["Black"]), step=1.0),
+    }
 
-        resultados = analisis["resultados"]
-        resumen = DiagnosticsService.summarize(
-            resultados=resultados,
-            vida_cabezal_pct=analisis["vida_cabezal_pct"],
+    if st.button("🔍 Analizar diagnóstico"):
+        imagen_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
+        texto_ocr = texto_manual.strip()
+        if not texto_ocr and imagen_diag is not None:
+            texto_ocr = pytesseract.image_to_string(imagen_diag, config="--psm 6")
+
+        imagen_tanque = _convertir_archivo_a_imagen(archivo_tanque) if archivo_tanque else None
+        porcentajes_foto = _extraer_porcentajes_foto(imagen_tanque)
+        porcentajes_texto = extraer_texto_diagnostico(texto_ocr).get("porcentajes", []) if texto_ocr else []
+
+        analisis = analizar_hoja_diagnostico(
+            texto_ocr=texto_ocr,
+            capacidad=capacidad,
+            porcentajes_foto=porcentajes_foto,
         )
+        resultados = analisis["resultados"]
+        resumen = DiagnosticsService.summarize(resultados=resultados, vida_cabezal_pct=analisis["vida_cabezal_pct"])
         st.session_state["diag_last_analysis"] = {
             "impresora": impresora_sel,
             "activo_id": activo_id_sel,
@@ -157,9 +173,7 @@ def render_diagnostico(usuario: str) -> None:
             if sync.get("movimientos_tinta"):
                 st.caption(
                     "Consumo de tintas aplicado en inventario: "
-                    + ", ".join(
-                        [f"{m['color']} ({float(m['consumo_ml']):.2f} ml)" for m in sync["movimientos_tinta"]]
-                    )
+                    + ", ".join([f"{m['color']} ({float(m['consumo_ml']):.2f} ml)" for m in sync["movimientos_tinta"]])
                 )
             else:
                 st.caption("No se detectó consumo adicional de tintas respecto al diagnóstico anterior.")
