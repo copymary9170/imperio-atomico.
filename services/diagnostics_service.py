@@ -89,6 +89,7 @@ def _extraer_numeros_linea(linea: str) -> list[int]:
         valor = _normalizar_numero_contador(raw)
         if valor is not None:
             valores.append(valor)
+            valores.append(valor)
     return valores
 
 
@@ -113,7 +114,71 @@ def extraer_desgaste_componentes(texto_ocr: str | None) -> dict[str, float | Non
     componentes: dict[str, float | None] = {"cabezal": None, "rodillo": None, "almohadillas": None}
     for nombre, patrones in COMPONENT_LIFE_PATTERNS.items():
         for patron in patrones:
-@@ -141,55 +181,93 @@ class DiagnosticsService:
+            match = patron.search(texto)
+            if not match:
+                continue
+            try:
+                componentes[nombre] = _clamp_percentage(float(match.group(1)))
+            except Exception:
+                componentes[nombre] = None
+            break
+    return componentes
+
+
+class DiagnosticsService:
+    """Utility methods to infer diagnostic metrics from OCR signals."""
+
+    @staticmethod
+    def merge_levels(
+        capacidad: dict[str, float],
+        porcentajes_texto: list[float] | None = None,
+        porcentajes_foto: dict[str, float] | None = None,
+    ) -> dict[str, float | None]:
+        porcentajes_texto = list(porcentajes_texto or [])
+        porcentajes_foto = dict(porcentajes_foto or {})
+
+        merged: dict[str, float | None] = {}
+        for idx, color in enumerate(_COLOR_ORDER):
+            pct_text = _clamp_percentage(porcentajes_texto[idx]) if idx < len(porcentajes_texto) else None
+            pct_foto = _clamp_percentage(porcentajes_foto.get(color))
+            pct = pct_foto if pct_foto is not None else pct_text
+
+            if pct is None:
+                merged[color] = None
+                continue
+
+            capacidad_color = float(capacidad.get(color, 0.0) or 0.0)
+            merged[color] = round((capacidad_color * pct) / 100.0, 2)
+        return merged
+
+    @staticmethod
+    def resolve_head_life(
+        detected_value: float | int | None,
+        porcentajes_foto: dict[str, float] | None = None,
+    ) -> float:
+        detected = _clamp_percentage(detected_value)
+        if detected is not None:
+            return float(detected)
+
+        foto = dict(porcentajes_foto or {})
+        valid = [_clamp_percentage(v) for v in foto.values()]
+        valid = [float(v) for v in valid if v is not None]
+        if valid:
+            return round(sum(valid) / len(valid), 2)
+
+        return 100.0
+
+    @staticmethod
+    def summarize(resultados: dict[str, float | None], vida_cabezal_pct: float | int | None) -> dict[str, Any]:
+        valores = [float(v) for v in resultados.values() if v is not None]
+        min_ml = min(valores) if valores else 0.0
+        max_ml = max(valores) if valores else 0.0
+
+        if not valores:
+            estado_tintas = "Sin datos"
+        elif min_ml <= CRITICAL_LEVEL:
+            estado_tintas = "Crítico"
+        elif min_ml <= LOW_LEVEL:
             estado_tintas = "Bajo"
         else:
             estado_tintas = "Óptimo"
@@ -136,7 +201,6 @@ def extraer_desgaste_componentes(texto_ocr: str | None) -> dict[str, float | Non
             "min_ml": round(min_ml, 2),
             "max_ml": round(max_ml, 2),
         }
-
 
 
 def _extraer_porcentajes_por_color(texto: str) -> list[float | None]:
