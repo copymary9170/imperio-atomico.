@@ -55,7 +55,6 @@ def _normalizar_imagenes(archivo) -> list[tuple[str, Image.Image]]:
 
     img = Image.open(io.BytesIO(bytes_data)).convert("CMYK")
     return [(nombre, img)]
-@@ -61,181 +68,329 @@ def _analizar_pagina(
     factor_k: float,
     auto_negro_inteligente: bool,
     refuerzo_negro: float,
