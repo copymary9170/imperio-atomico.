@@ -1,45 +1,54 @@
 from __future__ import annotations
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 
 def render_sublimacion(usuario: str):
-
     st.title("🔥 Sublimación Industrial")
+    st.caption(f"Operador: {usuario}")
 
-    st.info("Calculadora básica de trabajos de sublimación")
+    cola = st.session_state.get("cola_sublimacion", [])
+    if not cola:
+        st.info("No hay trabajos recibidos desde CMYK.")
+        return
 
-    producto = st.text_input("Producto")
+    df_cola = pd.DataFrame(cola)
+    st.subheader("📥 Trabajos pendientes")
+    st.dataframe(df_cola, use_container_width=True, hide_index=True)
 
-    ancho = st.number_input("Ancho (cm)", min_value=0.0)
-    alto = st.number_input("Alto (cm)", min_value=0.0)
+    total_transfer = float(df_cola.get("costo_transfer_total", pd.Series(dtype=float)).sum())
+    total_unidades = int(df_cola.get("cantidad", pd.Series(dtype=float)).sum())
+    costo_unitario_transfer = total_transfer / max(total_unidades, 1)
 
-    cantidad = st.number_input("Cantidad", min_value=1)
+    st.subheader("⚙️ Costos de Sublimación")
+    c1, c2, c3 = st.columns(3)
 
-    costo_transfer = st.number_input(
-        "Costo transfer unitario",
-        min_value=0.0,
-        value=0.20
-    )
+    potencia_kw = c1.number_input("Potencia kW", value=1.5, min_value=0.1)
+    minutos_unidad = c2.number_input("Min por unidad", value=5.0, min_value=0.1)
+    costo_kwh = c3.number_input("Costo kWh", value=0.15, min_value=0.0)
 
-    if st.button("Calcular producción"):
+    energia_unit = (potencia_kw * minutos_unidad / 60.0) * costo_kwh
 
-        area = ancho * alto
+    c4, c5 = st.columns(2)
+    salario_hora = c4.number_input("Salario hora operador", value=3.0, min_value=0.0)
+    prod_hora = c5.number_input("Unidades por hora", value=12.0, min_value=0.1)
+    mano_unit = salario_hora / prod_hora
 
-        costo_unitario = costo_transfer
+    c6, c7 = st.columns(2)
+    valor_maquina = c6.number_input("Valor máquina", value=1500.0, min_value=0.0)
+    vida_horas = c7.number_input("Vida útil horas", value=5000.0, min_value=1.0)
+    dep_unit = (valor_maquina / vida_horas) / prod_hora
 
-        costo_total = costo_unitario * cantidad
+    costo_unitario_final = costo_unitario_transfer + energia_unit + mano_unit + dep_unit
+    costo_total = costo_unitario_final * total_unidades
 
-        st.metric("Área por pieza", f"{area:.2f} cm²")
-        st.metric("Costo unitario", f"$ {costo_unitario:.2f}")
-        st.metric("Costo total", f"$ {costo_total:.2f}")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Costo transfer promedio", f"$ {costo_unitario_transfer:.4f}")
+    m2.metric("Costo unitario final", f"$ {costo_unitario_final:.4f}")
+    m3.metric("Costo total", f"$ {costo_total:.2f}")
 
-        df = pd.DataFrame({
-            "Producto": [producto],
-            "Cantidad": [cantidad],
-            "Costo unitario": [costo_unitario],
-            "Costo total": [costo_total]
-        })
-
-        st.dataframe(df, use_container_width=True)
+    if st.button("✅ Finalizar Sublimación", use_container_width=True):
+        st.session_state["cola_sublimacion"] = []
+        st.success("Producción de sublimación completada. Cola vaciada.")
+        st.rerun()
