@@ -253,7 +253,28 @@ def listar_impresoras_activas() -> list[dict[str, Any]]:
                     OR lower(COALESCE(unidad, '')) LIKE '%impres%'
                     OR lower(COALESCE(equipo, '')) LIKE '%epson%'
                     OR lower(COALESCE(modelo, '')) LIKE '%epson%'
+                    OR lower(COALESCE(equipo, '')) LIKE '%l805%'
+                    OR lower(COALESCE(equipo, '')) LIKE '%l3250%'
+                    OR lower(COALESCE(modelo, '')) LIKE '%l805%'
+                    OR lower(COALESCE(modelo, '')) LIKE '%l3250%'
                   )
+                ORDER BY id DESC
+                """
+            ).fetchall()
+        except Exception:
+            return []
+
+    return [dict(r) for r in rows]
+
+
+def listar_activos_disponibles() -> list[dict[str, Any]]:
+    with db_transaction() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, equipo, modelo, categoria, unidad
+                FROM activos
+                WHERE COALESCE(activo, 1) = 1
                 ORDER BY id DESC
                 """
             ).fetchall()
@@ -288,52 +309,7 @@ def _ensure_diagnostics_schema(conn) -> None:
     diag_cols = {row[1] for row in conn.execute("PRAGMA table_info(diagnosticos_impresora)").fetchall()}
     if "vida_rodillo_pct" not in diag_cols:
         conn.execute("ALTER TABLE diagnosticos_impresora ADD COLUMN vida_rodillo_pct REAL")
-    if "vida_almohadillas_pct" not in diag_cols:
-        conn.execute("ALTER TABLE diagnosticos_impresora ADD COLUMN vida_almohadillas_pct REAL")
-
-    activos_cols = {row[1] for row in conn.execute("PRAGMA table_info(activos)").fetchall()}
-    if "paginas_impresas" not in activos_cols:
-        conn.execute("ALTER TABLE activos ADD COLUMN paginas_impresas INTEGER NOT NULL DEFAULT 0")
-    if "vida_cabezal_pct" not in activos_cols:
-        conn.execute("ALTER TABLE activos ADD COLUMN vida_cabezal_pct REAL")
-    if "vida_rodillo_pct" not in activos_cols:
-        conn.execute("ALTER TABLE activos ADD COLUMN vida_rodillo_pct REAL")
-    if "vida_almohadillas_pct" not in activos_cols:
-        conn.execute("ALTER TABLE activos ADD COLUMN vida_almohadillas_pct REAL")
-
-
-
-def _buscar_item_tinta(conn, color: str) -> dict[str, Any] | None:
-    terms = {
-        "Cyan": ["cyan", "cian", "azul"],
-        "Magenta": ["magenta", "fucsia"],
-        "Yellow": ["yellow", "amarillo"],
-        "Black": ["black", "negro"],
-    }.get(color, [color.lower()])
-
-    for term in terms:
-        row = conn.execute(
-            """
-            SELECT id, nombre, unidad, stock_actual, costo_unitario_usd
-            FROM inventario
-            WHERE estado='activo'
-              AND lower(COALESCE(categoria, '')) LIKE '%tinta%'
-              AND lower(COALESCE(nombre, '')) LIKE ?
-            ORDER BY stock_actual DESC, id DESC
-            LIMIT 1
-            """,
-            (f"%{term.lower()}%",),
-        ).fetchone()
-        if row:
-            return dict(row)
-    return None
-
-
-def aplicar_resultado_diagnostico(
-    usuario: str,
-    impresora: str,
-    resultados: dict[str, float | None],
-    vida_cabezal_pct: float,
+@@ -337,50 +358,61 @@ def aplicar_resultado_diagnostico(
     contador_impresiones: int = 0,
     activo_id: int | None = None,
     desgaste_componentes: dict[str, float | None] | None = None,
@@ -358,6 +334,17 @@ def aplicar_resultado_diagnostico(
                 LIMIT 1
                 """,
                 (int(activo_id),),
+            ).fetchone()
+        elif impresora:
+            previo = conn.execute(
+                """
+                SELECT cyan_ml, magenta_ml, yellow_ml, black_ml
+                FROM diagnosticos_impresora
+                WHERE lower(COALESCE(impresora, '')) = lower(?)
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (str(impresora),),
             ).fetchone()
 
         componentes = dict(desgaste_componentes or {})
