@@ -16,6 +16,7 @@ from services.diagnostics_service import (
     aplicar_resultado_diagnostico,
     extraer_texto_diagnostico,
     listar_impresoras_activas,
+    listar_activos_disponibles,
 )
 
 
@@ -41,62 +42,7 @@ def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
         return cv2.cvtColor(np.array(pages[0]), cv2.COLOR_RGB2BGR) if pages else None
 
     return cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
-
-
-def _ocr_texto(img: np.ndarray | None) -> str:
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    denoise = cv2.GaussianBlur(gray, (3, 3), 0)
-    _, binaria = cv2.threshold(denoise, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    texto = pytesseract.image_to_string(binaria, lang="eng+spa")
-    return str(texto or "")
-
-
-def _detectar_vida_cabezal(texto: str) -> float | None:
-    if not texto:
-        return None
-    match = re.search(r"(?:head|cabezal)[^\d]{0,15}(\d{1,3})\s*%", texto, flags=re.IGNORECASE)
-    if not match:
-        return None
-    return max(0.0, min(100.0, float(match.group(1))))
-
-
-def _detectar_niveles_por_foto(img: np.ndarray | None) -> dict[str, float]:
-    if img is None or len(img.shape) < 3:
-        return {}
-
-    h, w, _ = img.shape
-    if h <= 0 or w <= 0:
-        return {}
-
-    zonas = {
-        "Black": img[:, 0: int(w * 0.25)],
-        "Cyan": img[:, int(w * 0.25): int(w * 0.50)],
-        "Magenta": img[:, int(w * 0.50): int(w * 0.75)],
-        "Yellow": img[:, int(w * 0.75): w],
-    }
-
-    niveles: dict[str, float] = {}
-    for color, zona in zonas.items():
-        if zona.size == 0:
-            continue
-
-        gray = cv2.cvtColor(zona, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
-        cobertura = float(np.sum(thresh > 0) / max(1, thresh.size))
-        niveles[color] = max(0.0, min(100.0, cobertura * 100.0))
-
-    return niveles
-
-
-def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str, Any]) -> None:
-    st.subheader("Resultado final")
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"Color": c, "Nivel (ml)": v if v is not None else "No detectado"}
-                for c, v in resultados.items()
-            ]
-        ),
+@@ -100,57 +101,69 @@ def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str,
         use_container_width=True,
         hide_index=True,
     )
@@ -122,13 +68,25 @@ def render_diagnostico(usuario: str) -> None:
         impresora_sel = str(impresora_data.get("modelo") or impresora_data.get("equipo") or "Otra")
         activo_id_sel = int(impresora_data["id"])
     else:
-        st.warning("No hay impresoras activas en Activos. Se usará selección manual.")
-        impresora_sel = st.selectbox(
-            "Impresora",
-            ["EPSON L805", "EPSON L3250", "Otra"],
-            index=0,
-        )
-        activo_id_sel = None
+        st.warning("No hay impresoras detectadas por filtro. Selecciona un activo manualmente.")
+        activos = listar_activos_disponibles()
+        if activos:
+            mapa_activos = {
+                f"#{row['id']} · {row.get('equipo') or 'Activo'} {('(' + str(row.get('modelo')) + ')') if row.get('modelo') else ''}": row
+                for row in activos
+            }
+            etiqueta_activo = st.selectbox("Activo a vincular", list(mapa_activos.keys()), index=0)
+            activo_sel = mapa_activos[etiqueta_activo]
+            activo_id_sel = int(activo_sel["id"])
+            impresora_sel = str(activo_sel.get("modelo") or activo_sel.get("equipo") or "Otra")
+        else:
+            st.warning("No hay activos disponibles. Se usará selección manual sin vínculo a Activos.")
+            impresora_sel = st.selectbox(
+                "Impresora",
+                ["EPSON L805", "EPSON L3250", "Otra"],
+                index=0,
+            )
+            activo_id_sel = None
 
     st.subheader("Entrada de diagnóstico")
     archivo_diag = st.file_uploader(
@@ -154,32 +112,7 @@ def render_diagnostico(usuario: str) -> None:
     capacidad = {
         "Cyan": c1.number_input("Cyan (ml)", min_value=0.0, value=float(capacidad_default["Cyan"]), step=1.0),
         "Magenta": c2.number_input("Magenta (ml)", min_value=0.0, value=float(capacidad_default["Magenta"]), step=1.0),
-        "Yellow": c3.number_input("Yellow (ml)", min_value=0.0, value=float(capacidad_default["Yellow"]), step=1.0),
-        "Black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["Black"]), step=1.0),
-    }
-
-    analizar = st.button("🚀 Analizar", type="primary")
-    if analizar:
-        img_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
-        img_tanque = _convertir_archivo_a_imagen(archivo_tanque) if archivo_tanque else None
-
-        texto_ocr = texto_manual.strip()
-        if not texto_ocr and img_diag is not None:
-            try:
-                texto_ocr = _ocr_texto(img_diag)
-            except Exception as exc:
-                st.warning(f"No fue posible ejecutar OCR automático: {exc}")
-                texto_ocr = ""
-
-        porcentajes_foto = _detectar_niveles_por_foto(img_tanque)
-        porcentajes_texto = extraer_texto_diagnostico(texto_ocr).get("porcentajes", [])
-        vida_detectada = _detectar_vida_cabezal(texto_ocr)
-
-        analisis = analizar_hoja_diagnostico(
-            texto_ocr=texto_ocr,
-            capacidad=capacidad,
-            porcentajes_foto=porcentajes_foto,
-            vida_cabezal_detectada=vida_detectada,
+@@ -183,50 +196,52 @@ def render_diagnostico(usuario: str) -> None:
         )
 
         resultados = analisis["resultados"]
@@ -205,6 +138,8 @@ def render_diagnostico(usuario: str) -> None:
         return
 
     _mostrar_resultados(datos["resultados"], datos["resumen"])
+    if not datos.get("activo_id"):
+        st.warning("Este análisis no está vinculado a un activo; Inventario puede actualizarse, pero Activos no recibirá cambios.")
     st.info("Análisis listo. Usa el botón para enviarlo a Activos e Inventario.")
 
     if st.button("📨 Enviar análisis a Activos e Inventario"):
