@@ -307,9 +307,77 @@ def _ensure_diagnostics_schema(conn) -> None:
     )
 
     diag_cols = {row[1] for row in conn.execute("PRAGMA table_info(diagnosticos_impresora)").fetchall()}
-    if "vida_rodillo_pct" not in diag_cols:
-        conn.execute("ALTER TABLE diagnosticos_impresora ADD COLUMN vida_rodillo_pct REAL")
-@@ -337,50 +358,61 @@ def aplicar_resultado_diagnostico(
+    optional_diag_cols = {
+        "vida_rodillo_pct": "ALTER TABLE diagnosticos_impresora ADD COLUMN vida_rodillo_pct REAL",
+        "vida_almohadillas_pct": "ALTER TABLE diagnosticos_impresora ADD COLUMN vida_almohadillas_pct REAL",
+        "contador_impresiones": "ALTER TABLE diagnosticos_impresora ADD COLUMN contador_impresiones INTEGER DEFAULT 0",
+        "activo_id": "ALTER TABLE diagnosticos_impresora ADD COLUMN activo_id INTEGER",
+    }
+    for col, alter_sql in optional_diag_cols.items():
+        if col not in diag_cols:
+            conn.execute(alter_sql)
+
+
+def _ensure_activos_sync_columns(conn) -> None:
+    activos_cols = {row[1] for row in conn.execute("PRAGMA table_info(activos)").fetchall()}
+    optional_cols = {
+        "vida_cabezal_pct": "ALTER TABLE activos ADD COLUMN vida_cabezal_pct REAL",
+        "vida_rodillo_pct": "ALTER TABLE activos ADD COLUMN vida_rodillo_pct REAL",
+        "vida_almohadillas_pct": "ALTER TABLE activos ADD COLUMN vida_almohadillas_pct REAL",
+        "paginas_impresas": "ALTER TABLE activos ADD COLUMN paginas_impresas INTEGER DEFAULT 0",
+    }
+    for col, alter_sql in optional_cols.items():
+        if col not in activos_cols:
+            conn.execute(alter_sql)
+
+
+def _buscar_item_tinta(conn, color: str) -> dict[str, Any] | None:
+    color_txt = str(color or "").strip().lower()
+    if not color_txt:
+        return None
+
+    filas = conn.execute(
+        """
+        SELECT id, nombre, categoria, unidad, stock_actual, costo_unitario_usd
+        FROM inventario
+        WHERE estado='activo'
+        """
+    ).fetchall()
+
+    tokens_objetivo = {color_txt, f"tinta {color_txt}", f"{color_txt} ink"}
+    mejor: dict[str, Any] | None = None
+    mejor_puntaje = 0
+
+    for row in filas:
+        data = dict(row)
+        nombre = _normalizar_texto_busqueda(str(data.get("nombre") or ""))
+        categoria = _normalizar_texto_busqueda(str(data.get("categoria") or ""))
+        unidad = _normalizar_texto_busqueda(str(data.get("unidad") or ""))
+
+        puntaje = 0
+        if "tinta" in categoria or "ink" in categoria:
+            puntaje += 3
+        if "ml" in unidad:
+            puntaje += 2
+        if any(tok in nombre for tok in tokens_objetivo):
+            puntaje += 4
+        if color_txt in nombre:
+            puntaje += 2
+        if color_txt[0:1] and re.search(rf"\b{re.escape(color_txt[0:1])}\b", nombre):
+            puntaje += 1
+
+        if puntaje > mejor_puntaje:
+            mejor_puntaje = puntaje
+            mejor = data
+
+    return mejor if mejor_puntaje >= 4 else None
+
+
+def aplicar_resultado_diagnostico(
+    usuario: str,
+    impresora: str,
+    resultados: dict[str, float | None],
+    vida_cabezal_pct: float,
     contador_impresiones: int = 0,
     activo_id: int | None = None,
     desgaste_componentes: dict[str, float | None] | None = None,
@@ -325,6 +393,7 @@ def _ensure_diagnostics_schema(conn) -> None:
 
         previo = None
         if activo_id:
+            _ensure_activos_sync_columns(conn)
             previo = conn.execute(
                 """
                 SELECT cyan_ml, magenta_ml, yellow_ml, black_ml
@@ -375,11 +444,7 @@ def _ensure_diagnostics_schema(conn) -> None:
         resumen["diagnostico_guardado"] = True
 
         if activo_id:
-            vidas_componentes = [
-                _clamp_percentage(vida_cabezal_pct),
-                vida_rodillo,
-                vida_almohadillas,
-            ]
+            vidas_componentes = [_clamp_percentage(vida_cabezal_pct), vida_rodillo, vida_almohadillas]
             vidas_validas = [float(v) for v in vidas_componentes if v is not None]
             vida_general = min(vidas_validas) if vidas_validas else None
             conn.execute(
