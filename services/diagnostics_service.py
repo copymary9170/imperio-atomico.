@@ -11,6 +11,12 @@ _COLOR_ORDER = ("Cyan", "Magenta", "Yellow", "Black")
 CRITICAL_LEVEL = 10
 LOW_LEVEL = 25
 PERCENT_REGEX = re.compile(r"(\d{1,3})\s*%")
+COLOR_PATTERNS = {
+    "Cyan": [re.compile(r"(?:cyan|cian)\D{0,20}(\d{1,3})\s*%", re.I), re.compile(r"(\d{1,3})\s*%\D{0,20}(?:cyan|cian)", re.I)],
+    "Magenta": [re.compile(r"magenta\D{0,20}(\d{1,3})\s*%", re.I), re.compile(r"(\d{1,3})\s*%\D{0,20}magenta", re.I)],
+    "Yellow": [re.compile(r"(?:yellow|amarillo)\D{0,20}(\d{1,3})\s*%", re.I), re.compile(r"(\d{1,3})\s*%\D{0,20}(?:yellow|amarillo)", re.I)],
+    "Black": [re.compile(r"(?:black|negro|bk)\D{0,20}(\d{1,3})\s*%", re.I), re.compile(r"(\d{1,3})\s*%\D{0,20}(?:black|negro|bk)", re.I)],
+}
 COUNTER_PATTERNS = [
     re.compile(r"(?:total\s*(?:(?:de|do|ds)\s*)?(?:pages?|pags?|paginas?|p[aá]ginas?)\s*(?:imp\w*)?)\D{0,30}([\d][\d\s.,]{0,15})", re.I),
     re.compile(r"(?:pages?\s*printed|printed\s*pages?)\D{0,15}([\d][\d\s.,]{0,15})", re.I),
@@ -36,18 +42,52 @@ def _normalizar_texto_busqueda(texto: str) -> str:
     return re.sub(r"\s+", " ", base)
 
 
+def _normalizar_numero_contador(raw: str) -> int | None:
+    txt = str(raw or "").strip()
+    if not txt:
+        return None
+
+    txt = re.sub(r"[^\d.,]", "", txt)
+    if not txt or not re.search(r"\d", txt):
+        return None
+
+    if "," in txt and "." in txt:
+        last_sep = "," if txt.rfind(",") > txt.rfind(".") else "."
+        decimal_pos = txt.rfind(last_sep)
+        dec_part = txt[decimal_pos + 1 :]
+        if 0 < len(dec_part) <= 2:
+            txt = txt[:decimal_pos]
+    elif "," in txt:
+        chunks = txt.split(",")
+        if len(chunks) > 1 and len(chunks[-1]) <= 2:
+            txt = "".join(chunks[:-1])
+        else:
+            txt = "".join(chunks)
+    elif "." in txt:
+        chunks = txt.split(".")
+        if len(chunks) > 1 and len(chunks[-1]) <= 2:
+            txt = "".join(chunks[:-1])
+        else:
+            txt = "".join(chunks)
+
+    digits = re.sub(r"\D", "", txt)
+    if not digits:
+        return None
+
+    try:
+        valor = int(digits)
+    except ValueError:
+        return None
+
+    return valor if valor > 0 else None
+
+
 def _extraer_numeros_linea(linea: str) -> list[int]:
     candidatos = re.findall(r"\d[\d\s.,]{0,15}", linea or "")
     valores: list[int] = []
     for raw in candidatos:
-        digits = re.sub(r"\D", "", raw)
-        if not digits:
-            continue
-        try:
-            valor = int(digits)
-        except ValueError:
-            continue
-        if valor > 0:
+        valor = _normalizar_numero_contador(raw)
+        if valor is not None:
             valores.append(valor)
     return valores
 
@@ -73,71 +113,7 @@ def extraer_desgaste_componentes(texto_ocr: str | None) -> dict[str, float | Non
     componentes: dict[str, float | None] = {"cabezal": None, "rodillo": None, "almohadillas": None}
     for nombre, patrones in COMPONENT_LIFE_PATTERNS.items():
         for patron in patrones:
-            match = patron.search(texto)
-            if not match:
-                continue
-            try:
-                componentes[nombre] = _clamp_percentage(float(match.group(1)))
-            except Exception:
-                componentes[nombre] = None
-            break
-    return componentes
-
-
-class DiagnosticsService:
-    """Utility methods to infer diagnostic metrics from OCR signals."""
-
-    @staticmethod
-    def merge_levels(
-        capacidad: dict[str, float],
-        porcentajes_texto: list[float] | None = None,
-        porcentajes_foto: dict[str, float] | None = None,
-    ) -> dict[str, float | None]:
-        porcentajes_texto = list(porcentajes_texto or [])
-        porcentajes_foto = dict(porcentajes_foto or {})
-
-        merged: dict[str, float | None] = {}
-        for idx, color in enumerate(_COLOR_ORDER):
-            pct_text = _clamp_percentage(porcentajes_texto[idx]) if idx < len(porcentajes_texto) else None
-            pct_foto = _clamp_percentage(porcentajes_foto.get(color))
-            pct = pct_foto if pct_foto is not None else pct_text
-
-            if pct is None:
-                merged[color] = None
-                continue
-
-            capacidad_color = float(capacidad.get(color, 0.0) or 0.0)
-            merged[color] = round((capacidad_color * pct) / 100.0, 2)
-        return merged
-
-    @staticmethod
-    def resolve_head_life(
-        detected_value: float | int | None,
-        porcentajes_foto: dict[str, float] | None = None,
-    ) -> float:
-        detected = _clamp_percentage(detected_value)
-        if detected is not None:
-            return float(detected)
-
-        foto = dict(porcentajes_foto or {})
-        valid = [_clamp_percentage(v) for v in foto.values()]
-        valid = [float(v) for v in valid if v is not None]
-        if valid:
-            return round(sum(valid) / len(valid), 2)
-
-        return 100.0
-
-    @staticmethod
-    def summarize(resultados: dict[str, float | None], vida_cabezal_pct: float | int | None) -> dict[str, Any]:
-        valores = [float(v) for v in resultados.values() if v is not None]
-        min_ml = min(valores) if valores else 0.0
-        max_ml = max(valores) if valores else 0.0
-
-        if not valores:
-            estado_tintas = "Sin datos"
-        elif min_ml <= CRITICAL_LEVEL:
-            estado_tintas = "Crítico"
-        elif min_ml <= LOW_LEVEL:
+@@ -141,55 +181,93 @@ class DiagnosticsService:
             estado_tintas = "Bajo"
         else:
             estado_tintas = "Óptimo"
@@ -163,11 +139,49 @@ class DiagnosticsService:
 
 
 
+def _extraer_porcentajes_por_color(texto: str) -> list[float | None]:
+    salida: list[float | None] = []
+    for color in _COLOR_ORDER:
+        valor: float | None = None
+        for patron in COLOR_PATTERNS[color]:
+            match = patron.search(texto)
+            if not match:
+                continue
+            valor = _clamp_percentage(float(match.group(1)))
+            if valor is not None:
+                break
+        salida.append(valor)
+    return salida
+
+
 def extraer_texto_diagnostico(texto_ocr: str | None) -> dict[str, Any]:
     texto = str(texto_ocr or "")
-    porcentajes = [float(v) for v in PERCENT_REGEX.findall(texto)]
+    porcentajes_globales = [_clamp_percentage(float(v)) for v in PERCENT_REGEX.findall(texto)]
+    porcentajes_color = _extraer_porcentajes_por_color(texto)
+
+    porcentajes: list[float] = []
+    usados_global = 0
+    for val_color in porcentajes_color:
+        if val_color is not None:
+            porcentajes.append(float(val_color))
+            continue
+
+        while usados_global < len(porcentajes_globales):
+            candidato = porcentajes_globales[usados_global]
+            usados_global += 1
+            if candidato is None:
+                continue
+            porcentajes.append(float(candidato))
+            break
+
+    while len(porcentajes) < len(_COLOR_ORDER) and usados_global < len(porcentajes_globales):
+        candidato = porcentajes_globales[usados_global]
+        usados_global += 1
+        if candidato is not None:
+            porcentajes.append(float(candidato))
+
     return {
-        "porcentajes": [_clamp_percentage(v) for v in porcentajes],
+        "porcentajes": porcentajes,
         "contadores": extraer_contador_impresiones(texto),
     }
 
@@ -193,6 +207,7 @@ def extraer_contador_impresiones(texto_ocr: str | None) -> dict[str, int]:
                     return {"contador_impresiones": max(candidatos)}
 
     for patron in COUNTER_PATTERNS:
+
         match = patron.search(texto)
         if match:
             candidatos = _extraer_numeros_linea(match.group(1))
