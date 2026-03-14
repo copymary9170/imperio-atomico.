@@ -55,13 +55,10 @@ def render_cmyk(usuario: str):
 
     with col1:
 
-        st.subheader("⚙️ Ajustes de Calibración")
+        st.subheader("⚙️ Ajustes de Calibración Automática")
 
-        tamaño_pagina = st.selectbox(
-            "📄 Tamaño de página",
-            ["A5", "A4", "A3", "Carta", "Oficio", "Tabloide"],
-            index=1
-        )
+        tamaño_pagina = "A4"
+        st.caption("📄 Tamaño de página: **Automático (A4 estándar)**")
 
         base_imprenta = _config_base_imprenta(tamaño_pagina)
 
@@ -97,6 +94,7 @@ def render_cmyk(usuario: str):
     # ------------------------------------------------------
     # ANÁLISIS
     # ------------------------------------------------------
+    
     if not archivos:
         st.info("Sube archivos para iniciar el análisis.")
         return
