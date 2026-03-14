@@ -14,6 +14,25 @@ from modules.cmyk.context import _load_contexto_cmyk
 
 
 # ==========================================================
+# BASE AUTOMÁTICA DE IMPRENTA
+# ==========================================================
+
+
+def _config_base_imprenta(tamano_pagina: str):
+    """Devuelve parámetros base típicos de una imprenta digital."""
+
+    base_por_tamano = {
+        "A5": {"costo_desgaste": 0.012, "ml_base": 0.09, "factor_general": 0.90},
+        "A4": {"costo_desgaste": 0.020, "ml_base": 0.15, "factor_general": 1.00},
+        "Carta": {"costo_desgaste": 0.021, "ml_base": 0.16, "factor_general": 1.02},
+        "Oficio": {"costo_desgaste": 0.025, "ml_base": 0.18, "factor_general": 1.08},
+        "A3": {"costo_desgaste": 0.034, "ml_base": 0.25, "factor_general": 1.22},
+        "Tabloide": {"costo_desgaste": 0.036, "ml_base": 0.27, "factor_general": 1.30},
+    }
+
+    return base_por_tamano.get(tamano_pagina, base_por_tamano["A4"])
+
+# ==========================================================
 # RENDER PRINCIPAL
 # ==========================================================
 
@@ -44,22 +63,16 @@ def render_cmyk(usuario: str):
             index=1
         )
 
-        costo_desgaste = st.number_input(
-            "Costo desgaste por página ($)",
-            min_value=0.0,
-            value=0.02,
-            step=0.005
-        )
+        base_imprenta = _config_base_imprenta(tamaño_pagina)
 
-        ml_base_pagina = st.number_input(
-            "Consumo base por página (ml)",
-            min_value=0.01,
-            value=0.15
-        )
+        costo_desgaste = base_imprenta["costo_desgaste"]
+        ml_base_pagina = base_imprenta["ml_base"]
+        factor_general = base_imprenta["factor_general"]
 
-        # FACTOR GENERAL AUTOMÁTICO
-        factor_general = 1.0
-        st.caption("Factor de consumo: automático según cobertura de tinta")
+        st.caption(f"Costo desgaste por página ($): **{costo_desgaste:.3f}**")
+        st.caption(f"Consumo base por página (ml): **{ml_base_pagina:.3f}**")
+        st.caption(f"Factor General de Consumo: **{factor_general:.2f}**")
+        st.caption("Base automática por tamaño de página (referencia de imprenta digital).")
 
         # ------------------------------------------------------
         # CALIDAD DE IMPRESIÓN
