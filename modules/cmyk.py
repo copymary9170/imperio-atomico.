@@ -1,22 +1,13 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 
 from modules.cmyk.analyzer import normalizar_imagenes, analizar_lote
 from modules.cmyk.cost_engine import (
     costo_tinta_ml,
-    calcular_costo_lote,
-    simular_papel_calidad
-)
-from modules.cmyk.inventory_engine import (
-    filtrar_tintas,
-    mapear_consumo_ids,
-    validar_stock,
-    descontar_inventario
+    calcular_costo_lote
 )
 from modules.cmyk.history import (
-    guardar_historial,
-    obtener_historial
+    guardar_historial
 )
 from modules.cmyk.page_size import ajustar_consumo_por_tamano
 from modules.cmyk.context import _load_contexto_cmyk
@@ -45,6 +36,8 @@ def render_cmyk(usuario: str):
 
     with col1:
 
+        st.subheader("⚙️ Ajustes de Calibración")
+
         tamaño_pagina = st.selectbox(
             "📄 Tamaño de página",
             ["A5", "A4", "A3", "Carta", "Oficio", "Tabloide"],
@@ -65,7 +58,7 @@ def render_cmyk(usuario: str):
         )
 
         factor_general = st.slider(
-            "Factor general de consumo",
+            "Factor General de Consumo",
             1.0, 3.0, 1.5
         )
 
@@ -74,10 +67,10 @@ def render_cmyk(usuario: str):
         # ------------------------------------------------------
 
         calidad_map = {
-            "Borrador": 0.85,
+            "Borrador": 0.6,
             "Normal": 1.0,
-            "Alta": 1.18,
-            "Foto": 1.32
+            "Alta": 1.5,
+            "Foto": 2.0
         }
 
         calidad_sel = st.selectbox(
@@ -89,25 +82,28 @@ def render_cmyk(usuario: str):
         factor_calidad = calidad_map[calidad_sel]
 
         # ------------------------------------------------------
-        # PERFIL DE PAPEL DEL DRIVER
+        # DRIVER DE PAPEL
         # ------------------------------------------------------
 
         papel_map = {
-            "Plain Paper": 0.9,
-            "Bond": 1.0,
-            "Matte": 1.15,
-            "Glossy": 1.30,
-            "Photo Premium": 1.40,
-            "Cartulina": 1.20
+            "Plain Paper": 0.8,
+            "Bond 90g": 1.0,
+            "Matte": 1.3,
+            "Glossy": 1.6,
+            "Photo Premium": 1.9,
+            "Cartulina": 1.4
         }
 
         papel_sel = st.selectbox(
-            "Perfil de papel del driver",
+            "Tipo de papel (driver)",
             list(papel_map.keys()),
             index=1
         )
 
         factor_papel = papel_map[papel_sel]
+
+        st.caption(f"Factor calidad aplicado: **{factor_calidad}**")
+        st.caption(f"Factor papel aplicado: **{factor_papel}**")
 
     with col2:
 
@@ -152,7 +148,7 @@ def render_cmyk(usuario: str):
             resultados.extend(res)
 
     # ------------------------------------------------------
-    # AJUSTE POR TAMAÑO DE PÁGINA
+    # AJUSTAR POR TAMAÑO DE PÁGINA
     # ------------------------------------------------------
 
     totales_ajustados = {
@@ -188,10 +184,11 @@ def render_cmyk(usuario: str):
 
     st.dataframe(df_resultados, use_container_width=True)
 
-    st.metric(
-        "Costo total estimado",
-        f"$ {costo['costo_total']:.2f}"
-    )
+    colA, colB, colC = st.columns(3)
+
+    colA.metric("Consumo total tinta", f"{total_ml:.3f} ml")
+    colB.metric("Precio tinta/ml", f"$ {precio_tinta:.3f}")
+    colC.metric("Costo total estimado", f"$ {costo['costo_total']:.2f}")
 
     # ------------------------------------------------------
     # HISTORIAL
@@ -206,7 +203,7 @@ def render_cmyk(usuario: str):
             totales_ajustados
         )
 
-        st.success("Historial guardado.")
+        st.success("Historial guardado correctamente.")
 
     st.divider()
 
