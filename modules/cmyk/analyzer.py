@@ -184,6 +184,7 @@ def analizar_pagina(
 
     base = (
         ml_base_pagina
+        * factor_general
         * factor_auto
         * factor_calidad
         * factor_papel
@@ -191,6 +192,7 @@ def analizar_pagina(
 
     if tipo_diseno == "fotografico":
         base *= 1.15
+
 
     # ------------------------------------------------------
     # CONSUMO
@@ -230,7 +232,14 @@ def analizar_pagina(
             + float(np.mean(rich_black_mask)) * 0.18
         )
 
-        k_extra_ml = ml_base_pagina * factor_auto * ratio_extra
+      k_extra_ml = (
+            ml_base_pagina
+            * factor_general
+            * factor_auto
+            * factor_calidad
+            * factor_papel
+            * ratio_extra
+        )
 
     else:
 
