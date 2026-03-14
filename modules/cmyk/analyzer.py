@@ -1,5 +1,6 @@
 import io
 from typing import List, Tuple, Dict
+
 import numpy as np
 from PIL import Image
 
@@ -8,8 +9,9 @@ from PIL import Image
 # CONFIGURACIÓN DE SEGURIDAD Y RENDIMIENTO
 # ==========================================================
 
-MAX_IMAGE_SIZE = 1500  # px máximo por lado (reduce RAM)
-MAX_PDF_PAGES = 50     # límite de páginas analizadas
+MAX_IMAGE_SIZE = 1500  # px máximo por lado
+MAX_PDF_PAGES = 50     # máximo de páginas PDF analizadas
+MAX_TOTAL_COVERAGE = 3.2  # límite de saturación de tinta
 
 
 # ==========================================================
@@ -25,9 +27,12 @@ def _optimize_image(img: Image.Image) -> Image.Image:
     """
     Reduce tamaño de imagen para evitar uso excesivo de memoria.
     """
+
     if img.width > MAX_IMAGE_SIZE or img.height > MAX_IMAGE_SIZE:
+
         img = img.copy()
         img.thumbnail((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE))
+
     return img
 
 
@@ -43,20 +48,21 @@ def normalizar_imagenes(archivo) -> List[Tuple[str, Image.Image]]:
     bytes_data = archivo.read()
     nombre = archivo.name
 
-    # -------------------------
+    # ------------------------------------------------------
     # PDF
-    # -------------------------
+    # ------------------------------------------------------
 
     if nombre.lower().endswith(".pdf"):
 
         try:
-            import fitz  # PyMuPDF
+            import fitz
         except ModuleNotFoundError:
             raise RuntimeError(
                 "PyMuPDF (fitz) es requerido para analizar PDF."
             )
 
         paginas = []
+
         doc = fitz.open(stream=bytes_data, filetype="pdf")
 
         total = min(len(doc), MAX_PDF_PAGES)
@@ -78,17 +84,20 @@ def normalizar_imagenes(archivo) -> List[Tuple[str, Image.Image]]:
 
             img = _optimize_image(img)
 
-            paginas.append((f"{nombre} (P{i+1})", img))
+            paginas.append(
+                (f"{nombre} (P{i+1})", img)
+            )
 
         doc.close()
 
         return paginas
 
-    # -------------------------
-    # Imagen normal
-    # -------------------------
+    # ------------------------------------------------------
+    # IMAGEN NORMAL
+    # ------------------------------------------------------
 
     img = Image.open(io.BytesIO(bytes_data)).convert("CMYK")
+
     img = _optimize_image(img)
 
     return [(nombre, img)]
@@ -108,40 +117,91 @@ def analizar_pagina(
     auto_negro_inteligente: bool,
     refuerzo_negro: float,
 ) -> Dict[str, float]:
+
     """
     Analiza cobertura CMYK de una página y estima consumo de tinta.
     """
 
-    arr = np.array(img_obj)
+    # ------------------------------------------------------
+    # Convertir imagen a numpy optimizado
+    # ------------------------------------------------------
 
-    c_chan = arr[:, :, 0] / 255.0
-    m_chan = arr[:, :, 1] / 255.0
-    y_chan = arr[:, :, 2] / 255.0
-    k_chan = arr[:, :, 3] / 255.0
+    arr = np.asarray(img_obj, dtype=np.float32) / 255.0
 
-    # -------------------------
+    c_chan = arr[:, :, 0]
+    m_chan = arr[:, :, 1]
+    y_chan = arr[:, :, 2]
+    k_chan = arr[:, :, 3]
+
+    # ------------------------------------------------------
     # Cobertura promedio
-    # -------------------------
+    # ------------------------------------------------------
 
     c_media = float(np.mean(c_chan))
     m_media = float(np.mean(m_chan))
     y_media = float(np.mean(y_chan))
     k_media = float(np.mean(k_chan))
 
-    # -------------------------
-    # Base de consumo
-    # -------------------------
+    # ------------------------------------------------------
+    # Densidad total de tinta
+    # ------------------------------------------------------
 
-    base = ml_base_pagina * factor_general * factor_calidad * factor_papel
+    densidad_total = float(
+        np.mean(c_chan + m_chan + y_chan + k_chan)
+    )
+
+    # ------------------------------------------------------
+    # Limitador de tinta (simula RIP)
+    # ------------------------------------------------------
+
+    if densidad_total > MAX_TOTAL_COVERAGE:
+
+        scale = MAX_TOTAL_COVERAGE / densidad_total
+
+        c_media *= scale
+        m_media *= scale
+        y_media *= scale
+        k_media *= scale
+
+    # ------------------------------------------------------
+    # Clasificación del diseño
+    # ------------------------------------------------------
+
+    if densidad_total < 0.35:
+        tipo_diseno = "vector"
+
+    elif densidad_total < 0.9:
+        tipo_diseno = "mixto"
+
+    else:
+        tipo_diseno = "fotografico"
+
+    # ------------------------------------------------------
+    # Base de consumo
+    # ------------------------------------------------------
+
+    base = (
+        ml_base_pagina
+        * factor_general
+        * factor_calidad
+        * factor_papel
+    )
+
+    if tipo_diseno == "fotografico":
+        base *= 1.15
+
+    # ------------------------------------------------------
+    # Consumo de tinta
+    # ------------------------------------------------------
 
     ml_c = c_media * base
     ml_m = m_media * base
     ml_y = y_media * base
     ml_k_base = k_media * base * factor_k
 
-    # ------------------------------------------------
+    # ------------------------------------------------------
     # NEGRO INTELIGENTE
-    # ------------------------------------------------
+    # ------------------------------------------------------
 
     if auto_negro_inteligente:
 
@@ -175,11 +235,22 @@ def analizar_pagina(
         promedio_color = (c_media + m_media + y_media) / 3.0
 
         if promedio_color > 0.55:
-            k_extra_ml = promedio_color * refuerzo_negro * factor_general
+
+            k_extra_ml = (
+                promedio_color
+                * refuerzo_negro
+                * factor_general
+            )
+
         else:
+
             k_extra_ml = 0.0
 
     ml_k = ml_k_base + k_extra_ml
+
+    # ------------------------------------------------------
+    # RESULTADO
+    # ------------------------------------------------------
 
     return {
         "C (ml)": float(ml_c),
@@ -187,6 +258,8 @@ def analizar_pagina(
         "Y (ml)": float(ml_y),
         "K (ml)": float(ml_k),
         "K extra auto (ml)": float(k_extra_ml),
+        "Densidad total": float(densidad_total),
+        "Tipo diseño": tipo_diseno,
     }
 
 
