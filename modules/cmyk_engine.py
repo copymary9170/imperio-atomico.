@@ -75,47 +75,16 @@ def render_cmyk(usuario: str):
         st.caption("Base automática por tamaño de página (referencia de imprenta digital).")
 
         # ------------------------------------------------------
-        # CALIDAD DE IMPRESIÓN
+        # MODO AUTOMÁTICO DE IMPRENTA
         # ------------------------------------------------------
 
-        calidad_map = {
-            "Borrador": 0.6,
-            "Normal": 1.0,
-            "Alta": 1.5,
-            "Foto": 2.0
-        }
+        factor_calidad = 1.0
+        factor_papel = 1.0
 
-        calidad_sel = st.selectbox(
-            "Calidad de impresión",
-            list(calidad_map.keys()),
-            index=1
-        )
-
-        factor_calidad = calidad_map[calidad_sel]
-
-        # ------------------------------------------------------
-        # DRIVER DE PAPEL
-        # ------------------------------------------------------
-
-        papel_map = {
-            "Plain Paper": 0.8,
-            "Bond 90g": 1.0,
-            "Matte": 1.3,
-            "Glossy": 1.6,
-            "Photo Premium": 1.9,
-            "Cartulina": 1.4
-        }
-
-        papel_sel = st.selectbox(
-            "Tipo de papel (driver)",
-            list(papel_map.keys()),
-            index=1
-        )
-
-        factor_papel = papel_map[papel_sel]
-
-        st.caption(f"Factor calidad aplicado: **{factor_calidad}**")
-        st.caption(f"Factor papel aplicado: **{factor_papel}**")
+        st.caption("Calidad de impresión: **Automática (Normal)**")
+        st.caption("Tipo de papel (driver): **Automático (Bond 90g)**")
+        st.caption(f"Factor calidad aplicado: **{factor_calidad:.2f}**")
+        st.caption(f"Factor papel aplicado: **{factor_papel:.2f}**")
 
     with col2:
 
@@ -128,7 +97,6 @@ def render_cmyk(usuario: str):
     # ------------------------------------------------------
     # ANÁLISIS
     # ------------------------------------------------------
-
     if not archivos:
         st.info("Sube archivos para iniciar el análisis.")
         return
