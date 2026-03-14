@@ -1,10 +1,10 @@
 import streamlit as st
 
+def render_cmyk(usuario):
 
-def render_cmyk():
-    st.title("Motor CMYK")
+    st.title("🎨 Motor de Análisis CMYK")
 
-    st.write("Sistema de cálculo de tinta CMYK")
+    st.write(f"Usuario activo: {usuario}")
 
     c = st.number_input("Cyan %", 0.0, 100.0)
     m = st.number_input("Magenta %", 0.0, 100.0)
