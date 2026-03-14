@@ -9,9 +9,9 @@ from PIL import Image
 # CONFIGURACIÓN DE SEGURIDAD Y RENDIMIENTO
 # ==========================================================
 
-MAX_IMAGE_SIZE = 1500  # px máximo por lado
-MAX_PDF_PAGES = 50     # máximo de páginas PDF analizadas
-MAX_TOTAL_COVERAGE = 3.2  # límite de saturación de tinta
+MAX_IMAGE_SIZE = 1500
+MAX_PDF_PAGES = 50
+MAX_TOTAL_COVERAGE = 3.2
 
 
 # ==========================================================
@@ -19,14 +19,10 @@ MAX_TOTAL_COVERAGE = 3.2  # límite de saturación de tinta
 # ==========================================================
 
 def safe_div(a: float, b: float) -> float:
-    """División segura evitando división por cero."""
     return float(a) / float(b) if float(b or 0) else 0.0
 
 
 def _optimize_image(img: Image.Image) -> Image.Image:
-    """
-    Reduce tamaño de imagen para evitar uso excesivo de memoria.
-    """
 
     if img.width > MAX_IMAGE_SIZE or img.height > MAX_IMAGE_SIZE:
 
@@ -37,13 +33,33 @@ def _optimize_image(img: Image.Image) -> Image.Image:
 
 
 # ==========================================================
+# FACTOR AUTOMÁTICO DE CONSUMO
+# ==========================================================
+
+def calcular_factor_consumo(densidad_total: float) -> float:
+    """
+    Determina automáticamente el factor de consumo
+    usando reglas típicas de imprenta.
+    """
+
+    if densidad_total < 0.35:
+        return 0.9
+
+    elif densidad_total < 0.9:
+        return 1.2
+
+    elif densidad_total < 1.5:
+        return 1.4
+
+    else:
+        return 1.6
+
+
+# ==========================================================
 # NORMALIZAR ARCHIVOS (PDF / IMAGEN)
 # ==========================================================
 
 def normalizar_imagenes(archivo) -> List[Tuple[str, Image.Image]]:
-    """
-    Convierte archivos cargados (PDF o imagen) en lista de imágenes CMYK.
-    """
 
     bytes_data = archivo.read()
     nombre = archivo.name
@@ -93,7 +109,7 @@ def normalizar_imagenes(archivo) -> List[Tuple[str, Image.Image]]:
         return paginas
 
     # ------------------------------------------------------
-    # IMAGEN NORMAL
+    # IMAGEN
     # ------------------------------------------------------
 
     img = Image.open(io.BytesIO(bytes_data)).convert("CMYK")
@@ -118,14 +134,6 @@ def analizar_pagina(
     refuerzo_negro: float,
 ) -> Dict[str, float]:
 
-    """
-    Analiza cobertura CMYK de una página y estima consumo de tinta.
-    """
-
-    # ------------------------------------------------------
-    # Convertir imagen a numpy optimizado
-    # ------------------------------------------------------
-
     arr = np.asarray(img_obj, dtype=np.float32) / 255.0
 
     c_chan = arr[:, :, 0]
@@ -133,25 +141,17 @@ def analizar_pagina(
     y_chan = arr[:, :, 2]
     k_chan = arr[:, :, 3]
 
-    # ------------------------------------------------------
-    # Cobertura promedio
-    # ------------------------------------------------------
-
     c_media = float(np.mean(c_chan))
     m_media = float(np.mean(m_chan))
     y_media = float(np.mean(y_chan))
     k_media = float(np.mean(k_chan))
-
-    # ------------------------------------------------------
-    # Densidad total de tinta
-    # ------------------------------------------------------
 
     densidad_total = float(
         np.mean(c_chan + m_chan + y_chan + k_chan)
     )
 
     # ------------------------------------------------------
-    # Limitador de tinta (simula RIP)
+    # LIMITADOR DE TINTA (RIP)
     # ------------------------------------------------------
 
     if densidad_total > MAX_TOTAL_COVERAGE:
@@ -164,7 +164,7 @@ def analizar_pagina(
         k_media *= scale
 
     # ------------------------------------------------------
-    # Clasificación del diseño
+    # CLASIFICACIÓN DISEÑO
     # ------------------------------------------------------
 
     if densidad_total < 0.35:
@@ -177,12 +177,14 @@ def analizar_pagina(
         tipo_diseno = "fotografico"
 
     # ------------------------------------------------------
-    # Base de consumo
+    # FACTOR AUTOMÁTICO
     # ------------------------------------------------------
+
+    factor_auto = calcular_factor_consumo(densidad_total)
 
     base = (
         ml_base_pagina
-        * factor_general
+        * factor_auto
         * factor_calidad
         * factor_papel
     )
@@ -191,7 +193,7 @@ def analizar_pagina(
         base *= 1.15
 
     # ------------------------------------------------------
-    # Consumo de tinta
+    # CONSUMO
     # ------------------------------------------------------
 
     ml_c = c_media * base
@@ -228,7 +230,7 @@ def analizar_pagina(
             + float(np.mean(rich_black_mask)) * 0.18
         )
 
-        k_extra_ml = ml_base_pagina * factor_general * ratio_extra
+        k_extra_ml = ml_base_pagina * factor_auto * ratio_extra
 
     else:
 
@@ -239,7 +241,7 @@ def analizar_pagina(
             k_extra_ml = (
                 promedio_color
                 * refuerzo_negro
-                * factor_general
+                * factor_auto
             )
 
         else:
@@ -247,10 +249,6 @@ def analizar_pagina(
             k_extra_ml = 0.0
 
     ml_k = ml_k_base + k_extra_ml
-
-    # ------------------------------------------------------
-    # RESULTADO
-    # ------------------------------------------------------
 
     return {
         "C (ml)": float(ml_c),
@@ -260,6 +258,7 @@ def analizar_pagina(
         "K extra auto (ml)": float(k_extra_ml),
         "Densidad total": float(densidad_total),
         "Tipo diseño": tipo_diseno,
+        "Factor consumo auto": float(factor_auto)
     }
 
 
