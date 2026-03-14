@@ -57,10 +57,9 @@ def render_cmyk(usuario: str):
             value=0.15
         )
 
-        factor_general = st.slider(
-            "Factor General de Consumo",
-            1.0, 3.0, 1.5
-        )
+        # FACTOR GENERAL AUTOMÁTICO
+        factor_general = 1.0
+        st.caption("Factor de consumo: automático según cobertura de tinta")
 
         # ------------------------------------------------------
         # CALIDAD DE IMPRESIÓN
