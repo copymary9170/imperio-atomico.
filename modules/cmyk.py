@@ -69,6 +69,46 @@ def render_cmyk(usuario: str):
             1.0, 3.0, 1.5
         )
 
+        # ------------------------------------------------------
+        # CALIDAD DE IMPRESIÓN
+        # ------------------------------------------------------
+
+        calidad_map = {
+            "Borrador": 0.85,
+            "Normal": 1.0,
+            "Alta": 1.18,
+            "Foto": 1.32
+        }
+
+        calidad_sel = st.selectbox(
+            "Calidad de impresión",
+            list(calidad_map.keys()),
+            index=1
+        )
+
+        factor_calidad = calidad_map[calidad_sel]
+
+        # ------------------------------------------------------
+        # PERFIL DE PAPEL DEL DRIVER
+        # ------------------------------------------------------
+
+        papel_map = {
+            "Plain Paper": 0.9,
+            "Bond": 1.0,
+            "Matte": 1.15,
+            "Glossy": 1.30,
+            "Photo Premium": 1.40,
+            "Cartulina": 1.20
+        }
+
+        papel_sel = st.selectbox(
+            "Perfil de papel del driver",
+            list(papel_map.keys()),
+            index=1
+        )
+
+        factor_papel = papel_map[papel_sel]
+
     with col2:
 
         archivos = st.file_uploader(
@@ -86,7 +126,7 @@ def render_cmyk(usuario: str):
         return
 
     resultados = []
-    totales = {"C": 0, "M": 0, "Y": 0, "K": 0}
+    totales = {"C": 0.0, "M": 0.0, "Y": 0.0, "K": 0.0}
 
     with st.spinner("Analizando cobertura CMYK..."):
 
@@ -97,8 +137,8 @@ def render_cmyk(usuario: str):
             config = {
                 "ml_base_pagina": ml_base_pagina,
                 "factor_general": factor_general,
-                "factor_calidad": 1.0,
-                "factor_papel": 1.0,
+                "factor_calidad": factor_calidad,
+                "factor_papel": factor_papel,
                 "factor_k": 0.8,
                 "auto_negro_inteligente": True,
                 "refuerzo_negro": 0.06
@@ -112,15 +152,15 @@ def render_cmyk(usuario: str):
             resultados.extend(res)
 
     # ------------------------------------------------------
-    # AJUSTAR POR TAMAÑO DE PÁGINA
+    # AJUSTE POR TAMAÑO DE PÁGINA
     # ------------------------------------------------------
 
-    total_ml = sum(totales.values())
+    totales_ajustados = {
+        k: ajustar_consumo_por_tamano(v, tamaño_pagina)
+        for k, v in totales.items()
+    }
 
-    total_ml = ajustar_consumo_por_tamano(
-        total_ml,
-        tamaño_pagina
-    )
+    total_ml = sum(totales_ajustados.values())
 
     # ------------------------------------------------------
     # COSTO
@@ -129,7 +169,7 @@ def render_cmyk(usuario: str):
     precio_tinta = costo_tinta_ml(df_inv, fallback=0.10)
 
     costo = calcular_costo_lote(
-        totales,
+        totales_ajustados,
         precio_tinta,
         len(resultados),
         costo_desgaste,
@@ -163,7 +203,7 @@ def render_cmyk(usuario: str):
             "Impresora",
             len(resultados),
             costo["costo_total"],
-            totales
+            totales_ajustados
         )
 
         st.success("Historial guardado.")
