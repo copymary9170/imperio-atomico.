@@ -232,7 +232,7 @@ def analizar_pagina(
             + float(np.mean(rich_black_mask)) * 0.18
         )
 
-      k_extra_ml = (
+        k_extra_ml = (
             ml_base_pagina
             * factor_general
             * factor_auto
