@@ -1,17 +1,13 @@
 from typing import Dict
 import pandas as pd
-
 from database.connection import db_transaction
 
 
 # ==========================================================
-# UTILIDAD
+# BUSCAR COLUMNA
 # ==========================================================
 
 def _col(df: pd.DataFrame, candidatos: list[str], default=None):
-    """
-    Devuelve la primera columna existente dentro de una lista de posibles nombres.
-    """
     for c in candidatos:
         if c in df.columns:
             return c
@@ -19,14 +15,10 @@ def _col(df: pd.DataFrame, candidatos: list[str], default=None):
 
 
 # ==========================================================
-# FILTRAR TINTAS DESDE INVENTARIO
+# FILTRAR TINTAS DEL INVENTARIO
 # ==========================================================
 
-def filtrar_tintas(
-    df_inv: pd.DataFrame,
-    impresora_sel: str,
-    usar_por_impresora: bool
-) -> pd.DataFrame:
+def filtrar_tintas(df_inv: pd.DataFrame) -> pd.DataFrame:
 
     if df_inv.empty:
         return pd.DataFrame()
@@ -37,46 +29,24 @@ def filtrar_tintas(
     if not col_nombre:
         return pd.DataFrame()
 
-    tintas_mask = df_inv[col_nombre].fillna("").str.contains(
-        "tinta|ink|cian|magenta|amarillo|negro|black|cyan",
+    mask = df_inv[col_nombre].fillna("").str.contains(
+        "tinta|ink|cian|cyan|magenta|amarillo|yellow|negro|black",
         case=False,
-        na=False,
+        na=False
     )
 
     if col_categoria:
-        tintas_mask = tintas_mask | df_inv[col_categoria].fillna("").str.contains(
-            "tinta|insumo",
+        mask = mask | df_inv[col_categoria].fillna("").str.contains(
+            "tinta|ink",
             case=False,
-            na=False,
+            na=False
         )
 
-    base = df_inv[tintas_mask].copy()
-
-    if not usar_por_impresora or base.empty:
-        return base
-
-    # -------------------------
-    # filtro por impresora
-    # -------------------------
-
-    aliases = [impresora_sel.lower().strip()]
-    aliases.extend([x for x in aliases[0].split() if len(x) > 2])
-
-    patron = "|".join(sorted(set(a for a in aliases if a)))
-
-    filtro = base[col_nombre].fillna("").str.lower().str.contains(
-        patron,
-        na=False,
-    )
-
-    if filtro.any():
-        return base[filtro].copy()
-
-    return base
+    return df_inv[mask].copy()
 
 
 # ==========================================================
-# MAPEAR CONSUMO CMYK → IDs INVENTARIO
+# MAPEAR CONSUMO CMYK → INVENTARIO
 # ==========================================================
 
 def mapear_consumo_ids(
@@ -89,14 +59,11 @@ def mapear_consumo_ids(
 
     col_nombre = _col(df_tintas, ["item", "nombre"])
 
-    if not col_nombre:
-        return {}
-
     alias = {
         "C": ["cian", "cyan"],
         "M": ["magenta"],
         "Y": ["amarillo", "yellow"],
-        "K": ["negro", "black"],
+        "K": ["negro", "black"]
     }
 
     consumos = {}
@@ -105,7 +72,7 @@ def mapear_consumo_ids(
 
         keys = alias.get(color, [])
 
-        if not keys or ml <= 0:
+        if not keys:
             continue
 
         sub = df_tintas[
@@ -118,19 +85,15 @@ def mapear_consumo_ids(
         if sub.empty:
             continue
 
-        row = sub.iloc[0]
+        item_id = int(sub.iloc[0]["id"])
 
-        item_id = int(row["id"])
-
-        consumos[item_id] = float(
-            consumos.get(item_id, 0.0) + ml
-        )
+        consumos[item_id] = float(consumos.get(item_id, 0.0) + ml)
 
     return consumos
 
 
 # ==========================================================
-# VALIDAR STOCK
+# VALIDAR INVENTARIO
 # ==========================================================
 
 def validar_stock(
@@ -138,16 +101,29 @@ def validar_stock(
     consumos_ids: Dict[int, float]
 ) -> list[str]:
 
-    if df_base.empty or not consumos_ids:
-        return []
+    alertas = []
+
+    # ❗ SI NO EXISTEN TINTAS
+    if df_base.empty:
+        alertas.append(
+            "❌ No hay tintas registradas en el inventario."
+        )
+        return alertas
+
+    if not consumos_ids:
+        alertas.append(
+            "❌ No se pudieron vincular tintas CMYK con el inventario."
+        )
+        return alertas
 
     col_nombre = _col(df_base, ["item", "nombre"]) or "id"
-    col_cantidad = _col(df_base, ["cantidad", "stock", "existencia"]) or "cantidad"
+    col_cantidad = _col(df_base, ["cantidad", "stock", "existencia"])
 
-    if col_cantidad not in df_base.columns or "id" not in df_base.columns:
-        return []
-
-    alertas = []
+    if not col_cantidad:
+        alertas.append(
+            "❌ El inventario no tiene columna de stock."
+        )
+        return alertas
 
     for item_id, requerido in consumos_ids.items():
 
@@ -155,7 +131,7 @@ def validar_stock(
 
         if fila.empty:
             alertas.append(
-                f"⚠️ No se encontró inventario ID {item_id}"
+                f"⚠️ No se encontró tinta con ID {item_id}"
             )
             continue
 
@@ -194,28 +170,26 @@ def descontar_inventario(
 
         cols = {
             str(r[1])
-            for r in conn.execute("PRAGMA table_info(inventario)").fetchall()
+            for r in conn.execute(
+                "PRAGMA table_info(inventario)"
+            ).fetchall()
         }
 
-        col_cantidad = None
+        col_stock = None
 
         if "cantidad" in cols:
-            col_cantidad = "cantidad"
+            col_stock = "cantidad"
         elif "stock" in cols:
-            col_cantidad = "stock"
+            col_stock = "stock"
 
-        if not col_cantidad:
+        if not col_stock:
             return False, "Inventario sin columna de stock."
-
-        # -------------------------
-        # verificar stock
-        # -------------------------
 
         for item_id, ml in consumos_ids.items():
 
             row = conn.execute(
-                f"SELECT {col_cantidad} FROM inventario WHERE id=?",
-                (int(item_id),),
+                f"SELECT {col_stock} FROM inventario WHERE id=?",
+                (int(item_id),)
             ).fetchone()
 
             if not row:
@@ -226,22 +200,18 @@ def descontar_inventario(
             if ml > disponible:
                 return False, (
                     f"Stock insuficiente ID {item_id}: "
-                    f"req {ml:.2f} ml / disp {disponible:.2f}"
+                    f"req {ml:.2f} / disp {disponible:.2f}"
                 )
-
-        # -------------------------
-        # descontar
-        # -------------------------
 
         for item_id, ml in consumos_ids.items():
 
             conn.execute(
                 f"""
                 UPDATE inventario
-                SET {col_cantidad} = {col_cantidad} - ?
+                SET {col_stock} = {col_stock} - ?
                 WHERE id = ?
                 """,
-                (float(ml), int(item_id)),
+                (float(ml), int(item_id))
             )
 
     return True, "Inventario actualizado correctamente."
