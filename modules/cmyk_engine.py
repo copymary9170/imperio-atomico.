@@ -95,6 +95,7 @@ def render_cmyk(usuario: str):
     # ANÁLISIS
     # ------------------------------------------------------
     
+    
     if not archivos:
         st.info("Sube archivos para iniciar el análisis.")
         return
