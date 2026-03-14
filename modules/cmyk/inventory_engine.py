@@ -15,7 +15,7 @@ def _col(df: pd.DataFrame, candidatos: list[str], default=None):
 
 
 # ==========================================================
-# FILTRAR TINTAS DEL INVENTARIO
+# FILTRAR TINTAS
 # ==========================================================
 
 def filtrar_tintas(df_inv: pd.DataFrame) -> pd.DataFrame:
@@ -30,7 +30,7 @@ def filtrar_tintas(df_inv: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     mask = df_inv[col_nombre].fillna("").str.contains(
-        "tinta|ink|cian|cyan|magenta|amarillo|yellow|negro|black",
+        "tinta|ink|cyan|cian|magenta|yellow|amarillo|black|negro",
         case=False,
         na=False
     )
@@ -46,7 +46,7 @@ def filtrar_tintas(df_inv: pd.DataFrame) -> pd.DataFrame:
 
 
 # ==========================================================
-# MAPEAR CONSUMO CMYK → INVENTARIO
+# MAPEAR CONSUMO CMYK
 # ==========================================================
 
 def mapear_consumo_ids(
@@ -93,7 +93,7 @@ def mapear_consumo_ids(
 
 
 # ==========================================================
-# VALIDAR INVENTARIO
+# VALIDAR STOCK
 # ==========================================================
 
 def validar_stock(
@@ -103,26 +103,19 @@ def validar_stock(
 
     alertas = []
 
-    # ❗ SI NO EXISTEN TINTAS
     if df_base.empty:
-        alertas.append(
-            "❌ No hay tintas registradas en el inventario."
-        )
+        alertas.append("❌ No hay tintas registradas en inventario.")
         return alertas
 
     if not consumos_ids:
-        alertas.append(
-            "❌ No se pudieron vincular tintas CMYK con el inventario."
-        )
+        alertas.append("❌ No se pudieron vincular tintas CMYK con el inventario.")
         return alertas
 
     col_nombre = _col(df_base, ["item", "nombre"]) or "id"
-    col_cantidad = _col(df_base, ["cantidad", "stock", "existencia"])
+    col_stock = _col(df_base, ["cantidad", "stock", "existencia"])
 
-    if not col_cantidad:
-        alertas.append(
-            "❌ El inventario no tiene columna de stock."
-        )
+    if not col_stock:
+        alertas.append("❌ Inventario sin columna de stock.")
         return alertas
 
     for item_id, requerido in consumos_ids.items():
@@ -130,13 +123,11 @@ def validar_stock(
         fila = df_base[df_base["id"].astype(int) == int(item_id)]
 
         if fila.empty:
-            alertas.append(
-                f"⚠️ No se encontró tinta con ID {item_id}"
-            )
+            alertas.append(f"⚠️ No se encontró tinta con ID {item_id}")
             continue
 
         disponible = float(
-            pd.to_numeric(fila[col_cantidad], errors="coerce")
+            pd.to_numeric(fila[col_stock], errors="coerce")
             .fillna(0)
             .sum()
         )
