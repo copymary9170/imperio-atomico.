@@ -376,7 +376,7 @@ def render_activos(usuario: str):
                     f"Niveles actuales (ml): BK {float(resumen.get('black_ml') or 0.0):.2f} | C {float(resumen.get('cyan_ml') or 0.0):.2f} | "
                     f"M {float(resumen.get('magenta_ml') or 0.0):.2f} | Y {float(resumen.get('yellow_ml') or 0.0):.2f}"
                 )
-                  st.write("Consumo acumulado por color (ml):", resumen.get("consumos") or {})
+                st.write("Consumo acumulado por color (ml):", resumen.get("consumos") or {})
                 st.caption(
                     f"Sistema tinta: {resumen.get('ink_system_type') or 'N/D'} · Uso tinta: {resumen.get('ink_usage_type') or 'N/D'}"
                 )
