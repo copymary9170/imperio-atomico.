@@ -1054,6 +1054,8 @@ def _obtener_capacidades_por_nombre(nombre: str) -> dict[str, float]:
     if "l1250" in model:
         return {"black": 70.0, "cyan": 70.0, "magenta": 70.0, "yellow": 70.0}
 
+    return {"black": 70.0, "cyan": 70.0, "magenta": 70.0, "yellow": 70.0}
+
 
 def _infer_brand_model(printer_name: str) -> tuple[str, str]:
     name = str(printer_name or "").strip()
