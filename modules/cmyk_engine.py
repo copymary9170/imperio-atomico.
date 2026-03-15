@@ -1,4 +1,4 @@
-mport streamlit as st
+import streamlit as st
 import pandas as pd
 
 from modules.cmyk.analyzer import normalizar_imagenes, analizar_lote
@@ -33,6 +33,42 @@ def _config_base_imprenta(tamano_pagina: str):
     
     return base_por_tamano.get(tamano_pagina, base_por_tamano["A4"])
 
+
+def _factor_area_personalizada(ancho_mm: float, alto_mm: float) -> float:
+    """Factor relativo usando A4 como referencia para tamaños personalizados."""
+    area_a4 = 210.0 * 297.0
+    area_custom = max(float(ancho_mm), 1.0) * max(float(alto_mm), 1.0)
+    return max(0.20, min(4.0, area_custom / area_a4))
+
+
+def _obtener_perfiles_driver(marca: str):
+    """Perfiles de tipo de papel similares a drivers reales para HP y Epson."""
+    perfiles_por_marca = {
+        "HP": {
+            "Papel normal": 1.00,
+            "Papeles fotográficos HP": 1.18,
+            "Papel profesional o folleto mate HP": 1.12,
+            "Papel de presentación mate HP": 1.10,
+            "Papel profesional o folleto brillante HP": 1.16,
+            "Otr. papeles fotog. inyec tinta": 1.20,
+            "Otr. papeles inyec. tinta mates": 1.08,
+            "Otr. pap. inyec tinta brillante": 1.14,
+            "Papel normal, ligero/reciclado": 0.94,
+        },
+        "Epson": {
+            "Papel normal": 1.00,
+            "Epson Photo Paper Glossy": 1.17,
+            "Epson Premium Photo Paper Glossy": 1.22,
+            "Epson Ultra Premium Photo Paper Glossy": 1.26,
+            "Epson Photo Paper Matte": 1.12,
+            "Epson Premium Presentation Paper Matte": 1.10,
+            "Epson Premium Presentation Paper Matte Double-sided": 1.11,
+            "Epson Brochure & Flyer Paper Matte": 1.13,
+            "Sobres": 0.96,
+        },
+    }
+    return perfiles_por_marca.get(marca, perfiles_por_marca["HP"])
+
 # ==========================================================
 # RENDER PRINCIPAL
 # ==========================================================
@@ -58,10 +94,27 @@ def render_cmyk(usuario: str):
 
         st.subheader("⚙️ Ajustes de Calibración Automática")
 
-        tamaños_disponibles = ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide"]
+        tamaños_disponibles = ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide", "Personalizado"]
         tamaño_pagina = st.selectbox("📄 Tamaño de página", tamaños_disponibles, index=1)
 
-        base_imprenta = _config_base_imprenta(tamaño_pagina)
+        if tamaño_pagina == "Personalizado":
+            col_ancho, col_alto = st.columns(2)
+            with col_ancho:
+                ancho_custom = st.number_input("Ancho (mm)", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
+            with col_alto:
+                alto_custom = st.number_input("Alto (mm)", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
+
+            factor_custom = _factor_area_personalizada(ancho_custom, alto_custom)
+            base_a4 = _config_base_imprenta("A4")
+            base_imprenta = {
+                "costo_desgaste": base_a4["costo_desgaste"] * factor_custom,
+                "ml_base": base_a4["ml_base"] * factor_custom,
+                "factor_general": base_a4["factor_general"] * factor_custom,
+            }
+            st.caption(f"Formato personalizado: **{ancho_custom:.0f} x {alto_custom:.0f} mm**")
+            st.caption(f"Factor por área aplicado: **{factor_custom:.2f}x**")
+        else:
+            base_imprenta = _config_base_imprenta(tamaño_pagina)
 
         costo_desgaste = base_imprenta["costo_desgaste"]
         ml_base_pagina = base_imprenta["ml_base"]
@@ -87,38 +140,7 @@ def render_cmyk(usuario: str):
         if col_nombre and not df_inv.empty:
             serie_nombre = df_inv[col_nombre].fillna("").astype(str)
             filtro_categoria = (
-                df_inv["categoria"].fillna("").astype(str).str.contains("papel", case=False, na=False)
-                if "categoria" in df_inv.columns
-                else False
-            )
-            filtro_nombre = serie_nombre.str.contains(
-                "papel|bond|fotograf|cartulina|opalina|sulfato|couche",
-                case=False,
-                na=False,
-            )
-
-            if isinstance(filtro_categoria, pd.Series):
-                df_papeles = df_inv[filtro_categoria | filtro_nombre].copy()
-            else:
-                df_papeles = df_inv[filtro_nombre].copy()
-
-        if not df_papeles.empty and "id" in df_papeles.columns:
-            opciones_papel = {
-                f"{str(row.get(col_nombre, 'Papel')).strip()} (ID {int(row['id'])})": int(row["id"])
-                for _, row in df_papeles.iterrows()
-            }
-            ids_papel = list(opciones_papel.values())
-
-            key_papel_inv = "cmyk_papel_inventario_id"
-            if key_papel_inv not in st.session_state or st.session_state[key_papel_inv] not in ids_papel:
-                st.session_state[key_papel_inv] = ids_papel[0]
-
-            id_actual = int(st.session_state[key_papel_inv])
-            idx_actual = ids_papel.index(id_actual) if id_actual in ids_papel else 0
-
-            etiqueta_papel = st.selectbox(
-                "📦 Papel desde inventario",
-                list(opciones_papel.keys()),
+@@ -122,65 +175,61 @@ def render_cmyk(usuario: str):
                 index=idx_actual,
                 key="cmyk_papel_inventario_label",
             )
@@ -144,21 +166,17 @@ def render_cmyk(usuario: str):
         )
         factor_calidad = float(perfiles_calidad[calidad_impresion])
 
-        perfiles_driver = {
-            "Bond 75g": 0.92,
-            "Bond 90g": 1.00,
-            "Papel Mate": 1.10,
-            "Papel Fotográfico": 1.18,
-            "Cartulina": 1.14,
-        }
+        marca_driver = st.selectbox("🧩 Marca / driver", ["HP", "Epson"], index=0)
+        perfiles_driver = _obtener_perfiles_driver(marca_driver)
         tipo_papel_driver = st.selectbox(
             "📄 Tipo de papel (driver)",
             list(perfiles_driver.keys()),
-            index=1,
+            index=0,
         )
         factor_papel = float(perfiles_driver[tipo_papel_driver])
 
         st.caption(f"Calidad de impresión: **{calidad_impresion}**")
+        st.caption(f"Driver seleccionado: **{marca_driver}**")
         st.caption(f"Tipo de papel (driver): **{tipo_papel_driver}**")
         st.caption(f"Factor calidad aplicado: **{factor_calidad:.2f}**")
         st.caption(f"Factor papel aplicado: **{factor_papel:.2f}**")
