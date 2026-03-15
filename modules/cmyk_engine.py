@@ -121,6 +121,128 @@ def _materiales_papel_disponibles(df_inv: pd.DataFrame) -> pd.DataFrame:
 
     return df.sort_values(by=["_stock_n", "_costo_hoja"], ascending=[False, True])
 
+def _impresoras_disponibles(df_act: pd.DataFrame) -> list[dict]:
+    """Lista impresoras activas detectadas en tabla activos."""
+    if df_act is None or df_act.empty:
+        return []
+
+    df = df_act.copy()
+    nombre_col = _column_match(df, ["equipo", "nombre", "modelo"])
+    if not nombre_col:
+        return []
+
+    categoria_col = _column_match(df, ["categoria", "unidad", "tipo"])
+    id_col = _column_match(df, ["id", "activo_id"])
+
+    if categoria_col:
+        mask_imp = df[categoria_col].fillna("").astype(str).str.contains("impres|cmyk|inkjet", case=False, na=False)
+        if mask_imp.any():
+            df = df[mask_imp].copy()
+
+    if df.empty:
+        return []
+
+    if not id_col:
+        df["_id"] = df.index.astype(int)
+        id_col = "_id"
+
+    return [
+        {
+            "id": int(row[id_col]),
+            "nombre": str(row[nombre_col]),
+            "label": f"{str(row[nombre_col])} (ID {int(row[id_col])})",
+        }
+        for _, row in df.iterrows()
+    ]
+
+
+def _descontar_material_papel(material_id: int, cantidad_hojas: float) -> tuple[bool, str]:
+    from database.connection import db_transaction
+
+    if cantidad_hojas <= 0:
+        return True, "No se descontó papel (cantidad 0)."
+
+    try:
+        with db_transaction() as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+            col_stock = "stock_actual" if "stock_actual" in cols else ("cantidad" if "cantidad" in cols else None)
+            if not col_stock:
+                return False, "No existe columna de stock en inventario."
+
+            row = conn.execute(
+                f"SELECT {col_stock}, COALESCE(nombre, item, sku, 'Material') FROM inventario WHERE id=?",
+                (int(material_id),),
+            ).fetchone()
+
+            if not row:
+                return False, "Material no encontrado."
+
+            stock_actual = float(row[0] or 0.0)
+            nombre = str(row[1])
+            if stock_actual < cantidad_hojas:
+                return False, f"Stock insuficiente de {nombre}. Disponible: {stock_actual:.2f}."
+
+            conn.execute(
+                f"UPDATE inventario SET {col_stock}=COALESCE({col_stock},0)-? WHERE id=?",
+                (float(cantidad_hojas), int(material_id)),
+            )
+            return True, f"Papel descontado: {cantidad_hojas:.2f} hojas de {nombre}."
+    except Exception as exc:
+        return False, f"Error descontando material: {exc}"
+
+
+def _registrar_desgaste_impresora(impresora_id: int, costo_desgaste_total: float) -> tuple[bool, str]:
+    from database.connection import db_transaction
+
+    if costo_desgaste_total <= 0:
+        return True, "Sin desgaste para registrar."
+
+    try:
+        with db_transaction() as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
+            if "desgaste" in cols:
+                conn.execute(
+                    "UPDATE activos SET desgaste=COALESCE(desgaste,0)+? WHERE id=?",
+                    (float(costo_desgaste_total), int(impresora_id)),
+                )
+                return True, f"Desgaste de impresora actualizado (+{costo_desgaste_total:.4f})."
+            if "desgaste_por_uso" in cols:
+                conn.execute(
+                    "UPDATE activos SET desgaste_por_uso=COALESCE(desgaste_por_uso,0)+? WHERE id=?",
+                    (float(costo_desgaste_total), int(impresora_id)),
+                )
+                return True, f"Vida útil/uso registrada (+{costo_desgaste_total:.4f})."
+            return False, "No se encontró columna de desgaste en activos."
+    except Exception as exc:
+        return False, f"Error registrando desgaste: {exc}"
+
+
+def _payload_base_cmyk(
+    usuario: str,
+    impresora: str,
+    total_paginas: int,
+    total_ml: float,
+    costo_total: float,
+    material: str,
+    totales_ajustados: dict,
+) -> dict:
+    return {
+        "origen": "cmyk",
+        "usuario": str(usuario),
+        "impresora": str(impresora),
+        "trabajo": f"Impresión CMYK ({total_paginas} pág)",
+        "cantidad": int(total_paginas),
+        "unidades": int(total_paginas),
+        "material": str(material),
+        "costo_estimado": float(costo_total),
+        "costo_base": float(costo_total),
+        "total_ml": float(total_ml),
+        "consumo_c": float(totales_ajustados.get("C", 0.0)),
+        "consumo_m": float(totales_ajustados.get("M", 0.0)),
+        "consumo_y": float(totales_ajustados.get("Y", 0.0)),
+        "consumo_k": float(totales_ajustados.get("K", 0.0)),
+    }
+
 
 # ==========================================================
 # RENDER PRINCIPAL
@@ -132,7 +254,7 @@ def render_cmyk(usuario: str):
     st.caption(f"Operador: {usuario}")
 
     try:
-        df_inv, _, df_hist = _load_contexto_cmyk()
+        df_inv, df_act, df_hist = _load_contexto_cmyk()
     except Exception as e:
         st.error(f"Error cargando datos CMYK: {e}")
         return
@@ -194,6 +316,7 @@ def render_cmyk(usuario: str):
         costo_material_pagina = 0.0
         material_papel = "No seleccionado"
 
+        material_papel_id = None
         if papeles_inv.empty:
             st.warning("No hay materiales tipo papel con stock disponible en inventario.")
         else:
@@ -205,6 +328,7 @@ def render_cmyk(usuario: str):
             )
             fila_papel = papeles_inv.iloc[int(idx_sel)]
             material_papel = str(fila_papel["_material_label"])
+            material_papel_id = int(fila_papel["_id"])
             costo_material_pagina = float(fila_papel["_costo_hoja"])
             st.caption(f"Material activo: **{material_papel}**")
 
@@ -217,12 +341,23 @@ def render_cmyk(usuario: str):
         st.markdown("#### 🖨️ Impresora y control de inventario")
         impresoras = _impresoras_disponibles(df_act)
         if impresoras:
-            impresora = st.selectbox("Impresora para este análisis", options=impresoras, index=0)
+            idx_imp = st.selectbox(
+                "Impresora para este análisis",
+                options=list(range(len(impresoras))),
+                format_func=lambda i: impresoras[i]["label"],
+                index=0,
+            )
+            impresora_data = impresoras[int(idx_imp)]
+            impresora = str(impresora_data["nombre"])
+            impresora_id = int(impresora_data["id"])
         else:
             impresora = "Impresora"
+            impresora_id = None
             st.info("No se detectaron impresoras activas en Activos. Se guardará como 'Impresora'.")
 
         descontar_stock = st.toggle("Descontar tintas del inventario al guardar", value=True)
+        descontar_papel = st.toggle("Descontar papel/material del inventario", value=True)
+        registrar_desgaste = st.toggle("Registrar consumo de vida útil/desgaste del activo", value=True)
 
     with col2:
         archivos = st.file_uploader("Carga tus diseños", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
@@ -233,7 +368,6 @@ def render_cmyk(usuario: str):
 
     resultados = []
     totales = {"C": 0.0, "M": 0.0, "Y": 0.0, "K": 0.0}
-
     with st.spinner("Analizando cobertura CMYK..."):
         for archivo in archivos:
             try:
@@ -311,16 +445,27 @@ def render_cmyk(usuario: str):
     with col_guardar:
         if st.button("Guardar en historial", use_container_width=True):
             guardar_historial(impresora, len(resultados), costo_total_con_material, totales_ajustados)
+            mensajes = ["Historial guardado correctamente."]
 
             if descontar_stock:
                 ok_stock, msg_stock = descontar_inventario(consumos_ids)
-                if ok_stock:
-                    st.success(f"Historial guardado y stock actualizado. {msg_stock}")
-                else:
-                    st.warning(f"Historial guardado, pero no se pudo descontar stock: {msg_stock}")
-            else:
-                st.success("Historial guardado correctamente.")
+                mensajes.append(msg_stock)
+                if not ok_stock:
+                    st.warning(f"Stock tintas: {msg_stock}")
 
+            if descontar_papel and material_papel_id is not None:
+                ok_papel, msg_papel = _descontar_material_papel(int(material_papel_id), float(total_paginas))
+                mensajes.append(msg_papel)
+                if not ok_papel:
+                    st.warning(f"Material: {msg_papel}")
+
+            if registrar_desgaste and impresora_id is not None:
+                ok_desg, msg_desg = _registrar_desgaste_impresora(int(impresora_id), float(costo["costo_desgaste"]))
+                mensajes.append(msg_desg)
+                if not ok_desg:
+                    st.warning(f"Activos: {msg_desg}")
+
+            st.success(" | ".join(mensajes))
             df_hist = obtener_historial(limit=100)
     with col_exportar:
         st.download_button(
@@ -330,6 +475,56 @@ def render_cmyk(usuario: str):
             mime="text/csv",
             use_container_width=True,
         )
+
+    st.markdown("#### 🚚 Enviar trabajo CMYK a otros módulos")
+    payload_base = _payload_base_cmyk(
+        usuario=usuario,
+        impresora=impresora,
+        total_paginas=total_paginas,
+        total_ml=total_ml,
+        costo_total=costo_total_con_material,
+        material=material_papel,
+        totales_ajustados=totales_ajustados,
+    )
+
+    b1, b2, b3, b4 = st.columns(4)
+    if b1.button("🔥 Enviar a Sublimación", use_container_width=True):
+        cola = st.session_state.get("cola_sublimacion", [])
+        payload_sub = {
+            **payload_base,
+            "tipo_produccion": "sublimacion",
+            "descripcion": f"Transfer CMYK ({total_paginas} páginas)",
+            "costo_transfer_total": float(costo_total_con_material),
+            "cantidad": int(total_paginas),
+        }
+        cola.append(payload_sub)
+        st.session_state["cola_sublimacion"] = cola
+        st.success("Trabajo enviado a la cola de Sublimación.")
+
+    if b2.button("🛠️ Enviar a Otros Procesos", use_container_width=True):
+        st.session_state["datos_proceso_desde_cmyk"] = {
+            **payload_base,
+            "tipo_produccion": "otros_procesos",
+            "observacion": f"Costo base CMYK: $ {costo_total_con_material:.2f} | Material: {material_papel}",
+        }
+        st.success("Trabajo enviado a Otros Procesos.")
+
+    if b3.button("✂️ Enviar a Corte", use_container_width=True):
+        st.session_state["datos_corte_desde_cmyk"] = {
+            **payload_base,
+            "tipo_produccion": "corte",
+            "archivo": "Lote CMYK",
+            "costo_base": float(costo_total_con_material),
+        }
+        st.success("Trabajo enviado a Corte como pre-orden.")
+
+    if b4.button("📝 Enviar a Cotización", use_container_width=True):
+        st.session_state["datos_pre_cotizacion"] = {
+            **payload_base,
+            "descripcion": f"Impresión CMYK {total_paginas} pág | {material_papel}",
+            "tipo_produccion": "cmyk",
+        }
+        st.success("Trabajo enviado a Cotizaciones.")
 
     st.divider()
     st.subheader("Historial reciente")
