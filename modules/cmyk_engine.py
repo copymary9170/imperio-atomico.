@@ -4,7 +4,8 @@ import pandas as pd
 from modules.cmyk.analyzer import normalizar_imagenes, analizar_lote
 from modules.cmyk.cost_engine import (
     costo_tinta_ml,
-    calcular_costo_lote
+    calcular_costo_lote,
+    PERFILES_CALIDAD,
 )
 from modules.cmyk.history import (
     guardar_historial
@@ -30,8 +31,7 @@ def _config_base_imprenta(tamano_pagina: str):
         "Tabloide": {"costo_desgaste": 0.036, "ml_base": 0.27, "factor_general": 1.30},
     }
 
-    return base_por_tamano.get(tamano_pagina, base_por_tamano["A4"])
-
+@@ -35,73 +36,152 @@ def _config_base_imprenta(tamano_pagina: str):
 # ==========================================================
 # RENDER PRINCIPAL
 # ==========================================================
@@ -57,8 +57,8 @@ def render_cmyk(usuario: str):
 
         st.subheader("⚙️ Ajustes de Calibración Automática")
 
-        tamaño_pagina = "A4"
-        st.caption("📄 Tamaño de página: **Automático (A4 estándar)**")
+        tamaños_disponibles = ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide"]
+        tamaño_pagina = st.selectbox("📄 Tamaño de página", tamaños_disponibles, index=1)
 
         base_imprenta = _config_base_imprenta(tamaño_pagina)
 
@@ -75,11 +75,90 @@ def render_cmyk(usuario: str):
         # MODO AUTOMÁTICO DE IMPRENTA
         # ------------------------------------------------------
 
-        factor_calidad = 1.0
-        factor_papel = 1.0
+        # ------------------------------------------------------
+        # PAPEL DE INVENTARIO (SE MANTIENE POR SESSION STATE)
+        # ------------------------------------------------------
 
-        st.caption("Calidad de impresión: **Automática (Normal)**")
-        st.caption("Tipo de papel (driver): **Automático (Bond 90g)**")
+        posibles_cols_nombre = ["nombre", "item", "sku"]
+        col_nombre = next((c for c in posibles_cols_nombre if c in df_inv.columns), None)
+
+        df_papeles = pd.DataFrame()
+        if col_nombre and not df_inv.empty:
+            serie_nombre = df_inv[col_nombre].fillna("").astype(str)
+            filtro_categoria = (
+                df_inv["categoria"].fillna("").astype(str).str.contains("papel", case=False, na=False)
+                if "categoria" in df_inv.columns
+                else False
+            )
+            filtro_nombre = serie_nombre.str.contains(
+                "papel|bond|fotograf|cartulina|opalina|sulfato|couche",
+                case=False,
+                na=False,
+            )
+
+            if isinstance(filtro_categoria, pd.Series):
+                df_papeles = df_inv[filtro_categoria | filtro_nombre].copy()
+            else:
+                df_papeles = df_inv[filtro_nombre].copy()
+
+        if not df_papeles.empty and "id" in df_papeles.columns:
+            opciones_papel = {
+                f"{str(row.get(col_nombre, 'Papel')).strip()} (ID {int(row['id'])})": int(row["id"])
+                for _, row in df_papeles.iterrows()
+            }
+            ids_papel = list(opciones_papel.values())
+
+            key_papel_inv = "cmyk_papel_inventario_id"
+            if key_papel_inv not in st.session_state or st.session_state[key_papel_inv] not in ids_papel:
+                st.session_state[key_papel_inv] = ids_papel[0]
+
+            id_actual = int(st.session_state[key_papel_inv])
+            idx_actual = ids_papel.index(id_actual) if id_actual in ids_papel else 0
+
+            etiqueta_papel = st.selectbox(
+                "📦 Papel desde inventario",
+                list(opciones_papel.keys()),
+                index=idx_actual,
+                key="cmyk_papel_inventario_label",
+            )
+            st.session_state[key_papel_inv] = opciones_papel[etiqueta_papel]
+            st.caption(f"Papel inventario seleccionado: **{etiqueta_papel}**")
+        else:
+            st.warning("No se detectaron papeles en inventario; se usará solo el perfil del driver.")
+
+        # ------------------------------------------------------
+        # CALIDAD Y PAPEL DE DRIVER
+        # ------------------------------------------------------
+
+        perfiles_calidad = {
+            "Borrador": PERFILES_CALIDAD["Borrador"]["ink_mult"],
+            "Normal": PERFILES_CALIDAD["Normal"]["ink_mult"],
+            "Alta": PERFILES_CALIDAD["Alta"]["ink_mult"],
+            "Foto": PERFILES_CALIDAD["Foto"]["ink_mult"],
+        }
+        calidad_impresion = st.selectbox(
+            "🖨️ Calidad de impresión",
+            list(perfiles_calidad.keys()),
+            index=1,
+        )
+        factor_calidad = float(perfiles_calidad[calidad_impresion])
+
+        perfiles_driver = {
+            "Bond 75g": 0.92,
+            "Bond 90g": 1.00,
+            "Papel Mate": 1.10,
+            "Papel Fotográfico": 1.18,
+            "Cartulina": 1.14,
+        }
+        tipo_papel_driver = st.selectbox(
+            "📄 Tipo de papel (driver)",
+            list(perfiles_driver.keys()),
+            index=1,
+        )
+        factor_papel = float(perfiles_driver[tipo_papel_driver])
+
+        st.caption(f"Calidad de impresión: **{calidad_impresion}**")
+        st.caption(f"Tipo de papel (driver): **{tipo_papel_driver}**")
         st.caption(f"Factor calidad aplicado: **{factor_calidad:.2f}**")
         st.caption(f"Factor papel aplicado: **{factor_papel:.2f}**")
 
