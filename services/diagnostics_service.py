@@ -1661,6 +1661,45 @@ def save_uploaded_file(file_obj, diagnostico_id: int, category: str = "evidencia
     }
 
 
+
+
+def register_diagnostic_files(diagnostic_id: int, legacy_diagnostic_id: int, files: list[dict[str, Any]]) -> None:
+    if not files:
+        return
+    with db_transaction() as conn:
+        _ensure_diagnostics_schema(conn)
+        for f in files:
+            conn.execute(
+                """
+                INSERT INTO printer_diagnostic_files
+                (diagnostic_id, file_path, file_type, description, file_name, file_size)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(diagnostic_id),
+                    str(f.get("file_path") or ""),
+                    str(f.get("file_type") or "application/octet-stream"),
+                    str(f.get("file_category") or "evidencia"),
+                    str(f.get("file_name") or "archivo"),
+                    int(f.get("file_size") or 0),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO diagnostico_archivos(diagnostico_id, file_name, file_type, file_category, file_path, file_size)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(legacy_diagnostic_id),
+                    str(f.get("file_name") or "archivo"),
+                    str(f.get("file_type") or "application/octet-stream"),
+                    str(f.get("file_category") or "evidencia"),
+                    str(f.get("file_path") or ""),
+                    int(f.get("file_size") or 0),
+                ),
+            )
+
+
 def get_printer_diagnostic_summary(activo_id: int) -> dict[str, Any]:
     with db_transaction() as conn:
         _ensure_diagnostics_schema(conn)
