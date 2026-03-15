@@ -102,6 +102,7 @@ def _impresoras_disponibles(df_act: pd.DataFrame) -> list[dict]:
     col_equipo = _column_match(df, ["equipo", "nombre"])
     col_categoria = _column_match(df, ["categoria", "tipo"])
     col_modelo = _column_match(df, ["modelo", "unidad"])
+    col_unidad = _column_match(df, ["unidad", "tipo"])
     col_id = _column_match(df, ["id"])
 
     if not col_equipo:
@@ -127,6 +128,9 @@ def _impresoras_disponibles(df_act: pd.DataFrame) -> list[dict]:
                 "id": int(row[col_id]) if col_id and pd.notna(row[col_id]) else None,
                 "nombre": nombre,
                 "label": label,
+                "modelo": modelo,
+                "unidad": str(row.get(col_unidad, "")).strip() if col_unidad else "",
+                "categoria": str(row.get(col_categoria, "")).strip() if col_categoria else "",
             }
         )
 
@@ -138,6 +142,32 @@ def _impresoras_disponibles(df_act: pd.DataFrame) -> list[dict]:
             vistos.add(k)
             unicas.append(op)
     return unicas
+
+
+def _detectar_marca_impresora(impresora: dict) -> str:
+    texto = " ".join(
+        [
+            str(impresora.get("nombre", "")),
+            str(impresora.get("modelo", "")),
+            str(impresora.get("label", "")),
+        ]
+    ).lower()
+    if "epson" in texto:
+        return "Epson"
+    return "HP"
+
+
+def _sistema_tinta_recomendado(impresora: dict) -> str:
+    texto = " ".join(
+        [
+            str(impresora.get("nombre", "")),
+            str(impresora.get("modelo", "")),
+            str(impresora.get("unidad", "")),
+        ]
+    ).lower()
+    if any(k in texto for k in ["tank", "ecotank", "tanque", "l3", "l5", "l8"]):
+        return "Tanque CMYK (4 tintas)"
+    return "Cartucho (Color + Negro)"
 
 
 def render_cmyk(usuario):
@@ -153,14 +183,31 @@ def render_cmyk(usuario):
 
     c1, c2, c3 = st.columns(3)
     impresora_op = c1.selectbox("Impresora (desde Activos)", opciones_imp, format_func=lambda x: x["label"])
-    marca = c2.selectbox("Marca / Driver", ["HP", "Epson"])
+    marca_default = _detectar_marca_impresora(impresora_op)
+    marca = c2.selectbox("Marca / Driver", ["HP", "Epson"], index=0 if marca_default == "HP" else 1)
     calidad = c3.selectbox("Calidad", list(PERFILES_CALIDAD.keys()), index=1)
+
+    st.caption(
+        f"Activo seleccionado: ID #{impresora_op.get('id') or 'N/A'} | "
+        f"Categoría: {impresora_op.get('categoria') or 'N/D'} | "
+        f"Unidad: {impresora_op.get('unidad') or 'N/D'}"
+    )
 
     perfiles_driver = _obtener_perfiles_driver(marca)
     c4, c5, c6 = st.columns(3)
     tipo_papel_driver = c4.selectbox("Perfil de papel (driver)", list(perfiles_driver.keys()))
     tamano = c5.selectbox("Tamaño", ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide", "Personalizado"], index=1)
-    sistema_tinta = c6.selectbox("Sistema de tinta", ["Tanque CMYK (4 tintas)", "Cartucho (Color + Negro)"])
+    sistema_default = _sistema_tinta_recomendado(impresora_op)
+    sistema_tinta = c6.selectbox(
+        "Sistema de tinta",
+        ["Tanque CMYK (4 tintas)", "Cartucho (Color + Negro)"],
+        index=0 if sistema_default.startswith("Tanque") else 1,
+    )
+
+    with st.expander("⚙️ Modo Pro CMYK", expanded=False):
+        p1, p2 = st.columns(2)
+        refuerzo_negro = p1.slider("Refuerzo de negro (K)", min_value=0.0, max_value=0.40, value=0.12, step=0.01)
+        desperdicio_factor = p2.slider("Factor de desperdicio", min_value=1.0, max_value=1.4, value=1.0, step=0.01)
 
     factor_area = 1.0
     if tamano == "Personalizado":
@@ -185,6 +232,7 @@ def render_cmyk(usuario):
         st.subheader("Historial reciente")
         st.dataframe(df_hist, use_container_width=True)
         return
+
 
     if not archivos:
         st.error("Carga al menos un archivo para analizar.")
@@ -217,7 +265,7 @@ def render_cmyk(usuario):
             "factor_papel": factor_driver,
             "factor_k": 1.0,
             "auto_negro_inteligente": True,
-            "refuerzo_negro": 0.12,
+            "refuerzo_negro": float(refuerzo_negro),
         },
     )
 
@@ -228,7 +276,7 @@ def render_cmyk(usuario):
         precio_tinta_ml=precio_tinta,
         paginas=total_paginas,
         costo_desgaste_pagina=float(base["costo_desgaste"]),
-        desperdicio_factor=1.0,
+        desperdicio_factor=float(desperdicio_factor),
         desgaste_head_ml=0.005,
         costo_limpieza=0.0,
     )
@@ -244,6 +292,14 @@ def render_cmyk(usuario):
     m4.metric("K (ml)", f"{totales['K']:.2f}")
 
     st.metric("Costo total estimado", f"$ {costo_total:.2f}")
+
+    b1, b2, b3 = st.columns(3)
+    b1.metric("Costo tinta", f"$ {float(costos['costo_tinta']):.2f}")
+    b2.metric("Costo desgaste", f"$ {float(costos['costo_desgaste']):.2f}")
+    b3.metric("Costo papel", f"$ {float(costo_papel_total):.2f}")
+
+    if total_paginas > 0:
+        st.caption(f"Costo unitario aproximado: $ {(costo_total / total_paginas):.4f} por página")
     st.dataframe(pd.DataFrame(resultados), use_container_width=True)
 
     consumos_ids = mapear_consumo_ids(
