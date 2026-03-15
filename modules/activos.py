@@ -7,6 +7,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, require_text
+from services.diagnostics_service import get_printer_diagnostic_summary, list_printer_diagnostics
 
 ALLOWED_ROLES = {"Admin", "Administration", "Administracion"}
 TIPOS_UNIDAD = [
@@ -349,10 +350,47 @@ def render_activos(usuario: str):
             c_imp3.metric("Páginas impresas (total)", int(df_imp["paginas_impresas"].sum()))
 
             mostrar_cols = [
-                "equipo", "modelo", "categoria", "vida_cabezal_pct", "vida_rodillo_pct",
+                "id", "equipo", "modelo", "categoria", "vida_cabezal_pct", "vida_rodillo_pct",
                 "vida_almohadillas_pct", "desgaste_cabezal_pct", "paginas_impresas", "desgaste", "riesgo"
             ]
             st.dataframe(df_imp[mostrar_cols], use_container_width=True, hide_index=True)
+
+            st.markdown("#### 🩺 Resumen de diagnóstico por impresora")
+            opciones_imp = {f"#{int(r.id)} · {r.equipo}": int(r.id) for r in df_imp.itertuples()}
+            sel_label = st.selectbox("Seleccionar impresora para ver resumen", list(opciones_imp.keys()), key="activos_diag_sel")
+            sel_id = opciones_imp[sel_label]
+            resumen = get_printer_diagnostic_summary(sel_id)
+            if resumen and resumen.get("diagnostico_id"):
+                r1, r2, r3, r4 = st.columns(4)
+                r1.metric("Último diagnóstico", str(resumen.get("fecha") or "N/D"))
+                r2.metric("Páginas totales", int(resumen.get("total_pages") or 0))
+                r3.metric("Desgaste cabezal", f"{float(resumen.get('head_wear_pct') or 0.0):.2f}%")
+                r4.metric("Depreciación estimada", f"$ {float(resumen.get('depreciation_amount') or 0.0):.4f}")
+
+                st.caption(
+                    f"Niveles actuales (ml): BK {float(resumen.get('black_ml') or 0.0):.2f} | C {float(resumen.get('cyan_ml') or 0.0):.2f} | "
+                    f"M {float(resumen.get('magenta_ml') or 0.0):.2f} | Y {float(resumen.get('yellow_ml') or 0.0):.2f}"
+                )
+                st.write("Consumo acumulado por color (ml):", resumen.get("consumos") or {})
+                st.info(
+                    "Exactitud de datos: "
+                    + ("Exacto" if str(resumen.get("estimation_mode") or "none") == "none" else f"Estimado ({resumen.get('estimation_mode')})")
+                    + f" · Confianza: {resumen.get('confidence_level') or 'medium'}"
+                )
+            else:
+                st.info("Esta impresora aún no tiene diagnósticos técnicos registrados.")
+
+            st.markdown("#### 📜 Historial de diagnósticos")
+            historial = pd.DataFrame(list_printer_diagnostics(sel_id, limit=50))
+            if not historial.empty:
+                cols_show = [
+                    "id", "fecha", "total_pages", "color_pages", "bw_pages", "borderless_pages", "scanned_pages",
+                    "black_ml", "cyan_ml", "magenta_ml", "yellow_ml", "estimation_mode", "confidence_level", "files_count"
+                ]
+                cols_show = [c for c in cols_show if c in historial.columns]
+                st.dataframe(historial[cols_show], use_container_width=True, hide_index=True)
+            else:
+                st.caption("Sin historial disponible.")
         else:
             st.info("No hay impresoras activas registradas.")
 
@@ -379,4 +417,4 @@ def render_activos(usuario: str):
 
         fig = px.bar(df, x="equipo", y="inversion", color="categoria", title="Distribución de Inversión por Activo")
         st.plotly_chart(fig, use_container_width=True)
-            st.error(f"Error cargando historial: {e}")
+
