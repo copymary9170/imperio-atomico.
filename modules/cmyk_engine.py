@@ -124,320 +124,265 @@ def _materiales_papel_disponibles(df_inv: pd.DataFrame) -> pd.DataFrame:
 def _impresoras_disponibles(df_act: pd.DataFrame) -> list[dict]:
     """Lista impresoras activas detectadas en tabla activos."""
     if df_act is None or df_act.empty:
-        return []
+from typing import Dict
+import re
+import unicodedata
+import pandas as pd
+from database.connection import db_transaction
 
-    df = df_act.copy()
-    nombre_col = _column_match(df, ["equipo", "nombre", "modelo"])
-    if not nombre_col:
-        return []
 
-    categoria_col = _column_match(df, ["categoria", "unidad", "tipo"])
-    id_col = _column_match(df, ["id", "activo_id"])
+def _normalize(txt: str) -> str:
+    base = unicodedata.normalize("NFKD", str(txt or ""))
+    base = "".join(ch for ch in base if not unicodedata.combining(ch))
+    base = re.sub(r"[^a-zA-Z0-9]+", " ", base).strip().lower()
+    return re.sub(r"\s+", " ", base)
 
-    if categoria_col:
-        mask_imp = df[categoria_col].fillna("").astype(str).str.contains("impres|cmyk|inkjet", case=False, na=False)
-        if mask_imp.any():
-            df = df[mask_imp].copy()
 
-    if df.empty:
-        return []
+# ==========================================================
+# BUSCAR COLUMNA
+# ==========================================================
 
-    if not id_col:
-        df["_id"] = df.index.astype(int)
-        id_col = "_id"
+def _col(df: pd.DataFrame, candidatos: list[str], default=None):
+    for c in candidatos:
+        if c in df.columns:
+            return c
+    return default
 
-    return [
-        {
-            "id": int(row[id_col]),
-            "nombre": str(row.get("equipo") or row.get("nombre") or row.get("modelo") or "Impresora"),
-            "modelo": str(row.get("modelo") or "").strip(),
-            "unidad": str(row.get("unidad") or "").strip(),
-            "categoria": str(row.get("categoria") or "").strip(),
-            "label": (
-                f"{str(row.get('equipo') or row.get('nombre') or row.get('modelo') or 'Impresora')}"
-                f"{(' · ' + str(row.get('modelo'))) if str(row.get('modelo') or '').strip() else ''}"
-                f" (ID {int(row[id_col])})"
-            ),
+
+# ==========================================================
+# FILTRAR TINTAS
+# ==========================================================
+
+def filtrar_tintas(df_inv: pd.DataFrame) -> pd.DataFrame:
+
+    if df_inv.empty:
+        return pd.DataFrame()
+
+    col_nombre = _col(df_inv, ["item", "nombre"])
+    col_categoria = _col(df_inv, ["categoria"])
+
+    if not col_nombre:
+        return pd.DataFrame()
+
+    mask = df_inv[col_nombre].fillna("").str.contains(
+        "tinta|ink|cyan|cian|magenta|yellow|amarillo|black|negro|cartucho|tricolor",
+        case=False,
+        na=False
+    )
+
+    if col_categoria:
+        mask = mask | df_inv[col_categoria].fillna("").str.contains(
+            "tinta|ink|cartucho",
+            case=False,
+            na=False
+        )
+
+    return df_inv[mask].copy()
+
+
+def _score_item(nombre_item: str, printer_name: str, tokens_color: list[str]) -> int:
+    nombre_n = _normalize(nombre_item)
+    printer_n = _normalize(printer_name)
+    score = 0
+
+    if any(tok in nombre_n for tok in tokens_color):
+        score += 6
+
+    if "tinta" in nombre_n or "ink" in nombre_n:
+        score += 2
+    if "cartucho" in nombre_n:
+        score += 2
+
+    for token in [t for t in printer_n.split(" ") if len(t) >= 3]:
+        if token in nombre_n:
+            score += 2
+
+    return score
+
+
+# ==========================================================
+# MAPEAR CONSUMO CMYK
+# ==========================================================
+
+def mapear_consumo_ids(
+    df_tintas: pd.DataFrame,
+    totales: Dict[str, float],
+    sistema_tinta: str = "Tanque CMYK (4 tintas)",
+    impresora: str = "",
+) -> Dict[int, float]:
+
+    if df_tintas.empty or "id" not in df_tintas.columns:
+        return {}
+
+    col_nombre = _col(df_tintas, ["item", "nombre"])
+    if not col_nombre:
+        return {}
+
+    if str(sistema_tinta).startswith("Cartucho"):
+        ml_color = float(totales.get("C", 0.0) + totales.get("M", 0.0) + totales.get("Y", 0.0))
+        ml_black = float(totales.get("K", 0.0))
+
+        alias_cart = {
+            "color": ["cartucho color", "tricolor", "color"],
+            "black": ["cartucho negro", "black", "negro", "bk"],
         }
-        for _, row in df.iterrows()
-    ]
+        consumos: Dict[int, float] = {}
+
+        if ml_color > 0:
+            mejor_id = None
+            mejor_score = 0
+            for _, row in df_tintas.iterrows():
+                score = _score_item(str(row[col_nombre]), impresora, alias_cart["color"])
+                if score > mejor_score:
+                    mejor_score = score
+                    mejor_id = int(row["id"])
+            if mejor_id is not None and mejor_score >= 5:
+                consumos[mejor_id] = consumos.get(mejor_id, 0.0) + ml_color
+
+        if ml_black > 0:
+            mejor_id = None
+            mejor_score = 0
+            for _, row in df_tintas.iterrows():
+                score = _score_item(str(row[col_nombre]), impresora, alias_cart["black"])
+                if score > mejor_score:
+                    mejor_score = score
+                    mejor_id = int(row["id"])
+            if mejor_id is not None and mejor_score >= 5:
+                consumos[mejor_id] = consumos.get(mejor_id, 0.0) + ml_black
+
+        return consumos
+
+    alias = {
+        "C": ["cian", "cyan", "tinta c", "ink c"],
+        "M": ["magenta", "tinta m", "ink m"],
+        "Y": ["amarillo", "yellow", "tinta y", "ink y"],
+        "K": ["negro", "black", "bk", "tinta k", "ink k"],
+    }
+
+    consumos = {}
+
+    for color, ml in totales.items():
+        if float(ml) <= 0:
+            continue
+
+        keys = alias.get(color, [])
+        if not keys:
+            continue
+
+        mejor_id = None
+        mejor_score = 0
+        for _, row in df_tintas.iterrows():
+            score = _score_item(str(row[col_nombre]), impresora, keys)
+            if score > mejor_score:
+                mejor_score = score
+                mejor_id = int(row["id"])
+
+        if mejor_id is not None and mejor_score >= 5:
+            consumos[mejor_id] = float(consumos.get(mejor_id, 0.0) + ml)
+
+    return consumos
 
 
-def _descontar_material_papel(material_id: int, cantidad_hojas: float) -> tuple[bool, str]:
-    from database.connection import db_transaction
+# ==========================================================
+# VALIDAR STOCK
+# ==========================================================
 
-    if cantidad_hojas <= 0:
-        return True, "No se descontó papel (cantidad 0)."
+def validar_stock(
+    df_base: pd.DataFrame,
+    consumos_ids: Dict[int, float]
+) -> list[str]:
 
-    try:
-        with db_transaction() as conn:
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
-            col_stock = "stock_actual" if "stock_actual" in cols else ("cantidad" if "cantidad" in cols else None)
-            if not col_stock:
-                return False, "No existe columna de stock en inventario."
+    alertas = []
+
+    if df_base.empty:
+        alertas.append("❌ No hay tintas registradas en inventario.")
+        return alertas
+
+    if not consumos_ids:
+        alertas.append("❌ No se pudieron vincular tintas CMYK con el inventario.")
+        return alertas
+
+    col_nombre = _col(df_base, ["item", "nombre"]) or "id"
+    col_stock = _col(df_base, ["stock_actual", "cantidad", "stock", "existencia"])
+
+    if not col_stock:
+        alertas.append("❌ Inventario sin columna de stock.")
+        return alertas
+
+    for item_id, requerido in consumos_ids.items():
+
+        fila = df_base[df_base["id"].astype(int) == int(item_id)]
+
+        if fila.empty:
+            alertas.append(f"⚠️ No se encontró tinta con ID {item_id}")
+            continue
+
+        disponible = float(
+            pd.to_numeric(fila[col_stock], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+
+        if requerido > disponible:
+
+            nombre = str(
+                fila.iloc[0].get(col_nombre, f"ID {item_id}")
+            )
+
+@@ -146,51 +211,53 @@ def validar_stock(
+    return alertas
+
+
+# ==========================================================
+# DESCONTAR INVENTARIO
+# ==========================================================
+
+def descontar_inventario(
+    consumos_ids: Dict[int, float]
+) -> tuple[bool, str]:
+
+    if not consumos_ids:
+        return False, "No se encontraron tintas vinculadas."
+
+    with db_transaction() as conn:
+
+        cols = {
+            str(r[1])
+            for r in conn.execute(
+                "PRAGMA table_info(inventario)"
+            ).fetchall()
+        }
+
+        col_stock = None
+
+        if "stock_actual" in cols:
+            col_stock = "stock_actual"
+        elif "cantidad" in cols:
+            col_stock = "cantidad"
+        elif "stock" in cols:
+            col_stock = "stock"
+
+        if not col_stock:
+            return False, "Inventario sin columna de stock."
+
+        for item_id, ml in consumos_ids.items():
 
             row = conn.execute(
-                f"SELECT {col_stock}, COALESCE(nombre, item, sku, 'Material') FROM inventario WHERE id=?",
-                (int(material_id),),
+                f"SELECT {col_stock} FROM inventario WHERE id=?",
+                (int(item_id),)
             ).fetchone()
 
             if not row:
-                return False, "Material no encontrado."
+                return False, f"No existe item ID {item_id}"
 
-            stock_actual = float(row[0] or 0.0)
-            nombre = str(row[1])
-            if stock_actual < cantidad_hojas:
-                return False, f"Stock insuficiente de {nombre}. Disponible: {stock_actual:.2f}."
+            disponible = float(row[0] or 0)
 
-            conn.execute(
-                f"UPDATE inventario SET {col_stock}=COALESCE({col_stock},0)-? WHERE id=?",
-                (float(cantidad_hojas), int(material_id)),
-            )
-            return True, f"Papel descontado: {cantidad_hojas:.2f} hojas de {nombre}."
-    except Exception as exc:
-        return False, f"Error descontando material: {exc}"
-
-
-def _registrar_desgaste_impresora(impresora_id: int, costo_desgaste_total: float, vidas_cabezales: int = 2) -> tuple[bool, str]:
-    from database.connection import db_transaction
-
-    if costo_desgaste_total <= 0:
-        return True, "Sin desgaste para registrar."
-
-    try:
-        with db_transaction() as conn:
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
-            if "vida_cabezal_pct" in cols:
-                dec_pct = min(100.0, float(costo_desgaste_total) * 0.02 * max(1, int(vidas_cabezales)))
-                conn.execute(
-                    "UPDATE activos SET vida_cabezal_pct=MAX(0, COALESCE(vida_cabezal_pct,100)-?) WHERE id=?",
-                    (float(dec_pct), int(impresora_id)),
+            if ml > disponible:
+                return False, (
+                    f"Stock insuficiente ID {item_id}: "
+                    f"req {ml:.2f} / disp {disponible:.2f}"
                 )
-            if "desgaste" in cols:
-                conn.execute(
-                    "UPDATE activos SET desgaste=COALESCE(desgaste,0)+? WHERE id=?",
-                    (float(costo_desgaste_total), int(impresora_id)),
-                )
-                return True, f"Desgaste de impresora actualizado (+{costo_desgaste_total:.4f}). Cabezales: {int(vidas_cabezales)}"
-            if "desgaste_por_uso" in cols:
-                conn.execute(
-                    "UPDATE activos SET desgaste_por_uso=COALESCE(desgaste_por_uso,0)+? WHERE id=?",
-                    (float(costo_desgaste_total), int(impresora_id)),
-                )
-                return True, f"Vida útil/uso registrada (+{costo_desgaste_total:.4f}). Cabezales: {int(vidas_cabezales)}"
-            return False, "No se encontró columna de desgaste en activos."
-    except Exception as exc:
-        return False, f"Error registrando desgaste: {exc}"
 
-
-def _payload_base_cmyk(
-    usuario: str,
-    impresora: str,
-    total_paginas: int,
-    total_ml: float,
-    costo_total: float,
-    material: str,
-    totales_ajustados: dict,
-) -> dict:
-    return {
-        "origen": "cmyk",
-        "usuario": str(usuario),
-        "impresora": str(impresora),
-        "trabajo": f"Impresión CMYK ({total_paginas} pág)",
-        "cantidad": int(total_paginas),
-        "unidades": int(total_paginas),
-        "material": str(material),
-        "costo_estimado": float(costo_total),
-        "costo_base": float(costo_total),
-        "total_ml": float(total_ml),
-@@ -328,55 +341,72 @@ def render_cmyk(usuario: str):
-            )
-            fila_papel = papeles_inv.iloc[int(idx_sel)]
-            material_papel = str(fila_papel["_material_label"])
-            material_papel_id = int(fila_papel["_id"])
-            costo_material_pagina = float(fila_papel["_costo_hoja"])
-            st.caption(f"Material activo: **{material_papel}**")
-
-        editar_parametros = st.toggle("Editar parámetros calculados", value=False)
-        if editar_parametros:
-            costo_desgaste = st.number_input("Costo desgaste por página ($)", min_value=0.0, value=float(costo_desgaste), step=0.001)
-            ml_base_pagina = st.number_input("Consumo base por página (ml)", min_value=0.001, value=float(ml_base_pagina), step=0.001)
-            factor_general = st.number_input("Factor general de consumo", min_value=0.10, value=float(factor_general), step=0.01)
-
-        st.markdown("#### 🖨️ Impresora y control de inventario")
-        impresoras = _impresoras_disponibles(df_act)
-        if impresoras:
-            idx_imp = st.selectbox(
-                "Impresora para este análisis",
-                options=list(range(len(impresoras))),
-                format_func=lambda i: impresoras[i]["label"],
-                index=0,
-            )
-            impresora_data = impresoras[int(idx_imp)]
-            impresora = str(impresora_data["nombre"])
-            impresora_id = int(impresora_data["id"])
-            pista_impresora = " ".join(
-                [
-                    str(impresora_data.get("nombre") or ""),
-                    str(impresora_data.get("modelo") or ""),
-                    str(impresora_data.get("categoria") or ""),
-                    str(impresora_data.get("unidad") or ""),
-                ]
-            ).strip()
-        else:
-            impresora = "Impresora"
-            impresora_id = None
-            pista_impresora = ""
-            st.info("No se detectaron impresoras activas en Activos. Se guardará como 'Impresora'.")
-
-        sistema_tinta = st.selectbox(
-            "Sistema de tinta",
-            ["Tanque CMYK (4 tintas)", "Cartucho (negro + color/tricolor)"],
-            index=0,
-            help="Tanque descuenta C/M/Y/K por separado. Cartucho descuenta negro y cartucho de color (C+M+Y).",
-        )
-        st.caption("Cabezales considerados para desgaste de vida útil: **2**")
-
-        descontar_stock = st.toggle("Descontar tintas del inventario al guardar", value=True)
-        descontar_papel = st.toggle("Descontar papel/material del inventario", value=True)
-        registrar_desgaste = st.toggle("Registrar consumo de vida útil/desgaste del activo", value=True)
-
-    with col2:
-        archivos = st.file_uploader("Carga tus diseños", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-
-    if not archivos:
-        st.info("Sube archivos para iniciar el análisis.")
-        return
-
-    resultados = []
-    totales = {"C": 0.0, "M": 0.0, "Y": 0.0, "K": 0.0}
-    with st.spinner("Analizando cobertura CMYK..."):
-        for archivo in archivos:
-            try:
-                paginas = normalizar_imagenes(archivo)
-            except ValueError as exc:
-                st.warning(str(exc))
-                continue
-
-            config = {
-                "ml_base_pagina": ml_base_pagina,
-                "factor_general": factor_general,
-                "factor_calidad": factor_calidad,
-                "factor_papel": factor_papel,
-                "factor_k": 0.8,
-                "auto_negro_inteligente": True,
-                "refuerzo_negro": 0.06,
-            }
-
-            res, tot = analizar_lote(paginas, config)
-            for k in totales:
-                totales[k] += tot[k]
-            resultados.extend(res)
-
-    totales_ajustados = {k: ajustar_consumo_por_tamano(v, tamano_pagina) for k, v in totales.items()}
-    total_ml = sum(totales_ajustados.values())
-    total_paginas = len(resultados)
-
-    precio_tinta = costo_tinta_ml(df_inv, fallback=0.10)
-    costo = calcular_costo_lote(totales_ajustados, precio_tinta, len(resultados), costo_desgaste, 1.15, 0.005, 0.02)
-    costo_material_total = costo_material_pagina * float(total_paginas)
-    costo_total_con_material = float(costo["costo_total"]) + float(costo_material_total)
-
-    df_resultados = pd.DataFrame(resultados)
-
-    st.subheader("Resumen general")
-    col_a, col_b, col_c, col_d = st.columns(4)
-    col_a.metric("Consumo total tinta", f"{total_ml:.3f} ml")
-    col_b.metric("Precio tinta/ml", f"$ {precio_tinta:.3f}")
-    col_c.metric("Costo material", f"$ {costo_material_total:.2f}")
-    col_d.metric("Costo total estimado", f"$ {costo_total_con_material:.2f}")
-    st.caption(f"Material seleccionado: **{material_papel}**")
-
-    st.subheader("Resultados por página")
-    st.dataframe(df_resultados, use_container_width=True, height=360)
-
-    st.markdown("#### Desglose de costos")
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"Concepto": "Tinta", "Monto ($)": round(float(costo["costo_tinta"]), 4)},
-                {"Concepto": "Desgaste por páginas", "Monto ($)": round(float(costo["costo_desgaste"]), 4)},
-                {"Concepto": "Cabezal", "Monto ($)": round(float(costo["costo_cabezal"]), 4)},
-                {"Concepto": "Limpieza", "Monto ($)": 0.02},
-                {"Concepto": "Material/Papel", "Monto ($)": round(float(costo_material_total), 4)},
-                {"Concepto": "TOTAL", "Monto ($)": round(float(costo_total_con_material), 4)},
-            ]
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.markdown("#### Consumo CMYK")
-    st.bar_chart(pd.DataFrame([totales_ajustados], index=["ml"]))
-
-    df_tintas = filtrar_tintas(df_inv)
-    consumos_ids = mapear_consumo_ids(
-        df_tintas,
-        totales_ajustados,
-        sistema_tinta=sistema_tinta,
-        impresora=f"{impresora} {pista_impresora}",
-    )
-    alertas_stock = validar_stock(df_tintas, consumos_ids)
-
-    if alertas_stock:
-        st.markdown("#### ⚠️ Validación de stock de tintas")
-        for alerta in alertas_stock:
-            st.warning(alerta)
-
-    col_guardar, col_exportar = st.columns([1, 1])
-    with col_guardar:
-        if st.button("Guardar en historial", use_container_width=True):
-            guardar_historial(impresora, len(resultados), costo_total_con_material, totales_ajustados)
-            mensajes = ["Historial guardado correctamente."]
-
-            if descontar_stock:
-                ok_stock, msg_stock = descontar_inventario(consumos_ids)
-                mensajes.append(msg_stock)
-                if not ok_stock:
-                    st.warning(f"Stock tintas: {msg_stock}")
-
-            if descontar_papel and material_papel_id is not None:
-                ok_papel, msg_papel = _descontar_material_papel(int(material_papel_id), float(total_paginas))
-                mensajes.append(msg_papel)
-                if not ok_papel:
-                    st.warning(f"Material: {msg_papel}")
-
-            if registrar_desgaste and impresora_id is not None:
-                ok_desg, msg_desg = _registrar_desgaste_impresora(
-                    int(impresora_id),
-                    float(costo["costo_desgaste"]),
-                    vidas_cabezales=2,
-                )
-                mensajes.append(msg_desg)
-                if not ok_desg:
-                    st.warning(f"Activos: {msg_desg}")
-
-            st.success(" | ".join(mensajes))
-            df_hist = obtener_historial(limit=100)
-    with col_exportar:
-        st.download_button(
-            "Descargar detalle CSV",
-            data=df_resultados.to_csv(index=False).encode("utf-8"),
-            file_name="analisis_cmyk_detalle.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-
-    st.markdown("#### 🚚 Enviar trabajo CMYK a otros módulos")
-    payload_base = _payload_base_cmyk(
-        usuario=usuario,
-        impresora=impresora,
-        total_paginas=total_paginas,
-        total_ml=total_ml,
-        costo_total=costo_total_con_material,
-        material=material_papel,
-        totales_ajustados=totales_ajustados,
-    )
 
     b1, b2, b3, b4 = st.columns(4)
     if b1.button("🔥 Enviar a Sublimación", use_container_width=True):
