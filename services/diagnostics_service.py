@@ -134,7 +134,7 @@ def _normalize_color(color: str) -> str:
     return aliases.get(txt, txt)
 
 
-def extraer_desgaste_componentes(texto_ocr: str | None) -> dict[str, float | None]::
+def extraer_desgaste_componentes(texto_ocr: str | None) -> dict[str, float | None]:
     texto = str(texto_ocr or "")
     componentes: dict[str, float | None] = {"cabezal": None, "rodillo": None, "almohadillas": None}
     for nombre, patrones in COMPONENT_LIFE_PATTERNS.items():
