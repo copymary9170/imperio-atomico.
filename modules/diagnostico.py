@@ -277,6 +277,8 @@ def render_diagnostico(usuario: str) -> None:
         "yellow": c3.number_input("Yellow (ml)", min_value=0.0, value=float(capacidad_default["yellow"]), step=1.0),
         "black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["black"]), step=1.0),
     }
+    
+   show_save_form_key = "diag_show_save_form"
 
     if st.button("🔍 Analizar diagnóstico"):
         texto_ocr = texto_manual.strip()
@@ -329,138 +331,29 @@ def render_diagnostico(usuario: str) -> None:
                 if payload
             ],
         }
+        st.session_state[show_save_form_key] = False
     datos = st.session_state.get("diag_last_analysis")
     if not datos or datos.get("impresora") != impresora_sel:
+        st.session_state[show_save_form_key] = False
         return
 
+    show_save_form = bool(st.session_state.get(show_save_form_key, False))
+
+    st.markdown("---")
+    st.subheader("3) Resultado del análisis")
     _mostrar_resultados(datos["resultados"], datos["resumen"])
-    if not datos.get("activo_id"):
-        st.warning("Este análisis no está vinculado a un activo; Inventario puede actualizarse, pero Activos no recibirá cambios.")
-    st.info("Análisis listo. Usa el botón para enviarlo a Activos e Inventario.")
+    r1, r2 = st.columns(2)
+    r1.metric("Contador de páginas", int(datos.get("contador_impresiones", 0)))
+    r2.metric("Vida del cabezal", f"{float(datos.get('vida_cabezal_pct', 0.0)):.2f}%")
 
-    st.subheader("🧾 Registro técnico del diagnóstico")
-    cc1, cc2, cc3 = st.columns(3)
-    total_pages = cc1.number_input("total_pages", min_value=0, value=int(datos.get("contador_impresiones", 0)), step=1)
-    color_pages = cc2.number_input("color_pages", min_value=0, value=0, step=1)
-    bw_pages = cc3.number_input("bw_pages", min_value=0, value=0, step=1)
-    cc4, cc5 = st.columns(2)
-    borderless_pages = cc4.number_input("borderless_pages", min_value=0, value=0, step=1)
-    scanned_pages = cc5.number_input("scanned_pages", min_value=0, value=0, step=1)
-
-    st.markdown("**Caso especial / estimación**")
-    ec1, ec2, ec3 = st.columns(3)
-    initial_fill_known = ec1.checkbox("initial_fill_known", value=bool(datos["profile"].get("initial_fill_known", True)))
-    estimation_mode_options = ["none", "visual", "software", "manual"]
-    em_default = datos["profile"].get("estimation_mode", "none")
-    em_index = estimation_mode_options.index(em_default) if em_default in estimation_mode_options else 0
-    estimation_mode = ec2.selectbox("estimation_mode", estimation_mode_options, index=em_index)
-    confidence_level = ec3.selectbox("confidence_level", ["low", "medium", "high"], index=1)
-
-    pc1, pc2, pc3 = st.columns(3)
-    ink_system_opts = ["factory_tank", "cartridge", "adapted_external_tank"]
-    usage_opts = ["standard", "sublimation"]
-    ink_default = datos["profile"].get("ink_system_type", "factory_tank")
-    usage_default = datos["profile"].get("ink_usage_type", "standard")
-    ink_system_type = pc1.selectbox("ink_system_type", ink_system_opts, index=ink_system_opts.index(ink_default) if ink_default in ink_system_opts else 0)
-    ink_usage_type = pc2.selectbox("ink_usage_type", usage_opts, index=usage_opts.index(usage_default) if usage_default in usage_opts else 0)
-    head_system_type = pc3.text_input("head_system_type", value=str(datos["profile"].get("head_system_type", "integrated")))
-    vc1, vc2 = st.columns(2)
-    purchase_value = vc1.number_input("purchase_value", min_value=0.0, value=0.0, step=10.0)
-    current_value = vc2.number_input("current_value", min_value=0.0, value=0.0, step=10.0)
-
-    notes = st.text_area("notes", value="Registro desde Diagnóstico IA", key="diag_notes")
-
-    st.markdown("**Lectura por color**")
-    source_options = ["photo", "software", "report", "manual"]
-    per_color_source: dict[str, str] = {}
-    per_color_conf: dict[str, str] = {}
-    cols = st.columns(4)
-    for idx, color in enumerate(COLOR_ORDER):
-        source_default = "software" if color in datos.get("porcentajes_software", {}) else "photo"
-        per_color_source[color] = cols[idx].selectbox(f"{color}_source", source_options, index=source_options.index(source_default), key=f"src_{color}")
-        per_color_conf[color] = cols[idx].selectbox(f"{color}_confidence", ["low", "medium", "high"], index=1, key=f"conf_{color}")
-
-    st.markdown("**Archivos y evidencia**")
-    st.caption(
-        "Se guardarán automáticamente los mismos archivos usados para el análisis (hoja, tanques y software)."
+    st.markdown("#### Resumen")
+    st.write(
+        {
+            "Estado tintas": datos["resumen"].get("estado_tintas", "N/D"),
+            "Estado cabezal": datos["resumen"].get("estado_cabezal", "N/D"),
+            "Mín tinta (ml)": round(float(datos["resumen"].get("min_ml", 0.0)), 2),
+        }
     )
-    archivos_extra = st.file_uploader(
-        "Evidencia extra opcional (fotos adicionales, botellas, otros soportes)",
-        type=["pdf", "png", "jpg", "jpeg"],
-        accept_multiple_files=True,
-        key="diag_extra_files",
-    )
-
-    if st.button("📨 Guardar diagnóstico técnico"):
-        try:
-            if not datos.get("activo_id"):
-                raise ValueError("Debes vincular el diagnóstico a un activo")
-
-            activo_id = int(datos.get("activo_id"))
-            save_tank_capacities(activo_id, capacidad)
-
-            tank_levels = {}
-            for color in COLOR_ORDER:
-                est_pct = float(datos.get("fusion_pct", {}).get(color, 0.0))
-                capacity_ml = float(capacidad.get(color, 0.0))
-                est_ml = round((est_pct * capacity_ml) / 100.0, 2)
-                tank_levels[color] = {
-                    "estimated_percent": est_pct,
-                    "estimated_ml": max(0.0, est_ml),
-                    "source_of_measurement": per_color_source.get(color, "manual"),
-                    "confidence_level": per_color_conf.get(color, confidence_level),
-                    "is_estimated": estimation_mode != "none",
-                }
-
-            rec = create_diagnostic_record(
-                usuario=usuario,
-                activo_id=activo_id,
-                printer_name=impresora_sel,
-                counters={
-                    "total_pages": int(total_pages),
-                    "color_pages": int(color_pages),
-                    "bw_pages": int(bw_pages),
-                    "borderless_pages": int(borderless_pages),
-                    "scanned_pages": int(scanned_pages),
-                },
-                tank_levels=tank_levels,
-                notes=notes,
-                files=[],
-                estimation_mode=estimation_mode,
-                confidence_level=confidence_level,
-                initial_fill_known=bool(initial_fill_known),
-                ink_system_type=ink_system_type,
-                ink_usage_type=ink_usage_type,
-                head_system_type=head_system_type,
-                purchase_value=float(purchase_value),
-                current_value=float(current_value),
-            )
-
-            files_meta = []
-            legacy_id = int(rec.get("legacy_diagnostico_id") or rec["diagnostico_id"])
-
-            archivos_principales = list(datos.get("archivos_principales") or [])
-            for payload in archivos_principales:
-                stored_file = _restore_upload(payload)
-                meta = save_uploaded_file(stored_file, legacy_id, str(payload.get("category") or "evidencia"))
-                if meta:
-                    files_meta.append(meta)
-
-            for extra_file in archivos_extra or []:
-                meta = save_uploaded_file(extra_file, legacy_id, "evidencia_extra")
-                if meta:
-                    files_meta.append(meta)
-
-            if files_meta:
-                register_diagnostic_files(int(rec["diagnostico_id"]), legacy_id, files_meta)
-
-            st.success(f"✅ Diagnóstico guardado (ID #{rec['diagnostico_id']}).")
-            st.caption(
-                "Desgaste estimado cabezal: "
-                f"{float(rec['head_wear_pct']):.2f}% | Depreciación estimada: ${float(rec['depreciation_amount']):.4f}"
-            )
-        except Exception as exc:
-            st.error(f"No fue posible guardar diagnóstico: {exc}")
 
     st.markdown("#### Señales detectadas")
     s1, s2, s3 = st.columns(3)
@@ -471,8 +364,147 @@ def render_diagnostico(usuario: str) -> None:
     s3.markdown("**Porcentajes visuales:**")
     s3.write({k: round(float(v), 2) for k, v in datos.get("porcentajes_visual", {}).items()})
 
-    if datos.get("activo_id"):
+    if not datos.get("activo_id"):
+        st.warning("Este análisis no está vinculado a un activo; Inventario puede actualizarse, pero Activos no recibirá cambios.")
+    st.info("Análisis listo. Revisa los resultados y luego continúa a la fase de guardado.")
+
+    if not show_save_form:
+        if st.button("➡️ Continuar para guardar diagnóstico"):
+            st.session_state[show_save_form_key] = True
+            st.rerun()
+
+    if show_save_form:
         st.markdown("---")
+        st.subheader("4) Registro técnico del diagnóstico")
+        st.caption("Completa estos campos para guardar el diagnóstico técnico.")
+
+        cc1, cc2, cc3 = st.columns(3)
+        total_pages = cc1.number_input("total_pages", min_value=0, value=int(datos.get("contador_impresiones", 0)), step=1)
+        color_pages = cc2.number_input("color_pages", min_value=0, value=0, step=1)
+        bw_pages = cc3.number_input("bw_pages", min_value=0, value=0, step=1)
+        cc4, cc5 = st.columns(2)
+        borderless_pages = cc4.number_input("borderless_pages", min_value=0, value=0, step=1)
+        scanned_pages = cc5.number_input("scanned_pages", min_value=0, value=0, step=1)
+
+        st.markdown("**Caso especial / estimación**")
+        ec1, ec2, ec3 = st.columns(3)
+        initial_fill_known = ec1.checkbox("initial_fill_known", value=bool(datos["profile"].get("initial_fill_known", True)))
+        estimation_mode_options = ["none", "visual", "software", "manual"]
+        em_default = datos["profile"].get("estimation_mode", "none")
+        em_index = estimation_mode_options.index(em_default) if em_default in estimation_mode_options else 0
+        estimation_mode = ec2.selectbox("estimation_mode", estimation_mode_options, index=em_index)
+        confidence_level = ec3.selectbox("confidence_level", ["low", "medium", "high"], index=1)
+
+        pc1, pc2, pc3 = st.columns(3)
+        ink_system_opts = ["factory_tank", "cartridge", "adapted_external_tank"]
+        usage_opts = ["standard", "sublimation"]
+        ink_default = datos["profile"].get("ink_system_type", "factory_tank")
+        usage_default = datos["profile"].get("ink_usage_type", "standard")
+        ink_system_type = pc1.selectbox("ink_system_type", ink_system_opts, index=ink_system_opts.index(ink_default) if ink_default in ink_system_opts else 0)
+        ink_usage_type = pc2.selectbox("ink_usage_type", usage_opts, index=usage_opts.index(usage_default) if usage_default in usage_opts else 0)
+        head_system_type = pc3.text_input("head_system_type", value=str(datos["profile"].get("head_system_type", "integrated")))
+        vc1, vc2 = st.columns(2)
+        purchase_value = vc1.number_input("purchase_value", min_value=0.0, value=0.0, step=10.0)
+        current_value = vc2.number_input("current_value", min_value=0.0, value=0.0, step=10.0)
+
+        notes = st.text_area("notes", value="Registro desde Diagnóstico IA", key="diag_notes")
+
+        st.markdown("**Lectura por color**")
+        source_options = ["photo", "software", "report", "manual"]
+        per_color_source: dict[str, str] = {}
+        per_color_conf: dict[str, str] = {}
+        cols = st.columns(4)
+        for idx, color in enumerate(COLOR_ORDER):
+            source_default = "software" if color in datos.get("porcentajes_software", {}) else "photo"
+            per_color_source[color] = cols[idx].selectbox(f"{color}_source", source_options, index=source_options.index(source_default), key=f"src_{color}")
+            per_color_conf[color] = cols[idx].selectbox(f"{color}_confidence", ["low", "medium", "high"], index=1, key=f"conf_{color}")
+
+        st.markdown("**Evidencia extra**")
+        st.caption(
+            "Se guardarán automáticamente los mismos archivos usados para el análisis (hoja, tanques y software)."
+        )
+        archivos_extra = st.file_uploader(
+            "Evidencia extra opcional (fotos adicionales, botellas, otros soportes)",
+            type=["pdf", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key="diag_extra_files",
+        )
+
+        st.subheader("5) Guardado del diagnóstico")
+        if st.button("📨 Guardar diagnóstico técnico"):
+            try:
+                if not datos.get("activo_id"):
+                    raise ValueError("Debes vincular el diagnóstico a un activo")
+
+                activo_id = int(datos.get("activo_id"))
+                save_tank_capacities(activo_id, capacidad)
+
+                tank_levels = {}
+                for color in COLOR_ORDER:
+                    est_pct = float(datos.get("fusion_pct", {}).get(color, 0.0))
+                    capacity_ml = float(capacidad.get(color, 0.0))
+                    est_ml = round((est_pct * capacity_ml) / 100.0, 2)
+                    tank_levels[color] = {
+                        "estimated_percent": est_pct,
+                        "estimated_ml": max(0.0, est_ml),
+                        "source_of_measurement": per_color_source.get(color, "manual"),
+                        "confidence_level": per_color_conf.get(color, confidence_level),
+                        "is_estimated": estimation_mode != "none",
+                    }
+
+                rec = create_diagnostic_record(
+                    usuario=usuario,
+                    activo_id=activo_id,
+                    printer_name=impresora_sel,
+                    counters={
+                        "total_pages": int(total_pages),
+                        "color_pages": int(color_pages),
+                        "bw_pages": int(bw_pages),
+                        "borderless_pages": int(borderless_pages),
+                        "scanned_pages": int(scanned_pages),
+                    },
+                    tank_levels=tank_levels,
+                    notes=notes,
+                    files=[],
+                    estimation_mode=estimation_mode,
+                    confidence_level=confidence_level,
+                    initial_fill_known=bool(initial_fill_known),
+                    ink_system_type=ink_system_type,
+                    ink_usage_type=ink_usage_type,
+                    head_system_type=head_system_type,
+                    purchase_value=float(purchase_value),
+                    current_value=float(current_value),
+                )
+
+                files_meta = []
+                legacy_id = int(rec.get("legacy_diagnostico_id") or rec["diagnostico_id"])
+
+                archivos_principales = list(datos.get("archivos_principales") or [])
+                for payload in archivos_principales:
+                    stored_file = _restore_upload(payload)
+                    meta = save_uploaded_file(stored_file, legacy_id, str(payload.get("category") or "evidencia"))
+                    if meta:
+                        files_meta.append(meta)
+
+                for extra_file in archivos_extra or []:
+                    meta = save_uploaded_file(extra_file, legacy_id, "evidencia_extra")
+                    if meta:
+                        files_meta.append(meta)
+
+                if files_meta:
+                    register_diagnostic_files(int(rec["diagnostico_id"]), legacy_id, files_meta)
+
+                st.success(f"✅ Diagnóstico guardado (ID #{rec['diagnostico_id']}).")
+                st.caption(
+                    "Desgaste estimado cabezal: "
+                    f"{float(rec['head_wear_pct']):.2f}% | Depreciación estimada: ${float(rec['depreciation_amount']):.4f}"
+                )
+            except Exception as exc:
+                st.error(f"No fue posible guardar diagnóstico: {exc}")
+
+    st.markdown("---")
+    st.subheader("6) Recargas, mantenimiento e historiales")
+    if datos.get("activo_id"):
         st.subheader("💧 Registro de recargas")
         rr1, rr2, rr3, rr4 = st.columns(4)
         refill_color = rr1.selectbox("color", list(COLOR_ORDER), key="refill_color")
