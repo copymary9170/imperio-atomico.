@@ -63,6 +63,59 @@ def _obtener_perfiles_driver(marca: str):
     return perfiles_por_marca.get(marca, perfiles_por_marca["HP"])
 
 
+def _column_match(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    return next((c for c in candidates if c in df.columns), None)
+
+
+def _materiales_papel_disponibles(df_inv: pd.DataFrame) -> pd.DataFrame:
+    """Filtra materiales de papel presentes en inventario y con stock positivo."""
+    if df_inv.empty:
+        return pd.DataFrame()
+
+    df = df_inv.copy()
+
+    col_nombre = _column_match(df, ["nombre", "item", "sku"])
+    col_categoria = _column_match(df, ["categoria", "familia", "tipo"])
+    col_stock = _column_match(df, ["stock_actual", "stock", "cantidad"])
+
+    if not col_nombre:
+        return pd.DataFrame()
+
+    nombres = df[col_nombre].fillna("").astype(str)
+    categorias = df[col_categoria].fillna("").astype(str) if col_categoria else ""
+
+    mask_papel_nombre = nombres.str.contains("papel|bond|opalina|couche|glossy|mate|fotograf|cartulina", case=False, na=False)
+    if col_categoria:
+        mask_papel_categoria = categorias.str.contains("papel|impres|sustrato|material", case=False, na=False)
+        mask_papel = mask_papel_nombre | mask_papel_categoria
+    else:
+        mask_papel = mask_papel_nombre
+
+    df = df[mask_papel].copy()
+
+    if col_stock:
+        df["_stock_n"] = pd.to_numeric(df[col_stock], errors="coerce").fillna(0.0)
+        df = df[df["_stock_n"] > 0].copy()
+    else:
+        df["_stock_n"] = 0.0
+
+    col_costo = _column_match(df, ["costo_unitario_usd", "precio_usd", "precio_venta_usd"])
+    df["_costo_hoja"] = pd.to_numeric(df[col_costo], errors="coerce").fillna(0.0) if col_costo else 0.0
+
+    col_id = _column_match(df, ["id", "inventario_id"])
+    if col_id:
+        df["_id"] = df[col_id]
+    else:
+        df["_id"] = df.index.astype(str)
+
+    df["_material_label"] = df.apply(
+        lambda r: f"{str(r[col_nombre]).strip()} | Stock: {float(r['_stock_n']):.2f} | $/hoja: {float(r['_costo_hoja']):.4f}",
+        axis=1,
+    )
+
+    return df.sort_values(by=["_stock_n", "_costo_hoja"], ascending=[False, True])
+
+
 # ==========================================================
 # RENDER PRINCIPAL
 # ==========================================================
@@ -105,7 +158,7 @@ def render_cmyk(usuario: str):
         else:
             base_imprenta = _config_base_imprenta(tamano_pagina)
 
-        costo_desgaste = base_imprenta["costo_desgaste"]
+       costo_desgaste = base_imprenta["costo_desgaste"]
         ml_base_pagina = base_imprenta["ml_base"]
         factor_general = base_imprenta["factor_general"]
 
@@ -130,15 +183,24 @@ def render_cmyk(usuario: str):
         st.caption(f"Factor calidad aplicado: **{factor_calidad:.2f}**")
         st.caption(f"Factor papel aplicado: **{factor_papel:.2f}**")
 
-        # Mostrar papel detectado en inventario sin forzar selección manual
-        posibles_cols_nombre = ["nombre", "item", "sku"]
-        col_nombre = next((c for c in posibles_cols_nombre if c in df_inv.columns), None)
-        if col_nombre and not df_inv.empty:
-            serie_nombre = df_inv[col_nombre].fillna("").astype(str)
-            mask = serie_nombre.str.contains("papel|bond|opalina|couche|glossy|mate|fotograf", case=False, na=False)
-            papeles = serie_nombre[mask].tolist()
-            if papeles:
-                st.caption(f"Papel inventario detectado: **{papeles[0]}**")
+        st.markdown("#### 📦 Material / papel desde inventario")
+        papeles_inv = _materiales_papel_disponibles(df_inv)
+        costo_material_pagina = 0.0
+        material_papel = "No seleccionado"
+
+        if papeles_inv.empty:
+            st.warning("No hay materiales tipo papel con stock disponible en inventario.")
+        else:
+            idx_sel = st.selectbox(
+                "Selecciona material/papel (solo inventario con stock)",
+                options=list(range(len(papeles_inv))),
+                format_func=lambda i: papeles_inv.iloc[i]["_material_label"],
+                index=0,
+            )
+            fila_papel = papeles_inv.iloc[int(idx_sel)]
+            material_papel = str(fila_papel["_material_label"])
+            costo_material_pagina = float(fila_papel["_costo_hoja"])
+            st.caption(f"Material activo: **{material_papel}**")
 
         editar_parametros = st.toggle("Editar parámetros calculados", value=False)
         if editar_parametros:
@@ -176,22 +238,54 @@ def render_cmyk(usuario: str):
 
     totales_ajustados = {k: ajustar_consumo_por_tamano(v, tamano_pagina) for k, v in totales.items()}
     total_ml = sum(totales_ajustados.values())
+    total_paginas = len(resultados)
 
     precio_tinta = costo_tinta_ml(df_inv, fallback=0.10)
     costo = calcular_costo_lote(totales_ajustados, precio_tinta, len(resultados), costo_desgaste, 1.15, 0.005, 0.02)
+    costo_material_total = costo_material_pagina * float(total_paginas)
+    costo_total_con_material = float(costo["costo_total"]) + float(costo_material_total)
 
     df_resultados = pd.DataFrame(resultados)
 
-    st.subheader("Resultados por página")
-    st.dataframe(df_resultados, use_container_width=True)
+    tab_resumen, tab_detalle, tab_analisis = st.tabs([
+        "📊 Resumen",
+        "📄 Detalle por página",
+        "🧠 Análisis avanzado",
+    ])
 
-    col_a, col_b, col_c = st.columns(3)
-    col_a.metric("Consumo total tinta", f"{total_ml:.3f} ml")
-    col_b.metric("Precio tinta/ml", f"$ {precio_tinta:.3f}")
-    col_c.metric("Costo total estimado", f"$ {costo['costo_total']:.2f}")
+    with tab_resumen:
+        col_a, col_b, col_c, col_d = st.columns(4)
+        col_a.metric("Consumo total tinta", f"{total_ml:.3f} ml")
+        col_b.metric("Precio tinta/ml", f"$ {precio_tinta:.3f}")
+        col_c.metric("Costo material", f"$ {costo_material_total:.2f}")
+        col_d.metric("Costo total estimado", f"$ {costo_total_con_material:.2f}")
+        st.caption(f"Material seleccionado: **{material_papel}**")
+
+    with tab_detalle:
+        st.subheader("Resultados por página")
+        st.dataframe(df_resultados, use_container_width=True)
+
+    with tab_analisis:
+        st.markdown("#### Desglose de costos")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Concepto": "Tinta", "Monto ($)": round(float(costo["costo_tinta"]), 4)},
+                    {"Concepto": "Desgaste por páginas", "Monto ($)": round(float(costo["costo_desgaste"]), 4)},
+                    {"Concepto": "Cabezal", "Monto ($)": round(float(costo["costo_cabezal"]), 4)},
+                    {"Concepto": "Limpieza", "Monto ($)": 0.02},
+                    {"Concepto": "Material/Papel", "Monto ($)": round(float(costo_material_total), 4)},
+                    {"Concepto": "TOTAL", "Monto ($)": round(float(costo_total_con_material), 4)},
+                ]
+            ),
+            use_container_width=True,
+        )
+
+        st.markdown("#### Consumo CMYK")
+        st.bar_chart(pd.DataFrame([totales_ajustados], index=["ml"]))
 
     if st.button("Guardar en historial"):
-        guardar_historial("Impresora", len(resultados), costo["costo_total"], totales_ajustados)
+        guardar_historial("Impresora", len(resultados), costo_total_con_material, totales_ajustados)
         st.success("Historial guardado correctamente.")
 
     st.divider()
