@@ -55,9 +55,10 @@ def calcular_factor_consumo(densidad_total: float) -> float:
         return 1.6
 
 
- ==========================================================
+# ==========================================================
 # NORMALIZAR ARCHIVOS (PDF / IMAGEN)
 # ==========================================================
+
 
 def normalizar_imagenes(archivo) -> List[Tuple[str, Image.Image]]:
 
@@ -117,7 +118,8 @@ def normalizar_imagenes(archivo) -> List[Tuple[str, Image.Image]]:
     # ------------------------------------------------------
 
     try:
-        img = Image.open(io.BytesIO(bytes_data)).convert("CMYK")
+        with Image.open(io.BytesIO(bytes_data)) as img_obj:
+            img = img_obj.convert("CMYK")
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValueError(
             f"El archivo '{nombre}' no es una imagen válida o está corrupto. "
