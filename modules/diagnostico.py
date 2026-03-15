@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 from typing import Any
 
@@ -25,8 +23,12 @@ from services.diagnostics_service import (
 
 def _obtener_capacidad_default(nombre_impresora: str) -> dict[str, float]:
     caps = get_tank_capacities(None, fallback_name=nombre_impresora)
-    return {"Black": caps["black"], "Cyan": caps["cyan"], "Magenta": caps["magenta"], "Yellow": caps["yellow"]}
-
+    return {
+        "Black": caps["black"],
+        "Cyan": caps["cyan"],
+        "Magenta": caps["magenta"],
+        "Yellow": caps["yellow"],
+    }
 
 def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
     if file_obj is None:
