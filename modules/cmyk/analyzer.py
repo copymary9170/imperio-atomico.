@@ -2,7 +2,7 @@ import io
 from typing import List, Tuple, Dict
 
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 
 # ==========================================================
@@ -55,7 +55,7 @@ def calcular_factor_consumo(densidad_total: float) -> float:
         return 1.6
 
 
-# ==========================================================
+ ==========================================================
 # NORMALIZAR ARCHIVOS (PDF / IMAGEN)
 # ==========================================================
 
@@ -64,9 +64,13 @@ def normalizar_imagenes(archivo) -> List[Tuple[str, Image.Image]]:
     bytes_data = archivo.read()
     nombre = archivo.name
 
+    if not bytes_data:
+        raise ValueError(f"El archivo '{nombre}' está vacío o no se pudo leer.")
+
     # ------------------------------------------------------
     # PDF
     # ------------------------------------------------------
+
 
     if nombre.lower().endswith(".pdf"):
 
@@ -112,12 +116,17 @@ def normalizar_imagenes(archivo) -> List[Tuple[str, Image.Image]]:
     # IMAGEN
     # ------------------------------------------------------
 
-    img = Image.open(io.BytesIO(bytes_data)).convert("CMYK")
+    try:
+        img = Image.open(io.BytesIO(bytes_data)).convert("CMYK")
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise ValueError(
+            f"El archivo '{nombre}' no es una imagen válida o está corrupto. "
+            "Formatos admitidos: PDF, PNG y JPG/JPEG."
+        ) from exc
 
     img = _optimize_image(img)
 
     return [(nombre, img)]
-
 
 # ==========================================================
 # ANÁLISIS CMYK
