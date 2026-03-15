@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 
 from modules.cmyk.analyzer import normalizar_imagenes, analizar_lote
@@ -30,8 +30,9 @@ def _config_base_imprenta(tamano_pagina: str):
         "A3": {"costo_desgaste": 0.034, "ml_base": 0.25, "factor_general": 1.22},
         "Tabloide": {"costo_desgaste": 0.036, "ml_base": 0.27, "factor_general": 1.30},
     }
+    
+    return base_por_tamano.get(tamano_pagina, base_por_tamano["A4"])
 
-@@ -35,73 +36,152 @@ def _config_base_imprenta(tamano_pagina: str):
 # ==========================================================
 # RENDER PRINCIPAL
 # ==========================================================
@@ -173,7 +174,7 @@ def render_cmyk(usuario: str):
     # ------------------------------------------------------
     # ANÁLISIS
     # ------------------------------------------------------
-    
+        
     
     if not archivos:
         st.info("Sube archivos para iniciar el análisis.")
