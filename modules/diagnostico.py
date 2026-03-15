@@ -1,4 +1,5 @@
 from datetime import datetime
+from io import BytesIO
 from typing import Any
 
 import cv2
@@ -90,6 +91,38 @@ def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
     return cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
 
 
+class _StoredUpload(BytesIO):
+    def __init__(self, content: bytes, name: str, mime_type: str) -> None:
+        super().__init__(content)
+        self.name = name
+        self.type = mime_type
+
+    def getvalue(self) -> bytes:  # type: ignore[override]
+        return super().getvalue()
+
+
+def _snapshot_upload(file_obj, category: str) -> dict[str, Any] | None:
+    if file_obj is None:
+        return None
+    content = file_obj.getvalue()
+    if not content:
+        return None
+    return {
+        "name": str(file_obj.name or "archivo"),
+        "type": str(getattr(file_obj, "type", "application/octet-stream")),
+        "content": content,
+        "category": category,
+    }
+
+
+def _restore_upload(payload: dict[str, Any]) -> _StoredUpload:
+    return _StoredUpload(
+        content=bytes(payload.get("content") or b""),
+        name=str(payload.get("name") or "archivo"),
+        mime_type=str(payload.get("type") or "application/octet-stream"),
+    )
+
+
 def _extraer_porcentajes_por_ocr(imagen: np.ndarray | None) -> dict[str, float]:
     if imagen is None:
         return {}
@@ -106,6 +139,10 @@ def _extraer_porcentajes_por_ocr(imagen: np.ndarray | None) -> dict[str, float]:
 
 def _analizar_tanque_visual(imagen: np.ndarray | None) -> dict[str, float]:
     if imagen is None:
+        return {}
+
+    h, w = imagen.shape[:2]
+    if h < 40 or w < 40:
         return {}
 
     h, w = imagen.shape[:2]
@@ -241,7 +278,7 @@ def render_diagnostico(usuario: str) -> None:
         "black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["black"]), step=1.0),
     }
 
-   if st.button("🔍 Analizar diagnóstico"):
+    if st.button("🔍 Analizar diagnóstico"):
         texto_ocr = texto_manual.strip()
         imagen_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
         if not texto_ocr and imagen_diag is not None:
@@ -282,8 +319,16 @@ def render_diagnostico(usuario: str) -> None:
             "fusion_pct": fusion_pct,
             "capacidad": capacidad,
             "profile": profile,
+            "archivos_principales": [
+                payload
+                for payload in (
+                    _snapshot_upload(archivo_diag, "diagnostic_sheet"),
+                    _snapshot_upload(archivo_tanque, "tank_photo"),
+                    _snapshot_upload(archivo_software, "software_capture"),
+                )
+                if payload
+            ],
         }
-
     datos = st.session_state.get("diag_last_analysis")
     if not datos or datos.get("impresora") != impresora_sel:
         return
@@ -335,11 +380,16 @@ def render_diagnostico(usuario: str) -> None:
         per_color_source[color] = cols[idx].selectbox(f"{color}_source", source_options, index=source_options.index(source_default), key=f"src_{color}")
         per_color_conf[color] = cols[idx].selectbox(f"{color}_confidence", ["low", "medium", "high"], index=1, key=f"conf_{color}")
 
-    st.markdown("**Archivos de soporte**")
-    archivos_hoja = st.file_uploader("Hojas diagnóstico / fotos", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="diag_multi_sheet")
-    archivos_tanques = st.file_uploader("Fotos de tanques", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="diag_multi_tanks")
-    archivos_software = st.file_uploader("Capturas software", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="diag_multi_software")
-    archivos_botellas = st.file_uploader("Fotos de botellas de tinta", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="diag_multi_bottles")
+    st.markdown("**Archivos y evidencia**")
+    st.caption(
+        "Se guardarán automáticamente los mismos archivos usados para el análisis (hoja, tanques y software)."
+    )
+    archivos_extra = st.file_uploader(
+        "Evidencia extra opcional (fotos adicionales, botellas, otros soportes)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        key="diag_extra_files",
+    )
 
     if st.button("📨 Guardar diagnóstico técnico"):
         try:
@@ -388,16 +438,18 @@ def render_diagnostico(usuario: str) -> None:
 
             files_meta = []
             legacy_id = int(rec.get("legacy_diagnostico_id") or rec["diagnostico_id"])
-            for cat, files in [
-                ("diagnostic_sheet", archivos_hoja or []),
-                ("tank_photo", archivos_tanques or []),
-                ("software_capture", archivos_software or []),
-                ("ink_bottle", archivos_botellas or []),
-            ]:
-                for f in files:
-                    meta = save_uploaded_file(f, legacy_id, cat)
-                    if meta:
-                        files_meta.append(meta)
+
+            archivos_principales = list(datos.get("archivos_principales") or [])
+            for payload in archivos_principales:
+                stored_file = _restore_upload(payload)
+                meta = save_uploaded_file(stored_file, legacy_id, str(payload.get("category") or "evidencia"))
+                if meta:
+                    files_meta.append(meta)
+
+            for extra_file in archivos_extra or []:
+                meta = save_uploaded_file(extra_file, legacy_id, "evidencia_extra")
+                if meta:
+                    files_meta.append(meta)
 
             if files_meta:
                 register_diagnostic_files(int(rec["diagnostico_id"]), legacy_id, files_meta)
