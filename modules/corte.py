@@ -28,17 +28,17 @@ def render_corte(usuario: str):
     st.title("✂️ Corte Industrial – Cameo")
     st.caption("Carga, análisis técnico y acciones de producción para corte industrial.")
 
-    with st.container(border=True):
-        st.subheader("1) Cargar archivo y configurar")
-
-        archivo = st.file_uploader(
-            "Subir archivo de corte (SVG, PNG, JPG, JPEG, DXF)",
-            type=["svg", "png", "jpg", "jpeg", "dxf"],
-            key="corte_file_ind",
+    if "datos_corte_desde_cmyk" in st.session_state:
+        cmyk_data = st.session_state.get("datos_corte_desde_cmyk", {})
+        st.success(
+            f"Trabajo recibido desde CMYK: {cmyk_data.get('trabajo', 'N/D')} ({cmyk_data.get('cantidad', 0)} uds)"
         )
+        st.caption(f"Costo base de impresión recibido: $ {float(cmyk_data.get('costo_base', 0.0)):.2f}")
+        if st.button("Limpiar envío CMYK (Corte)", key="btn_clear_cmyk_corte"):
+            st.session_state.pop("datos_corte_desde_cmyk", None)
+            st.rerun()
 
-        try:
-            with db_transaction() as conn:
+    with st.container(border=True):
                 df_inv = pd.read_sql_query(
                     """
                     SELECT id, item, cantidad, unidad, precio_usd
