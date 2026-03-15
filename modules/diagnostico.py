@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from typing import Any
 
@@ -17,6 +16,7 @@ from services.diagnostics_service import (
     get_tank_capacities,
     listar_activos_disponibles,
     listar_impresoras_activas,
+    register_diagnostic_files,
     save_tank_capacities,
     save_uploaded_file,
     register_printer_refill,
@@ -26,15 +26,54 @@ from services.diagnostics_service import (
     list_printer_diagnostics,
 )
 
+COLOR_ORDER = ("black", "cyan", "magenta", "yellow")
+COLOR_LABELS = {"black": "Black", "cyan": "Cyan", "magenta": "Magenta", "yellow": "Yellow"}
 
-def _obtener_capacidad_default(nombre_impresora: str) -> dict[str, float]:
-    caps = get_tank_capacities(None, fallback_name=nombre_impresora)
+PRINTER_PROFILES = {
+    "hp smart tank 580-590": {
+        "match_terms": ["smart tank 580", "smart tank 590", "580", "590"],
+        "ink_system_type": "factory_tank",
+        "ink_usage_type": "standard",
+        "initial_fill_known": True,
+        "estimation_mode": "software",
+        "head_system_type": "integrated",
+    },
+    "epson l1250 wifi": {
+        "match_terms": ["l1250", "epson l1250"],
+        "ink_system_type": "factory_tank",
+        "ink_usage_type": "sublimation",
+        "initial_fill_known": False,
+        "estimation_mode": "visual",
+        "head_system_type": "integrated",
+    },
+    "hp deskjet 2000 j210/j210a": {
+        "match_terms": ["deskjet 2000", "j210", "j210a"],
+        "ink_system_type": "adapted_external_tank",
+        "ink_usage_type": "standard",
+        "initial_fill_known": False,
+        "estimation_mode": "visual",
+        "head_system_type": "integrated",
+    },
+}
+
+
+def _obtener_perfil_impresora(nombre_impresora: str) -> dict[str, Any]:
+    nombre = (nombre_impresora or "").lower()
+    for _, profile in PRINTER_PROFILES.items():
+        if any(term in nombre for term in profile["match_terms"]):
+            return profile
     return {
-        "Black": caps["black"],
-        "Cyan": caps["cyan"],
-        "Magenta": caps["magenta"],
-        "Yellow": caps["yellow"],
+        "ink_system_type": "factory_tank",
+        "ink_usage_type": "standard",
+        "initial_fill_known": True,
+        "estimation_mode": "none",
+        "head_system_type": "integrated",
     }
+
+
+def _obtener_capacidades_canonicas(activo_id: int | None, nombre_impresora: str) -> dict[str, float]:
+    caps = get_tank_capacities(activo_id, fallback_name=nombre_impresora)
+    return {c: float(caps.get(c, 0.0)) for c in COLOR_ORDER}
 
 
 def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
@@ -51,19 +90,92 @@ def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
     return cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
 
 
-def _extraer_porcentajes_foto(imagen: np.ndarray | None) -> dict[str, float]:
+def _extraer_porcentajes_por_ocr(imagen: np.ndarray | None) -> dict[str, float]:
+    if imagen is None:
+        return {}
+    gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY)
+    texto = pytesseract.image_to_string(gris, config="--psm 6")
+    lectura = extraer_texto_diagnostico(texto)
+    porcentajes = lectura.get("porcentajes", [])
+    resultado: dict[str, float] = {}
+    for idx, color in enumerate(("cyan", "magenta", "yellow", "black")):
+        if idx < len(porcentajes):
+            resultado[color] = max(0.0, min(100.0, float(porcentajes[idx])))
+    return resultado
+
+
+def _analizar_tanque_visual(imagen: np.ndarray | None) -> dict[str, float]:
     if imagen is None:
         return {}
 
-    gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY)
-    texto = pytesseract.image_to_string(gris, config="--psm 6")
-    valores = [float(v) for v in re.findall(r"(\d{1,3})\s*%", texto)]
-    colores = ["Cyan", "Magenta", "Yellow", "Black"]
+    h, w = imagen.shape[:2]
+    if h < 40 or w < 40:
+        return {}
+
+    segmentos = np.array_split(imagen, 4, axis=1)
+    orden_segmentos = ["cyan", "magenta", "yellow", "black"]
     salida: dict[str, float] = {}
-    for idx, color in enumerate(colores):
-        if idx < len(valores):
-            salida[color] = max(0.0, min(100.0, valores[idx]))
+
+    for color, seg in zip(orden_segmentos, segmentos):
+        hsv = cv2.cvtColor(seg, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1].astype(np.float32)
+        value = hsv[:, :, 2].astype(np.float32)
+
+        if color == "black":
+            tinta_mask = value < 90
+        else:
+            tinta_mask = (saturation > 40) & (value > 30)
+
+        filas = tinta_mask.mean(axis=1)
+        candidatas = np.where(filas > 0.15)[0]
+        if len(candidatas) == 0:
+            continue
+
+        top = int(candidatas.min())
+        bottom = int(candidatas.max())
+        fill_ratio = max(0.0, min(1.0, (bottom - top + 1) / max(1, seg.shape[0])))
+        salida[color] = round(fill_ratio * 100.0, 2)
+
     return salida
+
+
+def _fusionar_porcentajes(
+    report_pct: list[float] | None,
+    software_pct: dict[str, float],
+    visual_pct: dict[str, float],
+    ink_system_type: str,
+) -> dict[str, float]:
+    salida: dict[str, float] = {}
+    report_map: dict[str, float] = {}
+    for idx, color in enumerate(("cyan", "magenta", "yellow", "black")):
+        if report_pct and idx < len(report_pct):
+            report_map[color] = float(report_pct[idx])
+
+    for color in COLOR_ORDER:
+        candidates = []
+        if color in software_pct:
+            candidates.append((software_pct[color], 0.6))
+        if color in report_map:
+            candidates.append((report_map[color], 0.5))
+        if color in visual_pct:
+            candidates.append((visual_pct[color], 0.7 if ink_system_type == "adapted_external_tank" else 0.4))
+
+        if not candidates:
+            continue
+
+        weighted = sum(v * w for v, w in candidates) / sum(w for _, w in candidates)
+        salida[color] = round(max(0.0, min(100.0, weighted)), 2)
+    return salida
+
+
+def _calcular_ml_desde_porcentaje(pct_by_color: dict[str, float], capacidad: dict[str, float]) -> dict[str, float | None]:
+    resultados = {COLOR_LABELS[c]: None for c in COLOR_ORDER}
+    for c in COLOR_ORDER:
+        pct = pct_by_color.get(c)
+        if pct is None:
+            continue
+        resultados[COLOR_LABELS[c]] = round((float(capacidad.get(c, 0.0)) * float(pct)) / 100.0, 2)
+    return resultados
 
 
 def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str, Any]) -> None:
@@ -111,49 +223,65 @@ def render_diagnostico(usuario: str) -> None:
             impresora_sel = st.selectbox("Impresora", ["EPSON L805", "EPSON L3250", "Otra"], index=0)
             activo_id_sel = None
 
+    profile = _obtener_perfil_impresora(impresora_sel)
+
     st.subheader("Entrada de diagnóstico")
     archivo_diag = st.file_uploader("📄 Hoja diagnóstico (PDF/imagen)", type=["pdf", "png", "jpg", "jpeg"], key="diag_file")
     archivo_tanque = st.file_uploader("🖼 Foto de tanques", type=["png", "jpg", "jpeg"], key="tank_file")
+    archivo_software = st.file_uploader("💻 Captura de software", type=["png", "jpg", "jpeg"], key="software_file")
     texto_manual = st.text_area("Texto OCR (editable)", placeholder="Puedes pegar/corregir el OCR aquí antes de analizar.", height=140)
 
-    capacidad_default = _obtener_capacidad_default(impresora_sel)
+    capacidad_default = _obtener_capacidades_canonicas(activo_id_sel, impresora_sel)
     st.subheader("⚙️ Capacidad de tanques (ml)")
     c1, c2, c3, c4 = st.columns(4)
     capacidad = {
-        "Cyan": c1.number_input("Cyan (ml)", min_value=0.0, value=float(capacidad_default["Cyan"]), step=1.0),
-        "Magenta": c2.number_input("Magenta (ml)", min_value=0.0, value=float(capacidad_default["Magenta"]), step=1.0),
-        "Yellow": c3.number_input("Yellow (ml)", min_value=0.0, value=float(capacidad_default["Yellow"]), step=1.0),
-        "Black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["Black"]), step=1.0),
+        "cyan": c1.number_input("Cyan (ml)", min_value=0.0, value=float(capacidad_default["cyan"]), step=1.0),
+        "magenta": c2.number_input("Magenta (ml)", min_value=0.0, value=float(capacidad_default["magenta"]), step=1.0),
+        "yellow": c3.number_input("Yellow (ml)", min_value=0.0, value=float(capacidad_default["yellow"]), step=1.0),
+        "black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["black"]), step=1.0),
     }
 
-    if st.button("🔍 Analizar diagnóstico"):
-        imagen_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
+   if st.button("🔍 Analizar diagnóstico"):
         texto_ocr = texto_manual.strip()
+        imagen_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
         if not texto_ocr and imagen_diag is not None:
             texto_ocr = pytesseract.image_to_string(imagen_diag, config="--psm 6")
 
-        imagen_tanque = _convertir_archivo_a_imagen(archivo_tanque) if archivo_tanque else None
-        porcentajes_foto = _extraer_porcentajes_foto(imagen_tanque)
-        porcentajes_texto = extraer_texto_diagnostico(texto_ocr).get("porcentajes", []) if texto_ocr else []
+        analisis_hoja = analizar_hoja_diagnostico(texto_ocr, {COLOR_LABELS[k]: v for k, v in capacidad.items()}, porcentajes_foto={})
+        porcentajes_hoja = extraer_texto_diagnostico(texto_ocr).get("porcentajes", []) if texto_ocr else []
 
-        analisis = analizar_hoja_diagnostico(
-            texto_ocr=texto_ocr,
-            capacidad=capacidad,
-            porcentajes_foto=porcentajes_foto,
+        imagen_software = _convertir_archivo_a_imagen(archivo_software) if archivo_software else None
+        porcentajes_software = _extraer_porcentajes_por_ocr(imagen_software)
+
+        imagen_tanque = _convertir_archivo_a_imagen(archivo_tanque) if archivo_tanque else None
+        porcentajes_visual = _analizar_tanque_visual(imagen_tanque)
+
+        fusion_pct = _fusionar_porcentajes(
+            report_pct=porcentajes_hoja,
+            software_pct=porcentajes_software,
+            visual_pct=porcentajes_visual,
+            ink_system_type=profile["ink_system_type"],
         )
-        resultados = analisis["resultados"]
-        resumen = DiagnosticsService.summarize(resultados=resultados, vida_cabezal_pct=analisis["vida_cabezal_pct"])
+
+        resultados = _calcular_ml_desde_porcentaje(fusion_pct, capacidad)
+        vida = float(analisis_hoja.get("vida_cabezal_pct", 100.0))
+        resumen = DiagnosticsService.summarize(resultados, vida)
+
         st.session_state["diag_last_analysis"] = {
             "impresora": impresora_sel,
             "activo_id": activo_id_sel,
             "resultados": resultados,
             "resumen": resumen,
-            "contador_impresiones": int(analisis.get("contador_impresiones", 0)),
-            "vida_cabezal_pct": float(analisis["vida_cabezal_pct"]),
-            "desgaste_componentes": dict(analisis.get("desgaste_componentes", {})),
+            "contador_impresiones": int(analisis_hoja.get("contador_impresiones", 0)),
+            "vida_cabezal_pct": vida,
+            "desgaste_componentes": dict(analisis_hoja.get("desgaste_componentes", {})),
             "texto_ocr": texto_ocr,
-            "porcentajes_foto": porcentajes_foto,
-            "porcentajes_texto": porcentajes_texto,
+            "porcentajes_hoja": porcentajes_hoja,
+            "porcentajes_software": porcentajes_software,
+            "porcentajes_visual": porcentajes_visual,
+            "fusion_pct": fusion_pct,
+            "capacidad": capacidad,
+            "profile": profile,
         }
 
     datos = st.session_state.get("diag_last_analysis")
@@ -164,7 +292,6 @@ def render_diagnostico(usuario: str) -> None:
     if not datos.get("activo_id"):
         st.warning("Este análisis no está vinculado a un activo; Inventario puede actualizarse, pero Activos no recibirá cambios.")
     st.info("Análisis listo. Usa el botón para enviarlo a Activos e Inventario.")
-
 
     st.subheader("🧾 Registro técnico del diagnóstico")
     cc1, cc2, cc3 = st.columns(3)
@@ -177,30 +304,35 @@ def render_diagnostico(usuario: str) -> None:
 
     st.markdown("**Caso especial / estimación**")
     ec1, ec2, ec3 = st.columns(3)
-    initial_fill_known = ec1.checkbox("initial_fill_known", value=True)
-    estimation_mode = ec2.selectbox("estimation_mode", ["none", "visual", "software", "manual"], index=0)
+    initial_fill_known = ec1.checkbox("initial_fill_known", value=bool(datos["profile"].get("initial_fill_known", True)))
+    estimation_mode_options = ["none", "visual", "software", "manual"]
+    em_default = datos["profile"].get("estimation_mode", "none")
+    em_index = estimation_mode_options.index(em_default) if em_default in estimation_mode_options else 0
+    estimation_mode = ec2.selectbox("estimation_mode", estimation_mode_options, index=em_index)
     confidence_level = ec3.selectbox("confidence_level", ["low", "medium", "high"], index=1)
 
     pc1, pc2, pc3 = st.columns(3)
-    ink_system_type = pc1.selectbox("ink_system_type", ["factory_tank", "cartridge", "adapted_external_tank"], index=0)
-    ink_usage_type = pc2.selectbox("ink_usage_type", ["standard", "sublimation"], index=0)
-    head_system_type = pc3.text_input("head_system_type", value="integrated")
+    ink_system_opts = ["factory_tank", "cartridge", "adapted_external_tank"]
+    usage_opts = ["standard", "sublimation"]
+    ink_default = datos["profile"].get("ink_system_type", "factory_tank")
+    usage_default = datos["profile"].get("ink_usage_type", "standard")
+    ink_system_type = pc1.selectbox("ink_system_type", ink_system_opts, index=ink_system_opts.index(ink_default) if ink_default in ink_system_opts else 0)
+    ink_usage_type = pc2.selectbox("ink_usage_type", usage_opts, index=usage_opts.index(usage_default) if usage_default in usage_opts else 0)
+    head_system_type = pc3.text_input("head_system_type", value=str(datos["profile"].get("head_system_type", "integrated")))
     vc1, vc2 = st.columns(2)
     purchase_value = vc1.number_input("purchase_value", min_value=0.0, value=0.0, step=10.0)
     current_value = vc2.number_input("current_value", min_value=0.0, value=0.0, step=10.0)
 
     notes = st.text_area("notes", value="Registro desde Diagnóstico IA", key="diag_notes")
 
-
     st.markdown("**Lectura por color**")
     source_options = ["photo", "software", "report", "manual"]
     per_color_source: dict[str, str] = {}
     per_color_conf: dict[str, str] = {}
     cols = st.columns(4)
-    for idx, color in enumerate(["black", "cyan", "magenta", "yellow"]):
-        source_default = "software" if datos.get("porcentajes_texto") else "photo"
-        source_idx = source_options.index(source_default) if source_default in source_options else 0
-        per_color_source[color] = cols[idx].selectbox(f"{color}_source", source_options, index=source_idx, key=f"src_{color}")
+    for idx, color in enumerate(COLOR_ORDER):
+        source_default = "software" if color in datos.get("porcentajes_software", {}) else "photo"
+        per_color_source[color] = cols[idx].selectbox(f"{color}_source", source_options, index=source_options.index(source_default), key=f"src_{color}")
         per_color_conf[color] = cols[idx].selectbox(f"{color}_confidence", ["low", "medium", "high"], index=1, key=f"conf_{color}")
 
     st.markdown("**Archivos de soporte**")
@@ -215,33 +347,20 @@ def render_diagnostico(usuario: str) -> None:
                 raise ValueError("Debes vincular el diagnóstico a un activo")
 
             activo_id = int(datos.get("activo_id"))
-            caps_default = get_tank_capacities(activo_id, impresora_sel)
-            save_tank_capacities(activo_id, caps_default)
+            save_tank_capacities(activo_id, capacidad)
 
             tank_levels = {}
-            for color, ml in datos["resultados"].items():
-                key = color.lower()
-                capacity_ml = float(caps_default.get(key, 0.0))
-                est_ml = float(ml or 0.0)
-                est_pct = (est_ml / capacity_ml * 100.0) if capacity_ml > 0 else 0.0
-                tank_levels[key] = {
+            for color in COLOR_ORDER:
+                est_pct = float(datos.get("fusion_pct", {}).get(color, 0.0))
+                capacity_ml = float(capacidad.get(color, 0.0))
+                est_ml = round((est_pct * capacity_ml) / 100.0, 2)
+                tank_levels[color] = {
+                    "estimated_percent": est_pct,
                     "estimated_ml": max(0.0, est_ml),
-                    "source_of_measurement": per_color_source.get(key, "manual"),
-                    "confidence_level": per_color_conf.get(key, confidence_level),
+                    "source_of_measurement": per_color_source.get(color, "manual"),
+                    "confidence_level": per_color_conf.get(color, confidence_level),
                     "is_estimated": estimation_mode != "none",
                 }
-
-            files_meta = []
-            for cat, files in [
-                ("diagnostic_sheet", archivos_hoja or []),
-                ("tank_photo", archivos_tanques or []),
-                ("software_capture", archivos_software or []),
-                ("ink_bottle", archivos_botellas or []),
-            ]:
-                for f in files:
-                    meta = save_uploaded_file(f, 0, cat)
-                    if meta:
-                        files_meta.append(meta)
 
             rec = create_diagnostic_record(
                 usuario=usuario,
@@ -256,7 +375,7 @@ def render_diagnostico(usuario: str) -> None:
                 },
                 tank_levels=tank_levels,
                 notes=notes,
-                files=files_meta,
+                files=[],
                 estimation_mode=estimation_mode,
                 confidence_level=confidence_level,
                 initial_fill_known=bool(initial_fill_known),
@@ -266,6 +385,23 @@ def render_diagnostico(usuario: str) -> None:
                 purchase_value=float(purchase_value),
                 current_value=float(current_value),
             )
+
+            files_meta = []
+            legacy_id = int(rec.get("legacy_diagnostico_id") or rec["diagnostico_id"])
+            for cat, files in [
+                ("diagnostic_sheet", archivos_hoja or []),
+                ("tank_photo", archivos_tanques or []),
+                ("software_capture", archivos_software or []),
+                ("ink_bottle", archivos_botellas or []),
+            ]:
+                for f in files:
+                    meta = save_uploaded_file(f, legacy_id, cat)
+                    if meta:
+                        files_meta.append(meta)
+
+            if files_meta:
+                register_diagnostic_files(int(rec["diagnostico_id"]), legacy_id, files_meta)
+
             st.success(f"✅ Diagnóstico guardado (ID #{rec['diagnostico_id']}).")
             st.caption(
                 "Desgaste estimado cabezal: "
@@ -275,17 +411,19 @@ def render_diagnostico(usuario: str) -> None:
             st.error(f"No fue posible guardar diagnóstico: {exc}")
 
     st.markdown("#### Señales detectadas")
-    s1, s2 = st.columns(2)
-    s1.markdown("**Porcentajes desde OCR:**")
-    s1.write([round(float(v), 2) for v in datos.get("porcentajes_texto", [])])
-    s2.markdown("**Porcentajes desde foto:**")
-    s2.write({k: round(float(v), 2) for k, v in datos.get("porcentajes_foto", {}).items()})
+    s1, s2, s3 = st.columns(3)
+    s1.markdown("**Porcentajes hoja:**")
+    s1.write([round(float(v), 2) for v in datos.get("porcentajes_hoja", [])])
+    s2.markdown("**Porcentajes software:**")
+    s2.write({k: round(float(v), 2) for k, v in datos.get("porcentajes_software", {}).items()})
+    s3.markdown("**Porcentajes visuales:**")
+    s3.write({k: round(float(v), 2) for k, v in datos.get("porcentajes_visual", {}).items()})
 
     if datos.get("activo_id"):
         st.markdown("---")
         st.subheader("💧 Registro de recargas")
         rr1, rr2, rr3, rr4 = st.columns(4)
-        refill_color = rr1.selectbox("color", ["black", "cyan", "magenta", "yellow"], key="refill_color")
+        refill_color = rr1.selectbox("color", list(COLOR_ORDER), key="refill_color")
         refill_ml = rr2.number_input("added_ml", min_value=0.0, value=0.0, step=1.0, key="refill_ml")
         refill_unit_cost = rr3.number_input("unit_cost", min_value=0.0, value=0.0, step=0.1, key="refill_uc")
         refill_date = rr4.text_input("refill_date", value="", key="refill_date")
@@ -344,5 +482,5 @@ def render_diagnostico(usuario: str) -> None:
         with st.expander("Ver texto OCR usado"):
             st.code(str(datos["texto_ocr"]))
 
-    if not datos.get("texto_ocr") and not datos.get("porcentajes_foto"):
+    if not datos.get("texto_ocr") and not datos.get("fusion_pct"):
         st.warning("No se detectaron datos automáticos. Ingresa texto OCR o una foto más clara para mejores resultados.")
