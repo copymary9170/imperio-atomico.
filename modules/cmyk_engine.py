@@ -158,7 +158,7 @@ def render_cmyk(usuario: str):
         else:
             base_imprenta = _config_base_imprenta(tamano_pagina)
 
-       costo_desgaste = base_imprenta["costo_desgaste"]
+        costo_desgaste = base_imprenta["costo_desgaste"]
         ml_base_pagina = base_imprenta["ml_base"]
         factor_general = base_imprenta["factor_general"]
 
@@ -247,46 +247,49 @@ def render_cmyk(usuario: str):
 
     df_resultados = pd.DataFrame(resultados)
 
-    tab_resumen, tab_detalle, tab_analisis = st.tabs([
-        "📊 Resumen",
-        "📄 Detalle por página",
-        "🧠 Análisis avanzado",
-    ])
+    st.subheader("Resumen general")
+    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a.metric("Consumo total tinta", f"{total_ml:.3f} ml")
+    col_b.metric("Precio tinta/ml", f"$ {precio_tinta:.3f}")
+    col_c.metric("Costo material", f"$ {costo_material_total:.2f}")
+    col_d.metric("Costo total estimado", f"$ {costo_total_con_material:.2f}")
+    st.caption(f"Material seleccionado: **{material_papel}**")
 
-    with tab_resumen:
-        col_a, col_b, col_c, col_d = st.columns(4)
-        col_a.metric("Consumo total tinta", f"{total_ml:.3f} ml")
-        col_b.metric("Precio tinta/ml", f"$ {precio_tinta:.3f}")
-        col_c.metric("Costo material", f"$ {costo_material_total:.2f}")
-        col_d.metric("Costo total estimado", f"$ {costo_total_con_material:.2f}")
-        st.caption(f"Material seleccionado: **{material_papel}**")
+    st.subheader("Resultados por página")
+    st.dataframe(df_resultados, use_container_width=True, height=360)
 
-    with tab_detalle:
-        st.subheader("Resultados por página")
-        st.dataframe(df_resultados, use_container_width=True)
+    st.markdown("#### Desglose de costos")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"Concepto": "Tinta", "Monto ($)": round(float(costo["costo_tinta"]), 4)},
+                {"Concepto": "Desgaste por páginas", "Monto ($)": round(float(costo["costo_desgaste"]), 4)},
+                {"Concepto": "Cabezal", "Monto ($)": round(float(costo["costo_cabezal"]), 4)},
+                {"Concepto": "Limpieza", "Monto ($)": 0.02},
+                {"Concepto": "Material/Papel", "Monto ($)": round(float(costo_material_total), 4)},
+                {"Concepto": "TOTAL", "Monto ($)": round(float(costo_total_con_material), 4)},
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    with tab_analisis:
-        st.markdown("#### Desglose de costos")
-        st.dataframe(
-            pd.DataFrame(
-                [
-                    {"Concepto": "Tinta", "Monto ($)": round(float(costo["costo_tinta"]), 4)},
-                    {"Concepto": "Desgaste por páginas", "Monto ($)": round(float(costo["costo_desgaste"]), 4)},
-                    {"Concepto": "Cabezal", "Monto ($)": round(float(costo["costo_cabezal"]), 4)},
-                    {"Concepto": "Limpieza", "Monto ($)": 0.02},
-                    {"Concepto": "Material/Papel", "Monto ($)": round(float(costo_material_total), 4)},
-                    {"Concepto": "TOTAL", "Monto ($)": round(float(costo_total_con_material), 4)},
-                ]
-            ),
+    st.markdown("#### Consumo CMYK")
+    st.bar_chart(pd.DataFrame([totales_ajustados], index=["ml"]))
+
+    col_guardar, col_exportar = st.columns([1, 1])
+    with col_guardar:
+        if st.button("Guardar en historial", use_container_width=True):
+            guardar_historial("Impresora", len(resultados), costo_total_con_material, totales_ajustados)
+            st.success("Historial guardado correctamente.")
+    with col_exportar:
+        st.download_button(
+            "Descargar detalle CSV",
+            data=df_resultados.to_csv(index=False).encode("utf-8"),
+            file_name="analisis_cmyk_detalle.csv",
+            mime="text/csv",
             use_container_width=True,
         )
-
-        st.markdown("#### Consumo CMYK")
-        st.bar_chart(pd.DataFrame([totales_ajustados], index=["ml"]))
-
-    if st.button("Guardar en historial"):
-        guardar_historial("Impresora", len(resultados), costo_total_con_material, totales_ajustados)
-        st.success("Historial guardado correctamente.")
 
     st.divider()
     st.subheader("Historial reciente")
