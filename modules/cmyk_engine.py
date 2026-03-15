@@ -4,7 +4,13 @@ import streamlit as st
 from modules.cmyk.analyzer import analizar_lote, normalizar_imagenes
 from modules.cmyk.context import _load_contexto_cmyk
 from modules.cmyk.cost_engine import PERFILES_CALIDAD, calcular_costo_lote, costo_tinta_ml
-from modules.cmyk.history import guardar_historial
+from modules.cmyk.history import guardar_historial, obtener_historial
+from modules.cmyk.inventory_engine import (
+    descontar_inventario,
+    filtrar_tintas,
+    mapear_consumo_ids,
+    validar_stock,
+)
 from modules.cmyk.page_size import ajustar_consumo_por_tamano
 
 
@@ -208,6 +214,16 @@ def render_cmyk(usuario: str):
             ml_base_pagina = st.number_input("Consumo base por página (ml)", min_value=0.001, value=float(ml_base_pagina), step=0.001)
             factor_general = st.number_input("Factor general de consumo", min_value=0.10, value=float(factor_general), step=0.01)
 
+        st.markdown("#### 🖨️ Impresora y control de inventario")
+        impresoras = _impresoras_disponibles(df_act)
+        if impresoras:
+            impresora = st.selectbox("Impresora para este análisis", options=impresoras, index=0)
+        else:
+            impresora = "Impresora"
+            st.info("No se detectaron impresoras activas en Activos. Se guardará como 'Impresora'.")
+
+        descontar_stock = st.toggle("Descontar tintas del inventario al guardar", value=True)
+
     with col2:
         archivos = st.file_uploader("Carga tus diseños", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
 
@@ -282,11 +298,30 @@ def render_cmyk(usuario: str):
     st.markdown("#### Consumo CMYK")
     st.bar_chart(pd.DataFrame([totales_ajustados], index=["ml"]))
 
+    df_tintas = filtrar_tintas(df_inv)
+    consumos_ids = mapear_consumo_ids(df_tintas, totales_ajustados)
+    alertas_stock = validar_stock(df_tintas, consumos_ids)
+
+    if alertas_stock:
+        st.markdown("#### ⚠️ Validación de stock de tintas")
+        for alerta in alertas_stock:
+            st.warning(alerta)
+
     col_guardar, col_exportar = st.columns([1, 1])
     with col_guardar:
         if st.button("Guardar en historial", use_container_width=True):
-            guardar_historial("Impresora", len(resultados), costo_total_con_material, totales_ajustados)
-            st.success("Historial guardado correctamente.")
+            guardar_historial(impresora, len(resultados), costo_total_con_material, totales_ajustados)
+
+            if descontar_stock:
+                ok_stock, msg_stock = descontar_inventario(consumos_ids)
+                if ok_stock:
+                    st.success(f"Historial guardado y stock actualizado. {msg_stock}")
+                else:
+                    st.warning(f"Historial guardado, pero no se pudo descontar stock: {msg_stock}")
+            else:
+                st.success("Historial guardado correctamente.")
+
+            df_hist = obtener_historial(limit=100)
     with col_exportar:
         st.download_button(
             "Descargar detalle CSV",
@@ -299,4 +334,3 @@ def render_cmyk(usuario: str):
     st.divider()
     st.subheader("Historial reciente")
     st.dataframe(df_hist, use_container_width=True)
-
