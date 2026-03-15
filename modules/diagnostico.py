@@ -30,6 +30,7 @@ def _obtener_capacidad_default(nombre_impresora: str) -> dict[str, float]:
         "Yellow": caps["yellow"],
     }
 
+
 def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
     if file_obj is None:
         return None
@@ -53,7 +54,87 @@ def _extraer_porcentajes_foto(imagen: np.ndarray | None) -> dict[str, float]:
     texto = pytesseract.image_to_string(gris, config="--psm 6")
     valores = [float(v) for v in re.findall(r"(\d{1,3})\s*%", texto)]
     colores = ["Cyan", "Magenta", "Yellow", "Black"]
-@@ -136,63 +135,121 @@ def render_diagnostico(usuario: str) -> None:
+    salida: dict[str, float] = {}
+    for idx, color in enumerate(colores):
+        if idx < len(valores):
+            salida[color] = max(0.0, min(100.0, valores[idx]))
+    return salida
+
+
+def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str, Any]) -> None:
+    st.subheader("📊 Resultado del análisis")
+    rows = [
+        {"Color": color, "Nivel (ml)": round(float(valor or 0.0), 2) if valor is not None else None}
+        for color, valor in resultados.items()
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Vida cabezal", f"{float(resumen.get('vida_cabezal_pct', 0.0)):.2f}%")
+    m2.metric("Estado tintas", str(resumen.get("estado_tintas", "N/D")))
+    m3.metric("Estado cabezal", str(resumen.get("estado_cabezal", "N/D")))
+    m4.metric("Mín tinta (ml)", f"{float(resumen.get('min_ml', 0.0)):.2f}")
+
+
+def render_diagnostico(usuario: str) -> None:
+    st.caption(f"Usuario activo: {usuario}")
+
+    impresoras_activas = listar_impresoras_activas()
+    if impresoras_activas:
+        mapa_impresoras = {
+            f"#{row['id']} · {row.get('equipo') or 'Impresora'} {('(' + str(row.get('modelo')) + ')') if row.get('modelo') else ''}".strip(): row
+            for row in impresoras_activas
+        }
+        etiqueta_sel = st.selectbox("Impresora (desde activos)", list(mapa_impresoras.keys()), index=0)
+        impresora_data = mapa_impresoras[etiqueta_sel]
+        impresora_sel = str(impresora_data.get("modelo") or impresora_data.get("equipo") or "Otra")
+        activo_id_sel = int(impresora_data["id"])
+    else:
+        st.warning("No hay impresoras detectadas por filtro. Selecciona un activo manualmente.")
+        activos = listar_activos_disponibles()
+        if activos:
+            mapa_activos = {
+                f"#{row['id']} · {row.get('equipo') or 'Activo'} {('(' + str(row.get('modelo')) + ')') if row.get('modelo') else ''}": row
+                for row in activos
+            }
+            etiqueta_activo = st.selectbox("Activo a vincular", list(mapa_activos.keys()), index=0)
+            activo_sel = mapa_activos[etiqueta_activo]
+            activo_id_sel = int(activo_sel["id"])
+            impresora_sel = str(activo_sel.get("modelo") or activo_sel.get("equipo") or "Otra")
+        else:
+            st.warning("No hay activos disponibles. Se usará selección manual sin vínculo a Activos.")
+            impresora_sel = st.selectbox("Impresora", ["EPSON L805", "EPSON L3250", "Otra"], index=0)
+            activo_id_sel = None
+
+    st.subheader("Entrada de diagnóstico")
+    archivo_diag = st.file_uploader("📄 Hoja diagnóstico (PDF/imagen)", type=["pdf", "png", "jpg", "jpeg"], key="diag_file")
+    archivo_tanque = st.file_uploader("🖼 Foto de tanques", type=["png", "jpg", "jpeg"], key="tank_file")
+    texto_manual = st.text_area("Texto OCR (editable)", placeholder="Puedes pegar/corregir el OCR aquí antes de analizar.", height=140)
+
+    capacidad_default = _obtener_capacidad_default(impresora_sel)
+    st.subheader("⚙️ Capacidad de tanques (ml)")
+    c1, c2, c3, c4 = st.columns(4)
+    capacidad = {
+        "Cyan": c1.number_input("Cyan (ml)", min_value=0.0, value=float(capacidad_default["Cyan"]), step=1.0),
+        "Magenta": c2.number_input("Magenta (ml)", min_value=0.0, value=float(capacidad_default["Magenta"]), step=1.0),
+        "Yellow": c3.number_input("Yellow (ml)", min_value=0.0, value=float(capacidad_default["Yellow"]), step=1.0),
+        "Black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["Black"]), step=1.0),
+    }
+
+    if st.button("🔍 Analizar diagnóstico"):
+        imagen_diag = _convertir_archivo_a_imagen(archivo_diag) if archivo_diag else None
+        texto_ocr = texto_manual.strip()
+        if not texto_ocr and imagen_diag is not None:
+            texto_ocr = pytesseract.image_to_string(imagen_diag, config="--psm 6")
+
+        imagen_tanque = _convertir_archivo_a_imagen(archivo_tanque) if archivo_tanque else None
+        porcentajes_foto = _extraer_porcentajes_foto(imagen_tanque)
+        porcentajes_texto = extraer_texto_diagnostico(texto_ocr).get("porcentajes", []) if texto_ocr else []
+
+        analisis = analizar_hoja_diagnostico(
+            texto_ocr=texto_ocr,
+            capacidad=capacidad,
+            porcentajes_foto=porcentajes_foto,
         )
         resultados = analisis["resultados"]
         resumen = DiagnosticsService.summarize(resultados=resultados, vida_cabezal_pct=analisis["vida_cabezal_pct"])
@@ -78,6 +159,7 @@ def _extraer_porcentajes_foto(imagen: np.ndarray | None) -> dict[str, float]:
     if not datos.get("activo_id"):
         st.warning("Este análisis no está vinculado a un activo; Inventario puede actualizarse, pero Activos no recibirá cambios.")
     st.info("Análisis listo. Usa el botón para enviarlo a Activos e Inventario.")
+
 
     st.subheader("🧾 Registro técnico del diagnóstico")
     cc1, cc2, cc3 = st.columns(3)
@@ -155,7 +237,10 @@ def _extraer_porcentajes_foto(imagen: np.ndarray | None) -> dict[str, float]:
                 initial_fill_known=bool(initial_fill_known),
             )
             st.success(f"✅ Diagnóstico guardado (ID #{rec['diagnostico_id']}).")
-            st.caption(f"Desgaste estimado cabezal: {float(rec['head_wear_pct']):.2f}% | Depreciación estimada: ${float(rec['depreciation_amount']):.4f}")
+            st.caption(
+                "Desgaste estimado cabezal: "
+                f"{float(rec['head_wear_pct']):.2f}% | Depreciación estimada: ${float(rec['depreciation_amount']):.4f}"
+            )
         except Exception as exc:
             st.error(f"No fue posible guardar diagnóstico: {exc}")
 
