@@ -1,17 +1,11 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
-from modules.cmyk.analyzer import normalizar_imagenes, analizar_lote
-from modules.cmyk.cost_engine import (
-    costo_tinta_ml,
-    calcular_costo_lote,
-    PERFILES_CALIDAD,
-)
-from modules.cmyk.history import (
-    guardar_historial
-)
-from modules.cmyk.page_size import ajustar_consumo_por_tamano
+from modules.cmyk.analyzer import analizar_lote, normalizar_imagenes
 from modules.cmyk.context import _load_contexto_cmyk
+from modules.cmyk.cost_engine import PERFILES_CALIDAD, calcular_costo_lote, costo_tinta_ml
+from modules.cmyk.history import guardar_historial
+from modules.cmyk.page_size import ajustar_consumo_por_tamano
 
 
 # ==========================================================
@@ -30,7 +24,6 @@ def _config_base_imprenta(tamano_pagina: str):
         "A3": {"costo_desgaste": 0.034, "ml_base": 0.25, "factor_general": 1.22},
         "Tabloide": {"costo_desgaste": 0.036, "ml_base": 0.27, "factor_general": 1.30},
     }
-    
     return base_por_tamano.get(tamano_pagina, base_por_tamano["A4"])
 
 
@@ -69,35 +62,31 @@ def _obtener_perfiles_driver(marca: str):
     }
     return perfiles_por_marca.get(marca, perfiles_por_marca["HP"])
 
+
 # ==========================================================
 # RENDER PRINCIPAL
 # ==========================================================
 
-def render_cmyk(usuario: str):
 
+def render_cmyk(usuario: str):
     st.title("🎨 Analizador Profesional de Cobertura CMYK")
     st.caption(f"Operador: {usuario}")
 
     try:
-        df_inv, df_act, df_hist = _load_contexto_cmyk()
+        df_inv, _, df_hist = _load_contexto_cmyk()
     except Exception as e:
         st.error(f"Error cargando datos CMYK: {e}")
         return
 
-    # ------------------------------------------------------
-    # CONFIGURACIÓN
-    # ------------------------------------------------------
-
     col1, col2 = st.columns([1, 2])
 
     with col1:
-
         st.subheader("⚙️ Ajustes de Calibración Automática")
 
-        tamaños_disponibles = ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide", "Personalizado"]
-        tamaño_pagina = st.selectbox("📄 Tamaño de página", tamaños_disponibles, index=1)
+        tamanos_disponibles = ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide", "Personalizado"]
+        tamano_pagina = st.selectbox("📄 Tamaño de página", tamanos_disponibles, index=1)
 
-        if tamaño_pagina == "Personalizado":
+        if tamano_pagina == "Personalizado":
             col_ancho, col_alto = st.columns(2)
             with col_ancho:
                 ancho_custom = st.number_input("Ancho (mm)", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
@@ -114,7 +103,7 @@ def render_cmyk(usuario: str):
             st.caption(f"Formato personalizado: **{ancho_custom:.0f} x {alto_custom:.0f} mm**")
             st.caption(f"Factor por área aplicado: **{factor_custom:.2f}x**")
         else:
-            base_imprenta = _config_base_imprenta(tamaño_pagina)
+            base_imprenta = _config_base_imprenta(tamano_pagina)
 
         costo_desgaste = base_imprenta["costo_desgaste"]
         ml_base_pagina = base_imprenta["ml_base"]
@@ -122,36 +111,7 @@ def render_cmyk(usuario: str):
 
         st.caption(f"Costo desgaste por página ($): **{costo_desgaste:.3f}**")
         st.caption(f"Consumo base por página (ml): **{ml_base_pagina:.3f}**")
-        st.caption(f"Factor General de Consumo: **{factor_general:.2f}**")
-        st.caption("Base automática por tamaño de página (referencia de imprenta digital).")
-
-        # ------------------------------------------------------
-        # MODO AUTOMÁTICO DE IMPRENTA
-        # ------------------------------------------------------
-
-        # ------------------------------------------------------
-        # PAPEL DE INVENTARIO (SE MANTIENE POR SESSION STATE)
-        # ------------------------------------------------------
-
-        posibles_cols_nombre = ["nombre", "item", "sku"]
-        col_nombre = next((c for c in posibles_cols_nombre if c in df_inv.columns), None)
-
-        df_papeles = pd.DataFrame()
-        if col_nombre and not df_inv.empty:
-            serie_nombre = df_inv[col_nombre].fillna("").astype(str)
-            filtro_categoria = (
-@@ -122,65 +175,61 @@ def render_cmyk(usuario: str):
-                index=idx_actual,
-                key="cmyk_papel_inventario_label",
-            )
-            st.session_state[key_papel_inv] = opciones_papel[etiqueta_papel]
-            st.caption(f"Papel inventario seleccionado: **{etiqueta_papel}**")
-        else:
-            st.warning("No se detectaron papeles en inventario; se usará solo el perfil del driver.")
-
-        # ------------------------------------------------------
-        # CALIDAD Y PAPEL DE DRIVER
-        # ------------------------------------------------------
+        st.caption(f"Factor general de consumo: **{factor_general:.2f}**")
 
         perfiles_calidad = {
             "Borrador": PERFILES_CALIDAD["Borrador"]["ink_mult"],
@@ -159,41 +119,36 @@ def render_cmyk(usuario: str):
             "Alta": PERFILES_CALIDAD["Alta"]["ink_mult"],
             "Foto": PERFILES_CALIDAD["Foto"]["ink_mult"],
         }
-        calidad_impresion = st.selectbox(
-            "🖨️ Calidad de impresión",
-            list(perfiles_calidad.keys()),
-            index=1,
-        )
+        calidad_impresion = st.selectbox("🖨️ Calidad de impresión", list(perfiles_calidad.keys()), index=1)
         factor_calidad = float(perfiles_calidad[calidad_impresion])
 
         marca_driver = st.selectbox("🧩 Marca / driver", ["HP", "Epson"], index=0)
         perfiles_driver = _obtener_perfiles_driver(marca_driver)
-        tipo_papel_driver = st.selectbox(
-            "📄 Tipo de papel (driver)",
-            list(perfiles_driver.keys()),
-            index=0,
-        )
+        tipo_papel_driver = st.selectbox("📄 Tipo de papel (driver)", list(perfiles_driver.keys()), index=0)
         factor_papel = float(perfiles_driver[tipo_papel_driver])
 
-        st.caption(f"Calidad de impresión: **{calidad_impresion}**")
-        st.caption(f"Driver seleccionado: **{marca_driver}**")
-        st.caption(f"Tipo de papel (driver): **{tipo_papel_driver}**")
         st.caption(f"Factor calidad aplicado: **{factor_calidad:.2f}**")
         st.caption(f"Factor papel aplicado: **{factor_papel:.2f}**")
 
+        # Mostrar papel detectado en inventario sin forzar selección manual
+        posibles_cols_nombre = ["nombre", "item", "sku"]
+        col_nombre = next((c for c in posibles_cols_nombre if c in df_inv.columns), None)
+        if col_nombre and not df_inv.empty:
+            serie_nombre = df_inv[col_nombre].fillna("").astype(str)
+            mask = serie_nombre.str.contains("papel|bond|opalina|couche|glossy|mate|fotograf", case=False, na=False)
+            papeles = serie_nombre[mask].tolist()
+            if papeles:
+                st.caption(f"Papel inventario detectado: **{papeles[0]}**")
+
+        editar_parametros = st.toggle("Editar parámetros calculados", value=False)
+        if editar_parametros:
+            costo_desgaste = st.number_input("Costo desgaste por página ($)", min_value=0.0, value=float(costo_desgaste), step=0.001)
+            ml_base_pagina = st.number_input("Consumo base por página (ml)", min_value=0.001, value=float(ml_base_pagina), step=0.001)
+            factor_general = st.number_input("Factor general de consumo", min_value=0.10, value=float(factor_general), step=0.01)
+
     with col2:
+        archivos = st.file_uploader("Carga tus diseños", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
 
-        archivos = st.file_uploader(
-            "Carga tus diseños",
-            type=["pdf", "png", "jpg", "jpeg"],
-            accept_multiple_files=True
-        )
-
-    # ------------------------------------------------------
-    # ANÁLISIS
-    # ------------------------------------------------------
-        
-    
     if not archivos:
         st.info("Sube archivos para iniciar el análisis.")
         return
@@ -202,11 +157,8 @@ def render_cmyk(usuario: str):
     totales = {"C": 0.0, "M": 0.0, "Y": 0.0, "K": 0.0}
 
     with st.spinner("Analizando cobertura CMYK..."):
-
         for archivo in archivos:
-
             paginas = normalizar_imagenes(archivo)
-
             config = {
                 "ml_base_pagina": ml_base_pagina,
                 "factor_general": factor_general,
@@ -214,76 +166,34 @@ def render_cmyk(usuario: str):
                 "factor_papel": factor_papel,
                 "factor_k": 0.8,
                 "auto_negro_inteligente": True,
-                "refuerzo_negro": 0.06
+                "refuerzo_negro": 0.06,
             }
 
             res, tot = analizar_lote(paginas, config)
-
             for k in totales:
                 totales[k] += tot[k]
-
             resultados.extend(res)
 
-    # ------------------------------------------------------
-    # AJUSTAR POR TAMAÑO DE PÁGINA
-    # ------------------------------------------------------
-
-    totales_ajustados = {
-        k: ajustar_consumo_por_tamano(v, tamaño_pagina)
-        for k, v in totales.items()
-    }
-
+    totales_ajustados = {k: ajustar_consumo_por_tamano(v, tamano_pagina) for k, v in totales.items()}
     total_ml = sum(totales_ajustados.values())
 
-    # ------------------------------------------------------
-    # COSTO
-    # ------------------------------------------------------
-
     precio_tinta = costo_tinta_ml(df_inv, fallback=0.10)
-
-    costo = calcular_costo_lote(
-        totales_ajustados,
-        precio_tinta,
-        len(resultados),
-        costo_desgaste,
-        1.15,
-        0.005,
-        0.02
-    )
-
-    # ------------------------------------------------------
-    # RESULTADOS
-    # ------------------------------------------------------
+    costo = calcular_costo_lote(totales_ajustados, precio_tinta, len(resultados), costo_desgaste, 1.15, 0.005, 0.02)
 
     df_resultados = pd.DataFrame(resultados)
 
     st.subheader("Resultados por página")
-
     st.dataframe(df_resultados, use_container_width=True)
 
-    colA, colB, colC = st.columns(3)
-
-    colA.metric("Consumo total tinta", f"{total_ml:.3f} ml")
-    colB.metric("Precio tinta/ml", f"$ {precio_tinta:.3f}")
-    colC.metric("Costo total estimado", f"$ {costo['costo_total']:.2f}")
-
-    # ------------------------------------------------------
-    # HISTORIAL
-    # ------------------------------------------------------
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("Consumo total tinta", f"{total_ml:.3f} ml")
+    col_b.metric("Precio tinta/ml", f"$ {precio_tinta:.3f}")
+    col_c.metric("Costo total estimado", f"$ {costo['costo_total']:.2f}")
 
     if st.button("Guardar en historial"):
-
-        guardar_historial(
-            "Impresora",
-            len(resultados),
-            costo["costo_total"],
-            totales_ajustados
-        )
-
+        guardar_historial("Impresora", len(resultados), costo["costo_total"], totales_ajustados)
         st.success("Historial guardado correctamente.")
 
     st.divider()
-
     st.subheader("Historial reciente")
-
     st.dataframe(df_hist, use_container_width=True)
