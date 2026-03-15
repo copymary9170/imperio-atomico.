@@ -7,7 +7,12 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, require_text
-from services.diagnostics_service import get_printer_diagnostic_summary, list_printer_diagnostics
+from services.diagnostics_service import (
+    get_printer_diagnostic_summary,
+    list_printer_diagnostics,
+    list_printer_refills,
+    list_printer_maintenance,
+)
 
 ALLOWED_ROLES = {"Admin", "Administration", "Administracion"}
 TIPOS_UNIDAD = [
@@ -371,10 +376,15 @@ def render_activos(usuario: str):
                     f"Niveles actuales (ml): BK {float(resumen.get('black_ml') or 0.0):.2f} | C {float(resumen.get('cyan_ml') or 0.0):.2f} | "
                     f"M {float(resumen.get('magenta_ml') or 0.0):.2f} | Y {float(resumen.get('yellow_ml') or 0.0):.2f}"
                 )
-                st.write("Consumo acumulado por color (ml):", resumen.get("consumos") or {})
+                  st.write("Consumo acumulado por color (ml):", resumen.get("consumos") or {})
+                st.caption(
+                    f"Sistema tinta: {resumen.get('ink_system_type') or 'N/D'} · Uso tinta: {resumen.get('ink_usage_type') or 'N/D'}"
+                )
+                if resumen.get("low_ink_alerts"):
+                    st.warning(f"Alertas de bajo nivel: {', '.join(resumen.get('low_ink_alerts') or [])}")
                 st.info(
                     "Exactitud de datos: "
-                    + ("Exacto" if str(resumen.get("estimation_mode") or "none") == "none" else f"Estimado ({resumen.get('estimation_mode')})")
+                    + str(resumen.get("diagnostic_accuracy") or "estimated")
                     + f" · Confianza: {resumen.get('confidence_level') or 'medium'}"
                 )
             else:
@@ -391,6 +401,20 @@ def render_activos(usuario: str):
                 st.dataframe(historial[cols_show], use_container_width=True, hide_index=True)
             else:
                 st.caption("Sin historial disponible.")
+
+            st.markdown("#### 💧 Historial de recargas")
+            refills = pd.DataFrame(list_printer_refills(sel_id, limit=50))
+            if not refills.empty:
+                st.dataframe(refills, use_container_width=True, hide_index=True)
+            else:
+                st.caption("Sin recargas registradas.")
+
+            st.markdown("#### 🛠️ Historial de mantenimiento")
+            maint = pd.DataFrame(list_printer_maintenance(sel_id, limit=50))
+            if not maint.empty:
+                st.dataframe(maint, use_container_width=True, hide_index=True)
+            else:
+                st.caption("Sin mantenimientos registrados.")
         else:
             st.info("No hay impresoras activas registradas.")
 
