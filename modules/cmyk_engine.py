@@ -220,7 +220,12 @@ def render_cmyk(usuario: str):
 
     with st.spinner("Analizando cobertura CMYK..."):
         for archivo in archivos:
-            paginas = normalizar_imagenes(archivo)
+            try:
+                paginas = normalizar_imagenes(archivo)
+            except ValueError as exc:
+                st.warning(str(exc))
+                continue
+
             config = {
                 "ml_base_pagina": ml_base_pagina,
                 "factor_general": factor_general,
@@ -312,7 +317,11 @@ def render_cmyk(usuario: str):
 
         for archivo in archivos:
 
-            paginas = normalizar_imagenes(archivo)
+            try:
+                paginas = normalizar_imagenes(archivo)
+            except ValueError as exc:
+                st.warning(str(exc))
+                continue
 
             config = {
                 "ml_base_pagina": ml_base_pagina,
