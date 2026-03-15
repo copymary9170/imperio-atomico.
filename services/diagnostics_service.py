@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import re
+import json
 import unicodedata
+from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 from database.connection import db_transaction
 
 
 _COLOR_ORDER = ("Cyan", "Magenta", "Yellow", "Black")
+COLOR_KEYS = ("black", "cyan", "magenta", "yellow")
+MEASUREMENT_SOURCES = {"photo", "software", "report", "manual"}
+ESTIMATION_MODES = {"none", "visual", "software", "manual"}
+CONFIDENCE_LEVELS = {"low", "medium", "high"}
 CRITICAL_LEVEL = 10
 LOW_LEVEL = 25
 PERCENT_REGEX = re.compile(r"(\d{1,3})\s*%")
@@ -109,7 +116,25 @@ def _clamp_percentage(value: float | int | None) -> float | None:
     return max(0.0, min(100.0, float(value)))
 
 
-def extraer_desgaste_componentes(texto_ocr: str | None) -> dict[str, float | None]:
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _normalize_color(color: str) -> str:
+    txt = str(color or "").strip().lower()
+    aliases = {
+        "bk": "black",
+        "negro": "black",
+        "cian": "cyan",
+        "amarillo": "yellow",
+    }
+    return aliases.get(txt, txt)
+
+
+def extraer_desgaste_componentes(texto_ocr: str | None) -> dict[str, float | None]::
     texto = str(texto_ocr or "")
     componentes: dict[str, float | None] = {"cabezal": None, "rodillo": None, "almohadillas": None}
     for nombre, patrones in COMPONENT_LIFE_PATTERNS.items():
@@ -380,7 +405,122 @@ def _ensure_diagnostics_schema(conn) -> None:
             black_ml REAL,
             observacion TEXT,
             vida_rodillo_pct REAL,
-            vida_almohadillas_pct REAL
+            vida_almohadillas_pct REAL,
+            total_pages INTEGER DEFAULT 0,
+            color_pages INTEGER DEFAULT 0,
+            bw_pages INTEGER DEFAULT 0,
+            borderless_pages INTEGER DEFAULT 0,
+            scanned_pages INTEGER DEFAULT 0,
+            estimation_mode TEXT DEFAULT 'none',
+            confidence_level TEXT DEFAULT 'medium',
+            initial_fill_known INTEGER DEFAULT 1,
+            is_estimated INTEGER DEFAULT 0,
+            depreciation_amount REAL DEFAULT 0,
+            head_wear_pct REAL DEFAULT 0,
+            payload_json TEXT,
+            FOREIGN KEY (activo_id) REFERENCES activos(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS diagnostico_tanques (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            diagnostico_id INTEGER NOT NULL,
+            color TEXT NOT NULL,
+            estimated_percent REAL,
+            estimated_ml REAL,
+            source_of_measurement TEXT,
+            confidence_level TEXT,
+            is_estimated INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (diagnostico_id) REFERENCES diagnosticos_impresora(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS diagnostico_archivos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            diagnostico_id INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            file_type TEXT,
+            file_category TEXT,
+            file_path TEXT,
+            file_size INTEGER DEFAULT 0,
+            uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (diagnostico_id) REFERENCES diagnosticos_impresora(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS impresora_tanque_capacidad (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            activo_id INTEGER NOT NULL,
+            color TEXT NOT NULL,
+            capacity_ml REAL NOT NULL DEFAULT 0,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(activo_id, color),
+            FOREIGN KEY (activo_id) REFERENCES activos(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS diagnostico_recargas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT,
+            activo_id INTEGER NOT NULL,
+            diagnostico_id INTEGER,
+            color TEXT NOT NULL,
+            ml_added REAL NOT NULL DEFAULT 0,
+            costo_unitario_usd REAL DEFAULT 0,
+            costo_total_usd REAL DEFAULT 0,
+            notes TEXT,
+            FOREIGN KEY (activo_id) REFERENCES activos(id),
+            FOREIGN KEY (diagnostico_id) REFERENCES diagnosticos_impresora(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS diagnostico_consumos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT,
+            activo_id INTEGER NOT NULL,
+            diagnostico_id INTEGER,
+            color TEXT NOT NULL,
+            consumed_ml REAL NOT NULL DEFAULT 0,
+            source TEXT,
+            inventory_item_id INTEGER,
+            notes TEXT,
+            FOREIGN KEY (activo_id) REFERENCES activos(id),
+            FOREIGN KEY (diagnostico_id) REFERENCES diagnosticos_impresora(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS costos_operativos_impresora (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT,
+            activo_id INTEGER NOT NULL,
+            diagnostico_id INTEGER,
+            tipo_costo TEXT NOT NULL,
+            monto_usd REAL NOT NULL DEFAULT 0,
+            detalle TEXT,
+            FOREIGN KEY (activo_id) REFERENCES activos(id),
+            FOREIGN KEY (diagnostico_id) REFERENCES diagnosticos_impresora(id)
         )
         """
     )
@@ -391,6 +531,18 @@ def _ensure_diagnostics_schema(conn) -> None:
         "vida_almohadillas_pct": "ALTER TABLE diagnosticos_impresora ADD COLUMN vida_almohadillas_pct REAL",
         "contador_impresiones": "ALTER TABLE diagnosticos_impresora ADD COLUMN contador_impresiones INTEGER DEFAULT 0",
         "activo_id": "ALTER TABLE diagnosticos_impresora ADD COLUMN activo_id INTEGER",
+        "total_pages": "ALTER TABLE diagnosticos_impresora ADD COLUMN total_pages INTEGER DEFAULT 0",
+        "color_pages": "ALTER TABLE diagnosticos_impresora ADD COLUMN color_pages INTEGER DEFAULT 0",
+        "bw_pages": "ALTER TABLE diagnosticos_impresora ADD COLUMN bw_pages INTEGER DEFAULT 0",
+        "borderless_pages": "ALTER TABLE diagnosticos_impresora ADD COLUMN borderless_pages INTEGER DEFAULT 0",
+        "scanned_pages": "ALTER TABLE diagnosticos_impresora ADD COLUMN scanned_pages INTEGER DEFAULT 0",
+        "estimation_mode": "ALTER TABLE diagnosticos_impresora ADD COLUMN estimation_mode TEXT DEFAULT 'none'",
+        "confidence_level": "ALTER TABLE diagnosticos_impresora ADD COLUMN confidence_level TEXT DEFAULT 'medium'",
+        "initial_fill_known": "ALTER TABLE diagnosticos_impresora ADD COLUMN initial_fill_known INTEGER DEFAULT 1",
+        "is_estimated": "ALTER TABLE diagnosticos_impresora ADD COLUMN is_estimated INTEGER DEFAULT 0",
+        "depreciation_amount": "ALTER TABLE diagnosticos_impresora ADD COLUMN depreciation_amount REAL DEFAULT 0",
+        "head_wear_pct": "ALTER TABLE diagnosticos_impresora ADD COLUMN head_wear_pct REAL DEFAULT 0",
+        "payload_json": "ALTER TABLE diagnosticos_impresora ADD COLUMN payload_json TEXT",
     }
     for col, alter_sql in optional_diag_cols.items():
         if col not in diag_cols:
@@ -673,3 +825,298 @@ def aplicar_resultado_diagnostico(
                 )
 
     return resumen
+
+
+
+
+def save_tank_capacities(activo_id: int, capacities_ml: dict[str, float]) -> None:
+    with db_transaction() as conn:
+        _ensure_diagnostics_schema(conn)
+        for color, value in (capacities_ml or {}).items():
+            c = _normalize_color(color)
+            if c not in COLOR_KEYS:
+                continue
+            conn.execute(
+                """
+                INSERT INTO impresora_tanque_capacidad(activo_id, color, capacity_ml, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(activo_id, color)
+                DO UPDATE SET capacity_ml=excluded.capacity_ml, updated_at=CURRENT_TIMESTAMP
+                """,
+                (int(activo_id), c, max(0.0, _to_float(value))),
+            )
+
+
+def get_tank_capacities(activo_id: int | None, fallback_name: str = "") -> dict[str, float]:
+    if not activo_id:
+        return _obtener_capacidades_por_nombre(fallback_name)
+
+    with db_transaction() as conn:
+        _ensure_diagnostics_schema(conn)
+        rows = conn.execute(
+            "SELECT color, capacity_ml FROM impresora_tanque_capacidad WHERE activo_id=?",
+            (int(activo_id),),
+        ).fetchall()
+
+    if not rows:
+        return _obtener_capacidades_por_nombre(fallback_name)
+
+    data = {str(r['color']).lower(): _to_float(r['capacity_ml']) for r in rows}
+    return {
+        "black": data.get("black", 70.0),
+        "cyan": data.get("cyan", 70.0),
+        "magenta": data.get("magenta", 70.0),
+        "yellow": data.get("yellow", 70.0),
+    }
+
+
+def _obtener_capacidades_por_nombre(nombre: str) -> dict[str, float]:
+    model = (nombre or "").lower()
+    if "580" in model or "590" in model:
+        return {"black": 135.0, "cyan": 70.0, "magenta": 70.0, "yellow": 70.0}
+    if "j210" in model or "deskjet 2000" in model:
+        return {"black": 100.0, "cyan": 70.0, "magenta": 70.0, "yellow": 70.0}
+    if "l1250" in model:
+        return {"black": 70.0, "cyan": 70.0, "magenta": 70.0, "yellow": 70.0}
+    return {"black": 70.0, "cyan": 70.0, "magenta": 70.0, "yellow": 70.0}
+
+
+def create_diagnostic_record(
+    usuario: str,
+    activo_id: int,
+    printer_name: str,
+    counters: dict[str, int],
+    tank_levels: dict[str, dict[str, Any]],
+    notes: str = "",
+    files: list[dict[str, Any]] | None = None,
+    estimation_mode: str = "none",
+    confidence_level: str = "medium",
+    initial_fill_known: bool = True,
+) -> dict[str, Any]:
+    if estimation_mode not in ESTIMATION_MODES:
+        raise ValueError("estimation_mode inválido")
+    if confidence_level not in CONFIDENCE_LEVELS:
+        raise ValueError("confidence_level inválido")
+
+    files = list(files or [])
+    counters = dict(counters or {})
+
+    with db_transaction() as conn:
+        _ensure_diagnostics_schema(conn)
+        _ensure_activos_sync_columns(conn)
+
+        total_pages = int(counters.get("total_pages") or 0)
+        color_pages = int(counters.get("color_pages") or 0)
+        bw_pages = int(counters.get("bw_pages") or 0)
+        borderless_pages = int(counters.get("borderless_pages") or 0)
+        scanned_pages = int(counters.get("scanned_pages") or 0)
+
+        if total_pages < 0 or color_pages < 0 or bw_pages < 0 or borderless_pages < 0 or scanned_pages < 0:
+            raise ValueError("Los contadores de páginas no pueden ser negativos")
+
+        prev = conn.execute(
+            "SELECT id, black_ml, cyan_ml, magenta_ml, yellow_ml, total_pages FROM diagnosticos_impresora WHERE activo_id=? ORDER BY id DESC LIMIT 1",
+            (int(activo_id),),
+        ).fetchone()
+
+        black_ml = _to_float(tank_levels.get("black", {}).get("estimated_ml"))
+        cyan_ml = _to_float(tank_levels.get("cyan", {}).get("estimated_ml"))
+        magenta_ml = _to_float(tank_levels.get("magenta", {}).get("estimated_ml"))
+        yellow_ml = _to_float(tank_levels.get("yellow", {}).get("estimated_ml"))
+
+        head_wear_pct = 0.0
+        if total_pages > 0:
+            head_wear_pct = min(100.0, round(total_pages / 10000.0 * 100.0, 2))
+        depreciation_amount = round(max(0.0, total_pages) * 0.0025, 4)
+
+        payload = {
+            "counters": counters,
+            "tank_levels": tank_levels,
+            "notes": notes,
+            "estimation_mode": estimation_mode,
+            "confidence_level": confidence_level,
+            "initial_fill_known": bool(initial_fill_known),
+        }
+
+        cur = conn.execute(
+            """
+            INSERT INTO diagnosticos_impresora
+            (usuario, activo_id, impresora, vida_cabezal_pct, contador_impresiones, cyan_ml, magenta_ml, yellow_ml, black_ml, observacion,
+             total_pages, color_pages, bw_pages, borderless_pages, scanned_pages, estimation_mode, confidence_level, initial_fill_known,
+             is_estimated, depreciation_amount, head_wear_pct, payload_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                usuario,
+                int(activo_id),
+                printer_name,
+                round(max(0.0, 100.0 - head_wear_pct), 2),
+                total_pages,
+                cyan_ml,
+                magenta_ml,
+                yellow_ml,
+                black_ml,
+                notes,
+                total_pages,
+                color_pages,
+                bw_pages,
+                borderless_pages,
+                scanned_pages,
+                estimation_mode,
+                confidence_level,
+                1 if initial_fill_known else 0,
+                0 if estimation_mode == "none" else 1,
+                depreciation_amount,
+                head_wear_pct,
+                json.dumps(payload, ensure_ascii=False),
+            ),
+        )
+        diagnostico_id = int(cur.lastrowid)
+
+        for color, values in tank_levels.items():
+            c = _normalize_color(color)
+            if c not in COLOR_KEYS:
+                continue
+            source = str(values.get("source_of_measurement") or "manual").lower()
+            if source not in MEASUREMENT_SOURCES:
+                source = "manual"
+            confidence = str(values.get("confidence_level") or confidence_level).lower()
+            if confidence not in CONFIDENCE_LEVELS:
+                confidence = confidence_level
+            conn.execute(
+                """
+                INSERT INTO diagnostico_tanques
+                (diagnostico_id, color, estimated_percent, estimated_ml, source_of_measurement, confidence_level, is_estimated)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    diagnostico_id,
+                    c,
+                    _clamp_percentage(values.get("estimated_percent")),
+                    max(0.0, _to_float(values.get("estimated_ml"))),
+                    source,
+                    confidence,
+                    1 if values.get("is_estimated", estimation_mode != "none") else 0,
+                ),
+            )
+
+        for f in files:
+            conn.execute(
+                """
+                INSERT INTO diagnostico_archivos
+                (diagnostico_id, file_name, file_type, file_category, file_path, file_size)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    diagnostico_id,
+                    str(f.get("file_name") or "archivo"),
+                    str(f.get("file_type") or "application/octet-stream"),
+                    str(f.get("file_category") or "evidencia"),
+                    str(f.get("file_path") or ""),
+                    int(f.get("file_size") or 0),
+                ),
+            )
+
+        conn.execute(
+            """
+            UPDATE activos
+            SET paginas_impresas = CASE WHEN ? > paginas_impresas THEN ? ELSE paginas_impresas END,
+                vida_cabezal_pct = ?,
+                desgaste = ROUND(? / 100.0, 6),
+                usuario = ?
+            WHERE id = ?
+            """,
+            (total_pages, total_pages, round(max(0.0, 100.0 - head_wear_pct), 2), head_wear_pct, usuario, int(activo_id)),
+        )
+
+        if prev:
+            prev_map = {"black": _to_float(prev["black_ml"]), "cyan": _to_float(prev["cyan_ml"]), "magenta": _to_float(prev["magenta_ml"]), "yellow": _to_float(prev["yellow_ml"])}
+            current_map = {"black": black_ml, "cyan": cyan_ml, "magenta": magenta_ml, "yellow": yellow_ml}
+            for color in COLOR_KEYS:
+                consumed = round(max(0.0, prev_map.get(color, 0.0) - current_map.get(color, 0.0)), 2)
+                if consumed <= 0:
+                    continue
+                conn.execute(
+                    "INSERT INTO diagnostico_consumos(usuario, activo_id, diagnostico_id, color, consumed_ml, source, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (usuario, int(activo_id), diagnostico_id, color, consumed, "diagnostico", "Consumo inferido entre diagnósticos"),
+                )
+                item = _buscar_item_tinta(conn, color)
+                if item:
+                    salida = min(_to_float(item.get("stock_actual")), consumed)
+                    if salida > 0:
+                        conn.execute(
+                            "INSERT INTO movimientos_inventario(usuario, inventario_id, tipo, cantidad, costo_unitario_usd, referencia) VALUES (?, ?, 'salida', ?, ?, ?)",
+                            (usuario, int(item["id"]), -float(salida), _to_float(item.get("costo_unitario_usd")), f"Consumo diagnóstico {printer_name} {color}"),
+                        )
+                        conn.execute("UPDATE inventario SET stock_actual = stock_actual - ? WHERE id = ?", (float(salida), int(item["id"])))
+                        conn.execute(
+                            "UPDATE diagnostico_consumos SET inventory_item_id=? WHERE diagnostico_id=? AND color=?",
+                            (int(item["id"]), diagnostico_id, color),
+                        )
+
+        return {"diagnostico_id": diagnostico_id, "depreciation_amount": depreciation_amount, "head_wear_pct": head_wear_pct}
+
+
+def save_uploaded_file(file_obj, diagnostico_id: int, category: str = "evidencia") -> dict[str, Any] | None:
+    if file_obj is None:
+        return None
+    root = Path("uploads") / "diagnosticos" / str(diagnostico_id)
+    root.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", file_obj.name or "archivo")
+    final_path = root / f"{timestamp}_{safe_name}"
+    content = file_obj.getvalue()
+    final_path.write_bytes(content)
+    return {
+        "file_name": file_obj.name,
+        "file_type": getattr(file_obj, "type", "application/octet-stream"),
+        "file_category": category,
+        "file_path": str(final_path),
+        "file_size": len(content),
+    }
+
+
+def get_printer_diagnostic_summary(activo_id: int) -> dict[str, Any]:
+    with db_transaction() as conn:
+        _ensure_diagnostics_schema(conn)
+        row = conn.execute(
+            """
+            SELECT a.id, a.equipo, a.modelo, a.paginas_impresas, a.vida_cabezal_pct,
+                   d.id AS diagnostico_id, d.fecha, d.total_pages, d.color_pages, d.bw_pages,
+                   d.borderless_pages, d.scanned_pages, d.black_ml, d.cyan_ml, d.magenta_ml, d.yellow_ml,
+                   d.estimation_mode, d.confidence_level, d.initial_fill_known, d.depreciation_amount, d.head_wear_pct
+            FROM activos a
+            LEFT JOIN diagnosticos_impresora d ON d.id = (
+                SELECT id FROM diagnosticos_impresora WHERE activo_id=a.id ORDER BY id DESC LIMIT 1
+            )
+            WHERE a.id=?
+            """,
+            (int(activo_id),),
+        ).fetchone()
+        if not row:
+            return {}
+        consumos = conn.execute(
+            "SELECT color, SUM(consumed_ml) AS consumed_ml FROM diagnostico_consumos WHERE activo_id=? GROUP BY color",
+            (int(activo_id),),
+        ).fetchall()
+    data = dict(row)
+    data["consumos"] = {str(r["color"]): _to_float(r["consumed_ml"]) for r in consumos}
+    return data
+
+
+def list_printer_diagnostics(activo_id: int, limit: int = 100) -> list[dict[str, Any]]:
+    with db_transaction() as conn:
+        _ensure_diagnostics_schema(conn)
+        rows = conn.execute(
+            """
+            SELECT d.*, 
+                   (SELECT COUNT(1) FROM diagnostico_archivos f WHERE f.diagnostico_id=d.id) AS files_count,
+                   (SELECT COUNT(1) FROM diagnostico_tanques t WHERE t.diagnostico_id=d.id) AS tank_rows
+            FROM diagnosticos_impresora d
+            WHERE d.activo_id=?
+            ORDER BY d.id DESC
+            LIMIT ?
+            """,
+            (int(activo_id), int(limit)),
+        ).fetchall()
+    return [dict(r) for r in rows]
