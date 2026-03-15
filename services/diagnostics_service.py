@@ -452,6 +452,56 @@ def _buscar_item_tinta(conn, color: str) -> dict[str, Any] | None:
     return mejor if mejor_puntaje >= 4 else None
 
 
+
+
+def _resolver_activo_impresora(conn, activo_id: int | None, impresora: str) -> int | None:
+    if activo_id:
+        return int(activo_id)
+
+    nombre_obj = _normalizar_texto_busqueda(impresora)
+    if not nombre_obj:
+        return None
+
+    filas = conn.execute(
+        """
+        SELECT id, equipo, modelo, categoria, unidad
+        FROM activos
+        WHERE COALESCE(activo, 1) = 1
+        """
+    ).fetchall()
+
+    mejor_id = None
+    mejor_puntaje = 0
+    tokens_obj = set(nombre_obj.split())
+
+    for row in filas:
+        data = dict(row)
+        equipo = _normalizar_texto_busqueda(str(data.get("equipo") or ""))
+        modelo = _normalizar_texto_busqueda(str(data.get("modelo") or ""))
+        categoria = _normalizar_texto_busqueda(str(data.get("categoria") or ""))
+        unidad = _normalizar_texto_busqueda(str(data.get("unidad") or ""))
+
+        puntaje = 0
+        if "impres" in categoria or "impres" in unidad:
+            puntaje += 3
+
+        for campo in (equipo, modelo):
+            if not campo:
+                continue
+            if campo in nombre_obj or nombre_obj in campo:
+                puntaje += 4
+
+            tokens_campo = set(campo.split())
+            coincidencias = len(tokens_obj & tokens_campo)
+            puntaje += coincidencias
+
+        if puntaje > mejor_puntaje:
+            mejor_puntaje = puntaje
+            mejor_id = int(data["id"])
+
+    return mejor_id if mejor_puntaje >= 4 else None
+
+
 def aplicar_resultado_diagnostico(
     usuario: str,
     impresora: str,
@@ -470,8 +520,10 @@ def aplicar_resultado_diagnostico(
     with db_transaction() as conn:
         _ensure_diagnostics_schema(conn)
 
+        activo_objetivo_id = _resolver_activo_impresora(conn, activo_id, impresora)
+
         previo = None
-        if activo_id:
+        if activo_objetivo_id:
             _ensure_activos_sync_columns(conn)
             previo = conn.execute(
                 """
@@ -481,7 +533,7 @@ def aplicar_resultado_diagnostico(
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                (int(activo_id),),
+                (int(activo_objetivo_id),),
             ).fetchone()
         elif impresora:
             previo = conn.execute(
@@ -507,7 +559,7 @@ def aplicar_resultado_diagnostico(
             """,
             (
                 usuario,
-                int(activo_id) if activo_id else None,
+                int(activo_objetivo_id) if activo_objetivo_id else None,
                 str(impresora),
                 float(vida_cabezal_pct),
                 int(contador_impresiones or 0),
@@ -522,7 +574,7 @@ def aplicar_resultado_diagnostico(
         )
         resumen["diagnostico_guardado"] = True
 
-        if activo_id:
+        if activo_objetivo_id:
             vidas_componentes = [_clamp_percentage(vida_cabezal_pct), vida_rodillo, vida_almohadillas]
             vidas_validas = [float(v) for v in vidas_componentes if v is not None]
             vida_general = min(vidas_validas) if vidas_validas else None
@@ -552,7 +604,7 @@ def aplicar_resultado_diagnostico(
                     int(contador_impresiones or 0),
                     int(contador_impresiones or 0),
                     usuario,
-                    int(activo_id),
+                    int(activo_objetivo_id),
                 ),
             )
             conn.execute(
