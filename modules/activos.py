@@ -67,6 +67,10 @@ def _ensure_activos_schema(conn) -> None:
         "estado": "ALTER TABLE activos ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo'",
         "fecha": "ALTER TABLE activos ADD COLUMN fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
         "usuario": "ALTER TABLE activos ADD COLUMN usuario TEXT",
+        "vida_cabezal_pct": "ALTER TABLE activos ADD COLUMN vida_cabezal_pct REAL",
+        "vida_rodillo_pct": "ALTER TABLE activos ADD COLUMN vida_rodillo_pct REAL",
+        "vida_almohadillas_pct": "ALTER TABLE activos ADD COLUMN vida_almohadillas_pct REAL",
+        "paginas_impresas": "ALTER TABLE activos ADD COLUMN paginas_impresas INTEGER DEFAULT 0",
     }
     for col, alter_sql in optional_cols.items():
         if col not in cols:
@@ -87,6 +91,10 @@ def _load_activos_df() -> pd.DataFrame:
                 desgaste,
                 modelo,
                 costo_hora,
+                COALESCE(vida_cabezal_pct, NULL) AS vida_cabezal_pct,
+                COALESCE(vida_rodillo_pct, NULL) AS vida_rodillo_pct,
+                COALESCE(vida_almohadillas_pct, NULL) AS vida_almohadillas_pct,
+                COALESCE(paginas_impresas, 0) AS paginas_impresas,
                 fecha,
                 COALESCE(activo, 1) AS activo
             FROM activos
@@ -97,12 +105,19 @@ def _load_activos_df() -> pd.DataFrame:
 
     if not rows:
         return pd.DataFrame(
-            columns=["id", "equipo", "categoria", "inversion", "unidad", "desgaste", "modelo", "costo_hora", "fecha", "activo"]
+            columns=[
+                "id", "equipo", "categoria", "inversion", "unidad", "desgaste", "modelo", "costo_hora",
+                "vida_cabezal_pct", "vida_rodillo_pct", "vida_almohadillas_pct", "paginas_impresas", "fecha", "activo"
+            ]
         )
 
     df = pd.DataFrame([dict(r) for r in rows])
     df["inversion"] = pd.to_numeric(df["inversion"], errors="coerce").fillna(0.0)
     df["desgaste"] = pd.to_numeric(df["desgaste"], errors="coerce").fillna(0.0)
+    df["vida_cabezal_pct"] = pd.to_numeric(df.get("vida_cabezal_pct"), errors="coerce")
+    df["vida_rodillo_pct"] = pd.to_numeric(df.get("vida_rodillo_pct"), errors="coerce")
+    df["vida_almohadillas_pct"] = pd.to_numeric(df.get("vida_almohadillas_pct"), errors="coerce")
+    df["paginas_impresas"] = pd.to_numeric(df.get("paginas_impresas"), errors="coerce").fillna(0).astype(int)
     ranking_riesgo = df["desgaste"].rank(pct=True, method="average").fillna(0)
     df["riesgo"] = np.where(
         ranking_riesgo >= 0.80,
@@ -325,8 +340,21 @@ def render_activos(usuario: str):
 
     with t1:
         st.subheader("Impresoras")
-        df_imp = df[df["unidad"].fillna("").str.contains("Impresora", case=False)]
-        st.dataframe(df_imp, use_container_width=True, hide_index=True)
+        df_imp = df[df["unidad"].fillna("").str.contains("Impresora", case=False)].copy()
+        if not df_imp.empty:
+            df_imp["desgaste_cabezal_pct"] = 100.0 - pd.to_numeric(df_imp["vida_cabezal_pct"], errors="coerce")
+            c_imp1, c_imp2, c_imp3 = st.columns(3)
+            c_imp1.metric("Vida cabezal promedio", f"{df_imp['vida_cabezal_pct'].mean(skipna=True):.2f}%")
+            c_imp2.metric("Desgaste cabezal promedio", f"{df_imp['desgaste_cabezal_pct'].mean(skipna=True):.2f}%")
+            c_imp3.metric("Páginas impresas (total)", int(df_imp["paginas_impresas"].sum()))
+
+            mostrar_cols = [
+                "equipo", "modelo", "categoria", "vida_cabezal_pct", "vida_rodillo_pct",
+                "vida_almohadillas_pct", "desgaste_cabezal_pct", "paginas_impresas", "desgaste", "riesgo"
+            ]
+            st.dataframe(df_imp[mostrar_cols], use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay impresoras activas registradas.")
 
     with t2:
         st.subheader("Corte / Plotter")
@@ -351,23 +379,4 @@ def render_activos(usuario: str):
 
         fig = px.bar(df, x="equipo", y="inversion", color="categoria", title="Distribución de Inversión por Activo")
         st.plotly_chart(fig, use_container_width=True)
-
-    with t6:
-        st.subheader("Historial de Movimientos de Activos")
-        try:
-            with db_transaction() as conn:
-                _ensure_activos_schema(conn)
-                hist = conn.execute(
-                    """
-                    SELECT activo, accion, detalle, costo, usuario, fecha
-                    FROM activos_historial
-                    ORDER BY fecha DESC, id DESC
-                    """
-                ).fetchall()
-            df_hist = pd.DataFrame([dict(r) for r in hist])
-            if df_hist.empty:
-                st.info("No hay movimientos registrados aún.")
-            else:
-                st.dataframe(df_hist, use_container_width=True, hide_index=True)
-        except Exception as e:
             st.error(f"Error cargando historial: {e}")
