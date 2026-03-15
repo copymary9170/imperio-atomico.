@@ -1,7 +1,9 @@
 from typing import Dict
 import re
 import unicodedata
+
 import pandas as pd
+
 from database.connection import db_transaction
 
 
@@ -12,10 +14,6 @@ def _normalize(txt: str) -> str:
     return re.sub(r"\s+", " ", base)
 
 
-# ==========================================================
-# BUSCAR COLUMNA
-# ==========================================================
-
 def _col(df: pd.DataFrame, candidatos: list[str], default=None):
     for c in candidatos:
         if c in df.columns:
@@ -23,12 +21,7 @@ def _col(df: pd.DataFrame, candidatos: list[str], default=None):
     return default
 
 
-# ==========================================================
-# FILTRAR TINTAS
-# ==========================================================
-
 def filtrar_tintas(df_inv: pd.DataFrame) -> pd.DataFrame:
-
     if df_inv.empty:
         return pd.DataFrame()
 
@@ -41,14 +34,14 @@ def filtrar_tintas(df_inv: pd.DataFrame) -> pd.DataFrame:
     mask = df_inv[col_nombre].fillna("").str.contains(
         "tinta|ink|cyan|cian|magenta|yellow|amarillo|black|negro|cartucho|tricolor",
         case=False,
-        na=False
+        na=False,
     )
 
     if col_categoria:
         mask = mask | df_inv[col_categoria].fillna("").str.contains(
             "tinta|ink|cartucho",
             case=False,
-            na=False
+            na=False,
         )
 
     return df_inv[mask].copy()
@@ -74,17 +67,12 @@ def _score_item(nombre_item: str, printer_name: str, tokens_color: list[str]) ->
     return score
 
 
-# ==========================================================
-# MAPEAR CONSUMO CMYK
-# ==========================================================
-
 def mapear_consumo_ids(
     df_tintas: pd.DataFrame,
     totales: Dict[str, float],
     sistema_tinta: str = "Tanque CMYK (4 tintas)",
     impresora: str = "",
 ) -> Dict[int, float]:
-
     if df_tintas.empty or "id" not in df_tintas.columns:
         return {}
 
@@ -95,7 +83,6 @@ def mapear_consumo_ids(
     if str(sistema_tinta).startswith("Cartucho"):
         ml_color = float(totales.get("C", 0.0) + totales.get("M", 0.0) + totales.get("Y", 0.0))
         ml_black = float(totales.get("K", 0.0))
-
         alias_cart = {
             "color": ["cartucho color", "tricolor", "color"],
             "black": ["cartucho negro", "black", "negro", "bk"],
@@ -133,7 +120,7 @@ def mapear_consumo_ids(
         "K": ["negro", "black", "bk", "tinta k", "ink k"],
     }
 
-    consumos = {}
+    consumos: Dict[int, float] = {}
 
     for color, ml in totales.items():
         if float(ml) <= 0:
@@ -157,15 +144,7 @@ def mapear_consumo_ids(
     return consumos
 
 
-# ==========================================================
-# VALIDAR STOCK
-# ==========================================================
-
-def validar_stock(
-    df_base: pd.DataFrame,
-    consumos_ids: Dict[int, float]
-) -> list[str]:
-
+def validar_stock(df_base: pd.DataFrame, consumos_ids: Dict[int, float]) -> list[str]:
     alertas = []
 
     if df_base.empty:
@@ -184,51 +163,31 @@ def validar_stock(
         return alertas
 
     for item_id, requerido in consumos_ids.items():
-
         fila = df_base[df_base["id"].astype(int) == int(item_id)]
 
         if fila.empty:
             alertas.append(f"⚠️ No se encontró tinta con ID {item_id}")
             continue
 
-        disponible = float(
-            pd.to_numeric(fila[col_stock], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
+        disponible = float(pd.to_numeric(fila[col_stock], errors="coerce").fillna(0).sum())
 
         if requerido > disponible:
-
-            nombre = str(
-                fila.iloc[0].get(col_nombre, f"ID {item_id}")
+            nombre = str(fila.iloc[0].get(col_nombre, f"ID {item_id}"))
+            alertas.append(
+                f"⚠️ Stock insuficiente en '{nombre}': requiere {requerido:.2f} ml y hay {disponible:.2f} ml"
             )
 
-@@ -146,51 +211,53 @@ def validar_stock(
     return alertas
 
 
-# ==========================================================
-# DESCONTAR INVENTARIO
-# ==========================================================
-
-def descontar_inventario(
-    consumos_ids: Dict[int, float]
-) -> tuple[bool, str]:
-
+def descontar_inventario(consumos_ids: Dict[int, float]) -> tuple[bool, str]:
     if not consumos_ids:
         return False, "No se encontraron tintas vinculadas."
 
     with db_transaction() as conn:
-
-        cols = {
-            str(r[1])
-            for r in conn.execute(
-                "PRAGMA table_info(inventario)"
-            ).fetchall()
-        }
+        cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
 
         col_stock = None
-
         if "stock_actual" in cols:
             col_stock = "stock_actual"
         elif "cantidad" in cols:
@@ -240,19 +199,21 @@ def descontar_inventario(
             return False, "Inventario sin columna de stock."
 
         for item_id, ml in consumos_ids.items():
-
             row = conn.execute(
                 f"SELECT {col_stock} FROM inventario WHERE id=?",
-                (int(item_id),)
+                (int(item_id),),
             ).fetchone()
-
             if not row:
                 return False, f"No existe item ID {item_id}"
 
             disponible = float(row[0] or 0)
+            if float(ml) > disponible:
+                return False, f"Stock insuficiente ID {item_id}: req {ml:.2f} / disp {disponible:.2f}"
 
-            if ml > disponible:
-                return False, (
-                    f"Stock insuficiente ID {item_id}: "
-                    f"req {ml:.2f} / disp {disponible:.2f}"
-                )
+        for item_id, ml in consumos_ids.items():
+            conn.execute(
+                f"UPDATE inventario SET {col_stock} = MAX(0, {col_stock} - ?) WHERE id=?",
+                (float(ml), int(item_id)),
+            )
+
+    return True, "Inventario descontado correctamente."
