@@ -149,8 +149,15 @@ def _impresoras_disponibles(df_act: pd.DataFrame) -> list[dict]:
     return [
         {
             "id": int(row[id_col]),
-            "nombre": str(row[nombre_col]),
-            "label": f"{str(row[nombre_col])} (ID {int(row[id_col])})",
+            "nombre": str(row.get("equipo") or row.get("nombre") or row.get("modelo") or "Impresora"),
+            "modelo": str(row.get("modelo") or "").strip(),
+            "unidad": str(row.get("unidad") or "").strip(),
+            "categoria": str(row.get("categoria") or "").strip(),
+            "label": (
+                f"{str(row.get('equipo') or row.get('nombre') or row.get('modelo') or 'Impresora')}"
+                f"{(' · ' + str(row.get('modelo'))) if str(row.get('modelo') or '').strip() else ''}"
+                f" (ID {int(row[id_col])})"
+            ),
         }
         for _, row in df.iterrows()
     ]
@@ -191,7 +198,7 @@ def _descontar_material_papel(material_id: int, cantidad_hojas: float) -> tuple[
         return False, f"Error descontando material: {exc}"
 
 
-def _registrar_desgaste_impresora(impresora_id: int, costo_desgaste_total: float) -> tuple[bool, str]:
+def _registrar_desgaste_impresora(impresora_id: int, costo_desgaste_total: float, vidas_cabezales: int = 2) -> tuple[bool, str]:
     from database.connection import db_transaction
 
     if costo_desgaste_total <= 0:
@@ -200,18 +207,24 @@ def _registrar_desgaste_impresora(impresora_id: int, costo_desgaste_total: float
     try:
         with db_transaction() as conn:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(activos)").fetchall()}
+            if "vida_cabezal_pct" in cols:
+                dec_pct = min(100.0, float(costo_desgaste_total) * 0.02 * max(1, int(vidas_cabezales)))
+                conn.execute(
+                    "UPDATE activos SET vida_cabezal_pct=MAX(0, COALESCE(vida_cabezal_pct,100)-?) WHERE id=?",
+                    (float(dec_pct), int(impresora_id)),
+                )
             if "desgaste" in cols:
                 conn.execute(
                     "UPDATE activos SET desgaste=COALESCE(desgaste,0)+? WHERE id=?",
                     (float(costo_desgaste_total), int(impresora_id)),
                 )
-                return True, f"Desgaste de impresora actualizado (+{costo_desgaste_total:.4f})."
+                return True, f"Desgaste de impresora actualizado (+{costo_desgaste_total:.4f}). Cabezales: {int(vidas_cabezales)}"
             if "desgaste_por_uso" in cols:
                 conn.execute(
                     "UPDATE activos SET desgaste_por_uso=COALESCE(desgaste_por_uso,0)+? WHERE id=?",
                     (float(costo_desgaste_total), int(impresora_id)),
                 )
-                return True, f"Vida útil/uso registrada (+{costo_desgaste_total:.4f})."
+                return True, f"Vida útil/uso registrada (+{costo_desgaste_total:.4f}). Cabezales: {int(vidas_cabezales)}"
             return False, "No se encontró columna de desgaste en activos."
     except Exception as exc:
         return False, f"Error registrando desgaste: {exc}"
@@ -237,94 +250,7 @@ def _payload_base_cmyk(
         "costo_estimado": float(costo_total),
         "costo_base": float(costo_total),
         "total_ml": float(total_ml),
-        "consumo_c": float(totales_ajustados.get("C", 0.0)),
-        "consumo_m": float(totales_ajustados.get("M", 0.0)),
-        "consumo_y": float(totales_ajustados.get("Y", 0.0)),
-        "consumo_k": float(totales_ajustados.get("K", 0.0)),
-    }
-
-
-# ==========================================================
-# RENDER PRINCIPAL
-# ==========================================================
-
-
-def render_cmyk(usuario: str):
-    st.title("🎨 Analizador Profesional de Cobertura CMYK")
-    st.caption(f"Operador: {usuario}")
-
-    try:
-        df_inv, df_act, df_hist = _load_contexto_cmyk()
-    except Exception as e:
-        st.error(f"Error cargando datos CMYK: {e}")
-        return
-
-    col1, col2 = st.columns([1, 2])
-
-    with col1:
-        st.subheader("⚙️ Ajustes de Calibración Automática")
-
-        tamanos_disponibles = ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide", "Personalizado"]
-        tamano_pagina = st.selectbox("📄 Tamaño de página", tamanos_disponibles, index=1)
-
-        if tamano_pagina == "Personalizado":
-            col_ancho, col_alto = st.columns(2)
-            with col_ancho:
-                ancho_custom = st.number_input("Ancho (mm)", min_value=50.0, max_value=2000.0, value=210.0, step=1.0)
-            with col_alto:
-                alto_custom = st.number_input("Alto (mm)", min_value=50.0, max_value=2000.0, value=297.0, step=1.0)
-
-            factor_custom = _factor_area_personalizada(ancho_custom, alto_custom)
-            base_a4 = _config_base_imprenta("A4")
-            base_imprenta = {
-                "costo_desgaste": base_a4["costo_desgaste"] * factor_custom,
-                "ml_base": base_a4["ml_base"] * factor_custom,
-                "factor_general": base_a4["factor_general"] * factor_custom,
-            }
-            st.caption(f"Formato personalizado: **{ancho_custom:.0f} x {alto_custom:.0f} mm**")
-            st.caption(f"Factor por área aplicado: **{factor_custom:.2f}x**")
-        else:
-            base_imprenta = _config_base_imprenta(tamano_pagina)
-
-        costo_desgaste = base_imprenta["costo_desgaste"]
-        ml_base_pagina = base_imprenta["ml_base"]
-        factor_general = base_imprenta["factor_general"]
-
-        st.caption(f"Costo desgaste por página ($): **{costo_desgaste:.3f}**")
-        st.caption(f"Consumo base por página (ml): **{ml_base_pagina:.3f}**")
-        st.caption(f"Factor general de consumo: **{factor_general:.2f}**")
-
-        perfiles_calidad = {
-            "Borrador": PERFILES_CALIDAD["Borrador"]["ink_mult"],
-            "Normal": PERFILES_CALIDAD["Normal"]["ink_mult"],
-            "Alta": PERFILES_CALIDAD["Alta"]["ink_mult"],
-            "Foto": PERFILES_CALIDAD["Foto"]["ink_mult"],
-        }
-        calidad_impresion = st.selectbox("🖨️ Calidad de impresión", list(perfiles_calidad.keys()), index=1)
-        factor_calidad = float(perfiles_calidad[calidad_impresion])
-
-        marca_driver = st.selectbox("🧩 Marca / driver", ["HP", "Epson"], index=0)
-        perfiles_driver = _obtener_perfiles_driver(marca_driver)
-        tipo_papel_driver = st.selectbox("📄 Tipo de papel (driver)", list(perfiles_driver.keys()), index=0)
-        factor_papel = float(perfiles_driver[tipo_papel_driver])
-
-        st.caption(f"Factor calidad aplicado: **{factor_calidad:.2f}**")
-        st.caption(f"Factor papel aplicado: **{factor_papel:.2f}**")
-
-        st.markdown("#### 📦 Material / papel desde inventario")
-        papeles_inv = _materiales_papel_disponibles(df_inv)
-        costo_material_pagina = 0.0
-        material_papel = "No seleccionado"
-
-        material_papel_id = None
-        if papeles_inv.empty:
-            st.warning("No hay materiales tipo papel con stock disponible en inventario.")
-        else:
-            idx_sel = st.selectbox(
-                "Selecciona material/papel (solo inventario con stock)",
-                options=list(range(len(papeles_inv))),
-                format_func=lambda i: papeles_inv.iloc[i]["_material_label"],
-                index=0,
+@@ -328,55 +341,72 @@ def render_cmyk(usuario: str):
             )
             fila_papel = papeles_inv.iloc[int(idx_sel)]
             material_papel = str(fila_papel["_material_label"])
@@ -350,10 +276,27 @@ def render_cmyk(usuario: str):
             impresora_data = impresoras[int(idx_imp)]
             impresora = str(impresora_data["nombre"])
             impresora_id = int(impresora_data["id"])
+            pista_impresora = " ".join(
+                [
+                    str(impresora_data.get("nombre") or ""),
+                    str(impresora_data.get("modelo") or ""),
+                    str(impresora_data.get("categoria") or ""),
+                    str(impresora_data.get("unidad") or ""),
+                ]
+            ).strip()
         else:
             impresora = "Impresora"
             impresora_id = None
+            pista_impresora = ""
             st.info("No se detectaron impresoras activas en Activos. Se guardará como 'Impresora'.")
+
+        sistema_tinta = st.selectbox(
+            "Sistema de tinta",
+            ["Tanque CMYK (4 tintas)", "Cartucho (negro + color/tricolor)"],
+            index=0,
+            help="Tanque descuenta C/M/Y/K por separado. Cartucho descuenta negro y cartucho de color (C+M+Y).",
+        )
+        st.caption("Cabezales considerados para desgaste de vida útil: **2**")
 
         descontar_stock = st.toggle("Descontar tintas del inventario al guardar", value=True)
         descontar_papel = st.toggle("Descontar papel/material del inventario", value=True)
@@ -433,7 +376,12 @@ def render_cmyk(usuario: str):
     st.bar_chart(pd.DataFrame([totales_ajustados], index=["ml"]))
 
     df_tintas = filtrar_tintas(df_inv)
-    consumos_ids = mapear_consumo_ids(df_tintas, totales_ajustados)
+    consumos_ids = mapear_consumo_ids(
+        df_tintas,
+        totales_ajustados,
+        sistema_tinta=sistema_tinta,
+        impresora=f"{impresora} {pista_impresora}",
+    )
     alertas_stock = validar_stock(df_tintas, consumos_ids)
 
     if alertas_stock:
@@ -460,7 +408,11 @@ def render_cmyk(usuario: str):
                     st.warning(f"Material: {msg_papel}")
 
             if registrar_desgaste and impresora_id is not None:
-                ok_desg, msg_desg = _registrar_desgaste_impresora(int(impresora_id), float(costo["costo_desgaste"]))
+                ok_desg, msg_desg = _registrar_desgaste_impresora(
+                    int(impresora_id),
+                    float(costo["costo_desgaste"]),
+                    vidas_cabezales=2,
+                )
                 mensajes.append(msg_desg)
                 if not ok_desg:
                     st.warning(f"Activos: {msg_desg}")
