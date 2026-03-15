@@ -203,11 +203,7 @@ def validar_stock(
                 fila.iloc[0].get(col_nombre, f"ID {item_id}")
             )
 
-            alertas.append(
-                f"⚠️ Stock insuficiente para {nombre}: "
-                f"necesitas {requerido:.2f} ml y hay {disponible:.2f} ml"
-            )
-
+@@ -146,51 +211,53 @@ def validar_stock(
     return alertas
 
 
@@ -260,24 +256,3 @@ def descontar_inventario(
                     f"Stock insuficiente ID {item_id}: "
                     f"req {ml:.2f} / disp {disponible:.2f}"
                 )
-
-            disponible = float(row[0] or 0)
-
-            if ml > disponible:
-                return False, (
-                    f"Stock insuficiente ID {item_id}: "
-                    f"req {ml:.2f} / disp {disponible:.2f}"
-                )
-
-        for item_id, ml in consumos_ids.items():
-
-            conn.execute(
-                f"""
-                UPDATE inventario
-                SET {col_stock} = {col_stock} - ?
-                WHERE id = ?
-                """,
-                (float(ml), int(item_id))
-            )
-
-    return True, "Inventario actualizado correctamente."
