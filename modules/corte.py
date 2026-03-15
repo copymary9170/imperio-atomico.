@@ -39,6 +39,10 @@ def render_corte(usuario: str):
             st.rerun()
 
     with st.container(border=True):
+        archivo = st.file_uploader("Archivo de diseño", type=["svg", "dxf", "png", "jpg", "jpeg", "pdf"])
+
+        try:
+            with db_transaction() as conn:
                 df_inv = pd.read_sql_query(
                     """
                     SELECT id, item, cantidad, unidad, precio_usd
