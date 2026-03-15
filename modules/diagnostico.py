@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import Any
 
 import cv2
@@ -18,6 +19,11 @@ from services.diagnostics_service import (
     listar_impresoras_activas,
     save_tank_capacities,
     save_uploaded_file,
+    register_printer_refill,
+    list_printer_refills,
+    register_printer_maintenance,
+    list_printer_maintenance,
+    list_printer_diagnostics,
 )
 
 
@@ -42,7 +48,6 @@ def _convertir_archivo_a_imagen(file_obj) -> np.ndarray | None:
     if file_obj.type == "application/pdf":
         pages = convert_from_bytes(file_bytes, dpi=250)
         return cv2.cvtColor(np.array(pages[0]), cv2.COLOR_RGB2BGR) if pages else None
-
     return cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
 
 
@@ -175,7 +180,28 @@ def render_diagnostico(usuario: str) -> None:
     initial_fill_known = ec1.checkbox("initial_fill_known", value=True)
     estimation_mode = ec2.selectbox("estimation_mode", ["none", "visual", "software", "manual"], index=0)
     confidence_level = ec3.selectbox("confidence_level", ["low", "medium", "high"], index=1)
+
+    pc1, pc2, pc3 = st.columns(3)
+    ink_system_type = pc1.selectbox("ink_system_type", ["factory_tank", "cartridge", "adapted_external_tank"], index=0)
+    ink_usage_type = pc2.selectbox("ink_usage_type", ["standard", "sublimation"], index=0)
+    head_system_type = pc3.text_input("head_system_type", value="integrated")
+    vc1, vc2 = st.columns(2)
+    purchase_value = vc1.number_input("purchase_value", min_value=0.0, value=0.0, step=10.0)
+    current_value = vc2.number_input("current_value", min_value=0.0, value=0.0, step=10.0)
+
     notes = st.text_area("notes", value="Registro desde Diagnóstico IA", key="diag_notes")
+
+
+    st.markdown("**Lectura por color**")
+    source_options = ["photo", "software", "report", "manual"]
+    per_color_source: dict[str, str] = {}
+    per_color_conf: dict[str, str] = {}
+    cols = st.columns(4)
+    for idx, color in enumerate(["black", "cyan", "magenta", "yellow"]):
+        source_default = "software" if datos.get("porcentajes_texto") else "photo"
+        source_idx = source_options.index(source_default) if source_default in source_options else 0
+        per_color_source[color] = cols[idx].selectbox(f"{color}_source", source_options, index=source_idx, key=f"src_{color}")
+        per_color_conf[color] = cols[idx].selectbox(f"{color}_confidence", ["low", "medium", "high"], index=1, key=f"conf_{color}")
 
     st.markdown("**Archivos de soporte**")
     archivos_hoja = st.file_uploader("Hojas diagnóstico / fotos", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="diag_multi_sheet")
@@ -199,10 +225,9 @@ def render_diagnostico(usuario: str) -> None:
                 est_ml = float(ml or 0.0)
                 est_pct = (est_ml / capacity_ml * 100.0) if capacity_ml > 0 else 0.0
                 tank_levels[key] = {
-                    "estimated_percent": max(0.0, min(100.0, est_pct)),
                     "estimated_ml": max(0.0, est_ml),
-                    "source_of_measurement": "software" if datos.get("porcentajes_texto") else "photo",
-                    "confidence_level": confidence_level,
+                    "source_of_measurement": per_color_source.get(key, "manual"),
+                    "confidence_level": per_color_conf.get(key, confidence_level),
                     "is_estimated": estimation_mode != "none",
                 }
 
@@ -235,6 +260,11 @@ def render_diagnostico(usuario: str) -> None:
                 estimation_mode=estimation_mode,
                 confidence_level=confidence_level,
                 initial_fill_known=bool(initial_fill_known),
+                ink_system_type=ink_system_type,
+                ink_usage_type=ink_usage_type,
+                head_system_type=head_system_type,
+                purchase_value=float(purchase_value),
+                current_value=float(current_value),
             )
             st.success(f"✅ Diagnóstico guardado (ID #{rec['diagnostico_id']}).")
             st.caption(
@@ -250,6 +280,62 @@ def render_diagnostico(usuario: str) -> None:
     s1.write([round(float(v), 2) for v in datos.get("porcentajes_texto", [])])
     s2.markdown("**Porcentajes desde foto:**")
     s2.write({k: round(float(v), 2) for k, v in datos.get("porcentajes_foto", {}).items()})
+
+    if datos.get("activo_id"):
+        st.markdown("---")
+        st.subheader("💧 Registro de recargas")
+        rr1, rr2, rr3, rr4 = st.columns(4)
+        refill_color = rr1.selectbox("color", ["black", "cyan", "magenta", "yellow"], key="refill_color")
+        refill_ml = rr2.number_input("added_ml", min_value=0.0, value=0.0, step=1.0, key="refill_ml")
+        refill_unit_cost = rr3.number_input("unit_cost", min_value=0.0, value=0.0, step=0.1, key="refill_uc")
+        refill_date = rr4.text_input("refill_date", value="", key="refill_date")
+        refill_bottle = st.text_input("bottle_reference", key="refill_bottle")
+        refill_notes = st.text_area("refill_notes", key="refill_notes")
+        if st.button("Guardar recarga"):
+            try:
+                _ = register_printer_refill(
+                    usuario=usuario,
+                    activo_id=int(datos.get("activo_id")),
+                    color=refill_color,
+                    added_ml=float(refill_ml),
+                    refill_date=refill_date or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    bottle_reference=refill_bottle,
+                    unit_cost=float(refill_unit_cost),
+                    notes=refill_notes,
+                )
+                st.success("Recarga registrada")
+            except Exception as exc:
+                st.error(f"No fue posible registrar recarga: {exc}")
+
+        df_refills = pd.DataFrame(list_printer_refills(int(datos.get("activo_id")), limit=50))
+        st.dataframe(df_refills, use_container_width=True, hide_index=True)
+
+        st.subheader("🛠️ Historial de mantenimiento")
+        mm1, mm2, mm3 = st.columns(3)
+        maintenance_date = mm1.text_input("maintenance_date", value="", key="mnt_date")
+        maintenance_type = mm2.text_input("maintenance_type", value="limpieza", key="mnt_type")
+        maintenance_cost = mm3.number_input("maintenance_cost", min_value=0.0, value=0.0, step=0.1, key="mnt_cost")
+        maintenance_notes = st.text_area("maintenance_notes", key="mnt_notes")
+        if st.button("Guardar mantenimiento"):
+            try:
+                _ = register_printer_maintenance(
+                    usuario=usuario,
+                    activo_id=int(datos.get("activo_id")),
+                    maintenance_date=maintenance_date or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    maintenance_type=maintenance_type,
+                    cost=float(maintenance_cost),
+                    notes=maintenance_notes,
+                )
+                st.success("Mantenimiento registrado")
+            except Exception as exc:
+                st.error(f"No fue posible registrar mantenimiento: {exc}")
+
+        df_maint = pd.DataFrame(list_printer_maintenance(int(datos.get("activo_id")), limit=50))
+        st.dataframe(df_maint, use_container_width=True, hide_index=True)
+
+        st.subheader("📜 Historial de diagnósticos")
+        df_hist = pd.DataFrame(list_printer_diagnostics(int(datos.get("activo_id")), limit=50))
+        st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
     contador_imp = int(datos.get("contador_impresiones", 0))
     if contador_imp > 0:
