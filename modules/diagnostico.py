@@ -232,6 +232,11 @@ def _mostrar_resultados(resultados: dict[str, float | None], resumen: dict[str, 
 
 def render_diagnostico(usuario: str) -> None:
     st.caption(f"Usuario activo: {usuario}")
+    show_save_form_key = "diag_show_save_form"
+    selected_printer_key = "diag_selected_printer"
+
+    if show_save_form_key not in st.session_state:
+        st.session_state[show_save_form_key] = False
 
     impresoras_activas = listar_impresoras_activas()
     if impresoras_activas:
@@ -262,6 +267,11 @@ def render_diagnostico(usuario: str) -> None:
 
     profile = _obtener_perfil_impresora(impresora_sel)
 
+    previous_printer = st.session_state.get(selected_printer_key)
+    if previous_printer != impresora_sel:
+        st.session_state[show_save_form_key] = False
+    st.session_state[selected_printer_key] = impresora_sel
+
     st.subheader("Entrada de diagnóstico")
     archivo_diag = st.file_uploader("📄 Hoja diagnóstico (PDF/imagen)", type=["pdf", "png", "jpg", "jpeg"], key="diag_file")
     archivo_tanque = st.file_uploader("🖼 Foto de tanques", type=["png", "jpg", "jpeg"], key="tank_file")
@@ -278,7 +288,6 @@ def render_diagnostico(usuario: str) -> None:
         "black": c4.number_input("Black (ml)", min_value=0.0, value=float(capacidad_default["black"]), step=1.0),
     }
     
-   show_save_form_key = "diag_show_save_form"
 
     if st.button("🔍 Analizar diagnóstico"):
         texto_ocr = texto_manual.strip()
