@@ -547,7 +547,8 @@ def render_diagnostico(usuario: str) -> None:
         return
 
     show_save_form = bool(st.session_state.get(show_save_form_key, False))
-
+    st.caption(f"🐞 DEBUG show_save_form={show_save_form}")
+    
     st.markdown("---")
     st.subheader("3) Resultado del análisis")
     _mostrar_resultados(datos["resultados"], datos["resumen"])
