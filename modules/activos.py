@@ -22,7 +22,12 @@ TIPOS_UNIDAD = [
     "Otro",
 ]
 CATEGORIAS = ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"]
-
+TIPOS_IMPRESORA = [
+    "Tanque de tinta",
+    "Cartucho",
+    "Láser monocromática",
+    "Láser a color",
+]
 
 # =========================================================
 # CAPA DE DATOS
