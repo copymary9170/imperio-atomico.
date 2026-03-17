@@ -38,6 +38,15 @@ IGNORE_COUNTER_CONTEXT = [
     re.compile(r"serial", re.I),
     re.compile(r"imei", re.I),
 ]
+SCAN_COUNTER_CONTEXT = [
+    re.compile(r"escanead", re.I),
+    re.compile(r"escaneo", re.I),
+    re.compile(r"scan", re.I),
+]
+PRINT_COUNTER_CONTEXT = [
+    re.compile(r"impres", re.I),
+    re.compile(r"print", re.I),
+]
 COMPONENT_LIFE_PATTERNS = {
     "cabezal": [re.compile(r"(?:head|cabezal)[^\d]{0,20}(\d{1,3})\s*%", re.I)],
     "rodillo": [re.compile(r"(?:roller|rodillo(?:s)?)[^\d]{0,20}(\d{1,3})\s*%", re.I)],
@@ -111,6 +120,14 @@ def _linea_parece_contador(linea: str) -> bool:
     tiene_paginas = "pag" in normalizada or "page" in normalizada
     tiene_impresion = "imp" in normalizada or "print" in normalizada or "contador" in normalizada
     return tiene_paginas and tiene_impresion
+
+
+def _linea_es_escaneo(linea: str) -> bool:
+    return any(p.search(linea or "") for p in SCAN_COUNTER_CONTEXT)
+
+
+def _linea_es_impresion(linea: str) -> bool:
+    return any(p.search(linea or "") for p in PRINT_COUNTER_CONTEXT)
 
 
 def _clamp_percentage(value: float | int | None) -> float | None:
@@ -282,41 +299,47 @@ def extraer_contador_impresiones(texto_ocr: str | None) -> dict[str, int]:
     texto = str(texto_ocr or "")
     lineas = [ln.strip() for ln in texto.splitlines() if ln.strip()]
 
+    candidatos_impresion: list[int] = []
+    candidatos_generales: list[int] = []
+
     for linea in lineas:
         if any(p.search(linea) for p in IGNORE_COUNTER_CONTEXT):
             continue
 
-        if _linea_parece_contador(linea):
-            candidatos_linea = _extraer_numeros_linea(linea)
-            if candidatos_linea:
-                return {"contador_impresiones": max(candidatos_linea)}
+        es_escaneo = _linea_es_escaneo(linea)
+        es_impresion = _linea_es_impresion(linea) or _linea_parece_contador(linea)
+
+        if es_impresion and not es_escaneo:
+            candidatos_impresion.extend(_extraer_numeros_linea(linea))
+
+        if es_escaneo:
+            continue
 
         for patron in COUNTER_PATTERNS:
             match = patron.search(linea)
-            if match:
-                candidatos = _extraer_numeros_linea(match.group(1))
-                if candidatos:
-                    return {"contador_impresiones": max(candidatos)}
+            if not match:
+                continue
+            candidatos = _extraer_numeros_linea(match.group(1))
+            if es_impresion:
+                candidatos_impresion.extend(candidatos)
+            else:
+                candidatos_generales.extend(candidatos)
 
+    if candidatos_impresion:
+        return {"contador_impresiones": max(candidatos_impresion)}
+
+    texto_sin_escaneo = "\n".join(ln for ln in lineas if not _linea_es_escaneo(ln))
     for patron in COUNTER_PATTERNS:
-
-        match = patron.search(texto)
+        match = patron.search(texto_sin_escaneo)
         if match:
             candidatos = _extraer_numeros_linea(match.group(1))
             if candidatos:
                 return {"contador_impresiones": max(candidatos)}
 
-    lineas_sospechosas = [
-        ln
-        for ln in lineas
-        if not any(p.search(ln) for p in IGNORE_COUNTER_CONTEXT)
-        and ("pag" in _normalizar_texto_busqueda(ln) or "page" in _normalizar_texto_busqueda(ln) or "print" in _normalizar_texto_busqueda(ln))
-    ]
-    numeros: list[int] = []
-    for linea in lineas_sospechosas:
-        numeros.extend(_extraer_numeros_linea(linea))
+    if candidatos_generales:
+        return {"contador_impresiones": max(candidatos_generales)}
 
-    return {"contador_impresiones": max(numeros) if numeros else 0}
+    return {"contador_impresiones": 0}
 
 
 def analizar_hoja_diagnostico(
