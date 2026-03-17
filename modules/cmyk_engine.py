@@ -170,6 +170,43 @@ def _sistema_tinta_recomendado(impresora: dict) -> str:
     return "Cartucho (Color + Negro)"
 
 
+def _precio_sugerido(
+    costo_total: float,
+    paginas: int,
+    margen_utilidad: float,
+    comision_pasarela: float,
+    impuesto_venta: float,
+    redondeo: float,
+) -> dict:
+    if paginas <= 0:
+        return {
+            "base": 0.0,
+            "subtotal": 0.0,
+            "comision": 0.0,
+            "impuesto": 0.0,
+            "precio_final": 0.0,
+            "precio_unitario": 0.0,
+        }
+
+    base = float(costo_total)
+    subtotal = base * (1.0 + (margen_utilidad / 100.0))
+    comision = subtotal * (comision_pasarela / 100.0)
+    impuesto = (subtotal + comision) * (impuesto_venta / 100.0)
+    precio = subtotal + comision + impuesto
+
+    if redondeo > 0:
+        precio = round(precio / redondeo) * redondeo
+
+    return {
+        "base": base,
+        "subtotal": subtotal,
+        "comision": comision,
+        "impuesto": impuesto,
+        "precio_final": precio,
+        "precio_unitario": precio / paginas,
+    }
+
+
 def render_cmyk(usuario):
     st.title("🖨️ Motor CMYK")
     st.caption("Analiza consumo de tinta y costo por lote usando inventario/activos.")
@@ -205,9 +242,15 @@ def render_cmyk(usuario):
     )
 
     with st.expander("⚙️ Modo Pro CMYK", expanded=False):
-        p1, p2 = st.columns(2)
+        p1, p2, p3 = st.columns(3)
         refuerzo_negro = p1.slider("Refuerzo de negro (K)", min_value=0.0, max_value=0.40, value=0.12, step=0.01)
         desperdicio_factor = p2.slider("Factor de desperdicio", min_value=1.0, max_value=1.4, value=1.0, step=0.01)
+        redondeo_precio = p3.number_input("Redondeo precio sugerido", min_value=0.0, value=0.05, step=0.05)
+
+        pr1, pr2, pr3 = st.columns(3)
+        margen_utilidad = pr1.slider("Margen de utilidad (%)", min_value=5, max_value=200, value=55, step=1)
+        comision_pasarela = pr2.slider("Comisión cobro (%)", min_value=0.0, max_value=12.0, value=0.0, step=0.1)
+        impuesto_venta = pr3.slider("Impuesto (%)", min_value=0.0, max_value=20.0, value=0.0, step=0.1)
 
     factor_area = 1.0
     if tamano == "Personalizado":
@@ -292,6 +335,36 @@ def render_cmyk(usuario):
     m4.metric("K (ml)", f"{totales['K']:.2f}")
 
     st.metric("Costo total estimado", f"$ {costo_total:.2f}")
+
+    precio = _precio_sugerido(
+        costo_total=costo_total,
+        paginas=total_paginas,
+        margen_utilidad=float(margen_utilidad),
+        comision_pasarela=float(comision_pasarela),
+        impuesto_venta=float(impuesto_venta),
+        redondeo=float(redondeo_precio),
+    )
+
+    st.subheader("💹 Precio sugerido")
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Precio final recomendado", f"$ {precio['precio_final']:.2f}")
+    p2.metric("Precio recomendado / página", f"$ {precio['precio_unitario']:.4f}")
+    utilidad_estimada = max(0.0, precio["precio_final"] - costo_total)
+    p3.metric("Utilidad bruta estimada", f"$ {utilidad_estimada:.2f}")
+
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"Concepto": "Costo base", "Monto": precio["base"]},
+                {"Concepto": f"Subtotal con margen ({margen_utilidad}%)", "Monto": precio["subtotal"]},
+                {"Concepto": f"Comisión ({comision_pasarela}%)", "Monto": precio["comision"]},
+                {"Concepto": f"Impuesto ({impuesto_venta}%)", "Monto": precio["impuesto"]},
+                {"Concepto": "Precio final", "Monto": precio["precio_final"]},
+            ]
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
 
     b1, b2, b3 = st.columns(3)
     b1.metric("Costo tinta", f"$ {float(costos['costo_tinta']):.2f}")
