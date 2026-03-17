@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 
 import streamlit as st
@@ -20,6 +21,8 @@ def render_diagnostico(usuario):
         st.info("Instala las dependencias faltantes para habilitar esta vista.")
         return
 
-    from modules.diagnostico import render_diagnostico as diagnostico_module
+    diagnostico_runtime = importlib.import_module("modules.diagnostico")
+    diagnostico_runtime = importlib.reload(diagnostico_runtime)
+    diagnostico_module = diagnostico_runtime.render_diagnostico
 
     diagnostico_module(usuario)
