@@ -63,7 +63,7 @@ def _ensure_activos_schema(conn) -> None:
             detalle TEXT,
             costo REAL NOT NULL DEFAULT 0,
             usuario TEXT
-        )
+)
         """
     )
 
@@ -82,6 +82,7 @@ def _ensure_activos_schema(conn) -> None:
         "vida_rodillo_pct": "ALTER TABLE activos ADD COLUMN vida_rodillo_pct REAL",
         "vida_almohadillas_pct": "ALTER TABLE activos ADD COLUMN vida_almohadillas_pct REAL",
         "paginas_impresas": "ALTER TABLE activos ADD COLUMN paginas_impresas INTEGER DEFAULT 0",
+        "tipo_impresora": "ALTER TABLE activos ADD COLUMN tipo_impresora TEXT",
     }
     for col, alter_sql in optional_cols.items():
         if col not in cols:
@@ -106,6 +107,7 @@ def _load_activos_df() -> pd.DataFrame:
                 COALESCE(vida_rodillo_pct, NULL) AS vida_rodillo_pct,
                 COALESCE(vida_almohadillas_pct, NULL) AS vida_almohadillas_pct,
                 COALESCE(paginas_impresas, 0) AS paginas_impresas,
+                tipo_impresora,
                 fecha,
                 COALESCE(activo, 1) AS activo
             FROM activos
@@ -118,7 +120,7 @@ def _load_activos_df() -> pd.DataFrame:
         return pd.DataFrame(
             columns=[
                 "id", "equipo", "categoria", "inversion", "unidad", "desgaste", "modelo", "costo_hora",
-                "vida_cabezal_pct", "vida_rodillo_pct", "vida_almohadillas_pct", "paginas_impresas", "fecha", "activo"
+                "vida_cabezal_pct", "vida_rodillo_pct", "vida_almohadillas_pct", "paginas_impresas", "tipo_impresora", "fecha", "activo"
             ]
         )
 
@@ -146,6 +148,7 @@ def _crear_activo(
     inversion: float,
     vida_util: int,
     modelo: str,
+    tipo_impresora: str | None,
 ) -> int:
     equipo = require_text(equipo, "Nombre del activo")
     categoria = require_text(categoria, "Categoría")
@@ -153,16 +156,27 @@ def _crear_activo(
     inversion = as_positive(inversion, "Inversión", allow_zero=False)
     vida_util = max(1, int(vida_util or 1))
     desgaste_unitario = inversion / vida_util
+    tipo_impresora = (tipo_impresora or "").strip() or None
 
     with db_transaction() as conn:
         _ensure_activos_schema(conn)
         cur = conn.execute(
             """
             INSERT INTO activos
-            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo')
+            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?)
             """,
-            (equipo, (modelo or "").strip() or None, categoria, inversion, tipo_unidad, desgaste_unitario, 0.0, usuario),
+            (
+                equipo,
+                (modelo or "").strip() or None,
+                categoria,
+                inversion,
+                tipo_unidad,
+                desgaste_unitario,
+                0.0,
+                usuario,
+                tipo_impresora,
+            ),
         )
         conn.execute(
             """
@@ -183,20 +197,31 @@ def _actualizar_activo(
     nueva_categoria: str,
     nuevo_modelo: str,
     nueva_unidad: str,
+    nuevo_tipo_impresora: str | None,
 ) -> None:
     nueva_inversion = as_positive(nueva_inversion, "Inversión")
     nueva_vida = max(1, int(nueva_vida or 1))
     nuevo_desgaste = (nueva_inversion / nueva_vida) if nueva_inversion > 0 else 0.0
+    nuevo_tipo_impresora = (nuevo_tipo_impresora or "").strip() or None
 
     with db_transaction() as conn:
         _ensure_activos_schema(conn)
         conn.execute(
             """
             UPDATE activos
-            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?
+            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?
             WHERE id = ?
             """,
-            (nueva_inversion, nueva_categoria, nuevo_desgaste, (nuevo_modelo or "").strip() or None, nueva_unidad, usuario, int(activo_id)),
+            (
+                nueva_inversion,
+                nueva_categoria,
+                nuevo_desgaste,
+                (nuevo_modelo or "").strip() or None,
+                nueva_unidad,
+                usuario,
+                nuevo_tipo_impresora,
+                int(activo_id),
+            ),
         )
         conn.execute(
             """
@@ -216,7 +241,6 @@ def _actualizar_activo(
 # =========================================================
 # INTERFAZ ACTIVOS
 # =========================================================
-
 def render_activos(usuario: str):
     role = st.session_state.get("rol", "Admin")
     if role not in ALLOWED_ROLES:
@@ -267,6 +291,9 @@ def render_activos(usuario: str):
             monto_inv = c3.number_input("Inversión ($)", min_value=0.0, step=10.0)
             vida_util = c4.number_input("Vida Útil (Usos)", min_value=1, value=1000, step=1)
             categoria = c5.selectbox("Categoría", CATEGORIAS)
+            tipo_impresora = None
+            if tipo_unidad == "Impresora":
+                tipo_impresora = st.selectbox("Tipo de impresora", TIPOS_IMPRESORA)
 
             modelo = st.text_input("Modelo (opcional)")
             guardar = st.form_submit_button("🚀 Guardar Activo")
@@ -281,6 +308,7 @@ def render_activos(usuario: str):
                     inversion=monto_inv,
                     vida_util=int(vida_util),
                     modelo=modelo,
+                    tipo_impresora=tipo_impresora,
                 )
                 st.success(f"✅ Activo registrado correctamente. ID #{aid}")
                 st.rerun()
@@ -303,6 +331,8 @@ def render_activos(usuario: str):
             unidad_actual = str(datos.get("unidad") or "Otro")
             idx_categoria = CATEGORIAS.index(categoria_actual) if categoria_actual in CATEGORIAS else len(CATEGORIAS) - 1
             idx_unidad = TIPOS_UNIDAD.index(unidad_actual) if unidad_actual in TIPOS_UNIDAD else len(TIPOS_UNIDAD) - 1
+            tipo_impresora_actual = str(datos.get("tipo_impresora") or "")
+            idx_tipo_impresora = TIPOS_IMPRESORA.index(tipo_impresora_actual) if tipo_impresora_actual in TIPOS_IMPRESORA else 0
 
             with st.form("editar_activo"):
                 e1, e2, e3 = st.columns(3)
@@ -313,6 +343,9 @@ def render_activos(usuario: str):
                 u1, u2 = st.columns(2)
                 nueva_unidad = u1.selectbox("Tipo de Equipo", TIPOS_UNIDAD, index=idx_unidad)
                 nuevo_modelo = u2.text_input("Modelo", value=str(datos.get("modelo") or ""))
+                nuevo_tipo_impresora = None
+                if nueva_unidad == "Impresora":
+                    nuevo_tipo_impresora = st.selectbox("Tipo de impresora", TIPOS_IMPRESORA, index=idx_tipo_impresora)
 
                 guardar_edicion = st.form_submit_button("💾 Guardar Cambios")
 
@@ -327,6 +360,7 @@ def render_activos(usuario: str):
                         nueva_categoria=nueva_cat,
                         nuevo_modelo=nuevo_modelo,
                         nueva_unidad=nueva_unidad,
+                        nuevo_tipo_impresora=nuevo_tipo_impresora,
                     )
                     st.success("✅ Activo actualizado correctamente.")
                     st.rerun()
@@ -360,7 +394,7 @@ def render_activos(usuario: str):
             c_imp3.metric("Páginas impresas (total)", int(df_imp["paginas_impresas"].sum()))
 
             mostrar_cols = [
-                "id", "equipo", "modelo", "categoria", "vida_cabezal_pct", "vida_rodillo_pct",
+                "id", "equipo", "modelo", "tipo_impresora", "categoria", "vida_cabezal_pct", "vida_rodillo_pct",
                 "vida_almohadillas_pct", "desgaste_cabezal_pct", "paginas_impresas", "desgaste", "riesgo"
             ]
             st.dataframe(df_imp[mostrar_cols], use_container_width=True, hide_index=True)
