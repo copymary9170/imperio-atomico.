@@ -107,33 +107,134 @@ def _extraer_numeros_linea(linea: str) -> list[int]:
     for raw in candidatos:
         valor = _normalizar_numero_contador(raw)
         if valor is not None:
+
+@@ -86,54 +86,76 @@ def _normalizar_numero_contador(raw: str) -> int | None:
+        chunks = txt.split(".")
+        chunks = txt.split(".")
+        if len(chunks) > 1 and len(chunks[-1]) <= 2:
+        if len(chunks) > 1 and len(chunks[-1]) <= 2:
+            txt = "".join(chunks[:-1])
+            txt = "".join(chunks[:-1])
+        else:
+        else:
+            txt = "".join(chunks)
+            txt = "".join(chunks)
+
+
+    digits = re.sub(r"\D", "", txt)
+    digits = re.sub(r"\D", "", txt)
+    if not digits:
+    if not digits:
+        return None
+        return None
+
+
+    try:
+    try:
+        valor = int(digits)
+        valor = int(digits)
+    except ValueError:
+    except ValueError:
+        return None
+        return None
+
+
+    return valor if valor > 0 else None
+    return valor if valor > 0 else None
+
+
+
+
+def _extraer_numeros_linea(linea: str) -> list[int]:
+def _extraer_numeros_linea(linea: str) -> list[int]:
+    candidatos = re.findall(r"\d[\d\s.,]{0,15}", linea or "")
+    candidatos = re.findall(r"\d[\d\s.,]{0,15}", linea or "")
+    valores: list[int] = []
+    valores: list[int] = []
+    for raw in candidatos:
+    for raw in candidatos:
+        valor = _normalizar_numero_contador(raw)
+        valor = _normalizar_numero_contador(raw)
+        if valor is not None:
+        if valor is not None:
+            valores.append(valor)
             valores.append(valor)
             valores.append(valor)
     return valores
+    return valores
+
+
+
+
+def _extraer_item_numerado(lineas: list[str], numero_item: int) -> int | None:
+    patron_item = re.compile(rf"^\s*{numero_item}\s*[\).:\-]?(.*)$", re.I)
+    candidatos: list[int] = []
+
+    for linea in lineas:
+        match = patron_item.match(linea or "")
+        if not match:
+            continue
+
+        contenido = match.group(1) or ""
+        if _linea_es_escaneo(contenido):
+            continue
+
+        numeros = _extraer_numeros_linea(contenido)
+        for valor in numeros:
+            if valor != numero_item:
+                candidatos.append(valor)
+
+    if not candidatos:
+        return None
+    return max(candidatos)
 
 
 def _linea_parece_contador(linea: str) -> bool:
+def _linea_parece_contador(linea: str) -> bool:
+    normalizada = _normalizar_texto_busqueda(linea)
     normalizada = _normalizar_texto_busqueda(linea)
     if not normalizada:
+    if not normalizada:
+        return False
         return False
 
+
+    tiene_paginas = "pag" in normalizada or "page" in normalizada
     tiene_paginas = "pag" in normalizada or "page" in normalizada
     tiene_impresion = "imp" in normalizada or "print" in normalizada or "contador" in normalizada
+    tiene_impresion = "imp" in normalizada or "print" in normalizada or "contador" in normalizada
+    return tiene_paginas and tiene_impresion
     return tiene_paginas and tiene_impresion
 
 
+
+
 def _linea_es_escaneo(linea: str) -> bool:
+def _linea_es_escaneo(linea: str) -> bool:
+    return any(p.search(linea or "") for p in SCAN_COUNTER_CONTEXT)
     return any(p.search(linea or "") for p in SCAN_COUNTER_CONTEXT)
 
 
+
+
 def _linea_es_impresion(linea: str) -> bool:
+def _linea_es_impresion(linea: str) -> bool:
+    return any(p.search(linea or "") for p in PRINT_COUNTER_CONTEXT)
     return any(p.search(linea or "") for p in PRINT_COUNTER_CONTEXT)
 
 
+
+
+def _clamp_percentage(value: float | int | None) -> float | None:
 def _clamp_percentage(value: float | int | None) -> float | None:
     if value is None:
+    if value is None:
+        return None
         return None
     return max(0.0, min(100.0, float(value)))
+    return max(0.0, min(100.0, float(value)))
+
+
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -298,6 +399,12 @@ def extraer_texto_diagnostico(texto_ocr: str | None) -> dict[str, Any]:
 def extraer_contador_impresiones(texto_ocr: str | None) -> dict[str, int]:
     texto = str(texto_ocr or "")
     lineas = [ln.strip() for ln in texto.splitlines() if ln.strip()]
+
+    # En reportes HP, el item 14 suele ser "Total de páginas impresas".
+    valor_item_14 = _extraer_item_numerado(lineas, 14)
+    if valor_item_14 is not None:
+        return {"contador_impresiones": valor_item_14}
+
 
     candidatos_impresion: list[int] = []
     candidatos_generales: list[int] = []
