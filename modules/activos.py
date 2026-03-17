@@ -29,6 +29,10 @@ TIPOS_IMPRESORA = [
     "Láser a color",
 ]
 
+
+def _es_equipo_impresora(tipo_equipo: str | None) -> bool:
+    return str(tipo_equipo or "").strip().lower() == "impresora"
+
 # =========================================================
 # CAPA DE DATOS
 # =========================================================
@@ -158,6 +162,9 @@ def _crear_activo(
     desgaste_unitario = inversion / vida_util
     tipo_impresora = (tipo_impresora or "").strip() or None
 
+        if not _es_equipo_impresora(tipo_unidad):
+        tipo_impresora = None
+            
     with db_transaction() as conn:
         _ensure_activos_schema(conn)
         cur = conn.execute(
@@ -203,6 +210,8 @@ def _actualizar_activo(
     nueva_vida = max(1, int(nueva_vida or 1))
     nuevo_desgaste = (nueva_inversion / nueva_vida) if nueva_inversion > 0 else 0.0
     nuevo_tipo_impresora = (nuevo_tipo_impresora or "").strip() or None
+    if not _es_equipo_impresora(nueva_unidad):
+        nuevo_tipo_impresora = None
 
     with db_transaction() as conn:
         _ensure_activos_schema(conn)
@@ -292,7 +301,7 @@ def render_activos(usuario: str):
             vida_util = c4.number_input("Vida Útil (Usos)", min_value=1, value=1000, step=1)
             categoria = c5.selectbox("Categoría", CATEGORIAS)
             tipo_impresora = None
-            if tipo_unidad == "Impresora":
+            if _es_equipo_impresora(tipo_unidad):
                 tipo_impresora = st.selectbox("Tipo de impresora", TIPOS_IMPRESORA)
 
             modelo = st.text_input("Modelo (opcional)")
@@ -343,8 +352,8 @@ def render_activos(usuario: str):
                 u1, u2 = st.columns(2)
                 nueva_unidad = u1.selectbox("Tipo de Equipo", TIPOS_UNIDAD, index=idx_unidad)
                 nuevo_modelo = u2.text_input("Modelo", value=str(datos.get("modelo") or ""))
-                nuevo_tipo_impresora = None
-                if nueva_unidad == "Impresora":
+               nuevo_tipo_impresora = None
+                if _es_equipo_impresora(nueva_unidad):
                     nuevo_tipo_impresora = st.selectbox("Tipo de impresora", TIPOS_IMPRESORA, index=idx_tipo_impresora)
 
                 guardar_edicion = st.form_submit_button("💾 Guardar Cambios")
