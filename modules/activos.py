@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+mport pandas as pd
 import plotly.express as px
 import streamlit as st
 
@@ -26,6 +26,7 @@ TIPOS_POR_EQUIPO = {
     "Impresora": {
         "categoria": "Impresora",
         "label": "Tipo de impresora",
+        "placeholder": "Selecciona el tipo de impresora",
         "opciones": [
             "Tanque de tinta",
             "Cartucho",
@@ -40,6 +41,7 @@ TIPOS_POR_EQUIPO = {
     "Corte": {
         "categoria": "Corte",
         "label": "Tipo de corte",
+        "placeholder": "Selecciona el tipo de corte",
         "opciones": [
             "Cameo",
             "Cricut",
@@ -57,6 +59,7 @@ TIPOS_POR_EQUIPO = {
     "Plastificación": {
         "categoria": "Plastificación",
         "label": "Tipo de máquina de plastificación",
+        "placeholder": "Selecciona el tipo de máquina de plastificación",
         "opciones": [
             "Plastificadora térmica",
             "Plastificadora de credenciales",
@@ -71,9 +74,11 @@ TIPOS_POR_EQUIPO = {
     "Sublimación": {
         "categoria": "Sublimación",
         "label": "Tipo de sublimación",
+        "placeholder": "Selecciona el tipo de sublimación",
         "opciones": [
             "Plancha",
             "Tapete",
+            "Cinta térmica",
             "Cintas térmicas",
             "Horno",
             "Resistencia",
@@ -82,18 +87,18 @@ TIPOS_POR_EQUIPO = {
             "Plancha plana",
             "Plancha 8 en 1",
             "Tapete térmico",
-            "Cinta térmica",
             "Papel de sublimación",
         ],
     },
     "Otro": {
         "categoria": "Otro",
         "label": "Detalle del equipo",
+        "placeholder": "Escribe el detalle del equipo",
         "opciones": [],
     },
 }
 OPCION_TIPO_PERSONALIZADO = "Otro / No está en la lista"
-ACTIVOS_UI_VERSION = "Activos UI v2"
+ACTIVOS_UI_VERSION = "Activos UI v3"
 
 
 def _equipo_config(tipo_equipo: str | None) -> dict:
@@ -144,6 +149,10 @@ def _label_tipo_equipo(tipo_equipo: str | None) -> str:
     return str(_equipo_config(tipo_equipo).get("label") or "Detalle del equipo")
 
 
+def _placeholder_tipo_equipo(tipo_equipo: str | None) -> str:
+    return str(_equipo_config(tipo_equipo).get("placeholder") or "Selecciona un tipo")
+
+
 def _resolver_tipo_detalle(tipo_equipo: str, tipo_predefinido: str | None, tipo_personalizado: str | None) -> str | None:
     opciones = _equipo_config(tipo_equipo).get("opciones") or []
     tipo_predefinido = str(tipo_predefinido or "").strip()
@@ -152,14 +161,14 @@ def _resolver_tipo_detalle(tipo_equipo: str, tipo_predefinido: str | None, tipo_
         return tipo_predefinido
     if tipo_predefinido == OPCION_TIPO_PERSONALIZADO or not opciones:
         return require_text(tipo_personalizado, _label_tipo_equipo(tipo_equipo))
-    return None
+    raise ValueError(f"Debes seleccionar {(_label_tipo_equipo(tipo_equipo)).lower()}.")
 
 
 def _valor_tipo_para_formulario(tipo_equipo: str | None, valor_actual: str | None) -> tuple[str | None, str]:
     valor_actual = str(valor_actual or "").strip()
     opciones = _equipo_config(tipo_equipo).get("opciones") or []
     if not valor_actual:
-        return (opciones[0] if opciones else None), ""
+        return None, ""
     if valor_actual in opciones:
         return valor_actual, ""
     if opciones:
@@ -441,6 +450,7 @@ def render_activos(usuario: str):
 
         opciones_tipo_nuevo = _opciones_tipo_equipo(tipo_unidad_nuevo)
         label_tipo_nuevo = _label_tipo_equipo(tipo_unidad_nuevo)
+        placeholder_tipo_nuevo = _placeholder_tipo_equipo(tipo_unidad_nuevo)
 
         c3, c4 = st.columns(2)
         monto_inv = c3.number_input("Inversión ($)", min_value=0.0, step=10.0, key="activos_inversion_nuevo_v2")
@@ -451,9 +461,13 @@ def render_activos(usuario: str):
         if opciones_tipo_nuevo:
             tipo_predefinido_nuevo = st.selectbox(
                 label_tipo_nuevo,
-                opciones_tipo_nuevo,
+                [placeholder_tipo_nuevo] + opciones_tipo_nuevo,
+                index=0,
                 key=_key_tipo_equipo("activos_tipo_detalle_nuevo_v2", tipo_unidad_nuevo),
+                help="Solo se muestran tipos del equipo seleccionado.",
             )
+            if tipo_predefinido_nuevo == placeholder_tipo_nuevo:
+                tipo_predefinido_nuevo = None
             if tipo_predefinido_nuevo == OPCION_TIPO_PERSONALIZADO:
                 tipo_personalizado_nuevo = st.text_input(
                     f"Especifica {label_tipo_nuevo.lower()}",
@@ -463,6 +477,7 @@ def render_activos(usuario: str):
             tipo_personalizado_nuevo = st.text_input(
                 label_tipo_nuevo,
                 key=_key_tipo_equipo("activos_tipo_detalle_libre_nuevo_v2", tipo_unidad_nuevo),
+                help="Escribe manualmente el tipo específico si no existe una lista para este equipo.",
             )
 
         modelo = st.text_input("Modelo (opcional)", key="activos_modelo_nuevo_v2")
@@ -512,6 +527,7 @@ def render_activos(usuario: str):
             tipo_predefinido_actual, tipo_personalizado_actual = _valor_tipo_para_formulario(nueva_unidad, tipo_detalle_actual)
             opciones_tipo_edicion = _opciones_tipo_equipo(nueva_unidad)
             label_tipo_edicion = _label_tipo_equipo(nueva_unidad)
+            placeholder_tipo_edicion = _placeholder_tipo_equipo(nueva_unidad)
             e1, e2 = st.columns(2)
             nueva_inv = e1.number_input(
                 "Inversión ($)",
@@ -537,13 +553,18 @@ def render_activos(usuario: str):
             nuevo_tipo_predefinido = None
             nuevo_tipo_personalizado = tipo_personalizado_actual
             if opciones_tipo_edicion:
-                idx_tipo_edicion = opciones_tipo_edicion.index(tipo_predefinido_actual) if tipo_predefinido_actual in opciones_tipo_edicion else 0
+                opciones_widget_edicion = [placeholder_tipo_edicion] + opciones_tipo_edicion
+                valor_inicial_edicion = tipo_predefinido_actual if tipo_predefinido_actual in opciones_tipo_edicion else placeholder_tipo_edicion
+                idx_tipo_edicion = opciones_widget_edicion.index(valor_inicial_edicion)
                 nuevo_tipo_predefinido = st.selectbox(
                     label_tipo_edicion,
-                    opciones_tipo_edicion,
+                    opciones_widget_edicion,
                     index=idx_tipo_edicion,
                     key=_key_tipo_equipo(f"activos_editar_tipo_detalle_{activo_id}", nueva_unidad),
+                    help="Solo se muestran tipos del equipo seleccionado.",
                 )
+                if nuevo_tipo_predefinido == placeholder_tipo_edicion:
+                    nuevo_tipo_predefinido = None
                 if nuevo_tipo_predefinido == OPCION_TIPO_PERSONALIZADO:
                     nuevo_tipo_personalizado = st.text_input(
                         f"Especifica {label_tipo_edicion.lower()}",
@@ -555,6 +576,7 @@ def render_activos(usuario: str):
                     label_tipo_edicion,
                     value=tipo_personalizado_actual,
                     key=_key_tipo_equipo(f"activos_editar_tipo_detalle_libre_{activo_id}", nueva_unidad),
+                    help="Escribe manualmente el tipo específico si no existe una lista para este equipo.",
                 )
 
             guardar_edicion = st.button("💾 Guardar Cambios", key=f"activos_guardar_edicion_{activo_id}")
