@@ -31,7 +31,8 @@ TIPOS_POR_EQUIPO = {
             "Cartucho",
             "Láser monocromática",
             "Láser a color",
-            "Sublimación",
+            "Impresora de sublimación",
+            "Plotter de impresión",
         ],
     },
     "Corte": {
@@ -40,6 +41,7 @@ TIPOS_POR_EQUIPO = {
         "opciones": [
             "Cameo",
             "Cricut",
+            "Plotter de corte",
             "Guillotina",
             "Guillotina manual",
             "Tijeras",
@@ -55,6 +57,8 @@ TIPOS_POR_EQUIPO = {
             "Plastificadora de credenciales",
             "Laminadora en frío",
             "Laminadora en caliente",
+            "Enmicadora",
+            "Rodillo manual",
         ],
     },
     "Sublimación": {
@@ -63,10 +67,12 @@ TIPOS_POR_EQUIPO = {
         "opciones": [
             "Plancha",
             "Tapete",
-            "Cintas",
+            "Cintas térmicas",
             "Horno",
             "Resistencia",
-            "Taza",
+            "Plancha para tazas",
+            "Plancha para gorras",
+            "Plancha plana",
         ],
     },
     "Otro": {
@@ -117,6 +123,12 @@ def _opciones_tipo_equipo(tipo_equipo: str | None) -> list[str]:
     return opciones + [OPCION_TIPO_PERSONALIZADO] if opciones else []
 
 
+def _key_tipo_equipo(base_key: str, tipo_equipo: str | None) -> str:
+    slug = str(tipo_equipo or "otro").strip().lower()
+    slug = slug.replace(" ", "_").replace("/", "_")
+    return f"{base_key}_{slug}"
+
+
 def _label_tipo_equipo(tipo_equipo: str | None) -> str:
     return str(_equipo_config(tipo_equipo).get("label") or "Detalle del equipo")
 
@@ -130,6 +142,7 @@ def _resolver_tipo_detalle(tipo_equipo: str, tipo_predefinido: str | None, tipo_
     if tipo_predefinido == OPCION_TIPO_PERSONALIZADO or not opciones:
         return require_text(tipo_personalizado, _label_tipo_equipo(tipo_equipo))
     return None
+
 
 def _valor_tipo_para_formulario(tipo_equipo: str | None, valor_actual: str | None) -> tuple[str | None, str]:
     valor_actual = str(valor_actual or "").strip()
@@ -263,7 +276,6 @@ def _crear_activo(
     usuario: str,
     equipo: str,
     tipo_unidad: str,
-    categoria: str,
     inversion: float,
     vida_util: int,
     modelo: str,
@@ -315,7 +327,6 @@ def _actualizar_activo(
     activo_nombre: str,
     nueva_inversion: float,
     nueva_vida: int,
-    nueva_categoria: str,
     nuevo_modelo: str,
     nueva_unidad: str,
     nuevo_tipo_detalle: str | None,
@@ -366,6 +377,8 @@ def _actualizar_activo(
 # =========================================================
 # INTERFAZ ACTIVOS
 # =========================================================
+
+
 def render_activos(usuario: str):
     role = st.session_state.get("rol", "Admin")
     if role not in ALLOWED_ROLES:
@@ -374,7 +387,7 @@ def render_activos(usuario: str):
 
     st.title("🏗️ Gestión Integral de Activos")
     st.caption(
-        f"{ACTIVOS_UI_VERSION} · catálogo unificado por tipo de equipo. Si ves opciones legadas como `Plancha de Sublimación`, recarga la app para tomar esta versión."
+        f"{ACTIVOS_UI_VERSION} · catálogo unificado por tipo de equipo. La categoría queda resuelta automáticamente según el equipo; aquí solo capturas el tipo específico que corresponde."
     )
 
     try:
@@ -410,7 +423,7 @@ def render_activos(usuario: str):
             st.plotly_chart(fig_riesgo, use_container_width=True)
 
     with st.expander("➕ Registrar Nuevo Activo", expanded=True):
-        st.info("Selecciona primero el equipo y luego captura solo el tipo específico que corresponde a ese equipo. Si no aparece en la lista, puedes escribirlo manualmente.")
+        st.info("Selecciona primero el equipo y luego captura solo el tipo específico de ese equipo. No verás tipos cruzados entre equipos y, si no aparece en la lista, puedes escribirlo manualmente.")
 
         with st.form("form_activos_pro_v2"):
             c1, c2 = st.columns(2)
@@ -427,11 +440,21 @@ def render_activos(usuario: str):
             tipo_predefinido_nuevo = None
             tipo_personalizado_nuevo = ""
             if opciones_tipo_nuevo:
-                tipo_predefinido_nuevo = st.selectbox(label_tipo_nuevo, opciones_tipo_nuevo, key="activos_tipo_detalle_nuevo_v2")
+                tipo_predefinido_nuevo = st.selectbox(
+                    label_tipo_nuevo,
+                    opciones_tipo_nuevo,
+                    key=_key_tipo_equipo("activos_tipo_detalle_nuevo_v2", tipo_unidad_nuevo),
+                )
                 if tipo_predefinido_nuevo == OPCION_TIPO_PERSONALIZADO:
-                    tipo_personalizado_nuevo = st.text_input(f"Especifica {label_tipo_nuevo.lower()}", key="activos_tipo_detalle_custom_nuevo_v2")
+                    tipo_personalizado_nuevo = st.text_input(
+                        f"Especifica {label_tipo_nuevo.lower()}",
+                        key=_key_tipo_equipo("activos_tipo_detalle_custom_nuevo_v2", tipo_unidad_nuevo),
+                    )
             else:
-                tipo_personalizado_nuevo = st.text_input(label_tipo_nuevo, key="activos_tipo_detalle_libre_nuevo_v2")
+                tipo_personalizado_nuevo = st.text_input(
+                    label_tipo_nuevo,
+                    key=_key_tipo_equipo("activos_tipo_detalle_libre_nuevo_v2", tipo_unidad_nuevo),
+                )
 
             modelo = st.text_input("Modelo (opcional)")
             guardar = st.form_submit_button("🚀 Guardar activo")
@@ -446,7 +469,6 @@ def render_activos(usuario: str):
                     usuario=usuario,
                     equipo=nombre_eq,
                     tipo_unidad=tipo_unidad_nuevo,
-                    categoria=_categoria_por_equipo(tipo_unidad_nuevo),
                     inversion=monto_inv,
                     vida_util=int(vida_util),
                     modelo=modelo,
@@ -497,19 +519,19 @@ def render_activos(usuario: str):
                         label_tipo_edicion,
                         opciones_tipo_edicion,
                         index=idx_tipo_edicion,
-                        key=f"activos_editar_tipo_detalle_{activo_id}",
+                        key=_key_tipo_equipo(f"activos_editar_tipo_detalle_{activo_id}", nueva_unidad),
                     )
                     if nuevo_tipo_predefinido == OPCION_TIPO_PERSONALIZADO:
                         nuevo_tipo_personalizado = st.text_input(
                             f"Especifica {label_tipo_edicion.lower()}",
                             value=tipo_personalizado_actual,
-                            key=f"activos_editar_tipo_detalle_custom_{activo_id}",
+                            key=_key_tipo_equipo(f"activos_editar_tipo_detalle_custom_{activo_id}", nueva_unidad),
                         )
                 else:
                     nuevo_tipo_personalizado = st.text_input(
                         label_tipo_edicion,
                         value=tipo_personalizado_actual,
-                        key=f"activos_editar_tipo_detalle_libre_{activo_id}",
+                        key=_key_tipo_equipo(f"activos_editar_tipo_detalle_libre_{activo_id}", nueva_unidad),
                     )
 
                 guardar_edicion = st.form_submit_button("💾 Guardar Cambios")
@@ -526,7 +548,6 @@ def render_activos(usuario: str):
                         activo_nombre=str(datos["equipo"]),
                         nueva_inversion=float(nueva_inv),
                         nueva_vida=int(nueva_vida),
-                        nueva_categoria=_categoria_por_equipo(nueva_unidad),
                         nuevo_modelo=nuevo_modelo,
                         nueva_unidad=nueva_unidad,
                         nuevo_tipo_detalle=nuevo_tipo_detalle,
@@ -629,22 +650,22 @@ def render_activos(usuario: str):
     with t2:
         st.subheader("Equipos de corte")
         df_corte = df[df["unidad"].fillna("").eq("Corte")].copy()
-        st.dataframe(df_corte, use_container_width=True, hide_index=True)
+        st.dataframe(df_corte.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
 
     with t3:
         st.subheader("Equipos de plastificación")
         df_plast = df[df["unidad"].fillna("").eq("Plastificación")].copy()
-        st.dataframe(df_plast, use_container_width=True, hide_index=True)
+        st.dataframe(df_plast.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
 
     with t4:
         st.subheader("Equipos de sublimación")
         df_subl = df[df["unidad"].fillna("").eq("Sublimación")].copy()
-        st.dataframe(df_subl, use_container_width=True, hide_index=True)
+        st.dataframe(df_subl.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
 
     with t5:
         st.subheader("Otros equipos")
         df_otro = df[df["unidad"].fillna("").eq("Otro")].copy()
-        st.dataframe(df_otro, use_container_width=True, hide_index=True)
+        st.dataframe(df_otro.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
 
     with t6:
         c_inv, c_des, c_prom = st.columns(3)
@@ -654,4 +675,3 @@ def render_activos(usuario: str):
 
         fig = px.bar(df, x="equipo", y="inversion", color="unidad", title="Distribución de Inversión por Activo")
         st.plotly_chart(fig, use_container_width=True)
-
