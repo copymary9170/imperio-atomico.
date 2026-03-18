@@ -33,6 +33,8 @@ TIPOS_POR_EQUIPO = {
             "Láser a color",
             "Impresora de sublimación",
             "Plotter de impresión",
+            "Impresora térmica",
+            "Impresora matricial",
         ],
     },
     "Corte": {
@@ -47,6 +49,9 @@ TIPOS_POR_EQUIPO = {
             "Tijeras",
             "Exacto",
             "Bisturí",
+            "Bisturí de precisión",
+            "Cizalla",
+            "Troqueladora",
         ],
     },
     "Plastificación": {
@@ -59,6 +64,8 @@ TIPOS_POR_EQUIPO = {
             "Laminadora en caliente",
             "Enmicadora",
             "Rodillo manual",
+            "Plastificadora de rodillo",
+            "Plastificadora industrial",
         ],
     },
     "Sublimación": {
@@ -73,6 +80,10 @@ TIPOS_POR_EQUIPO = {
             "Plancha para tazas",
             "Plancha para gorras",
             "Plancha plana",
+            "Plancha 8 en 1",
+            "Tapete térmico",
+            "Cinta térmica",
+            "Papel de sublimación",
         ],
     },
     "Otro": {
@@ -424,40 +435,38 @@ def render_activos(usuario: str):
 
     with st.expander("➕ Registrar Nuevo Activo", expanded=True):
         st.info("Selecciona primero el equipo y luego captura solo el tipo específico de ese equipo. No verás tipos cruzados entre equipos y, si no aparece en la lista, puedes escribirlo manualmente.")
+        c1, c2 = st.columns(2)
+        nombre_eq = c1.text_input("Nombre del activo", key="activos_nombre_nuevo_v2")
+        tipo_unidad_nuevo = c2.selectbox("Tipo de equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo_v2")
 
-        with st.form("form_activos_pro_v2"):
-            c1, c2 = st.columns(2)
-            nombre_eq = c1.text_input("Nombre del activo")
-            tipo_unidad_nuevo = c2.selectbox("Tipo de equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo_v2")
+        opciones_tipo_nuevo = _opciones_tipo_equipo(tipo_unidad_nuevo)
+        label_tipo_nuevo = _label_tipo_equipo(tipo_unidad_nuevo)
 
-            opciones_tipo_nuevo = _opciones_tipo_equipo(tipo_unidad_nuevo)
-            label_tipo_nuevo = _label_tipo_equipo(tipo_unidad_nuevo)
+        c3, c4 = st.columns(2)
+        monto_inv = c3.number_input("Inversión ($)", min_value=0.0, step=10.0, key="activos_inversion_nuevo_v2")
+        vida_util = c4.number_input("Vida útil (usos)", min_value=1, value=1000, step=1, key="activos_vida_nuevo_v2")
 
-            c3, c4 = st.columns(2)
-            monto_inv = c3.number_input("Inversión ($)", min_value=0.0, step=10.0)
-            vida_util = c4.number_input("Vida útil (usos)", min_value=1, value=1000, step=1)
-
-            tipo_predefinido_nuevo = None
-            tipo_personalizado_nuevo = ""
-            if opciones_tipo_nuevo:
-                tipo_predefinido_nuevo = st.selectbox(
-                    label_tipo_nuevo,
-                    opciones_tipo_nuevo,
-                    key=_key_tipo_equipo("activos_tipo_detalle_nuevo_v2", tipo_unidad_nuevo),
-                )
-                if tipo_predefinido_nuevo == OPCION_TIPO_PERSONALIZADO:
-                    tipo_personalizado_nuevo = st.text_input(
-                        f"Especifica {label_tipo_nuevo.lower()}",
-                        key=_key_tipo_equipo("activos_tipo_detalle_custom_nuevo_v2", tipo_unidad_nuevo),
-                    )
-            else:
+        tipo_predefinido_nuevo = None
+        tipo_personalizado_nuevo = ""
+        if opciones_tipo_nuevo:
+            tipo_predefinido_nuevo = st.selectbox(
+                label_tipo_nuevo,
+                opciones_tipo_nuevo,
+                key=_key_tipo_equipo("activos_tipo_detalle_nuevo_v2", tipo_unidad_nuevo),
+            )
+            if tipo_predefinido_nuevo == OPCION_TIPO_PERSONALIZADO:
                 tipo_personalizado_nuevo = st.text_input(
-                    label_tipo_nuevo,
-                    key=_key_tipo_equipo("activos_tipo_detalle_libre_nuevo_v2", tipo_unidad_nuevo),
+                    f"Especifica {label_tipo_nuevo.lower()}",
+                    key=_key_tipo_equipo("activos_tipo_detalle_custom_nuevo_v2", tipo_unidad_nuevo),
                 )
+        else:
+            tipo_personalizado_nuevo = st.text_input(
+                label_tipo_nuevo,
+                key=_key_tipo_equipo("activos_tipo_detalle_libre_nuevo_v2", tipo_unidad_nuevo),
+            )
 
-            modelo = st.text_input("Modelo (opcional)")
-            guardar = st.form_submit_button("🚀 Guardar activo")
+        modelo = st.text_input("Modelo (opcional)", key="activos_modelo_nuevo_v2")
+        guardar = st.button("🚀 Guardar activo", key="activos_guardar_nuevo_v2", type="primary")
         if guardar:
             try:
                 tipo_detalle_nuevo = _resolver_tipo_detalle(
@@ -503,38 +512,52 @@ def render_activos(usuario: str):
             tipo_predefinido_actual, tipo_personalizado_actual = _valor_tipo_para_formulario(nueva_unidad, tipo_detalle_actual)
             opciones_tipo_edicion = _opciones_tipo_equipo(nueva_unidad)
             label_tipo_edicion = _label_tipo_equipo(nueva_unidad)
+            e1, e2 = st.columns(2)
+            nueva_inv = e1.number_input(
+                "Inversión ($)",
+                min_value=0.0,
+                value=float(datos["inversion"]),
+                step=10.0,
+                key=f"activos_editar_inversion_{activo_id}",
+            )
+            nueva_vida = e2.number_input(
+                "Vida útil",
+                min_value=1,
+                value=int(vida_sugerida),
+                step=1,
+                key=f"activos_editar_vida_{activo_id}",
+            )
 
-            with st.form("editar_activo"):
-                e1, e2 = st.columns(2)
-                nueva_inv = e1.number_input("Inversión ($)", min_value=0.0, value=float(datos["inversion"]), step=10.0)
-                nueva_vida = e2.number_input("Vida útil", min_value=1, value=int(vida_sugerida), step=1)
+            nuevo_modelo = st.text_input(
+                "Modelo",
+                value=str(datos.get("modelo") or ""),
+                key=f"activos_editar_modelo_{activo_id}",
+            )
 
-                nuevo_modelo = st.text_input("Modelo", value=str(datos.get("modelo") or ""))
-
-                nuevo_tipo_predefinido = None
-                nuevo_tipo_personalizado = tipo_personalizado_actual
-                if opciones_tipo_edicion:
-                    idx_tipo_edicion = opciones_tipo_edicion.index(tipo_predefinido_actual) if tipo_predefinido_actual in opciones_tipo_edicion else 0
-                    nuevo_tipo_predefinido = st.selectbox(
-                        label_tipo_edicion,
-                        opciones_tipo_edicion,
-                        index=idx_tipo_edicion,
-                        key=_key_tipo_equipo(f"activos_editar_tipo_detalle_{activo_id}", nueva_unidad),
-                    )
-                    if nuevo_tipo_predefinido == OPCION_TIPO_PERSONALIZADO:
-                        nuevo_tipo_personalizado = st.text_input(
-                            f"Especifica {label_tipo_edicion.lower()}",
-                            value=tipo_personalizado_actual,
-                            key=_key_tipo_equipo(f"activos_editar_tipo_detalle_custom_{activo_id}", nueva_unidad),
-                        )
-                else:
+            nuevo_tipo_predefinido = None
+            nuevo_tipo_personalizado = tipo_personalizado_actual
+            if opciones_tipo_edicion:
+                idx_tipo_edicion = opciones_tipo_edicion.index(tipo_predefinido_actual) if tipo_predefinido_actual in opciones_tipo_edicion else 0
+                nuevo_tipo_predefinido = st.selectbox(
+                    label_tipo_edicion,
+                    opciones_tipo_edicion,
+                    index=idx_tipo_edicion,
+                    key=_key_tipo_equipo(f"activos_editar_tipo_detalle_{activo_id}", nueva_unidad),
+                )
+                if nuevo_tipo_predefinido == OPCION_TIPO_PERSONALIZADO:
                     nuevo_tipo_personalizado = st.text_input(
-                        label_tipo_edicion,
+                        f"Especifica {label_tipo_edicion.lower()}",
                         value=tipo_personalizado_actual,
-                        key=_key_tipo_equipo(f"activos_editar_tipo_detalle_libre_{activo_id}", nueva_unidad),
+                        key=_key_tipo_equipo(f"activos_editar_tipo_detalle_custom_{activo_id}", nueva_unidad),
                     )
+            else:
+                nuevo_tipo_personalizado = st.text_input(
+                    label_tipo_edicion,
+                    value=tipo_personalizado_actual,
+                    key=_key_tipo_equipo(f"activos_editar_tipo_detalle_libre_{activo_id}", nueva_unidad),
+                )
 
-                guardar_edicion = st.form_submit_button("💾 Guardar Cambios")
+            guardar_edicion = st.button("💾 Guardar Cambios", key=f"activos_guardar_edicion_{activo_id}")
             if guardar_edicion:
                 try:
                     nuevo_tipo_detalle = _resolver_tipo_detalle(
