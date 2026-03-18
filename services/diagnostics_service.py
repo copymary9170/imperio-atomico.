@@ -406,12 +406,25 @@ def listar_impresoras_activas() -> list[dict[str, Any]]:
         try:
             rows = conn.execute(
                 """
-                SELECT id, equipo, modelo, categoria, unidad
+                SELECT
+                    id,
+                    equipo,
+                    modelo,
+                    categoria,
+                    unidad,
+                    COALESCE(tipo_detalle, tipo_impresora) AS tipo_detalle,
+                    CASE
+                        WHEN lower(COALESCE(unidad, '')) = 'impresora' THEN 3
+                        WHEN lower(COALESCE(categoria, '')) LIKE '%impres%' THEN 2
+                        WHEN lower(COALESCE(tipo_detalle, COALESCE(tipo_impresora, ''))) LIKE '%impres%' THEN 1
+                        ELSE 0
+                    END AS printer_priority
                 FROM activos
                 WHERE COALESCE(activo, 1) = 1
                   AND (
-                    lower(COALESCE(categoria, '')) LIKE '%impres%'
-                    OR lower(COALESCE(unidad, '')) LIKE '%impres%'
+                    lower(COALESCE(unidad, '')) = 'impresora'
+                    OR lower(COALESCE(categoria, '')) LIKE '%impres%'
+                    OR lower(COALESCE(tipo_detalle, COALESCE(tipo_impresora, ''))) LIKE '%impres%'
                     OR lower(COALESCE(equipo, '')) LIKE '%epson%'
                     OR lower(COALESCE(modelo, '')) LIKE '%epson%'
                     OR lower(COALESCE(equipo, '')) LIKE '%l805%'
@@ -419,6 +432,29 @@ def listar_impresoras_activas() -> list[dict[str, Any]]:
                     OR lower(COALESCE(modelo, '')) LIKE '%l805%'
                     OR lower(COALESCE(modelo, '')) LIKE '%l3250%'
                   )
+                ORDER BY printer_priority DESC, id DESC
+                """
+            ).fetchall()
+        except Exception:
+            return []
+
+    return [dict(r) for r in rows]
+
+
+def listar_activos_disponibles() -> list[dict[str, Any]]:
+    with db_transaction() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    equipo,
+                    modelo,
+                    categoria,
+                    unidad,
+                    COALESCE(tipo_detalle, tipo_impresora) AS tipo_detalle
+                FROM activos
+                WHERE COALESCE(activo, 1) = 1
                 ORDER BY id DESC
                 """
             ).fetchall()
