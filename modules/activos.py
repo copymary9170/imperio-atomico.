@@ -17,21 +17,118 @@ from services.diagnostics_service import (
 ALLOWED_ROLES = {"Admin", "Administration", "Administracion"}
 TIPOS_UNIDAD = [
     "Impresora",
-    "Corte / Plotter (Cameo)",
-    "Plancha de Sublimación",
+    "Corte",
+    "Plastificación",
+    "Sublimación",
     "Otro",
 ]
-CATEGORIAS = ["Impresora", "Corte", "Sublimación", "Tinta", "Calor", "Mantenimiento", "Otro"]
-TIPOS_IMPRESORA = [
-    "Tanque de tinta",
-    "Cartucho",
-    "Láser monocromática",
-    "Láser a color",
-]
+TIPOS_POR_EQUIPO = {
+    "Impresora": {
+        "categoria": "Impresora",
+        "label": "Tipo de impresora",
+        "opciones": [
+            "Tanque de tinta",
+            "Cartucho",
+            "Láser monocromática",
+            "Láser a color",
+            "Sublimación",
+        ],
+    },
+    "Corte": {
+        "categoria": "Corte",
+        "label": "Tipo de corte",
+        "opciones": [
+            "Cameo",
+            "Cricut",
+            "Guillotina",
+            "Guillotina manual",
+            "Tijeras",
+            "Exacto",
+            "Bisturí",
+        ],
+    },
+    "Plastificación": {
+        "categoria": "Plastificación",
+        "label": "Tipo de máquina de plastificación",
+        "opciones": [
+            "Plastificadora térmica",
+            "Plastificadora de credenciales",
+            "Laminadora en frío",
+            "Laminadora en caliente",
+        ],
+    },
+    "Sublimación": {
+        "categoria": "Sublimación",
+        "label": "Tipo de sublimación",
+        "opciones": [
+            "Plancha",
+            "Tapete",
+            "Cintas",
+            "Horno",
+            "Resistencia",
+            "Taza",
+        ],
+    },
+    "Otro": {
+        "categoria": "Otro",
+        "label": "Detalle del equipo",
+        "opciones": [],
+    },
+}
+OPCION_TIPO_PERSONALIZADO = "Otro / No está en la lista"
+
+
+def _equipo_config(tipo_equipo: str | None) -> dict:
+    return TIPOS_POR_EQUIPO.get(str(tipo_equipo or "").strip(), TIPOS_POR_EQUIPO["Otro"])
 
 
 def _es_equipo_impresora(tipo_equipo: str | None) -> bool:
     return str(tipo_equipo or "").strip().lower() == "impresora"
+
+
+def _categoria_por_equipo(tipo_equipo: str | None) -> str:
+    return str(_equipo_config(tipo_equipo).get("categoria") or "Otro")
+
+
+def _normalizar_unidad(tipo_equipo: str | None) -> str:
+    valor = str(tipo_equipo or "").strip()
+    equivalencias = {
+        "Corte / Plotter (Cameo)": "Corte",
+        "Plancha de Sublimación": "Sublimación",
+    }
+    return equivalencias.get(valor, valor or "Otro")
+
+
+def _opciones_tipo_equipo(tipo_equipo: str | None) -> list[str]:
+    opciones = list(_equipo_config(tipo_equipo).get("opciones") or [])
+    return opciones + [OPCION_TIPO_PERSONALIZADO] if opciones else []
+
+
+def _label_tipo_equipo(tipo_equipo: str | None) -> str:
+    return str(_equipo_config(tipo_equipo).get("label") or "Detalle del equipo")
+
+
+def _resolver_tipo_detalle(tipo_equipo: str, tipo_predefinido: str | None, tipo_personalizado: str | None) -> str | None:
+    opciones = _equipo_config(tipo_equipo).get("opciones") or []
+    tipo_predefinido = str(tipo_predefinido or "").strip()
+    tipo_personalizado = str(tipo_personalizado or "").strip()
+    if tipo_predefinido and tipo_predefinido != OPCION_TIPO_PERSONALIZADO:
+        return tipo_predefinido
+    if tipo_predefinido == OPCION_TIPO_PERSONALIZADO or not opciones:
+        return require_text(tipo_personalizado, _label_tipo_equipo(tipo_equipo))
+    return None
+
+
+def _valor_tipo_para_formulario(tipo_equipo: str | None, valor_actual: str | None) -> tuple[str | None, str]:
+    valor_actual = str(valor_actual or "").strip()
+    opciones = _equipo_config(tipo_equipo).get("opciones") or []
+    if not valor_actual:
+        return (opciones[0] if opciones else None), ""
+    if valor_actual in opciones:
+        return valor_actual, ""
+    if opciones:
+        return OPCION_TIPO_PERSONALIZADO, valor_actual
+    return None, valor_actual
 
 # =========================================================
 # CAPA DE DATOS
@@ -87,6 +184,7 @@ def _ensure_activos_schema(conn) -> None:
         "vida_almohadillas_pct": "ALTER TABLE activos ADD COLUMN vida_almohadillas_pct REAL",
         "paginas_impresas": "ALTER TABLE activos ADD COLUMN paginas_impresas INTEGER DEFAULT 0",
         "tipo_impresora": "ALTER TABLE activos ADD COLUMN tipo_impresora TEXT",
+        "tipo_detalle": "ALTER TABLE activos ADD COLUMN tipo_detalle TEXT",
     }
     for col, alter_sql in optional_cols.items():
         if col not in cols:
@@ -112,6 +210,7 @@ def _load_activos_df() -> pd.DataFrame:
                 COALESCE(vida_almohadillas_pct, NULL) AS vida_almohadillas_pct,
                 COALESCE(paginas_impresas, 0) AS paginas_impresas,
                 tipo_impresora,
+                COALESCE(tipo_detalle, tipo_impresora) AS tipo_detalle,
                 fecha,
                 COALESCE(activo, 1) AS activo
             FROM activos
@@ -124,11 +223,13 @@ def _load_activos_df() -> pd.DataFrame:
         return pd.DataFrame(
             columns=[
                 "id", "equipo", "categoria", "inversion", "unidad", "desgaste", "modelo", "costo_hora",
-                "vida_cabezal_pct", "vida_rodillo_pct", "vida_almohadillas_pct", "paginas_impresas", "tipo_impresora", "fecha", "activo"
+                "vida_cabezal_pct", "vida_rodillo_pct", "vida_almohadillas_pct", "paginas_impresas", "tipo_impresora", "tipo_detalle", "fecha", "activo"
             ]
         )
 
     df = pd.DataFrame([dict(r) for r in rows])
+    df["unidad"] = df["unidad"].apply(_normalizar_unidad)
+    df["tipo_detalle"] = df["tipo_detalle"].where(df["tipo_detalle"].notna(), df["tipo_impresora"])
     df["inversion"] = pd.to_numeric(df["inversion"], errors="coerce").fillna(0.0)
     df["desgaste"] = pd.to_numeric(df["desgaste"], errors="coerce").fillna(0.0)
     df["vida_cabezal_pct"] = pd.to_numeric(df.get("vida_cabezal_pct"), errors="coerce")
@@ -152,26 +253,24 @@ def _crear_activo(
     inversion: float,
     vida_util: int,
     modelo: str,
-    tipo_impresora: str | None,
+    tipo_detalle: str | None,
 ) -> int:
     equipo = require_text(equipo, "Nombre del activo")
-    categoria = require_text(categoria, "Categoría")
-    tipo_unidad = require_text(tipo_unidad, "Tipo de equipo")
+    tipo_unidad = _normalizar_unidad(require_text(tipo_unidad, "Tipo de equipo"))
+    categoria = _categoria_por_equipo(tipo_unidad)
     inversion = as_positive(inversion, "Inversión", allow_zero=False)
     vida_util = max(1, int(vida_util or 1))
     desgaste_unitario = inversion / vida_util
-    tipo_impresora = (tipo_impresora or "").strip() or None
-
-    if not _es_equipo_impresora(tipo_unidad):
-        tipo_impresora = None
+    tipo_detalle = (tipo_detalle or "").strip() or None
+    tipo_impresora = tipo_detalle if _es_equipo_impresora(tipo_unidad) else None
 
     with db_transaction() as conn:
         _ensure_activos_schema(conn)
         cur = conn.execute(
             """
             INSERT INTO activos
-            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?)
+            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora, tipo_detalle)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?, ?)
             """,
             (
                 equipo,
@@ -183,6 +282,7 @@ def _crear_activo(
                 0.0,
                 usuario,
                 tipo_impresora,
+                tipo_detalle,
             ),
         )
         conn.execute(
@@ -204,21 +304,22 @@ def _actualizar_activo(
     nueva_categoria: str,
     nuevo_modelo: str,
     nueva_unidad: str,
-    nuevo_tipo_impresora: str | None,
+    nuevo_tipo_detalle: str | None,
 ) -> None:
     nueva_inversion = as_positive(nueva_inversion, "Inversión")
     nueva_vida = max(1, int(nueva_vida or 1))
     nuevo_desgaste = (nueva_inversion / nueva_vida) if nueva_inversion > 0 else 0.0
-    nuevo_tipo_impresora = (nuevo_tipo_impresora or "").strip() or None
-    if not _es_equipo_impresora(nueva_unidad):
-        nuevo_tipo_impresora = None
+    nueva_unidad = _normalizar_unidad(nueva_unidad)
+    nueva_categoria = _categoria_por_equipo(nueva_unidad)
+    nuevo_tipo_detalle = (nuevo_tipo_detalle or "").strip() or None
+    nuevo_tipo_impresora = nuevo_tipo_detalle if _es_equipo_impresora(nueva_unidad) else None
 
     with db_transaction() as conn:
         _ensure_activos_schema(conn)
         conn.execute(
             """
             UPDATE activos
-            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?
+            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?, tipo_detalle = ?
             WHERE id = ?
             """,
             (
@@ -229,6 +330,7 @@ def _actualizar_activo(
                 nueva_unidad,
                 usuario,
                 nuevo_tipo_impresora,
+                nuevo_tipo_detalle,
                 int(activo_id),
             ),
         )
@@ -240,7 +342,7 @@ def _actualizar_activo(
             (
                 activo_nombre,
                 "EDICIÓN",
-                f"Actualización de valores (vida útil: {nueva_vida}, categoría: {nueva_categoria})",
+                f"Actualización de valores (vida útil: {nueva_vida}, equipo: {nueva_unidad}, tipo: {nuevo_tipo_detalle or 'N/D'})",
                 nueva_inversion,
                 usuario,
             ),
@@ -276,7 +378,7 @@ def render_activos(usuario: str):
         with st.expander("🔎 Activos con prioridad de mantenimiento", expanded=False):
             st.dataframe(
                 df.sort_values("desgaste", ascending=False)[
-                    ["equipo", "categoria", "unidad", "inversion", "desgaste", "riesgo"]
+                    ["equipo", "unidad", "tipo_detalle", "inversion", "desgaste", "riesgo"]
                 ].head(10),
                 use_container_width=True,
                 hide_index=True,
@@ -291,34 +393,48 @@ def render_activos(usuario: str):
             st.plotly_chart(fig_riesgo, use_container_width=True)
 
     with st.expander("➕ Registrar Nuevo Activo"):
-        tipo_unidad_nuevo = st.selectbox("Tipo de Equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo")
+        tipo_unidad_nuevo = st.selectbox("Equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo")
+        opciones_tipo_nuevo = _opciones_tipo_equipo(tipo_unidad_nuevo)
+        label_tipo_nuevo = _label_tipo_equipo(tipo_unidad_nuevo)
 
         with st.form("form_activos_pro"):
             c1, c2 = st.columns(2)
             nombre_eq = c1.text_input("Nombre del Activo")
-            c2.caption(f"Tipo de equipo seleccionado: **{tipo_unidad_nuevo}**")
+            c2.caption(
+                f"Equipo seleccionado: **{tipo_unidad_nuevo}** · Categoría automática: **{_categoria_por_equipo(tipo_unidad_nuevo)}**"
+            )
 
-            c3, c4, c5 = st.columns(3)
+            c3, c4 = st.columns(2)
             monto_inv = c3.number_input("Inversión ($)", min_value=0.0, step=10.0)
             vida_util = c4.number_input("Vida Útil (Usos)", min_value=1, value=1000, step=1)
-            categoria = c5.selectbox("Categoría", CATEGORIAS)
-            tipo_impresora = None
-            if _es_equipo_impresora(tipo_unidad_nuevo):
-                tipo_impresora = st.selectbox("Tipo de impresora", TIPOS_IMPRESORA)
+
+            tipo_predefinido_nuevo = None
+            tipo_personalizado_nuevo = ""
+            if opciones_tipo_nuevo:
+                tipo_predefinido_nuevo = st.selectbox(label_tipo_nuevo, opciones_tipo_nuevo, key="activos_tipo_detalle_nuevo")
+                if tipo_predefinido_nuevo == OPCION_TIPO_PERSONALIZADO:
+                    tipo_personalizado_nuevo = st.text_input(f"Especifica {label_tipo_nuevo.lower()}", key="activos_tipo_detalle_custom_nuevo")
+            else:
+                tipo_personalizado_nuevo = st.text_input(label_tipo_nuevo, key="activos_tipo_detalle_libre_nuevo")
 
             modelo = st.text_input("Modelo (opcional)")
             guardar = st.form_submit_button("🚀 Guardar Activo")
         if guardar:
             try:
+                tipo_detalle_nuevo = _resolver_tipo_detalle(
+                    tipo_unidad_nuevo,
+                    tipo_predefinido_nuevo,
+                    tipo_personalizado_nuevo,
+                )
                 aid = _crear_activo(
                     usuario=usuario,
                     equipo=nombre_eq,
                     tipo_unidad=tipo_unidad_nuevo,
-                    categoria=categoria,
+                    categoria=_categoria_por_equipo(tipo_unidad_nuevo),
                     inversion=monto_inv,
                     vida_util=int(vida_util),
                     modelo=modelo,
-                    tipo_impresora=tipo_impresora,
+                    tipo_detalle=tipo_detalle_nuevo,
                 )
                 st.success(f"✅ Activo registrado correctamente. ID #{aid}")
                 st.rerun()
@@ -337,46 +453,72 @@ def render_activos(usuario: str):
             datos = df[df["id"] == activo_id].iloc[0]
 
             vida_sugerida = int(max(1, round(datos["inversion"] / max(datos["desgaste"], 1e-9)))) if datos["inversion"] > 0 else 1000
-            categoria_actual = str(datos.get("categoria") or "Otro")
             unidad_actual = str(datos.get("unidad") or "Otro")
-            idx_categoria = CATEGORIAS.index(categoria_actual) if categoria_actual in CATEGORIAS else len(CATEGORIAS) - 1
             idx_unidad = TIPOS_UNIDAD.index(unidad_actual) if unidad_actual in TIPOS_UNIDAD else len(TIPOS_UNIDAD) - 1
-            tipo_impresora_actual = str(datos.get("tipo_impresora") or "")
-            idx_tipo_impresora = TIPOS_IMPRESORA.index(tipo_impresora_actual) if tipo_impresora_actual in TIPOS_IMPRESORA else 0
+            tipo_detalle_actual = str(datos.get("tipo_detalle") or datos.get("tipo_impresora") or "")
             nueva_unidad = st.selectbox(
-                "Tipo de Equipo",
+                "Equipo",
                 TIPOS_UNIDAD,
                 index=idx_unidad,
                 key=f"activos_editar_unidad_{activo_id}",
             )
+            tipo_predefinido_actual, tipo_personalizado_actual = _valor_tipo_para_formulario(nueva_unidad, tipo_detalle_actual)
+            opciones_tipo_edicion = _opciones_tipo_equipo(nueva_unidad)
+            label_tipo_edicion = _label_tipo_equipo(nueva_unidad)
 
             with st.form("editar_activo"):
-                e1, e2, e3 = st.columns(3)
+                e1, e2 = st.columns(2)
                 nueva_inv = e1.number_input("Inversión ($)", min_value=0.0, value=float(datos["inversion"]), step=10.0)
                 nueva_vida = e2.number_input("Vida útil", min_value=1, value=int(vida_sugerida), step=1)
-                nueva_cat = e3.selectbox("Categoría", CATEGORIAS, index=idx_categoria)
 
                 u1, u2 = st.columns(2)
-                u1.caption(f"Tipo de equipo seleccionado: **{nueva_unidad}**")
+                u1.caption(
+                    f"Equipo seleccionado: **{nueva_unidad}** · Categoría automática: **{_categoria_por_equipo(nueva_unidad)}**"
+                )
                 nuevo_modelo = u2.text_input("Modelo", value=str(datos.get("modelo") or ""))
-                nuevo_tipo_impresora = None
-                if _es_equipo_impresora(nueva_unidad):
-                    nuevo_tipo_impresora = st.selectbox("Tipo de impresora", TIPOS_IMPRESORA, index=idx_tipo_impresora)
+
+                nuevo_tipo_predefinido = None
+                nuevo_tipo_personalizado = tipo_personalizado_actual
+                if opciones_tipo_edicion:
+                    idx_tipo_edicion = opciones_tipo_edicion.index(tipo_predefinido_actual) if tipo_predefinido_actual in opciones_tipo_edicion else 0
+                    nuevo_tipo_predefinido = st.selectbox(
+                        label_tipo_edicion,
+                        opciones_tipo_edicion,
+                        index=idx_tipo_edicion,
+                        key=f"activos_editar_tipo_detalle_{activo_id}",
+                    )
+                    if nuevo_tipo_predefinido == OPCION_TIPO_PERSONALIZADO:
+                        nuevo_tipo_personalizado = st.text_input(
+                            f"Especifica {label_tipo_edicion.lower()}",
+                            value=tipo_personalizado_actual,
+                            key=f"activos_editar_tipo_detalle_custom_{activo_id}",
+                        )
+                else:
+                    nuevo_tipo_personalizado = st.text_input(
+                        label_tipo_edicion,
+                        value=tipo_personalizado_actual,
+                        key=f"activos_editar_tipo_detalle_libre_{activo_id}",
+                    )
 
                 guardar_edicion = st.form_submit_button("💾 Guardar Cambios")
 
             if guardar_edicion:
                 try:
+                    nuevo_tipo_detalle = _resolver_tipo_detalle(
+                        nueva_unidad,
+                        nuevo_tipo_predefinido,
+                        nuevo_tipo_personalizado,
+                    )
                     _actualizar_activo(
                         usuario=usuario,
                         activo_id=activo_id,
                         activo_nombre=str(datos["equipo"]),
                         nueva_inversion=float(nueva_inv),
                         nueva_vida=int(nueva_vida),
-                        nueva_categoria=nueva_cat,
+                        nueva_categoria=_categoria_por_equipo(nueva_unidad),
                         nuevo_modelo=nuevo_modelo,
                         nueva_unidad=nueva_unidad,
-                        nuevo_tipo_impresora=nuevo_tipo_impresora,
+                        nuevo_tipo_detalle=nuevo_tipo_detalle,
                     )
                     st.success("✅ Activo actualizado correctamente.")
                     st.rerun()
@@ -387,11 +529,11 @@ def render_activos(usuario: str):
 
     t1, t2, t3, t4, t5, t6 = st.tabs([
         "🖨️ Impresoras",
-        "✂️ Corte / Plotter",
-        "🔥 Planchas",
+        "✂️ Corte",
+        "🪪 Plastificación",
+        "🔥 Sublimación",
         "🧰 Otros",
-        "📊 Resumen Global",
-        "📜 Historial",
+       "📊 Resumen Global",
     ])
 
     if df.empty:
@@ -410,7 +552,7 @@ def render_activos(usuario: str):
             c_imp3.metric("Páginas impresas (total)", int(df_imp["paginas_impresas"].sum()))
 
             mostrar_cols = [
-                "id", "equipo", "modelo", "tipo_impresora", "categoria", "vida_cabezal_pct", "vida_rodillo_pct",
+                "id", "equipo", "modelo", "tipo_detalle", "vida_cabezal_pct", "vida_rodillo_pct",
                 "vida_almohadillas_pct", "desgaste_cabezal_pct", "paginas_impresas", "desgaste", "riesgo"
             ]
             st.dataframe(df_imp[mostrar_cols], use_container_width=True, hide_index=True)
@@ -474,26 +616,31 @@ def render_activos(usuario: str):
             st.info("No hay impresoras activas registradas.")
 
     with t2:
-        st.subheader("Corte / Plotter")
-        df_corte = df[df["unidad"].fillna("").str.contains("Corte|Plotter|Cameo", case=False)]
+        st.subheader("Equipos de corte")
+        df_corte = df[df["unidad"].fillna("").eq("Corte")].copy()
         st.dataframe(df_corte, use_container_width=True, hide_index=True)
 
     with t3:
-        st.subheader("Planchas de Sublimación")
-        df_plancha = df[df["unidad"].fillna("").str.contains("Plancha|Sublim", case=False)]
-        st.dataframe(df_plancha, use_container_width=True, hide_index=True)
+        st.subheader("Equipos de plastificación")
+        df_plast = df[df["unidad"].fillna("").eq("Plastificación")].copy()
+        st.dataframe(df_plast, use_container_width=True, hide_index=True)
 
     with t4:
-        st.subheader("Otros equipos")
-        mask_otro = ~df["unidad"].fillna("").str.contains("Impresora|Corte|Plotter|Cameo|Plancha|Sublim", case=False)
-        st.dataframe(df[mask_otro], use_container_width=True, hide_index=True)
+        st.subheader("Equipos de sublimación")
+        df_subl = df[df["unidad"].fillna("").eq("Sublimación")].copy()
+        st.dataframe(df_subl, use_container_width=True, hide_index=True)
 
     with t5:
+        st.subheader("Otros equipos")
+        df_otro = df[df["unidad"].fillna("").eq("Otro")].copy()
+        st.dataframe(df_otro, use_container_width=True, hide_index=True)
+
+    with t6:
         c_inv, c_des, c_prom = st.columns(3)
         c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
         c_des.metric("Activos Registrados", len(df))
         c_prom.metric("Desgaste Promedio por Uso", f"$ {df['desgaste'].mean():.4f}")
 
-        fig = px.bar(df, x="equipo", y="inversion", color="categoria", title="Distribución de Inversión por Activo")
+        fig = px.bar(df, x="equipo", y="inversion", color="unidad", title="Distribución de Inversión por Activo")
         st.plotly_chart(fig, use_container_width=True)
 
