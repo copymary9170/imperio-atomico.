@@ -76,6 +76,7 @@ TIPOS_POR_EQUIPO = {
     },
 }
 OPCION_TIPO_PERSONALIZADO = "Otro / No está en la lista"
+ACTIVOS_UI_VERSION = "Activos UI v2"
 
 
 def _equipo_config(tipo_equipo: str | None) -> dict:
@@ -99,6 +100,18 @@ def _normalizar_unidad(tipo_equipo: str | None) -> str:
     return equivalencias.get(valor, valor or "Otro")
 
 
+def _migrar_valores_legados_activos(conn) -> None:
+    unidades_legadas = {
+        "Corte / Plotter (Cameo)": "Corte",
+        "Plancha de Sublimación": "Sublimación",
+    }
+    for valor_anterior, valor_nuevo in unidades_legadas.items():
+        conn.execute(
+            "UPDATE activos SET unidad = ?, categoria = ? WHERE unidad = ?",
+            (valor_nuevo, _categoria_por_equipo(valor_nuevo), valor_anterior),
+        )
+
+
 def _opciones_tipo_equipo(tipo_equipo: str | None) -> list[str]:
     opciones = list(_equipo_config(tipo_equipo).get("opciones") or [])
     return opciones + [OPCION_TIPO_PERSONALIZADO] if opciones else []
@@ -117,7 +130,6 @@ def _resolver_tipo_detalle(tipo_equipo: str, tipo_predefinido: str | None, tipo_
     if tipo_predefinido == OPCION_TIPO_PERSONALIZADO or not opciones:
         return require_text(tipo_personalizado, _label_tipo_equipo(tipo_equipo))
     return None
-
 
 def _valor_tipo_para_formulario(tipo_equipo: str | None, valor_actual: str | None) -> tuple[str | None, str]:
     valor_actual = str(valor_actual or "").strip()
@@ -189,6 +201,8 @@ def _ensure_activos_schema(conn) -> None:
     for col, alter_sql in optional_cols.items():
         if col not in cols:
             conn.execute(alter_sql)
+
+    _migrar_valores_legados_activos(conn)
 
 
 def _load_activos_df() -> pd.DataFrame:
@@ -359,6 +373,9 @@ def render_activos(usuario: str):
         return
 
     st.title("🏗️ Gestión Integral de Activos")
+    st.caption(
+        f"{ACTIVOS_UI_VERSION} · catálogo unificado por tipo de equipo. Si ves opciones legadas como `Plancha de Sublimación`, recarga la app para tomar esta versión."
+    )
 
     try:
         df = _load_activos_df()
@@ -392,33 +409,33 @@ def render_activos(usuario: str):
             )
             st.plotly_chart(fig_riesgo, use_container_width=True)
 
-    with st.expander("➕ Registrar Nuevo Activo"):
-        tipo_unidad_nuevo = st.selectbox("Equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo")
-        opciones_tipo_nuevo = _opciones_tipo_equipo(tipo_unidad_nuevo)
-        label_tipo_nuevo = _label_tipo_equipo(tipo_unidad_nuevo)
+    with st.expander("➕ Registrar Nuevo Activo", expanded=True):
+        st.info("Esta es la versión renovada del formulario de activos. La categoría se calcula automáticamente según el tipo de equipo.")
 
-        with st.form("form_activos_pro"):
+        with st.form("form_activos_pro_v2"):
             c1, c2 = st.columns(2)
-            nombre_eq = c1.text_input("Nombre del Activo")
-            c2.caption(
-                f"Equipo seleccionado: **{tipo_unidad_nuevo}** · Categoría automática: **{_categoria_por_equipo(tipo_unidad_nuevo)}**"
-            )
+            nombre_eq = c1.text_input("Nombre del activo")
+            tipo_unidad_nuevo = c2.selectbox("Tipo de equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo_v2")
 
-            c3, c4 = st.columns(2)
+            opciones_tipo_nuevo = _opciones_tipo_equipo(tipo_unidad_nuevo)
+            label_tipo_nuevo = _label_tipo_equipo(tipo_unidad_nuevo)
+
+            c3, c4, c5 = st.columns(3)
             monto_inv = c3.number_input("Inversión ($)", min_value=0.0, step=10.0)
-            vida_util = c4.number_input("Vida Útil (Usos)", min_value=1, value=1000, step=1)
+            vida_util = c4.number_input("Vida útil (usos)", min_value=1, value=1000, step=1)
+            c5.text_input("Categoría detectada", value=_categoria_por_equipo(tipo_unidad_nuevo), disabled=True)
 
             tipo_predefinido_nuevo = None
             tipo_personalizado_nuevo = ""
             if opciones_tipo_nuevo:
-                tipo_predefinido_nuevo = st.selectbox(label_tipo_nuevo, opciones_tipo_nuevo, key="activos_tipo_detalle_nuevo")
+                tipo_predefinido_nuevo = st.selectbox(label_tipo_nuevo, opciones_tipo_nuevo, key="activos_tipo_detalle_nuevo_v2")
                 if tipo_predefinido_nuevo == OPCION_TIPO_PERSONALIZADO:
-                    tipo_personalizado_nuevo = st.text_input(f"Especifica {label_tipo_nuevo.lower()}", key="activos_tipo_detalle_custom_nuevo")
+                    tipo_personalizado_nuevo = st.text_input(f"Especifica {label_tipo_nuevo.lower()}", key="activos_tipo_detalle_custom_nuevo_v2")
             else:
-                tipo_personalizado_nuevo = st.text_input(label_tipo_nuevo, key="activos_tipo_detalle_libre_nuevo")
+                tipo_personalizado_nuevo = st.text_input(label_tipo_nuevo, key="activos_tipo_detalle_libre_nuevo_v2")
 
             modelo = st.text_input("Modelo (opcional)")
-            guardar = st.form_submit_button("🚀 Guardar Activo")
+            guardar = st.form_submit_button("🚀 Guardar activo")
         if guardar:
             try:
                 tipo_detalle_nuevo = _resolver_tipo_detalle(
@@ -438,6 +455,87 @@ def render_activos(usuario: str):
                 )
                 st.success(f"✅ Activo registrado correctamente. ID #{aid}")
                 st.rerun()
+            except Exception as e:
+                st.error(f"Error al registrar activo: {e}")
+
+    st.divider()
+
+    with st.expander("✏️ Editar Activo Existente"):
+        if df.empty:
+            st.info("No hay activos para editar.")
+        else:
+            opciones = {f"{row.equipo} · {row.unidad}": int(row.id) for row in df.itertuples()}
+            label = st.selectbox("Seleccionar activo:", list(opciones.keys()))
+            activo_id = opciones[label]
+            datos = df[df["id"] == activo_id].iloc[0]
+
+            vida_sugerida = int(max(1, round(datos["inversion"] / max(datos["desgaste"], 1e-9)))) if datos["inversion"] > 0 else 1000
+            unidad_actual = str(datos.get("unidad") or "Otro")
+            idx_unidad = TIPOS_UNIDAD.index(unidad_actual) if unidad_actual in TIPOS_UNIDAD else len(TIPOS_UNIDAD) - 1
+            tipo_detalle_actual = str(datos.get("tipo_detalle") or datos.get("tipo_impresora") or "")
+            nueva_unidad = st.selectbox(
+                "Tipo de equipo",
+                TIPOS_UNIDAD,
+                index=idx_unidad,
+                key=f"activos_editar_unidad_v2_{activo_id}",
+            )
+            tipo_predefinido_actual, tipo_personalizado_actual = _valor_tipo_para_formulario(nueva_unidad, tipo_detalle_actual)
+            opciones_tipo_edicion = _opciones_tipo_equipo(nueva_unidad)
+            label_tipo_edicion = _label_tipo_equipo(nueva_unidad)
+
+            with st.form("editar_activo"):
+                e1, e2, e3 = st.columns(3)
+                nueva_inv = e1.number_input("Inversión ($)", min_value=0.0, value=float(datos["inversion"]), step=10.0)
+                nueva_vida = e2.number_input("Vida útil", min_value=1, value=int(vida_sugerida), step=1)
+                e3.text_input("Categoría detectada", value=_categoria_por_equipo(nueva_unidad), disabled=True)
+
+                nuevo_modelo = st.text_input("Modelo", value=str(datos.get("modelo") or ""))
+
+                nuevo_tipo_predefinido = None
+                nuevo_tipo_personalizado = tipo_personalizado_actual
+                if opciones_tipo_edicion:
+                    idx_tipo_edicion = opciones_tipo_edicion.index(tipo_predefinido_actual) if tipo_predefinido_actual in opciones_tipo_edicion else 0
+                    nuevo_tipo_predefinido = st.selectbox(
+                        label_tipo_edicion,
+                        opciones_tipo_edicion,
+                        index=idx_tipo_edicion,
+                        key=f"activos_editar_tipo_detalle_v2_{activo_id}",
+                    )
+                    if nuevo_tipo_predefinido == OPCION_TIPO_PERSONALIZADO:
+                        nuevo_tipo_personalizado = st.text_input(
+                            f"Especifica {label_tipo_edicion.lower()}",
+                            value=tipo_personalizado_actual,
+                            key=f"activos_editar_tipo_detalle_custom_v2_{activo_id}",
+                        )
+                else:
+                    nuevo_tipo_personalizado = st.text_input(
+                        label_tipo_edicion,
+                        value=tipo_personalizado_actual,
+                        key=f"activos_editar_tipo_detalle_libre_v2_{activo_id}",
+                    )
+
+                guardar_edicion = st.form_submit_button("💾 Guardar Cambios")
+
+            if guardar_edicion:
+                try:
+                    nuevo_tipo_detalle = _resolver_tipo_detalle(
+                        nueva_unidad,
+                        nuevo_tipo_predefinido,
+                        nuevo_tipo_personalizado,
+                    )
+                    _actualizar_activo(
+                        usuario=usuario,
+                        activo_id=activo_id,
+                        activo_nombre=str(datos["equipo"]),
+                        nueva_inversion=float(nueva_inv),
+                        nueva_vida=int(nueva_vida),
+                        nueva_categoria=_categoria_por_equipo(nueva_unidad),
+                        nuevo_modelo=nuevo_modelo,
+                        nueva_unidad=nueva_unidad,
+                        nuevo_tipo_detalle=nuevo_tipo_detalle,
+                    )
+                    st.success("✅ Activo actualizado correctamente.")
+                    st.rerun()
             except Exception as e:
                 st.error(f"Error al registrar activo: {e}")
 
