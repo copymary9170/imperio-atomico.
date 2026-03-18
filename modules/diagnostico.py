@@ -58,11 +58,51 @@ PRINTER_PROFILES = {
 }
 
 
-def _obtener_perfil_impresora(nombre_impresora: str) -> dict[str, Any]:
-    nombre = (nombre_impresora or "").lower()
+def _normalizar_texto_impresora(*valores: Any) -> str:
+    return " ".join(str(valor or "").strip().lower() for valor in valores if str(valor or "").strip())
+
+
+def _formatear_opcion_activo(row: dict[str, Any], default_label: str = "Activo") -> str:
+    equipo = str(row.get("equipo") or default_label).strip()
+    modelo = str(row.get("modelo") or "").strip()
+    tipo_detalle = str(row.get("tipo_detalle") or "").strip()
+    partes = [f"#{row['id']} · {equipo}"]
+    if modelo:
+        partes.append(f"({modelo})")
+    if tipo_detalle:
+        partes.append(f"· {tipo_detalle}")
+    return " ".join(partes).strip()
+
+
+def _obtener_perfil_impresora(nombre_impresora: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    metadata = metadata or {}
+    nombre = _normalizar_texto_impresora(
+        nombre_impresora,
+        metadata.get("equipo"),
+        metadata.get("modelo"),
+        metadata.get("tipo_detalle"),
+        metadata.get("unidad"),
+    )
     for _, profile in PRINTER_PROFILES.items():
         if any(term in nombre for term in profile["match_terms"]):
             return profile
+    tipo_detalle = str(metadata.get("tipo_detalle") or "").strip().lower()
+    if "sublim" in tipo_detalle:
+        return {
+            "ink_system_type": "factory_tank",
+            "ink_usage_type": "sublimation",
+            "initial_fill_known": False,
+            "estimation_mode": "visual",
+            "head_system_type": "integrated",
+        }
+    if "cartucho" in tipo_detalle:
+        return {
+            "ink_system_type": "cartridge",
+            "ink_usage_type": "standard",
+            "initial_fill_known": False,
+            "estimation_mode": "manual",
+            "head_system_type": "integrated",
+        }
     return {
         "ink_system_type": "factory_tank",
         "ink_usage_type": "standard",
@@ -70,7 +110,6 @@ def _obtener_perfil_impresora(nombre_impresora: str) -> dict[str, Any]:
         "estimation_mode": "none",
         "head_system_type": "integrated",
     }
-
 
 def _obtener_capacidades_canonicas(activo_id: int | None, nombre_impresora: str) -> dict[str, float]:
     caps = get_tank_capacities(activo_id, fallback_name=nombre_impresora)
@@ -234,7 +273,7 @@ def _seleccionar_impresora() -> tuple[str, int | None]:
     impresoras_activas = listar_impresoras_activas()
     if impresoras_activas:
         mapa_impresoras = {
-            f"#{row['id']} · {row.get('equipo') or 'Impresora'} {('(' + str(row.get('modelo')) + ')') if row.get('modelo') else ''}".strip(): row
+            _formatear_opcion_activo(row, default_label="Impresora"): row
             for row in impresoras_activas
         }
         etiqueta_sel = st.selectbox("Impresora (desde activos)", list(mapa_impresoras.keys()), index=0)
@@ -247,7 +286,7 @@ def _seleccionar_impresora() -> tuple[str, int | None]:
     activos = listar_activos_disponibles()
     if activos:
         mapa_activos = {
-            f"#{row['id']} · {row.get('equipo') or 'Activo'} {('(' + str(row.get('modelo')) + ')') if row.get('modelo') else ''}": row
+            _formatear_opcion_activo(row): row
             for row in activos
         }
         etiqueta_activo = st.selectbox("Activo a vincular", list(mapa_activos.keys()), index=0)
@@ -468,8 +507,14 @@ def render_diagnostico(usuario: str) -> None:
         st.session_state[show_save_form_key] = False
 
     impresora_sel, activo_id_sel = _seleccionar_impresora()
+    activos_lookup = {
+        int(row["id"]): row
+        for row in (listar_impresoras_activas() + listar_activos_disponibles())
+        if row.get("id") is not None
+    }
+    activo_metadata = activos_lookup.get(int(activo_id_sel)) if activo_id_sel else None
 
-    profile = _obtener_perfil_impresora(impresora_sel)
+    profile = _obtener_perfil_impresora(impresora_sel, activo_metadata)
 
     previous_printer = st.session_state.get(selected_printer_key)
     if previous_printer != impresora_sel:
