@@ -162,9 +162,9 @@ def _crear_activo(
     desgaste_unitario = inversion / vida_util
     tipo_impresora = (tipo_impresora or "").strip() or None
 
-        if not _es_equipo_impresora(tipo_unidad):
+    if not _es_equipo_impresora(tipo_unidad):
         tipo_impresora = None
-            
+
     with db_transaction() as conn:
         _ensure_activos_schema(conn)
         cur = conn.execute(
@@ -291,28 +291,29 @@ def render_activos(usuario: str):
             st.plotly_chart(fig_riesgo, use_container_width=True)
 
     with st.expander("➕ Registrar Nuevo Activo"):
+        tipo_unidad_nuevo = st.selectbox("Tipo de Equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo")
+
         with st.form("form_activos_pro"):
             c1, c2 = st.columns(2)
             nombre_eq = c1.text_input("Nombre del Activo")
-            tipo_unidad = c2.selectbox("Tipo de Equipo", TIPOS_UNIDAD)
+            c2.caption(f"Tipo de equipo seleccionado: **{tipo_unidad_nuevo}**")
 
             c3, c4, c5 = st.columns(3)
             monto_inv = c3.number_input("Inversión ($)", min_value=0.0, step=10.0)
             vida_util = c4.number_input("Vida Útil (Usos)", min_value=1, value=1000, step=1)
             categoria = c5.selectbox("Categoría", CATEGORIAS)
             tipo_impresora = None
-            if _es_equipo_impresora(tipo_unidad):
+            if _es_equipo_impresora(tipo_unidad_nuevo):
                 tipo_impresora = st.selectbox("Tipo de impresora", TIPOS_IMPRESORA)
 
             modelo = st.text_input("Modelo (opcional)")
             guardar = st.form_submit_button("🚀 Guardar Activo")
-
         if guardar:
             try:
                 aid = _crear_activo(
                     usuario=usuario,
                     equipo=nombre_eq,
-                    tipo_unidad=tipo_unidad,
+                    tipo_unidad=tipo_unidad_nuevo,
                     categoria=categoria,
                     inversion=monto_inv,
                     vida_util=int(vida_util),
@@ -342,6 +343,12 @@ def render_activos(usuario: str):
             idx_unidad = TIPOS_UNIDAD.index(unidad_actual) if unidad_actual in TIPOS_UNIDAD else len(TIPOS_UNIDAD) - 1
             tipo_impresora_actual = str(datos.get("tipo_impresora") or "")
             idx_tipo_impresora = TIPOS_IMPRESORA.index(tipo_impresora_actual) if tipo_impresora_actual in TIPOS_IMPRESORA else 0
+            nueva_unidad = st.selectbox(
+                "Tipo de Equipo",
+                TIPOS_UNIDAD,
+                index=idx_unidad,
+                key=f"activos_editar_unidad_{activo_id}",
+            )
 
             with st.form("editar_activo"):
                 e1, e2, e3 = st.columns(3)
@@ -350,9 +357,9 @@ def render_activos(usuario: str):
                 nueva_cat = e3.selectbox("Categoría", CATEGORIAS, index=idx_categoria)
 
                 u1, u2 = st.columns(2)
-                nueva_unidad = u1.selectbox("Tipo de Equipo", TIPOS_UNIDAD, index=idx_unidad)
+                u1.caption(f"Tipo de equipo seleccionado: **{nueva_unidad}**")
                 nuevo_modelo = u2.text_input("Modelo", value=str(datos.get("modelo") or ""))
-               nuevo_tipo_impresora = None
+                nuevo_tipo_impresora = None
                 if _es_equipo_impresora(nueva_unidad):
                     nuevo_tipo_impresora = st.selectbox("Tipo de impresora", TIPOS_IMPRESORA, index=idx_tipo_impresora)
 
