@@ -448,7 +448,9 @@ def render_activos(usuario: str):
                     tipo_unidad=tipo_unidad_nuevo,
                     categoria=_categoria_por_equipo(tipo_unidad_nuevo),
                     inversion=monto_inv,
-@@ -455,147 +454,62 @@ def render_activos(usuario: str):
+                    vida_util=int(vida_util),
+                    modelo=modelo,
+                    tipo_detalle=tipo_detalle_nuevo,
                 )
                 st.success(f"✅ Activo registrado correctamente. ID #{aid}")
                 st.rerun()
