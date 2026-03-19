@@ -408,8 +408,9 @@ def _render_guardado_tecnico(usuario: str, impresora_sel: str, datos: dict[str, 
                 head_system_type=head_system_type,
                 purchase_value=float(purchase_value),
                 current_value=float(current_value),
+                head_life_pct=float(datos.get("vida_cabezal_pct", 0.0)),
+                component_life_pct=dict(datos.get("desgaste_componentes") or {}),
             )
-
             files_meta = []
             legacy_id = int(rec.get("legacy_diagnostico_id") or rec["diagnostico_id"])
 
