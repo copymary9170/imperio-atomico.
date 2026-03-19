@@ -640,11 +640,13 @@ def render_activos(usuario: str):
             sel_id = opciones_imp[sel_label]
             resumen = get_printer_diagnostic_summary(sel_id)
             if resumen and resumen.get("diagnostico_id"):
-                r1, r2, r3, r4 = st.columns(4)
+                r1, r2, r3, r4, r5, r6 = st.columns(6)
                 r1.metric("Último diagnóstico", str(resumen.get("fecha") or "N/D"))
                 r2.metric("Páginas totales", int(resumen.get("total_pages") or 0))
                 r3.metric("Desgaste cabezal", f"{float(resumen.get('head_wear_pct') or 0.0):.2f}%")
                 r4.metric("Depreciación estimada", f"$ {float(resumen.get('depreciation_amount') or 0.0):.4f}")
+                r5.metric("Vida rodillo", f"{float(resumen.get('vida_rodillo_pct') or 0.0):.2f}%")
+                r6.metric("Vida almohadillas", f"{float(resumen.get('vida_almohadillas_pct') or 0.0):.2f}%")
 
                 st.caption(
                     f"Niveles actuales (ml): BK {float(resumen.get('black_ml') or 0.0):.2f} | C {float(resumen.get('cyan_ml') or 0.0):.2f} | "
@@ -670,6 +672,7 @@ def render_activos(usuario: str):
                 cols_show = [
                     "id", "fecha", "total_pages", "color_pages", "bw_pages", "borderless_pages", "scanned_pages",
                     "black_ml", "cyan_ml", "magenta_ml", "yellow_ml", "estimation_mode", "confidence_level", "files_count"
+
                 ]
                 cols_show = [c for c in cols_show if c in historial.columns]
                 st.dataframe(historial[cols_show], use_container_width=True, hide_index=True)
