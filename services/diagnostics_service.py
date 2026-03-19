@@ -1425,6 +1425,8 @@ def create_diagnostic_record(
     valuation_method: str = "usage_based",
     purchase_value: float = 0.0,
     current_value: float = 0.0,
+    head_life_pct: float | None = None,
+    component_life_pct: dict[str, float | None] | None = None,
 ) -> dict[str, Any]:
     if estimation_mode not in ESTIMATION_MODES:
         raise ValueError("estimation_mode inválido")
@@ -1667,6 +1669,19 @@ def create_diagnostic_record(
             )
 
         wear_pct, wear_method = _calculate_head_wear(total_pages, ink_system_type, ink_usage_type)
+        provided_head_life = _clamp_percentage(head_life_pct)
+        head_life_resolved = (
+            float(provided_head_life)
+            if provided_head_life is not None
+            else round(max(0.0, 100.0 - wear_pct), 2)
+        )
+        head_wear_resolved = round(max(0.0, 100.0 - head_life_resolved), 2)
+        component_life_pct = dict(component_life_pct or {})
+        vida_rodillo = _clamp_percentage(component_life_pct.get("rodillo"))
+        vida_almohadillas = _clamp_percentage(component_life_pct.get("almohadillas"))
+        vidas_componentes = [head_life_resolved, vida_rodillo, vida_almohadillas]
+        vidas_validas = [float(v) for v in vidas_componentes if v is not None]
+        vida_general = min(vidas_validas) if vidas_validas else None
         maintenance_cost = conn.execute(
             "SELECT COALESCE(SUM(cost),0) AS total FROM printer_maintenance_logs WHERE printer_id=?",
             (printer_id,),
@@ -1707,11 +1722,38 @@ def create_diagnostic_record(
             UPDATE activos
             SET paginas_impresas = CASE WHEN ? > paginas_impresas THEN ? ELSE paginas_impresas END,
                 vida_cabezal_pct = ?,
+                vida_rodillo_pct = COALESCE(?, vida_rodillo_pct),
+                vida_almohadillas_pct = COALESCE(?, vida_almohadillas_pct),
                 desgaste = ROUND(? / 100.0, 6),
                 usuario = ?
             WHERE id = ?
             """,
-            (total_pages, total_pages, round(max(0.0, 100.0 - wear_pct), 2), wear_pct, usuario, int(activo_id)),
+            (
+                total_pages,
+                total_pages,
+                head_life_resolved,
+                float(vida_rodillo) if vida_rodillo is not None else None,
+                float(vida_almohadillas) if vida_almohadillas is not None else None,
+                round((100.0 - float(vida_general)), 6) if vida_general is not None else wear_pct,
+                usuario,
+                int(activo_id),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO activos_historial(activo, accion, detalle, costo, usuario)
+            VALUES (?, 'DIAGNÓSTICO IA', ?, 0, ?)
+            """,
+            (
+                str(printer_name),
+                (
+                    f"Vida cabezal: {float(head_life_resolved):.2f}%"
+                    + (f" | rodillo: {float(vida_rodillo):.2f}%" if vida_rodillo is not None else "")
+                    + (f" | almohadillas: {float(vida_almohadillas):.2f}%" if vida_almohadillas is not None else "")
+                    + f" | contador: {int(total_pages)}"
+                ),
+                usuario,
+            ),
         )
 
         conn.execute(
@@ -1719,15 +1761,33 @@ def create_diagnostic_record(
             (depreciation_amount, depreciation_amount, printer_id),
         )
         conn.execute(
-            "UPDATE diagnosticos_impresora SET depreciation_amount=?, head_wear_pct=?, vida_cabezal_pct=? WHERE id=?",
-            (depreciation_amount, wear_pct, round(max(0.0, 100.0 - wear_pct), 2), legacy_diag_id),
+            """
+            UPDATE diagnosticos_impresora
+            SET depreciation_amount=?,
+                head_wear_pct=?,
+                vida_cabezal_pct=?,
+                vida_rodillo_pct=COALESCE(?, vida_rodillo_pct),
+                vida_almohadillas_pct=COALESCE(?, vida_almohadillas_pct)
+            WHERE id=?
+            """,
+            (
+                depreciation_amount,
+                head_wear_resolved,
+                head_life_resolved,
+                float(vida_rodillo) if vida_rodillo is not None else None,
+                float(vida_almohadillas) if vida_almohadillas is not None else None,
+                legacy_diag_id,
+            ),
         )
 
         return {
             "diagnostico_id": diagnostic_id,
             "legacy_diagnostico_id": legacy_diag_id,
             "depreciation_amount": depreciation_amount,
-            "head_wear_pct": wear_pct,
+            "head_wear_pct": head_wear_resolved,
+            "head_life_pct": head_life_resolved,
+            "vida_rodillo_pct": vida_rodillo,
+            "vida_almohadillas_pct": vida_almohadillas,
             "diagnostic_accuracy": diagnostic_accuracy,
         }
 
@@ -1795,7 +1855,8 @@ def get_printer_diagnostic_summary(activo_id: int) -> dict[str, Any]:
         _ensure_diagnostics_schema(conn)
         row = conn.execute(
             """
-            SELECT a.id AS asset_id, a.equipo, a.modelo, a.paginas_impresas, a.vida_cabezal_pct,
+           SELECT a.id AS asset_id, a.equipo, a.modelo, a.paginas_impresas, a.vida_cabezal_pct,
+                   a.vida_rodillo_pct, a.vida_almohadillas_pct,
                    p.id AS printer_id, p.brand, p.serial_number, p.ink_system_type, p.ink_usage_type,
                    p.head_system_type, p.valuation_method, p.purchase_value, p.current_value, p.status,
                    p.initial_fill_known, p.estimation_mode,
