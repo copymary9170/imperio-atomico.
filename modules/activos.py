@@ -149,7 +149,7 @@ TIPOS_POR_EQUIPO = {
     },
 }
 OPCION_TIPO_PERSONALIZADO = "Otro / No está en la lista"
-ACTIVOS_UI_VERSION = "Activos UI v 4 "
+ACTIVOS_UI_VERSION = "Activos UI v4"
 
 
 def _equipo_config(tipo_equipo: str | None) -> dict:
@@ -348,6 +348,9 @@ def _agregar_metricas_relacionadas(df: pd.DataFrame) -> pd.DataFrame:
         ("costo_componentes_asociados", 0.0),
     ):
         if f"{col}_resumen" in base.columns:
+
+
+
             base[col] = pd.to_numeric(base[f"{col}_resumen"], errors="coerce").fillna(default)
             base = base.drop(columns=[f"{col}_resumen"])
     if "vida_restante_minima_vinculada_resumen" in base.columns:
@@ -425,47 +428,6 @@ def _render_componentes_asociados(componentes_map: dict[int, pd.DataFrame], acti
             f"Próximo a reponer: {siguiente['equipo']} · {float(siguiente['vida_restante_pct']):.1f}% de vida restante"
         )
     st.dataframe(vista, use_container_width=True, hide_index=True)
-
-
-def _aplicar_filtros_activos(
-    df: pd.DataFrame,
-    texto_busqueda: str = "",
-    unidades: list[str] | None = None,
-    clases: list[str] | None = None,
-    riesgos: list[str] | None = None,
-    solo_con_relacion: bool = False,
-) -> pd.DataFrame:
-    if df.empty:
-        return df.copy()
-
-    vista = df.copy()
-
-    texto = str(texto_busqueda or "").strip().lower()
-    if texto:
-        columnas_busqueda = [
-            "equipo",
-            "modelo",
-            "unidad",
-            "tipo_detalle",
-            "clase_registro_label",
-            "activo_padre_label",
-        ]
-        máscara = pd.Series(False, index=vista.index)
-        for columna in columnas_busqueda:
-            if columna in vista.columns:
-                máscara = máscara | vista[columna].fillna("").astype(str).str.lower().str.contains(texto, regex=False)
-        vista = vista[máscara].copia()
-
-    si unidades:
-        vista = vista[vista["unidad"].fillna("").isin(unidades)].copy()
-    si clases:
-        vista = vista[vista["clase_registro_label"].fillna("").isin(clases)].copy()
-    if riesgos:
-        vista = vista[vista["riesgo"].fillna("").isin(riesgos)].copy()
-    if solo_con_relacion:
-        vista = vista[vista["activo_padre_id"].notna()].copy()
-
-    vista de regreso
 
 
 def _key_tipo_equipo(base_key: str, tipo_equipo: str | None) -> str:
@@ -739,7 +701,9 @@ def _actualizar_activo(
     activo_nombre: str,
     nueva_inversion: float,
     nueva_vida: int,
-    nueva_vida_util_unidad: str,
+
+
+        nueva_vida_util_unidad: str,
     nuevo_uso_acumulado: float,
     nueva_fecha_instalacion: str | None,
     nuevo_modelo: str,
@@ -885,82 +849,9 @@ def render_activos(usuario: str):
             )
             st.plotly_chart(fig_riesgo, use_container_width=True)
 
-        st.divider()
-        st.subheader("🧭 Vista operativa actualizada")
-        st.caption("Filtra, busca y revisa relaciones padre → hijo sin perder la edición completa del catálogo.")
-        f1, f2, f3, f4 = st.columns([1.4, 1, 1, 0.8])
-        texto_busqueda = f1.text_input(
-            "Buscar activo, modelo o tipo",
-            key="activos_busqueda_general_v4",
-            placeholder="Ej. Epson, Cameo, rodillo, UPS…",
-        )
-        unidades_sel = f2.multiselect(
-            "Tipo de equipo",
-            options=TIPOS_UNIDAD,
-            predeterminado=[],
-            key="activos_filtro_unidad_v4",
-        )
-        clases_sel = f3.multiselect(
-            "Clase de registro",
-            opciones=lista(CLASES_REGISTRO.values()),
-            predeterminado=[],
-            key="activos_filtro_clase_v4",
-        )
-        solo_relacionados = f4.checkbox(
-            "Solo vinculados",
-            valor=Falso,
-            key="activos_filtro_relacionados_v4",
-            help="Muestra solo componentes, repuestos o accesorios asociados a un activo principal.",
-        )
-        riesgos_sel = st.multiselect(
-            "Riesgo",
-            options=["🔴 Alto", "🟠 Medio", "🟢 Bajo"],
-            predeterminado=[],
-            key="activos_filtro_riesgo_v4",
-        )
-        df_vista = _aplicar_filtros_activos(
-            df,
-            texto_busqueda=texto_busqueda,
-            unidades=unidades_seleccionar,
-            clases=clases_sel,
-            riesgos=riesgos_sel,
-            solo_con_relacion=solo_relacionados,
-        )
-
-        vr1, vr2, vr3, vr4 = st.columns(4)
-        vr1.metric("Activos visibles", len(df_vista))
-        vr2.metric("Inversión visible", f"$ {df_vista['inversion_total_relacionada'].sum():,.2f}")
-        vr3.metric("Con relación padre/hijo", int(df_vista["activo_padre_id"].notna().sum()))
-        vr4.metric("Riesgo alto visible", int((df_vista["riesgo"] == "🔴 Alto").sum()))
-
-        columnas_vista_operativa = [
-            "identificación",
-            "equipo",
-            "modelo",
-            "unidad",
-            "tipo_detalle",
-            "clase_registro_label",
-            "activo_padre_label",
-            "estado_componente",
-            "componentes_vinculados",
-            "componentes_criticos_vinculados",
-            "inversion_total_relacionada",
-            "vida_restante_pct",
-            "riesgo",
-        ]
-        si df_vista.empty:
-            st.warning("No hay activos que coincidan con los filtros aplicados.")
-        demás:
-            st.dataframe(
-                df_vista[columnas_vista_operativa],
-                use_container_width=True,
-                ocultar_índice=Verdadero,
-            )
-
-    demás:
-        información_parental = {}
+    else:
+        parent_info = {}
         componentes_map = {}
-        df_vista = df.copy()
 
     with st.expander("➕ Registrar Nuevo Activo", expanded=True):
         st.info("Selecciona el tipo de equipo, define si es equipo principal, componente o herramienta, y asócialo a un activo padre cuando corresponda. Si un tipo no aparece, puedes escribirlo manualmente.")
@@ -1078,94 +969,51 @@ def render_activos(usuario: str):
             tipo_detalle_actual = str(datos.get("tipo_detalle") or datos.get("tipo_impresora") or "")
             ecl1, ecl2 = st.columns(2)
             nueva_unidad = ecl1.selectbox(
-            "Tipo de equipo",
-            options=TIPOS_UNIDAD,
-            default=[],
-            key="activos_filtro_unidad_v4",
-        )
-        clases_sel = f3.multiselect(
-            "Clase de registro",
-            options=list(CLASES_REGISTRO.values()),
-            default=[],
-            key="activos_filtro_clase_v4",
-        )
-        solo_relacionados = f4.checkbox(
-            "Solo vinculados",
-            value=False,
-            key="activos_filtro_relacionados_v4",
-            help="Muestra solo componentes, repuestos o accesorios asociados a un activo principal.",
-        )
-        riesgos_sel = st.multiselect(
-            "Riesgo",
-            options=["🔴 Alto", "🟠 Medio", "🟢 Bajo"],
-            default=[],
-            key="activos_filtro_riesgo_v4",
-        )
-        df_vista = _aplicar_filtros_activos(
-            df,
-            texto_busqueda=texto_busqueda,
-            unidades=unidades_sel,
-            clases=clases_sel,
-            riesgos=riesgos_sel,
-            solo_con_relacion=solo_relacionados,
-        )
-
-        vr1, vr2, vr3, vr4 = st.columns(4)
-        vr1.metric("Activos visibles", len(df_vista))
-        vr2.metric("Inversión visible", f"$ {df_vista['inversion_total_relacionada'].sum():,.2f}")
-        vr3.metric("Con relación padre/hijo", int(df_vista["activo_padre_id"].notna().sum()))
-        vr4.metric("Riesgo alto visible", int((df_vista["riesgo"] == "🔴 Alto").sum()))
-
-        columnas_vista_operativa = [
-            "identificación",
-            "equipo",
-            "modelo",
-            "unidad",
-            "tipo_detalle",
-            "clase_registro_label",
-            "activo_padre_label",
-            "estado_componente",
-            "componentes_vinculados",
-            "componentes_criticos_vinculados",
-            "inversion_total_relacionada",
-            "vida_restante_pct",
-            "riesgo",
-        ]
-        if df_vista.empty:
-            st.warning("No hay activos que coincidan con los filtros aplicados.")
-        else:
-            st.dataframe(
-                df_vista[columnas_vista_operativa],
-                use_container_width=True,
-                hide_index=True,
+                "Tipo de equipo",
+                TIPOS_UNIDAD,
+                index=idx_unidad,
+                key=f"activos_editar_unidad_{activo_id}",
             )
-
-    else:
-        información_parental = {}
-        componentes_map = {}
-        df_vista = df.copy()
-
-    with st.expander("➕ Registrar Nuevo Activo", expanded=True):
-        st.info("Selecciona el tipo de equipo, define si es equipo principal, componente o herramienta, y asócialo a un activo padre cuando corresponda. Si un tipo no aparece, puedes escribirlo manualmente.")
-        c1, c2, c3 = st.columns(3)
-        nombre_eq = c1.text_input("Nombre del activo", key="activos_nombre_nuevo_v2")
-        tipo_unidad_nuevo = c2.selectbox("Tipo de equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo_v2")
-        clase_nueva_label = c3.selectbox("Clase de registro", list(CLASES_REGISTRO.values()), key="activos_clase_registro_nuevo_v2")
-        clase_nueva = next((slug for slug, label in CLASES_REGISTRO.items() if label == clase_nueva_label), "equipo_principal")
-
-        opciones_tipo_nuevo = _opciones_tipo_equipo(tipo_unidad_nuevo)
-        label_tipo_nuevo = _label_tipo_equipo(tipo_unidad_nuevo)
-        placeholder_tipo_nuevo = _placeholder_tipo_equipo(tipo_unidad_nuevo)
-
-        c4, c5, c6 = st.columns(3)
-        monto_inv = c4.number_input("Inversión ($)", min_value=0.0, step=10.0, key="activos_inversion_nuevo_v2")
-        vida_util = c5.number_input("Vida útil", min_value=1, value=1000, step=1, key="activos_vida_nuevo_v2")
-        vida_util_unidad_nuevo = c6.selectbox("Unidad de vida útil", UNIDADES_VIDA_UTIL, key="activos_vida_unidad_nuevo_v2")
-        sc1, sc2 = st.columns(2)
-        uso_acumulado_nuevo = sc1.number_input(
-            "Uso acumulado",
-            min_value=0.0,
-            step=1.0,
+            clase_actual_slug = _slug_clase_registro(datos.get("clase_registro"))
+            clase_actual_label = _label_clase_registro(clase_actual_slug)
+            nueva_clase_label = ecl2.selectbox(
+                "Clase de registro",
+                list(CLASES_REGISTRO.values()),
+                index=list(CLASES_REGISTRO.values()).index(clase_actual_label),
+                key=f"activos_editar_clase_{activo_id}",
+            )
+            nueva_clase = next((slug for slug, label in CLASES_REGISTRO.items() if label == nueva_clase_label), "equipo_principal")
+            tipo_predefinido_actual, tipo_personalizado_actual = _valor_tipo_para_formulario(nueva_unidad, tipo_detalle_actual)
+            opciones_tipo_edicion = _opciones_tipo_equipo(nueva_unidad)
+            label_tipo_edicion = _label_tipo_equipo(nueva_unidad)
+            placeholder_tipo_edicion = _placeholder_tipo_equipo(nueva_unidad)
+            e1, e2, e3 = st.columns(3)
+            nueva_inv = e1.number_input(
+                "Inversión ($)",
+                min_value=0.0,
+                value=float(datos["inversion"]),
+                step=10.0,
+                key=f"activos_editar_inversion_{activo_id}",
+            )
+            nueva_vida = e2.number_input(
+                "Vida útil",
+                min_value=1,
+                value=int(vida_sugerida),
+                step=1,
+                key=f"activos_editar_vida_{activo_id}",
+            )
+            nueva_vida_unidad = e3.selectbox(
+                "Unidad de vida útil",
+                UNIDADES_VIDA_UTIL,
+                index=UNIDADES_VIDA_UTIL.index(_normalizar_vida_util_unidad(datos.get("vida_util_unidad"))),
+                key=f"activos_editar_vida_unidad_{activo_id}",
+            )
+            e4, e5 = st.columns(2)
+            nuevo_uso_acumulado = e4.number_input(
+                "Uso acumulado",
+                min_value=0.0,
+                value=float(datos.get("uso_acumulado") or 0.0),
+                step=1.0,
                 key=f"activos_editar_uso_acumulado_{activo_id}",
             )
             nueva_fecha_instalacion = e5.text_input(
@@ -1199,7 +1047,9 @@ def render_activos(usuario: str):
                     nuevo_tipo_personalizado = st.text_input(
                         f"Especifica {label_tipo_edicion.lower()}",
                         value=tipo_personalizado_actual,
-                        key=_key_tipo_equipo(f"activos_editar_tipo_detalle_custom_{activo_id}", nueva_unidad),
+
+
+                                                key=_key_tipo_equipo(f"activos_editar_tipo_detalle_custom_{activo_id}", nueva_unidad),
                     )
             else:
                 nuevo_tipo_personalizado = st.text_input(
@@ -1311,7 +1161,7 @@ def render_activos(usuario: str):
 
     with t1:
         st.subheader("Impresoras")
-        df_imp = df_vista[df_vista["unidad"].fillna("").str.contains("Impresora", case=False)].copy()
+        df_imp = df[df["unidad"].fillna("").str.contains("Impresora", case=False)].copy()
         if not df_imp.empty:
             df_imp["desgaste_cabezal_pct"] = 100.0 - pd.to_numeric(df_imp["vida_cabezal_pct"], errors="coerce")
             c_imp1, c_imp2, c_imp3 = st.columns(3)
@@ -1421,28 +1271,28 @@ def render_activos(usuario: str):
             st.info("No hay impresoras activas registradas.")
 
     with t2:
-        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Corte")].copy(), "Equipos de corte", "Componentes de corte")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Corte")].copy(), "Equipos de corte", "Componentes de corte")
 
     with t3:
-        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Plastificación")].copy(), "Equipos de plastificación", "Componentes de plastificación")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Plastificación")].copy(), "Equipos de plastificación", "Componentes de plastificación")
 
     with t4:
-        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Sublimación")].copy(), "Equipos de sublimación", "Componentes de sublimación")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Sublimación")].copy(), "Equipos de sublimación", "Componentes de sublimación")
 
     with t5:
-        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Conexión y Energía")].copy(), "Conexión y energía", "Componentes de conexión/energía")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Conexión y Energía")].copy(), "Conexión y energía", "Componentes de conexión/energía")
 
     with t6:
-        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Otro")].copy(), "Otros equipos", "Componentes de otros equipos")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Otro")].copy(), "Otros equipos", "Componentes de otros equipos")
 
     with t7:
         c_inv, c_des, c_prom = st.columns(3)
-        c_inv.metric("Inversión Total", f"$ {df_vista['inversion_total_relacionada'].sum():,.2f}")
-        c_des.metric("Activos Registrados", len(df_vista))
-        c_prom.metric("Desgaste Promedio por Uso", f"$ {df_vista['desgaste'].mean():.4f}")
+        c_inv.metric("Inversión Total", f"$ {df['inversion_total_relacionada'].sum():,.2f}")
+        c_des.metric("Activos Registrados", len(df))
+        c_prom.metric("Desgaste Promedio por Uso", f"$ {df['desgaste'].mean():.4f}")
 
         fig = px.bar(
-            df_vista,
+            df,
             x="equipo",
             y="inversion_total_relacionada",
             color="unidad",
@@ -1450,7 +1300,7 @@ def render_activos(usuario: str):
         )
         st.plotly_chart(fig, use_container_width=True)
         st.markdown("#### Relaciones padre → hijo")
-        relacionados = df_vista[df_vista["activo_padre_id"].notna()].copy()
+        relacionados = df[df["activo_padre_id"].notna()].copy()
         if relacionados.empty:
             st.caption("Aún no hay componentes o accesorios vinculados a equipos principales.")
         else:
