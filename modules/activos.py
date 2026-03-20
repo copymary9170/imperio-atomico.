@@ -430,13 +430,13 @@ def _render_componentes_asociados(componentes_map: dict[int, pd.DataFrame], acti
 def _aplicar_filtros_activos(
     df: pd.DataFrame,
     texto_busqueda: str = "",
-    unidades: lista[str] | Ninguno = Ninguno,
-    clases: lista[str] | Ninguno = Ninguno,
-    riesgos: lista[str] | Ninguno = Ninguno,
+    unidades: list[str] | None = None,
+    clases: list[str] | None = None,
+    riesgos: list[str] | None = None,
     solo_con_relacion: bool = False,
 ) -> pd.DataFrame:
-    si df.empty:
-        devolver df.copy()
+    if df.empty:
+        return df.copy()
 
     vista = df.copy()
 
@@ -1078,51 +1078,94 @@ def render_activos(usuario: str):
             tipo_detalle_actual = str(datos.get("tipo_detalle") or datos.get("tipo_impresora") or "")
             ecl1, ecl2 = st.columns(2)
             nueva_unidad = ecl1.selectbox(
-                "Tipo de equipo",
-                TIPOS_UNIDAD,
-                index=idx_unidad,
-                key=f"activos_editar_unidad_{activo_id}",
+            "Tipo de equipo",
+            options=TIPOS_UNIDAD,
+            default=[],
+            key="activos_filtro_unidad_v4",
+        )
+        clases_sel = f3.multiselect(
+            "Clase de registro",
+            options=list(CLASES_REGISTRO.values()),
+            default=[],
+            key="activos_filtro_clase_v4",
+        )
+        solo_relacionados = f4.checkbox(
+            "Solo vinculados",
+            value=False,
+            key="activos_filtro_relacionados_v4",
+            help="Muestra solo componentes, repuestos o accesorios asociados a un activo principal.",
+        )
+        riesgos_sel = st.multiselect(
+            "Riesgo",
+            options=["🔴 Alto", "🟠 Medio", "🟢 Bajo"],
+            default=[],
+            key="activos_filtro_riesgo_v4",
+        )
+        df_vista = _aplicar_filtros_activos(
+            df,
+            texto_busqueda=texto_busqueda,
+            unidades=unidades_sel,
+            clases=clases_sel,
+            riesgos=riesgos_sel,
+            solo_con_relacion=solo_relacionados,
+        )
+
+        vr1, vr2, vr3, vr4 = st.columns(4)
+        vr1.metric("Activos visibles", len(df_vista))
+        vr2.metric("Inversión visible", f"$ {df_vista['inversion_total_relacionada'].sum():,.2f}")
+        vr3.metric("Con relación padre/hijo", int(df_vista["activo_padre_id"].notna().sum()))
+        vr4.metric("Riesgo alto visible", int((df_vista["riesgo"] == "🔴 Alto").sum()))
+
+        columnas_vista_operativa = [
+            "identificación",
+            "equipo",
+            "modelo",
+            "unidad",
+            "tipo_detalle",
+            "clase_registro_label",
+            "activo_padre_label",
+            "estado_componente",
+            "componentes_vinculados",
+            "componentes_criticos_vinculados",
+            "inversion_total_relacionada",
+            "vida_restante_pct",
+            "riesgo",
+        ]
+        if df_vista.empty:
+            st.warning("No hay activos que coincidan con los filtros aplicados.")
+        else:
+            st.dataframe(
+                df_vista[columnas_vista_operativa],
+                use_container_width=True,
+                hide_index=True,
             )
-            clase_actual_slug = _slug_clase_registro(datos.get("clase_registro"))
-            clase_actual_label = _label_clase_registro(clase_actual_slug)
-            nueva_clase_label = ecl2.selectbox(
-                "Clase de registro",
-                list(CLASES_REGISTRO.values()),
-                index=list(CLASES_REGISTRO.values()).index(clase_actual_label),
-                key=f"activos_editar_clase_{activo_id}",
-            )
-            nueva_clase = next((slug for slug, label in CLASES_REGISTRO.items() if label == nueva_clase_label), "equipo_principal")
-            tipo_predefinido_actual, tipo_personalizado_actual = _valor_tipo_para_formulario(nueva_unidad, tipo_detalle_actual)
-            opciones_tipo_edicion = _opciones_tipo_equipo(nueva_unidad)
-            label_tipo_edicion = _label_tipo_equipo(nueva_unidad)
-            placeholder_tipo_edicion = _placeholder_tipo_equipo(nueva_unidad)
-            e1, e2, e3 = st.columns(3)
-            nueva_inv = e1.number_input(
-                "Inversión ($)",
-                min_value=0.0,
-                value=float(datos["inversion"]),
-                step=10.0,
-                key=f"activos_editar_inversion_{activo_id}",
-            )
-            nueva_vida = e2.number_input(
-                "Vida útil",
-                min_value=1,
-                value=int(vida_sugerida),
-                step=1,
-                key=f"activos_editar_vida_{activo_id}",
-            )
-            nueva_vida_unidad = e3.selectbox(
-                "Unidad de vida útil",
-                UNIDADES_VIDA_UTIL,
-                index=UNIDADES_VIDA_UTIL.index(_normalizar_vida_util_unidad(datos.get("vida_util_unidad"))),
-                key=f"activos_editar_vida_unidad_{activo_id}",
-            )
-            e4, e5 = st.columns(2)
-            nuevo_uso_acumulado = e4.number_input(
-                "Uso acumulado",
-                min_value=0.0,
-                value=float(datos.get("uso_acumulado") or 0.0),
-                step=1.0,
+
+    else:
+        información_parental = {}
+        componentes_map = {}
+        df_vista = df.copy()
+
+    with st.expander("➕ Registrar Nuevo Activo", expanded=True):
+        st.info("Selecciona el tipo de equipo, define si es equipo principal, componente o herramienta, y asócialo a un activo padre cuando corresponda. Si un tipo no aparece, puedes escribirlo manualmente.")
+        c1, c2, c3 = st.columns(3)
+        nombre_eq = c1.text_input("Nombre del activo", key="activos_nombre_nuevo_v2")
+        tipo_unidad_nuevo = c2.selectbox("Tipo de equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo_v2")
+        clase_nueva_label = c3.selectbox("Clase de registro", list(CLASES_REGISTRO.values()), key="activos_clase_registro_nuevo_v2")
+        clase_nueva = next((slug for slug, label in CLASES_REGISTRO.items() if label == clase_nueva_label), "equipo_principal")
+
+        opciones_tipo_nuevo = _opciones_tipo_equipo(tipo_unidad_nuevo)
+        label_tipo_nuevo = _label_tipo_equipo(tipo_unidad_nuevo)
+        placeholder_tipo_nuevo = _placeholder_tipo_equipo(tipo_unidad_nuevo)
+
+        c4, c5, c6 = st.columns(3)
+        monto_inv = c4.number_input("Inversión ($)", min_value=0.0, step=10.0, key="activos_inversion_nuevo_v2")
+        vida_util = c5.number_input("Vida útil", min_value=1, value=1000, step=1, key="activos_vida_nuevo_v2")
+        vida_util_unidad_nuevo = c6.selectbox("Unidad de vida útil", UNIDADES_VIDA_UTIL, key="activos_vida_unidad_nuevo_v2")
+        sc1, sc2 = st.columns(2)
+        uso_acumulado_nuevo = sc1.number_input(
+            "Uso acumulado",
+            min_value=0.0,
+            step=1.0,
                 key=f"activos_editar_uso_acumulado_{activo_id}",
             )
             nueva_fecha_instalacion = e5.text_input(
