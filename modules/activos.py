@@ -293,6 +293,82 @@ def _componentes_por_padre(df: pd.DataFrame) -> dict[int, pd.DataFrame]:
     return grupos
 
 
+def _agregar_metricas_relacionadas(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    base = df.copy()
+    for col, default in (
+        ("componentes_vinculados", 0),
+        ("componentes_criticos_vinculados", 0),
+        ("costo_componentes_asociados", 0.0),
+        ("vida_restante_minima_vinculada", np.nan),
+    ):
+        if col not in base.columns:
+            base[col] = default
+
+    if "activo_padre_id" not in base.columns:
+        base["inversion_total_relacionada"] = base["inversion"]
+        return base
+
+    relacionados = base[base["activo_padre_id"].notna()].copy()
+    if relacionados.empty:
+        base["inversion_total_relacionada"] = base["inversion"]
+        return base
+
+    relacionados["activo_padre_id"] = pd.to_numeric(relacionados["activo_padre_id"], errors="coerce")
+    relacionados = relacionados[relacionados["activo_padre_id"].notna()].copy()
+    if relacionados.empty:
+        base["inversion_total_relacionada"] = base["inversion"]
+        return base
+
+    resumen = (
+        relacionados.groupby(relacionados["activo_padre_id"].astype(int))
+        .apply(
+            lambda grupo: pd.Series(
+                {
+                    "componentes_vinculados": int(len(grupo)),
+                    "componentes_criticos_vinculados": int((grupo["estado_componente"] == "Crítico").sum()),
+                    "costo_componentes_asociados": float(
+                        grupo.loc[grupo["impacta_costo_padre"] == 1, "inversion"].sum()
+                    ),
+                    "vida_restante_minima_vinculada": pd.to_numeric(
+                        grupo["vida_restante_pct"], errors="coerce"
+                    ).min(),
+                }
+            )
+        )
+        .reset_index()
+        .rename(columns={"activo_padre_id": "id"})
+    )
+    base = base.merge(resumen, how="left", on="id", suffixes=("", "_resumen"))
+    for col, default in (
+        ("componentes_vinculados", 0),
+        ("componentes_criticos_vinculados", 0),
+        ("costo_componentes_asociados", 0.0),
+    ):
+        if f"{col}_resumen" in base.columns:
+            base[col] = pd.to_numeric(base[f"{col}_resumen"], errors="coerce").fillna(default)
+            base = base.drop(columns=[f"{col}_resumen"])
+    if "vida_restante_minima_vinculada_resumen" in base.columns:
+        base["vida_restante_minima_vinculada"] = pd.to_numeric(
+            base["vida_restante_minima_vinculada_resumen"], errors="coerce"
+        )
+        base = base.drop(columns=["vida_restante_minima_vinculada_resumen"])
+
+    base["componentes_vinculados"] = base["componentes_vinculados"].fillna(0).astype(int)
+    base["componentes_criticos_vinculados"] = base["componentes_criticos_vinculados"].fillna(0).astype(int)
+    base["costo_componentes_asociados"] = pd.to_numeric(
+        base["costo_componentes_asociados"], errors="coerce"
+    ).fillna(0.0)
+    base["inversion_total_relacionada"] = base["inversion"] + np.where(
+        base["clase_registro"].eq("equipo_principal"),
+        base["costo_componentes_asociados"],
+        0.0,
+    )
+    return base
+
+
 def _selector_activo_padre(df: pd.DataFrame, key: str, excluir_id: int | None = None, seleccionado_id: int | None = None) -> int | None:
     opciones = _opciones_activo_padre(df, excluir_id=excluir_id)
     if not opciones:
@@ -532,7 +608,7 @@ def _load_activos_df() -> pd.DataFrame:
         "🔴 Alto",
         np.where(ranking_riesgo >= 0.50, "🟠 Medio", "🟢 Bajo"),
     )
-    return df
+    return _agregar_metricas_relacionadas(df)
 
 
 def _crear_activo(
@@ -725,7 +801,7 @@ def render_activos(usuario: str):
         componentes_map = _componentes_por_padre(df)
         st.subheader("🧠 Salud de Activos")
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Inversión instalada", f"$ {df['inversion'].sum():,.2f}")
+        m1.metric("Inversión instalada", f"$ {df['inversion_total_relacionada'].sum():,.2f}")
         m2.metric("Desgaste promedio", f"$ {df['desgaste'].mean():.4f}/uso")
         m3.metric("Activos en riesgo alto", int((df["riesgo"] == "🔴 Alto").sum()))
         activo_critico = df.sort_values("desgaste", ascending=False).iloc[0]["equipo"]
@@ -734,11 +810,27 @@ def render_activos(usuario: str):
         c_reg1.metric("Equipos principales", int((df["clase_registro"] == "equipo_principal").sum()))
         c_reg2.metric("Componentes / repuestos", int((df["clase_registro"] == "componente").sum()))
         c_reg3.metric("Herramientas / accesorios", int((df["clase_registro"] == "herramienta").sum()))
+        if int(df["componentes_criticos_vinculados"].sum()) > 0:
+            st.warning(
+                "Hay equipos principales con componentes críticos vinculados. "
+                "Revísalos en su categoría o en el Resumen Global para planificar reposiciones."
+            )
 
         with st.expander("🔎 Activos con prioridad de mantenimiento", expanded=False):
             st.dataframe(
                 df.sort_values("desgaste", ascending=False)[
-                    ["equipo", "unidad", "tipo_detalle", "clase_registro_label", "activo_padre_label", "inversion", "desgaste", "riesgo"]
+                    [
+                        "equipo",
+                        "unidad",
+                        "tipo_detalle",
+                        "clase_registro_label",
+                        "activo_padre_label",
+                        "inversion_total_relacionada",
+                        "componentes_vinculados",
+                        "componentes_criticos_vinculados",
+                        "desgaste",
+                        "riesgo",
+                    ]
                 ].head(10),
                 use_container_width=True,
                 hide_index=True,
@@ -1039,7 +1131,9 @@ def render_activos(usuario: str):
         "vida_util_unidad",
         "vida_restante_pct",
         "estado_componente",
-        "inversion",
+        "componentes_vinculados",
+        "componentes_criticos_vinculados",
+        "inversion_total_relacionada",
         "desgaste",
         "riesgo",
     ]
@@ -1075,6 +1169,9 @@ def render_activos(usuario: str):
                 "tipo_detalle",
                 "clase_registro_label",
                 "activo_padre_label",
+                "componentes_vinculados",
+                "componentes_criticos_vinculados",
+                "costo_componentes_asociados",
                 "vida_cabezal_pct",
                 "vida_rodillo_pct",
                 "vida_almohadillas_pct",
@@ -1115,6 +1212,13 @@ def render_activos(usuario: str):
                     + str(resumen.get("diagnostic_accuracy") or "estimated")
                     + f" · Confianza: {resumen.get('confidence_level') or 'medium'}"
                 )
+                fila_impresora = df_imp[df_imp["id"] == sel_id]
+                if not fila_impresora.empty:
+                    impresora_data = fila_impresora.iloc[0]
+                    rc1, rc2, rc3 = st.columns(3)
+                    rc1.metric("Costo vinculado", f"$ {float(impresora_data.get('costo_componentes_asociados') or 0.0):,.2f}")
+                    rc2.metric("Componentes vinculados", int(impresora_data.get("componentes_vinculados") or 0))
+                    rc3.metric("Componentes críticos", int(impresora_data.get("componentes_criticos_vinculados") or 0))
             else:
                 st.info("Esta impresora aún no tiene diagnósticos técnicos registrados.")
                 _render_componentes_asociados(componentes_map, sel_id, titulo="Componentes, repuestos y accesorios vinculados")
@@ -1176,11 +1280,17 @@ def render_activos(usuario: str):
 
     with t7:
         c_inv, c_des, c_prom = st.columns(3)
-        c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
+        c_inv.metric("Inversión Total", f"$ {df['inversion_total_relacionada'].sum():,.2f}")
         c_des.metric("Activos Registrados", len(df))
         c_prom.metric("Desgaste Promedio por Uso", f"$ {df['desgaste'].mean():.4f}")
 
-        fig = px.bar(df, x="equipo", y="inversion", color="unidad", title="Distribución de Inversión por Activo")
+        fig = px.bar(
+            df,
+            x="equipo",
+            y="inversion_total_relacionada",
+            color="unidad",
+            title="Distribución de inversión por activo (incluye componentes vinculados en equipos principales)",
+        )
         st.plotly_chart(fig, use_container_width=True)
         st.markdown("#### Relaciones padre → hijo")
         relacionados = df[df["activo_padre_id"].notna()].copy()
@@ -1196,6 +1306,7 @@ def render_activos(usuario: str):
                         "clase_registro_label",
                         "activo_padre_label",
                         "tipo_detalle",
+                        "inversion",
                         "uso_acumulado",
                         "vida_util_valor",
                         "vida_util_unidad",
