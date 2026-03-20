@@ -47,6 +47,11 @@ CUCHILLAS_CORTE_CONFIG = {
     "Rotatoria": {"parametro_cm": 0.1, "descripcion": "Cuchilla rotatoria para tela y materiales especiales."},
 }
 TIPOS_CUCHILLA_CORTE = list(CUCHILLAS_CORTE_CONFIG.keys())
+POSICIONES_CARRO_CAMEO = [
+    "No aplica / intercambiable",
+    "Carro 1",
+    "Carro 2",
+]
 
 TIPOS_POR_EQUIPO = {
     "Impresora": {
@@ -70,6 +75,8 @@ TIPOS_POR_EQUIPO = {
         "placeholder": "Selecciona el tipo de corte",
         "opciones": [
             "Cameo",
+            "Cameo 4",
+            "Cameo 5",
             "Cricut",
             "Plotter de corte",
             "Guillotina",
@@ -415,6 +422,7 @@ def _render_componentes_asociados(componentes_map: dict[int, pd.DataFrame], acti
             "tipo_detalle",
             "tipo_cuchilla",
             "parametro_cuchilla_cm",
+            "carro_cuchilla",
             "clase_registro_label",
             "fecha_instalacion",
             "uso_acumulado",
@@ -459,12 +467,18 @@ def _placeholder_tipo_equipo(tipo_equipo: str | None) -> str:
     return str(_equipo_config(tipo_equipo).get("placeholder") or "Selecciona un tipo")
 
 
-def _es_tipo_cuchilla_corte(tipo_equipo: str | None, tipo_detalle: str | None) -> bool:
+def _es_tipo_cuchilla_corte(tipo_equipo: str | None, tipo_detalle: str | None, es_cuchilla: bool | None = None) -> bool:
     tipo_equipo = str(tipo_equipo or "").strip().lower()
     if tipo_equipo != "corte":
         return False
+    if es_cuchilla is not None:
+        return bool(es_cuchilla)
     tipo_detalle = str(tipo_detalle or "").strip().lower()
-    return "cuchilla" in tipo_detalle or tipo_detalle in {"cameo", "cameo 4", "cameo 5"}
+    return "cuchilla" in tipo_detalle
+
+
+def _es_equipo_principal_corte(tipo_equipo: str | None, clase_registro: str | None) -> bool:
+    return str(tipo_equipo or "").strip().lower() == "corte" and _slug_clase_registro(clase_registro) == "equipo_principal"
 
 
 def _parametro_cuchilla_por_tipo(tipo_cuchilla: str | None) -> float | None:
@@ -482,12 +496,30 @@ def _descripcion_cuchilla(tipo_cuchilla: str | None) -> str:
 def _render_campos_cuchilla(
     tipo_equipo: str | None,
     tipo_detalle: str | None,
+    clase_registro: str | None,
     prefijo_key: str,
+    es_cuchilla_actual: bool = False,
     tipo_cuchilla_actual: str | None = None,
     parametro_actual: float | None = None,
-) -> tuple[str | None, float | None]:
-    if not _es_tipo_cuchilla_corte(tipo_equipo, tipo_detalle):
-        return None, None
+    carro_cuchilla_actual: str | None = None,
+) -> tuple[bool, str | None, float | None, str | None]:
+    if str(tipo_equipo or "").strip().lower() != "corte":
+        return False, None, None, None
+    if _es_equipo_principal_corte(tipo_equipo, clase_registro):
+        return False, None, None, None
+
+    detalle_normalizado = str(tipo_detalle or "").strip().lower()
+    es_cuchilla_default = bool(es_cuchilla_actual or "cuchilla" in detalle_normalizado)
+    es_cuchilla = st.radio(
+        "¿Este activo es una cuchilla?",
+        options=["No", "Sí"],
+        index=1 if es_cuchilla_default else 0,
+        horizontal=True,
+        key=f"{prefijo_key}_es_cuchilla",
+        help="Activa esta opción solo para cuchillas. Así evitamos pedir datos de cuchilla para tapetes, espátulas u otros accesorios de corte.",
+    ) == "Sí"
+    if not es_cuchilla:
+        return False, None, None, None
 
     opciones = ["Selecciona la cuchilla"] + TIPOS_CUCHILLA_CORTE
     valor_inicial = str(tipo_cuchilla_actual or "").strip()
@@ -498,7 +530,7 @@ def _render_campos_cuchilla(
         opciones,
         index=indice,
         key=f"{prefijo_key}_tipo_cuchilla",
-        help="Elige la variante de cuchilla para Cameo/corte y el sistema sugerirá el parámetro en cm.",
+        help="Elige la variante de cuchilla y el sistema sugerirá el parámetro en cm.",
     )
     if tipo_cuchilla == opciones[0]:
         tipo_cuchilla = None
@@ -513,12 +545,25 @@ def _render_campos_cuchilla(
         key=f"{prefijo_key}_parametro_cuchilla_cm",
         help="Se autocompleta según la cuchilla seleccionada, pero puedes ajustarlo manualmente.",
     )
+    carro_inicial = str(carro_cuchilla_actual or POSICIONES_CARRO_CAMEO[0]).strip()
+    if carro_inicial not in POSICIONES_CARRO_CAMEO:
+        carro_inicial = POSICIONES_CARRO_CAMEO[0]
+    carro_cuchilla = st.selectbox(
+        "Carro compatible en Cameo 5",
+        POSICIONES_CARRO_CAMEO,
+        index=POSICIONES_CARRO_CAMEO.index(carro_inicial),
+        key=f"{prefijo_key}_carro_cuchilla",
+        help="Indica si la cuchilla va en el carro 1, carro 2 o si no aplica / es intercambiable.",
+    )
+    if carro_cuchilla == POSICIONES_CARRO_CAMEO[0]:
+        carro_cuchilla = None
+
     descripcion = _descripcion_cuchilla(tipo_cuchilla)
     if descripcion:
         st.caption(f"Parámetro sugerido: {parametro_default:.1f} cm · {descripcion}")
     else:
         st.caption("Puedes indicar manualmente el parámetro en cm para esta cuchilla.")
-    return tipo_cuchilla, float(parametro_cuchilla_cm)
+    return True, tipo_cuchilla, float(parametro_cuchilla_cm), carro_cuchilla
 
 
 
@@ -606,6 +651,9 @@ def _ensure_activos_schema(conn) -> None:
         "fecha_instalacion": "ALTER TABLE activos ADD COLUMN fecha_instalacion TEXT",
         "impacta_costo_padre": "ALTER TABLE activos ADD COLUMN impacta_costo_padre INTEGER NOT NULL DEFAULT 1",
         "impacta_desgaste_padre": "ALTER TABLE activos ADD COLUMN impacta_desgaste_padre INTEGER NOT NULL DEFAULT 0",
+        "tipo_cuchilla": "ALTER TABLE activos ADD COLUMN tipo_cuchilla TEXT",
+        "parametro_cuchilla_cm": "ALTER TABLE activos ADD COLUMN parametro_cuchilla_cm REAL",
+        "carro_cuchilla": "ALTER TABLE activos ADD COLUMN carro_cuchilla TEXT",
     }
     for col, alter_sql in optional_cols.items():
         if col not in cols:
@@ -642,6 +690,9 @@ def _load_activos_df() -> pd.DataFrame:
                 fecha_instalacion,
                 COALESCE(impacta_costo_padre, 1) AS impacta_costo_padre,
                 COALESCE(impacta_desgaste_padre, 0) AS impacta_desgaste_padre,
+                tipo_cuchilla,
+                parametro_cuchilla_cm,
+                carro_cuchilla,
                 fecha,
                 COALESCE(activo, 1) AS activo
             FROM activos
@@ -656,7 +707,7 @@ def _load_activos_df() -> pd.DataFrame:
                 "id", "equipo", "categoria", "inversion", "unidad", "desgaste", "modelo", "costo_hora",
                 "vida_cabezal_pct", "vida_rodillo_pct", "vida_almohadillas_pct", "paginas_impresas", "tipo_impresora", "tipo_detalle",
                 "clase_registro", "activo_padre_id", "vida_util_valor", "vida_util_unidad", "uso_acumulado", "fecha_instalacion",
-                "impacta_costo_padre", "impacta_desgaste_padre", "tipo_cuchilla", "parametro_cuchilla_cm", "fecha", "activo"
+                "impacta_costo_padre", "impacta_desgaste_padre", "tipo_cuchilla", "parametro_cuchilla_cm", "carro_cuchilla", "fecha", "activo"
             ]
         )
 
@@ -683,8 +734,9 @@ def _load_activos_df() -> pd.DataFrame:
     df["estado_componente"] = df["vida_restante_pct"].apply(_estado_componente_desde_vida)
     df["impacta_costo_padre"] = pd.to_numeric(df.get("impacta_costo_padre"), errors="coerce").fillna(1).astype(int)
     df["impacta_desgaste_padre"] = pd.to_numeric(df.get("impacta_desgaste_padre"), errors="coerce").fillna(0).astype(int)
-    df["tipo_cuchilla"] = df.get("tipo_cuchilla").fillna("")
+    df["tipo_cuchilla"] = df.get("tipo_cuchilla", pd.Series(dtype="object")).fillna("")
     df["parametro_cuchilla_cm"] = pd.to_numeric(df.get("parametro_cuchilla_cm"), errors="coerce")
+    df["carro_cuchilla"] = df.get("carro_cuchilla", pd.Series(dtype="object")).fillna("")
     ranking_riesgo = df["desgaste"].rank(pct=True, method="average").fillna(0)
     df["riesgo"] = np.where(
         ranking_riesgo >= 0.80,
