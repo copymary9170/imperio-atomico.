@@ -205,7 +205,7 @@ def _valor_bool_db(valor: bool | int | None) -> int:
 
 def _normalizar_vida_util_unidad(valor: str | None) -> str:
     texto = str(valor or "usos").strip().lower()
-   return texto if texto in UNIDADES_VIDA_UTIL else "usos"
+    return texto if texto in UNIDADES_VIDA_UTIL else "usos"
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -1022,7 +1022,121 @@ def render_activos(usuario: str):
         "📊 Resumen Global",
     ])
 
-@@ -973,84 +1086,189 @@ def render_activos(usuario: str):
+    if df.empty:
+        with t1:
+            st.info("No hay activos registrados todavía.")
+        return
+
+    columnas_categoria = [
+        "id",
+        "equipo",
+        "modelo",
+        "tipo_detalle",
+        "clase_registro_label",
+        "activo_padre_label",
+        "uso_acumulado",
+        "vida_util_valor",
+        "vida_util_unidad",
+        "vida_restante_pct",
+        "estado_componente",
+        "inversion",
+        "desgaste",
+        "riesgo",
+    ]
+
+    def _render_tab_activos(df_categoria: pd.DataFrame, titulo: str, prefijo_expandir: str) -> None:
+        st.subheader(titulo)
+        if df_categoria.empty:
+            st.caption("Sin activos registrados en esta categoría.")
+            return
+        st.dataframe(
+            df_categoria.drop(columns=["categoria"], errors="ignore")[columnas_categoria],
+            use_container_width=True,
+            hide_index=True,
+        )
+        for row in df_categoria[df_categoria["clase_registro"] == "equipo_principal"].itertuples():
+            with st.expander(f"{prefijo_expandir} · {_formatear_activo_relacion(row)}", expanded=False):
+                _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
+
+    with t1:
+        st.subheader("Impresoras")
+        df_imp = df[df["unidad"].fillna("").str.contains("Impresora", case=False)].copy()
+        if not df_imp.empty:
+            df_imp["desgaste_cabezal_pct"] = 100.0 - pd.to_numeric(df_imp["vida_cabezal_pct"], errors="coerce")
+            c_imp1, c_imp2, c_imp3 = st.columns(3)
+            c_imp1.metric("Vida cabezal promedio", f"{df_imp['vida_cabezal_pct'].mean(skipna=True):.2f}%")
+            c_imp2.metric("Desgaste cabezal promedio", f"{df_imp['desgaste_cabezal_pct'].mean(skipna=True):.2f}%")
+            c_imp3.metric("Páginas impresas (total)", int(df_imp["paginas_impresas"].sum()))
+
+            mostrar_cols = [
+                "id",
+                "equipo",
+                "modelo",
+                "tipo_detalle",
+                "clase_registro_label",
+                "activo_padre_label",
+                "vida_cabezal_pct",
+                "vida_rodillo_pct",
+                "vida_almohadillas_pct",
+                "desgaste_cabezal_pct",
+                "paginas_impresas",
+                "desgaste",
+                "riesgo",
+            ]
+            st.dataframe(df_imp[mostrar_cols], use_container_width=True, hide_index=True)
+
+            st.markdown("#### 🩺 Resumen de diagnóstico por impresora")
+            opciones_imp = {f"#{int(r.id)} · {r.equipo}": int(r.id) for r in df_imp.itertuples()}
+            sel_label = st.selectbox("Seleccionar impresora para ver resumen", list(opciones_imp.keys()), key="activos_diag_sel")
+            sel_id = opciones_imp[sel_label]
+            resumen = get_printer_diagnostic_summary(sel_id)
+            if resumen and resumen.get("diagnostico_id"):
+                r1, r2, r3, r4, r5, r6 = st.columns(6)
+                r1.metric("Último diagnóstico", str(resumen.get("fecha") or "N/D"))
+                r2.metric("Páginas totales", int(resumen.get("total_pages") or 0))
+                r3.metric("Desgaste cabezal", f"{float(resumen.get('head_wear_pct') or 0.0):.2f}%")
+                r4.metric("Depreciación estimada", f"$ {float(resumen.get('depreciation_amount') or 0.0):.4f}")
+                r5.metric("Vida rodillo", f"{float(resumen.get('vida_rodillo_pct') or 0.0):.2f}%")
+                r6.metric("Vida almohadillas", f"{float(resumen.get('vida_almohadillas_pct') or 0.0):.2f}%")
+
+                st.caption(
+                    f"Niveles actuales (ml): BK {float(resumen.get('black_ml') or 0.0):.2f} | C {float(resumen.get('cyan_ml') or 0.0):.2f} | "
+                    f"M {float(resumen.get('magenta_ml') or 0.0):.2f} | Y {float(resumen.get('yellow_ml') or 0.0):.2f}"
+                )
+                st.write("Consumo acumulado por color (ml):", resumen.get("consumos") or {})
+                st.caption(
+                    f"Sistema tinta: {resumen.get('ink_system_type') or 'N/D'} · Uso tinta: {resumen.get('ink_usage_type') or 'N/D'}"
+                )
+                _render_componentes_asociados(componentes_map, sel_id, titulo="Componentes, repuestos y accesorios vinculados")
+                if resumen.get("low_ink_alerts"):
+                    st.warning(f"Alertas de bajo nivel: {', '.join(resumen.get('low_ink_alerts') or [])}")
+                st.info(
+                    "Exactitud de datos: "
+                    + str(resumen.get("diagnostic_accuracy") or "estimated")
+                    + f" · Confianza: {resumen.get('confidence_level') or 'medium'}"
+                )
+            else:
+                st.info("Esta impresora aún no tiene diagnósticos técnicos registrados.")
+                _render_componentes_asociados(componentes_map, sel_id, titulo="Componentes, repuestos y accesorios vinculados")
+
+            st.markdown("#### 📜 Historial de diagnósticos")
+            historial = pd.DataFrame(list_printer_diagnostics(sel_id, limit=50))
+            if not historial.empty:
+                cols_show = [
+                    "id",
+                    "fecha",
+                    "total_pages",
+                    "color_pages",
+                    "bw_pages",
+                    "borderless_pages",
+                    "scanned_pages",
+                    "black_ml",
+                    "cyan_ml",
+                    "magenta_ml",
+                    "yellow_ml",
+                    "estimation_mode",
+                    "confidence_level",
+                    "files_count",
                 ]
                 cols_show = [c for c in cols_show if c in historial.columns]
                 st.dataframe(historial[cols_show], use_container_width=True, hide_index=True)
@@ -1046,150 +1160,19 @@ def render_activos(usuario: str):
             st.info("No hay impresoras activas registradas.")
 
     with t2:
-        st.subheader("Equipos de corte")
-        df_corte = df[df["unidad"].fillna("").eq("Corte")].copy()
-        st.dataframe(
-            df_corte.drop(columns=["categoria"], errors="ignore")[
-                [
-                    "id",
-                    "equipo",
-                    "modelo",
-                    "tipo_detalle",
-                    "clase_registro_label",
-                    "activo_padre_label",
-                    "uso_acumulado",
-                    "vida_util_valor",
-                    "vida_util_unidad",
-                    "vida_restante_pct",
-                    "estado_componente",
-                    "inversion",
-                    "desgaste",
-                    "riesgo",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        for row in df_corte[df_corte["clase_registro"] == "equipo_principal"].itertuples():
-            with st.expander(f"Componentes de corte · {_formatear_activo_relacion(row)}", expanded=False):
-                _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Corte")].copy(), "Equipos de corte", "Componentes de corte")
 
     with t3:
-        st.subheader("Equipos de plastificación")
-        df_plast = df[df["unidad"].fillna("").eq("Plastificación")].copy()
-        st.dataframe(
-            df_plast.drop(columns=["categoria"], errors="ignore")[
-                [
-                    "id",
-                    "equipo",
-                    "modelo",
-                    "tipo_detalle",
-                    "clase_registro_label",
-                    "activo_padre_label",
-                    "uso_acumulado",
-                    "vida_util_valor",
-                    "vida_util_unidad",
-                    "vida_restante_pct",
-                    "estado_componente",
-                    "inversion",
-                    "desgaste",
-                    "riesgo",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        for row in df_plast[df_plast["clase_registro"] == "equipo_principal"].itertuples():
-            with st.expander(f"Componentes de plastificación · {_formatear_activo_relacion(row)}", expanded=False):
-                _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Plastificación")].copy(), "Equipos de plastificación", "Componentes de plastificación")
 
     with t4:
-        st.subheader("Equipos de sublimación")
-        df_subl = df[df["unidad"].fillna("").eq("Sublimación")].copy()
-        st.dataframe(
-            df_subl.drop(columns=["categoria"], errors="ignore")[
-                [
-                    "id",
-                    "equipo",
-                    "modelo",
-                    "tipo_detalle",
-                    "clase_registro_label",
-                    "activo_padre_label",
-                    "uso_acumulado",
-                    "vida_util_valor",
-                    "vida_util_unidad",
-                    "vida_restante_pct",
-                    "estado_componente",
-                    "inversion",
-                    "desgaste",
-                    "riesgo",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        for row in df_subl[df_subl["clase_registro"] == "equipo_principal"].itertuples():
-            with st.expander(f"Componentes de sublimación · {_formatear_activo_relacion(row)}", expanded=False):
-                _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Sublimación")].copy(), "Equipos de sublimación", "Componentes de sublimación")
 
     with t5:
-        st.subheader("Conexión y energía")
-        df_energy = df[df["unidad"].fillna("").eq("Conexión y Energía")].copy()
-        st.dataframe(
-            df_energy.drop(columns=["categoria"], errors="ignore")[
-                [
-                    "id",
-                    "equipo",
-                    "modelo",
-                    "tipo_detalle",
-                    "clase_registro_label",
-                    "activo_padre_label",
-                    "uso_acumulado",
-                    "vida_util_valor",
-                    "vida_util_unidad",
-                    "vida_restante_pct",
-                    "estado_componente",
-                    "inversion",
-                    "desgaste",
-                    "riesgo",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        principales_energy = df_energy[df_energy["clase_registro"] == "equipo_principal"].copy()
-        for row in principales_energy.itertuples():
-            with st.expander(f"Componentes de conexión/energía · {_formatear_activo_relacion(row)}", expanded=False):
-                _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Conexión y Energía")].copy(), "Conexión y energía", "Componentes de conexión/energía")
 
     with t6:
-        st.subheader("Otros equipos")
-        df_otro = df[df["unidad"].fillna("").eq("Otro")].copy()
-        st.dataframe(
-            df_otro.drop(columns=["categoria"], errors="ignore")[
-                [
-                    "id",
-                    "equipo",
-                    "modelo",
-                    "tipo_detalle",
-                    "clase_registro_label",
-                    "activo_padre_label",
-                    "uso_acumulado",
-                    "vida_util_valor",
-                    "vida_util_unidad",
-                    "vida_restante_pct",
-                    "estado_componente",
-                    "inversion",
-                    "desgaste",
-                    "riesgo",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        for row in df_otro[df_otro["clase_registro"] == "equipo_principal"].itertuples():
-            with st.expander(f"Componentes de otros equipos · {_formatear_activo_relacion(row)}", expanded=False):
-                _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
+        _render_tab_activos(df[df["unidad"].fillna("").eq("Otro")].copy(), "Otros equipos", "Componentes de otros equipos")
 
     with t7:
         c_inv, c_des, c_prom = st.columns(3)
@@ -1213,6 +1196,10 @@ def render_activos(usuario: str):
                         "clase_registro_label",
                         "activo_padre_label",
                         "tipo_detalle",
+                        "uso_acumulado",
+                        "vida_util_valor",
+                        "vida_util_unidad",
+                        "estado_componente",
                         "impacta_costo_padre",
                         "impacta_desgaste_padre",
                     ]
