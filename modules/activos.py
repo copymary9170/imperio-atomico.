@@ -682,7 +682,7 @@ def _load_activos_df() -> pd.DataFrame:
     )
     df["estado_componente"] = df["vida_restante_pct"].apply(_estado_componente_desde_vida)
     df["impacta_costo_padre"] = pd.to_numeric(df.get("impacta_costo_padre"), errors="coerce").fillna(1).astype(int)
-       df["impacta_desgaste_padre"] = pd.to_numeric(df.get("impacta_desgaste_padre"), errors="coerce").fillna(0).astype(int)
+    df["impacta_desgaste_padre"] = pd.to_numeric(df.get("impacta_desgaste_padre"), errors="coerce").fillna(0).astype(int)
     df["tipo_cuchilla"] = df.get("tipo_cuchilla").fillna("")
     df["parametro_cuchilla_cm"] = pd.to_numeric(df.get("parametro_cuchilla_cm"), errors="coerce")
     ranking_riesgo = df["desgaste"].rank(pct=True, method="average").fillna(0)
