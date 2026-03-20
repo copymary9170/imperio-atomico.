@@ -1,22 +1,20 @@
-rom __future__ import annotations
-
-from datetime import datetime
+from __future__ import annotations
 
 import numpy as np
-importar pandas como pd
+import pandas as pd
 import plotly.express as px
-importar streamlit como st
+import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, require_text
-desde services.diagnostics_service importar (
-    obtener_resumen_diagnóstico_de_impresora,
-    lista_diagnósticos_de_impresora,
-    lista_recargas_de_impresora,
-    lista_mantenimiento_impresora,
+from services.diagnostics_service import (
+    get_printer_diagnostic_summary,
+    list_printer_diagnostics,
+    list_printer_refills,
+    list_printer_maintenance,
 )
 
-ROLES_PERMITIDOS = {"Admin", "Administration", "Administracion"}
+ALLOWED_ROLES = {"Admin", "Administration", "Administracion"}
 TIPOS_UNIDAD = [
     "Impresora",
     "Corte",
@@ -30,80 +28,22 @@ CLASES_REGISTRO = {
     "componente": "Componente / Repuesto",
     "herramienta": "Herramienta / Accesorio",
 }
-UNIDADES DE VIDA ÚTILES = [
+UNIDADES_VIDA_UTIL = [
     "usos",
     "páginas",
-    "cortés",
+    "cortes",
     "trabajos",
-    "horas"
-    "meses"
+    "horas",
+    "meses",
     "manual",
 ]
-ESTADOS_OPERATIVOS = ["Nuevo", "Bueno", "Medio", "Bajo", "Crítico", "Reemplazar"]
-TIPOS_COMPONENTE_POR_UNIDAD = {
-    "Impresora": [
-        "Cabezal color",
-        "Cabezal negro",
-        "Cabezal",
-        "Rodillo",
-        "Almohadillas",
-        "Regulador de voltaje",
-        "Cable USB",
-        "Cable de poder",
-        "Fuente de poder",
-    ],
-    "Cortar": [
-        "Cuchilla",
-        "Estera",
-        "Espátula",
-        "Kit de desbaste",
-        "Regleta",
-        "Regulador de voltaje",
-        "Cable USB",
-        "Cable de poder",
-    ],
-    "Plastificación": [
-        "Rodillo",
-        "Resistencia",
-        "Cable de poder",
-        "Regulador de voltaje",
-        "Regleta",
-    ],
-    "Sublimación": [
-        "Resistencia",
-        "Estera",
-        "Olvidar",
-        "Teflón",
-        "Regulador de voltaje",
-        "Cable de poder",
-        "Regleta",
-    ],
-    "Conexión y Energía": [
-        "Regleta",
-        "UNIÓN POSTAL UNIVERSAL",
-        "Regulador de voltaje",
-        "Cable USB",
-        "Cable de poder",
-        "Cable HDMI",
-        "Cable de red",
-        "Extensión eléctrica",
-        "Adaptador de corriente",
-        "Fuente de poder",
-        "Transformador",
-        "Concentrador USB",
-        "Conector",
-        "Cargador",
-        "Convertidor",
-    ],
-    "Otro": [],
-}
 TIPOS_POR_EQUIPO = {
     "Impresora": {
         "categoria": "Impresora",
         "label": "Tipo de impresora",
         "placeholder": "Selecciona el tipo de impresora",
         "opciones": [
-            "Tanque de tinta"
+            "Tanque de tinta",
             "Cartucho",
             "Láser monocromática",
             "Láser a color",
@@ -113,12 +53,12 @@ TIPOS_POR_EQUIPO = {
             "Impresora matricial",
         ],
     },
-    "Cortar": {
-        "categoría": "Corte",
+    "Corte": {
+        "categoria": "Corte",
         "label": "Tipo de corte",
         "placeholder": "Selecciona el tipo de corte",
         "opciones": [
-            "Camafeo",
+            "Cameo",
             "Cricut",
             "Plotter de corte",
             "Guillotina",
@@ -162,7 +102,227 @@ TIPOS_POR_EQUIPO = {
             "Plancha plana",
             "Plancha 8 en 1",
             "Tapete térmico",
-   raise ValueError(f"Debes seleccionar {(_label_tipo_equipo(tipo_equipo)).lower()}.")
+            "Papel de sublimación",
+        ],
+    },
+    "Conexión y Energía": {
+        "categoria": "Conexión y Energía",
+        "label": "Tipo de conexión o energía",
+        "placeholder": "Selecciona el tipo de conexión o energía",
+        "opciones": [
+            "Regleta",
+            "UPS",
+            "Regulador de voltaje",
+            "Cable USB",
+            "Cable de poder",
+            "Cable HDMI",
+            "Cable de red",
+            "Extensión eléctrica",
+            "Adaptador de corriente",
+            "Fuente de poder",
+            "Transformador",
+            "Hub USB",
+            "Conector",
+            "Cargador",
+            "Convertidor",
+        ],
+    },
+    "Otro": {
+        "categoria": "Otro",
+        "label": "Detalle del equipo",
+        "placeholder": "Escribe el detalle del equipo",
+        "opciones": [],
+    },
+}
+OPCION_TIPO_PERSONALIZADO = "Otro / No está en la lista"
+ACTIVOS_UI_VERSION = "Activos UI v3"
+
+
+def _equipo_config(tipo_equipo: str | None) -> dict:
+    return TIPOS_POR_EQUIPO.get(str(tipo_equipo or "").strip(), TIPOS_POR_EQUIPO["Otro"])
+
+
+def _es_equipo_impresora(tipo_equipo: str | None) -> bool:
+    return str(tipo_equipo or "").strip().lower() == "impresora"
+
+
+def _categoria_por_equipo(tipo_equipo: str | None) -> str:
+    return str(_equipo_config(tipo_equipo).get("categoria") or "Otro")
+
+
+def _normalizar_unidad(tipo_equipo: str | None) -> str:
+    valor = str(tipo_equipo or "").strip()
+    equivalencias = {
+        "Corte / Plotter (Cameo)": "Corte",
+        "Plancha de Sublimación": "Sublimación",
+    }
+    return equivalencias.get(valor, valor or "Otro")
+
+
+def _migrar_valores_legados_activos(conn) -> None:
+    unidades_legadas = {
+        "Corte / Plotter (Cameo)": "Corte",
+        "Plancha de Sublimación": "Sublimación",
+    }
+    for valor_anterior, valor_nuevo in unidades_legadas.items():
+        conn.execute(
+            "UPDATE activos SET unidad = ?, categoria = ? WHERE unidad = ?",
+            (valor_nuevo, _categoria_por_equipo(valor_nuevo), valor_anterior),
+        )
+
+
+def _opciones_tipo_equipo(tipo_equipo: str | None) -> list[str]:
+    opciones = list(_equipo_config(tipo_equipo).get("opciones") or [])
+    return opciones + [OPCION_TIPO_PERSONALIZADO] if opciones else []
+
+
+def _slug_clase_registro(clase_registro: str | None) -> str:
+    valor = str(clase_registro or "equipo_principal").strip().lower()
+    return valor if valor in CLASES_REGISTRO else "equipo_principal"
+
+
+def _label_clase_registro(clase_registro: str | None) -> str:
+    return CLASES_REGISTRO.get(_slug_clase_registro(clase_registro), CLASES_REGISTRO["equipo_principal"])
+
+
+def _valor_bool_db(valor: bool | int | None) -> int:
+    return 1 if bool(valor) else 0
+
+
+def _normalizar_vida_util_unidad(valor: str | None) -> str:
+    texto = str(valor or "usos").strip().lower()
+    return texto if texto in UNIDADES_VIDA_UTIL else "usos"
+
+
+def _formatear_activo_relacion(row: dict | pd.Series, incluir_unidad: bool = True) -> str:
+    if isinstance(row, pd.Series):
+        data = row.to_dict()
+    elif isinstance(row, dict):
+        data = dict(row)
+    elif hasattr(row, "_asdict"):
+        data = row._asdict()
+    else:
+        data = dict(getattr(row, "__dict__", {}))
+    equipo = str(data.get("equipo") or "Activo").strip()
+    modelo = str(data.get("modelo") or "").strip()
+    unidad = str(data.get("unidad") or "").strip()
+    partes = [f"#{int(data.get('id') or 0)} · {equipo}"]
+    if modelo:
+        partes.append(f"({modelo})")
+    if incluir_unidad and unidad:
+        partes.append(f"· {unidad}")
+    return " ".join(partes).strip()
+
+
+def _opciones_activo_padre(df: pd.DataFrame, excluir_id: int | None = None) -> dict[str, int]:
+    if df.empty:
+        return {}
+    base = df.copy()
+    if excluir_id is not None:
+        base = base[base["id"] != int(excluir_id)]
+    base = base[base["clase_registro"].fillna("equipo_principal") == "equipo_principal"].copy()
+    if base.empty:
+        return {}
+    base = base.sort_values(["unidad", "equipo", "id"], ascending=[True, True, True])
+    return {_formatear_activo_relacion(row): int(row["id"]) for _, row in base.iterrows()}
+
+
+def _info_activo_padre(df: pd.DataFrame) -> dict[int, dict]:
+    if df.empty:
+        return {}
+    return {
+        int(row["id"]): {
+            "equipo": str(row.get("equipo") or ""),
+            "modelo": str(row.get("modelo") or ""),
+            "unidad": str(row.get("unidad") or ""),
+            "label": _formatear_activo_relacion(row),
+        }
+        for _, row in df.iterrows()
+    }
+
+
+def _componentes_por_padre(df: pd.DataFrame) -> dict[int, pd.DataFrame]:
+    if df.empty or "activo_padre_id" not in df.columns:
+        return {}
+    hijos = df[df["activo_padre_id"].notna()].copy()
+    if hijos.empty:
+        return {}
+    grupos: dict[int, pd.DataFrame] = {}
+    for padre_id, grupo in hijos.groupby(hijos["activo_padre_id"].astype(int)):
+        grupos[int(padre_id)] = grupo.sort_values(["unidad", "equipo", "id"], ascending=[True, True, True]).copy()
+    return grupos
+
+
+def _selector_activo_padre(df: pd.DataFrame, key: str, excluir_id: int | None = None, seleccionado_id: int | None = None) -> int | None:
+    opciones = _opciones_activo_padre(df, excluir_id=excluir_id)
+    if not opciones:
+        st.caption("No hay equipos principales disponibles para asociar como activo padre.")
+        return None
+    labels = ["Sin relación"] + list(opciones.keys())
+    default_label = "Sin relación"
+    if seleccionado_id:
+        for label, value in opciones.items():
+            if int(value) == int(seleccionado_id):
+                default_label = label
+                break
+    index = labels.index(default_label) if default_label in labels else 0
+    elegido = st.selectbox("Activo principal asociado", labels, index=index, key=key)
+    return int(opciones[elegido]) if elegido != "Sin relación" else None
+
+
+def _render_componentes_asociados(componentes_map: dict[int, pd.DataFrame], activo_id: int, titulo: str = "Componentes asociados") -> None:
+    componentes = componentes_map.get(int(activo_id))
+    if componentes is None or componentes.empty:
+        st.caption("Sin componentes o accesorios asociados.")
+        return
+    vista = componentes[
+        [
+            "id",
+            "equipo",
+            "unidad",
+            "tipo_detalle",
+            "clase_registro_label",
+            "vida_util_unidad",
+            "impacta_costo_padre",
+            "impacta_desgaste_padre",
+            "inversion",
+            "desgaste",
+            "riesgo",
+        ]
+    ].copy()
+    vista["impacta_costo_padre"] = vista["impacta_costo_padre"].map({1: "Sí", 0: "No"})
+    vista["impacta_desgaste_padre"] = vista["impacta_desgaste_padre"].map({1: "Sí", 0: "No"})
+    st.markdown(f"##### {titulo}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Componentes vinculados", len(vista))
+    c2.metric("Costo asociado", f"$ {vista['inversion'].sum():,.2f}")
+    c3.metric("Componentes críticos", int((vista["riesgo"] == "🔴 Alto").sum()))
+    st.dataframe(vista, use_container_width=True, hide_index=True)
+
+
+def _key_tipo_equipo(base_key: str, tipo_equipo: str | None) -> str:
+    slug = str(tipo_equipo or "otro").strip().lower()
+    slug = slug.replace(" ", "_").replace("/", "_")
+    return f"{base_key}_{slug}"
+
+
+def _label_tipo_equipo(tipo_equipo: str | None) -> str:
+    return str(_equipo_config(tipo_equipo).get("label") or "Detalle del equipo")
+
+
+def _placeholder_tipo_equipo(tipo_equipo: str | None) -> str:
+    return str(_equipo_config(tipo_equipo).get("placeholder") or "Selecciona un tipo")
+
+
+def _resolver_tipo_detalle(tipo_equipo: str, tipo_predefinido: str | None, tipo_personalizado: str | None) -> str | None:
+    opciones = _equipo_config(tipo_equipo).get("opciones") or []
+    tipo_predefinido = str(tipo_predefinido or "").strip()
+    tipo_personalizado = str(tipo_personalizado or "").strip()
+    if tipo_predefinido and tipo_predefinido != OPCION_TIPO_PERSONALIZADO:
+        return tipo_predefinido
+    if tipo_predefinido == OPCION_TIPO_PERSONALIZADO or not opciones:
+        return require_text(tipo_personalizado, _label_tipo_equipo(tipo_equipo))
+    raise ValueError(f"Debes seleccionar {(_label_tipo_equipo(tipo_equipo)).lower()}.")
 
 def _valor_tipo_para_formulario(tipo_equipo: str | None, valor_actual: str | None) -> tuple[str | None, str]:
     valor_actual = str(valor_actual or "").strip()
@@ -232,36 +392,29 @@ def _ensure_activos_schema(conn) -> None:
         "tipo_detalle": "ALTER TABLE activos ADD COLUMN tipo_detalle TEXT",
         "clase_registro": "ALTER TABLE activos ADD COLUMN clase_registro TEXT NOT NULL DEFAULT 'equipo_principal'",
         "activo_padre_id": "ALTER TABLE activos ADD COLUMN activo_padre_id INTEGER",
-        "tipo_componente": "ALTER TABLE activos ADD COLUMN tipo_componente TEXT",
         "vida_util_unidad": "ALTER TABLE activos ADD COLUMN vida_util_unidad TEXT NOT NULL DEFAULT 'usos'",
-        "vida_util_valor": "ALTER TABLE activos ADD COLUMN vida_util_valor REAL DEFAULT 0",
-        "uso_inicial": "ALTER TABLE activos ADD COLUMN uso_inicial REAL DEFAULT 0",
-        "uso_acumulado": "ALTER TABLE activos ADD COLUMN uso_acumulado REAL DEFAULT 0",
-        "costo_reposicion": "ALTER TABLE activos ADD COLUMN costo_reposicion REAL DEFAULT 0",
-        "fecha_instalacion": "ALTER TABLE activos ADD COLUMN fecha_instalacion TEXT",
-        "estado_operativo": "ALTER TABLE activos ADD COLUMN estado_operativo TEXT NOT NULL DEFAULT 'Bueno'",
         "impacta_costo_padre": "ALTER TABLE activos ADD COLUMN impacta_costo_padre INTEGER NOT NULL DEFAULT 1",
         "impacta_desgaste_padre": "ALTER TABLE activos ADD COLUMN impacta_desgaste_padre INTEGER NOT NULL DEFAULT 0",
     }
-    para col, alter_sql en optional_cols.items():
-        Si col no está en cols:
+    for col, alter_sql in optional_cols.items():
+        if col not in cols:
             conn.execute(alter_sql)
 
     _migrar_valores_legados_activos(conn)
 
 
 def _load_activos_df() -> pd.DataFrame:
-    con db_transaction() como conexión:
+    with db_transaction() as conn:
         _ensure_activos_schema(conn)
-        filas = conn.execute(
+        rows = conn.execute(
             """
-            SELECCIONAR
-                identificación,
+            SELECT
+                id,
                 equipo,
-                categoría,
-                inversión,
+                categoria,
+                inversion,
                 unidad,
-                tener puesto,
+                desgaste,
                 modelo,
                 costo_hora,
                 COALESCE(vida_cabezal_pct, NULL) AS vida_cabezal_pct,
@@ -272,53 +425,40 @@ def _load_activos_df() -> pd.DataFrame:
                 COALESCE(tipo_detalle, tipo_impresora) AS tipo_detalle,
                 COALESCE(clase_registro, 'equipo_principal') AS clase_registro,
                 activo_padre_id,
-                tipo_componente,
                 COALESCE(vida_util_unidad, 'usos') AS vida_util_unidad,
-                COALESCE(vida_util_valor, 0) AS vida_util_valor,
-                COALESCE(uso_inicial, 0) AS uso_inicial,
-                COALESCE(uso_acumulativo, 0) AS uso_acumulativo,
-                COALESCE(costo_reposicion, 0) AS costo_reposicion,
-                fecha_instalacion,
-                COALESCE(estado_operativo, 'Bueno') AS estado_operativo,
                 COALESCE(impacta_costo_padre, 1) AS impacta_costo_padre,
                 COALESCE(impacta_desgaste_padre, 0) AS impacta_desgaste_padre,
                 fecha,
                 COALESCE(activo, 1) AS activo
             FROM activos
             WHERE COALESCE(activo, 1) = 1
-            ORDENAR POR id DESC
+            ORDER BY id DESC
             """
         ).fetchall()
 
-    si no hay filas:
-        devolver pd.DataFrame(
-            columnas=[
+    if not rows:
+        return pd.DataFrame(
+            columns=[
                 "id", "equipo", "categoria", "inversion", "unidad", "desgaste", "modelo", "costo_hora",
                 "vida_cabezal_pct", "vida_rodillo_pct", "vida_almohadillas_pct", "paginas_impresas", "tipo_impresora", "tipo_detalle",
-                "clase_registro", "activo_padre_id", "tipo_componente", "vida_util_unidad", "vida_util_valor", "uso_inicial", "uso_acumulado",
-                "costo_reposicion", "fecha_instalacion", "estado_operativo", "impacta_costo_padre", "impacta_desgaste_padre", "fecha", "activo"
+                "clase_registro", "activo_padre_id", "vida_util_unidad", "impacta_costo_padre", "impacta_desgaste_padre", "fecha", "activo"
             ]
         )
 
     df = pd.DataFrame([dict(r) for r in rows])
     df["unidad"] = df["unidad"].apply(_normalizar_unidad)
     df["tipo_detalle"] = df["tipo_detalle"].where(df["tipo_detalle"].notna(), df["tipo_impresora"])
-    df["inversión"] = pd.to_numeric(df["inversión"], errors="coerce").fillna(0.0)
+    df["inversion"] = pd.to_numeric(df["inversion"], errors="coerce").fillna(0.0)
     df["desgaste"] = pd.to_numeric(df["desgaste"], errors="coerce").fillna(0.0)
     df["vida_cabezal_pct"] = pd.to_numeric(df.get("vida_cabezal_pct"), errors="coerce")
     df["vida_rodillo_pct"] = pd.to_numeric(df.get("vida_rodillo_pct"), errors="coerce")
     df["vida_almohadillas_pct"] = pd.to_numeric(df.get("vida_almohadillas_pct"), errors="coerce")
     df["paginas_impresas"] = pd.to_numeric(df.get("paginas_impresas"), errors="coerce").fillna(0).astype(int)
     df["activo_padre_id"] = pd.to_numeric(df.get("activo_padre_id"), errors="coerce")
-    df["vida_util_value"] = pd.to_numeric(df.get("vida_util_value"), errors="coerce").fillna(0.0)
-    df["uso_inicial"] = pd.to_numeric(df.get("uso_inicial"), errors="coerce").fillna(0.0)
-    df["uso_acumulado"] = pd.to_numeric(df.get("uso_acumulado"), errores="coerce").fillna(0.0)
-    df["costo_reposicion"] = pd.to_numeric(df.get("costo_reposicion"), errors="coerce").fillna(0.0)
     df["clase_registro"] = df.get("clase_registro", "equipo_principal").apply(_slug_clase_registro)
     df["clase_registro_label"] = df["clase_registro"].apply(_label_clase_registro)
     df["vida_util_unidad"] = df.get("vida_util_unidad", "usos").apply(_normalizar_vida_util_unidad)
-    df["estado_operativo"] = df.get("estado_operativo", "Bueno").apply(_normalizar_estado_operativo)
-    df["impacta_costo_padre"] = pd.to_numeric(df.get("impacta_costo_padre"), errores="coerce").fillna(1).astype(int)
+    df["impacta_costo_padre"] = pd.to_numeric(df.get("impacta_costo_padre"), errors="coerce").fillna(1).astype(int)
     df["impacta_desgaste_padre"] = pd.to_numeric(df.get("impacta_desgaste_padre"), errors="coerce").fillna(0).astype(int)
     ranking_riesgo = df["desgaste"].rank(pct=True, method="average").fillna(0)
     df["riesgo"] = np.where(
@@ -326,26 +466,20 @@ def _load_activos_df() -> pd.DataFrame:
         "🔴 Alto",
         np.where(ranking_riesgo >= 0.50, "🟠 Medio", "🟢 Bajo"),
     )
-    devolver df
+    return df
 
 
 def _crear_activo(
     usuario: str,
     equipo: str,
     tipo_unidad: str,
-    inversión: flotante,
+    inversion: float,
     vida_util: int,
     vida_util_unidad: str,
     modelo: str,
-    type_detalle: str | Ninguno,
+    tipo_detalle: str | None,
     clase_registro: str = "equipo_principal",
-    active_father_id: int | Ninguno = Ninguno,
-    tipo_componente: str | Ninguno = Ninguno,
-    initial_use: float = 0.0,
-    uso_acumulativo: flotante = 0.0,
-    costo_reposicion: float = 0.0,
-    fecha_instalacion: str | None = None,
-    estado_operativo: str = "Bueno",
+    activo_padre_id: int | None = None,
     impacta_costo_padre: bool = True,
     impacta_desgaste_padre: bool = False,
 ) -> int:
@@ -360,28 +494,20 @@ def _crear_activo(
     tipo_impresora = tipo_detalle if _es_equipo_impresora(tipo_unidad) else None
     clase_registro = _slug_clase_registro(clase_registro)
     activo_padre_id = int(activo_padre_id) if activo_padre_id and clase_registro != "equipo_principal" else None
-    tipo_componente = (tipo_componente o "").strip() o None
-    if clase_registro != "equipo_principal":
-        tipo_componente = require_text(tipo_componente, "Tipo de componente")
-    uso_inicial = max(0.0, float(uso_inicial o 0.0))
-    uso_acumulativo = max(0.0, float(uso_acumulativo o 0.0))
-    costo_reposicion = max(0.0, float(costo_reposicion or 0.0))
-    fecha_instalacion = str(fecha_instalacion or "").strip() or datetime.now().strftime("%Y-%m-%d")
-    estado_operativo = _normalizar_estado_operativo(estado_operativo)
 
-    con db_transaction() como conexión:
+    with db_transaction() as conn:
         _ensure_activos_schema(conn)
         cur = conn.execute(
             """
             INSERT INTO activos
-            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora, tipo_detalle, clase_registro, activo_padre_id, tipo_componente, vida_util_unidad, vida_util_valor, uso_inicial, uso_acumulado, costo_reposicion, fecha_instalacion, estado_operativo, impacta_costo_padre, impacta_desgaste_padre)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora, tipo_detalle, clase_registro, activo_padre_id, vida_util_unidad, impacta_costo_padre, impacta_desgaste_padre)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 equipo,
-                (modelo o "").strip() o None,
-                categoría,
-                inversión,
+                (modelo or "").strip() or None,
+                categoria,
+                inversion,
                 tipo_unidad,
                 desgaste_unitario,
                 0.0,
@@ -390,14 +516,7 @@ def _crear_activo(
                 tipo_detalle,
                 clase_registro,
                 activo_padre_id,
-                tipo_componente,
                 vida_util_unidad,
-                float(vida_util),
-                uso_inicial,
-                uso_acumulativo,
-                costo_reposicion,
-                fecha_instalacion,
-                estado_operativo,
                 _valor_bool_db(impacta_costo_padre),
                 _valor_bool_db(impacta_desgaste_padre),
             ),
@@ -405,7 +524,7 @@ def _crear_activo(
         conn.execute(
             """
             INSERT INTO activos_historial (activo, accion, detalle, costo, usuario)
-            VALORES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 equipo,
@@ -414,36 +533,29 @@ def _crear_activo(
                     f"Registro inicial (vida útil: {vida_util} {vida_util_unidad})"
                     + (f" · clase: {_label_clase_registro(clase_registro)}" if clase_registro else "")
                     + (f" · activo padre ID: {activo_padre_id}" if activo_padre_id else "")
-                    + (f" · componente: {tipo_componente}" if tipo_componente else "")
                 ),
-                inversión,
+                inversion,
                 usuario,
             ),
         )
-        devolver int(cur.lastrowid)
+        return int(cur.lastrowid)
 
 
 def _actualizar_activo(
     usuario: str,
     activo_id: int,
     activo_nombre: str,
-    nueva_inversión: flotante,
+    nueva_inversion: float,
     nueva_vida: int,
     nueva_vida_util_unidad: str,
     nuevo_modelo: str,
     nueva_unidad: str,
     nuevo_tipo_detalle: str | None,
     clase_registro: str = "equipo_principal",
-    active_father_id: int | Ninguno = Ninguno,
-    tipo_componente: str | Ninguno = Ninguno,
-    initial_use: float = 0.0,
-    uso_acumulativo: flotante = 0.0,
-    costo_reposicion: float = 0.0,
-    fecha_instalacion: str | None = None,
-    estado_operativo: str = "Bueno",
+    activo_padre_id: int | None = None,
     impacta_costo_padre: bool = True,
     impacta_desgaste_padre: bool = False,
-) -> Ninguno:
+) -> None:
     nueva_inversion = as_positive(nueva_inversion, "Inversión")
     nueva_vida = max(1, int(nueva_vida or 1))
     nuevo_desgaste = (nueva_inversion / nueva_vida) if nueva_inversion > 0 else 0.0
@@ -454,42 +566,27 @@ def _actualizar_activo(
     nuevo_tipo_impresora = nuevo_tipo_detalle if _es_equipo_impresora(nueva_unidad) else None
     clase_registro = _slug_clase_registro(clase_registro)
     activo_padre_id = int(activo_padre_id) if activo_padre_id and clase_registro != "equipo_principal" else None
-    tipo_componente = (tipo_componente o "").strip() o None
-    if clase_registro != "equipo_principal":
-        tipo_componente = require_text(tipo_componente, "Tipo de componente")
-    uso_inicial = max(0.0, float(uso_inicial o 0.0))
-    uso_acumulativo = max(0.0, float(uso_acumulativo o 0.0))
-    costo_reposicion = max(0.0, float(costo_reposicion or 0.0))
-    fecha_instalacion = str(fecha_instalacion or "").strip() or datetime.now().strftime("%Y-%m-%d")
-    estado_operativo = _normalizar_estado_operativo(estado_operativo)
 
-    con db_transaction() como conexión:
+    with db_transaction() as conn:
         _ensure_activos_schema(conn)
         conn.execute(
             """
             UPDATE activos
-            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?, tipo_detalle = ?, clase_registro = ?, activo_padre_id = ?, tipo_componente = ?, vida_util_unidad = ?, vida_util_valor = ?, uso_inicial = ?, uso_acumulado = ?, costo_reposicion = ?, fecha_instalacion = ?, estado_operativo = ?, impacta_costo_padre = ?, impacta_desgaste_padre = ?
-            DONDE id = ?
+            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?, tipo_detalle = ?, clase_registro = ?, activo_padre_id = ?, vida_util_unidad = ?, impacta_costo_padre = ?, impacta_desgaste_padre = ?
+            WHERE id = ?
             """,
             (
                 nueva_inversion,
                 nueva_categoria,
                 nuevo_desgaste,
-                (nuevo_modelo o "").strip() o None,
+                (nuevo_modelo or "").strip() or None,
                 nueva_unidad,
                 usuario,
                 nuevo_tipo_impresora,
                 nuevo_tipo_detalle,
                 clase_registro,
                 activo_padre_id,
-                tipo_componente,
                 nueva_vida_util_unidad,
-                float(nueva_vida),
-                uso_inicial,
-                uso_acumulativo,
-                costo_reposicion,
-                fecha_instalacion,
-                estado_operativo,
                 _valor_bool_db(impacta_costo_padre),
                 _valor_bool_db(impacta_desgaste_padre),
                 int(activo_id),
@@ -498,7 +595,7 @@ def _actualizar_activo(
         conn.execute(
             """
             INSERT INTO activos_historial (activo, accion, detalle, costo, usuario)
-            VALORES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 activo_nombre,
@@ -507,7 +604,6 @@ def _actualizar_activo(
                     f"Actualización de valores (vida útil: {nueva_vida} {nueva_vida_util_unidad}, equipo: {nueva_unidad}, tipo: {nuevo_tipo_detalle or 'N/D'})"
                     + f" · clase: {_label_clase_registro(clase_registro)}"
                     + (f" · activo padre ID: {activo_padre_id}" if activo_padre_id else "")
-                    + (f" · componente: {tipo_componente}" if tipo_componente else "")
                 ),
                 nueva_inversion,
                 usuario,
@@ -521,25 +617,24 @@ def _actualizar_activo(
 
 
 def render_activos(usuario: str):
-    rol = st.session_state.get("rol", "Admin")
-    Si el rol no está en ROLES_PERMITIDOS:
+    role = st.session_state.get("rol", "Admin")
+    if role not in ALLOWED_ROLES:
         st.error("🚫 Acceso denegado. Solo Admin/Administración puede gestionar activos.")
-        devolver
+        return
 
     st.title("🏗️ Gestión Integral de Activos")
     st.caption(
         f"{ACTIVOS_UI_VERSION} · catálogo unificado por tipo de equipo. Ahora puedes clasificar equipos principales, componentes/repuestos y herramientas/accesorios, además de vincularlos a un activo padre."
     )
 
-    intentar:
+    try:
         df = _load_activos_df()
-    excepto Exception como e:
+    except Exception as e:
         st.error(f"Error al cargar activos: {e}")
-        devolver
+        return
 
-    si df no está vacío:
+    if not df.empty:
         parent_info = _info_activo_padre(df)
-        df = _enrich_components(df, parent_info)
         df["activo_padre_label"] = df["activo_padre_id"].apply(
             lambda x: parent_info.get(int(x), {}).get("label", "Sin relación") if pd.notna(x) else "Sin relación"
         )
@@ -562,7 +657,7 @@ def render_activos(usuario: str):
                     ["equipo", "unidad", "tipo_detalle", "clase_registro_label", "activo_padre_label", "inversion", "desgaste", "riesgo"]
                 ].head(10),
                 use_container_width=True,
-                ocultar_índice=Verdadero,
+                hide_index=True,
             )
             fig_riesgo = px.histogram(
                 df,
@@ -573,13 +668,13 @@ def render_activos(usuario: str):
             )
             st.plotly_chart(fig_riesgo, use_container_width=True)
 
-    demás:
-        información_parental = {}
+    else:
+        parent_info = {}
         componentes_map = {}
 
     with st.expander("➕ Registrar Nuevo Activo", expanded=True):
         st.info("Selecciona el tipo de equipo, define si es equipo principal, componente o herramienta, y asócialo a un activo padre cuando corresponda. Si un tipo no aparece, puedes escribirlo manualmente.")
-        c1, c2 , c3 = st.columns(3 )
+        c1, c2, c3 = st.columns(3)
         nombre_eq = c1.text_input("Nombre del activo", key="activos_nombre_nuevo_v2")
         tipo_unidad_nuevo = c2.selectbox("Tipo de equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo_v2")
         clase_nueva_label = c3.selectbox("Clase de registro", list(CLASES_REGISTRO.values()), key="activos_clase_registro_nuevo_v2")
@@ -600,7 +695,7 @@ def render_activos(usuario: str):
             tipo_predefinido_nuevo = st.selectbox(
                 label_tipo_nuevo,
                 [placeholder_tipo_nuevo] + opciones_tipo_nuevo,
-                índice=0,
+                index=0,
                 key=_key_tipo_equipo("activos_tipo_detalle_nuevo_v2", tipo_unidad_nuevo),
                 help="Solo se muestran tipos del equipo seleccionado.",
             )
@@ -611,7 +706,7 @@ def render_activos(usuario: str):
                     f"Especifica {label_tipo_nuevo.lower()}",
                     key=_key_tipo_equipo("activos_tipo_detalle_custom_nuevo_v2", tipo_unidad_nuevo),
                 )
-        demás:
+        else:
             tipo_personalizado_nuevo = st.text_input(
                 label_tipo_nuevo,
                 key=_key_tipo_equipo("activos_tipo_detalle_libre_nuevo_v2", tipo_unidad_nuevo),
@@ -619,20 +714,25 @@ def render_activos(usuario: str):
             )
 
         modelo = st.text_input("Modelo (opcional)", key="activos_modelo_nuevo_v2")
-        extra_nuevo = _render_campos_componente(
-            df=df,
-            clase_registro=clase_nueva,
-            tipo_unidad=tipo_unidad_nuevo,
-            vida_util_unidad=vida_util_unidad_nuevo,
-            key_prefix="activos_nuevo_componente",
-            valores predeterminados={
-                "impacta_costo_padre": True if clase_nueva != "equipo_principal" else False,
-                "impacta_desgaste_padre": True if clase_nueva == "componente" else False,
-            },
+        cc1, cc2 = st.columns(2)
+        impacta_costo_nuevo = cc1.checkbox(
+            "Impacta costo del activo principal",
+            value=True if clase_nueva != "equipo_principal" else False,
+            key="activos_impacta_costo_padre_nuevo_v2",
+            help="Útil para componentes, repuestos o accesorios que deseas sumar al costo del equipo asociado.",
         )
+        impacta_desgaste_nuevo = cc2.checkbox(
+            "Impacta seguimiento/desgaste del activo principal",
+            value=True if clase_nueva == "componente" else False,
+            key="activos_impacta_desgaste_padre_nuevo_v2",
+            help="Marca esto cuando el componente afecte el estado o mantenimiento del equipo principal.",
+        )
+        activo_padre_id_nuevo = None
+        if clase_nueva != "equipo_principal":
+            activo_padre_id_nuevo = _selector_activo_padre(df, key="activos_padre_nuevo_v2")
         guardar = st.button("🚀 Guardar activo", key="activos_guardar_nuevo_v2", type="primary")
         if guardar:
-            intentar:
+            try:
                 tipo_detalle_nuevo = _resolver_tipo_detalle(
                     tipo_unidad_nuevo,
                     tipo_predefinido_nuevo,
@@ -642,37 +742,31 @@ def render_activos(usuario: str):
                     usuario=usuario,
                     equipo=nombre_eq,
                     tipo_unidad=tipo_unidad_nuevo,
-                    inversión=mont_inv,
+                    inversion=monto_inv,
                     vida_util=int(vida_util),
                     vida_util_unidad=vida_util_unidad_nuevo,
                     modelo=modelo,
                     tipo_detalle=tipo_detalle_nuevo,
                     clase_registro=clase_nueva,
-                    activo_padre_id=extra_nuevo.get("activo_padre_id"),
-                    tipo_componente=extra_nuevo.get("tipo_componente"),
-                    uso_inicial=float(extra_nuevo.get("uso_inicial") or 0.0),
-                    uso_acumulado=float(extra_nuevo.get("uso_acumulado") or 0.0),
-                    costo_reposicion=float(extra_nuevo.get("costo_reposicion") or 0.0),
-                    fecha_instalacion=str(extra_nuevo.get("fecha_instalacion") or ""),
-                    estado_operativo=str(extra_nuevo.get("estado_operativo") or "Bueno"),
-                    impacta_costo_padre=bool(extra_nuevo.get("impacta_costo_padre")),
-                    impacta_desgaste_padre=bool(extra_nuevo.get("impacta_desgaste_padre")),
+                    activo_padre_id=activo_padre_id_nuevo,
+                    impacta_costo_padre=impacta_costo_nuevo,
+                    impacta_desgaste_padre=impacta_desgaste_nuevo,
                 )
                 st.success(f"✅ Activo registrado correctamente. ID #{aid}")
                 st.rerun()
-            excepto Exception como e:
+            except Exception as e:
                 st.error(f"Error al registrar activo: {e}")
 
     st.divider()
 
     with st.expander("✏️ Editar Activo Existente"):
-        si df.empty:
+        if df.empty:
             st.info("No hay activos para editar.")
-        demás:
+        else:
             opciones = {f"{row.equipo} · {row.unidad}": int(row.id) for row in df.itertuples()}
             label = st.selectbox("Seleccionar activo:", list(opciones.keys()))
             activo_id = opciones[label]
-            datos = df[df["id"] == asset_id].iloc[0]
+            datos = df[df["id"] == activo_id].iloc[0]
 
             vida_sugerida = int(max(1, round(datos["inversion"] / max(datos["desgaste"], 1e-9)))) if datos["inversion"] > 0 else 1000
             unidad_actual = str(datos.get("unidad") or "Otro")
@@ -698,31 +792,31 @@ def render_activos(usuario: str):
             opciones_tipo_edicion = _opciones_tipo_equipo(nueva_unidad)
             label_tipo_edicion = _label_tipo_equipo(nueva_unidad)
             placeholder_tipo_edicion = _placeholder_tipo_equipo(nueva_unidad)
-            e1, e2 , e3 = st.columns(3 )
+            e1, e2, e3 = st.columns(3)
             nueva_inv = e1.number_input(
                 "Inversión ($)",
                 min_value=0.0,
-                valor=flotante(datos["inversión"]),
-                paso=10.0,
+                value=float(datos["inversion"]),
+                step=10.0,
                 key=f"activos_editar_inversion_{activo_id}",
             )
             nueva_vida = e2.number_input(
-                "Vida útil"
+                "Vida útil",
                 min_value=1,
                 value=int(vida_sugerida),
-                paso=1,
+                step=1,
                 key=f"activos_editar_vida_{activo_id}",
             )
             nueva_vida_unidad = e3.selectbox(
                 "Unidad de vida útil",
-                UNIDADES DE VIDA ÚTIL,
+                UNIDADES_VIDA_UTIL,
                 index=UNIDADES_VIDA_UTIL.index(_normalizar_vida_util_unidad(datos.get("vida_util_unidad"))),
                 key=f"activos_editar_vida_unidad_{activo_id}",
             )
 
             nuevo_modelo = st.text_input(
                 "Modelo",
-                valor=str(datos.get("modelo") o ""),
+                value=str(datos.get("modelo") or ""),
                 key=f"activos_editar_modelo_{activo_id}",
             )
 
@@ -743,11 +837,11 @@ def render_activos(usuario: str):
                     nuevo_tipo_predefinido = None
                 if nuevo_tipo_predefinido == OPCION_TIPO_PERSONALIZADO:
                     nuevo_tipo_personalizado = st.text_input(
-                        f"Especifique {edition_type_label.lower()}",
+                        f"Especifica {label_tipo_edicion.lower()}",
                         value=tipo_personalizado_actual,
                         key=_key_tipo_equipo(f"activos_editar_tipo_detalle_custom_{activo_id}", nueva_unidad),
                     )
-            demás:
+            else:
                 nuevo_tipo_personalizado = st.text_input(
                     label_tipo_edicion,
                     value=tipo_personalizado_actual,
@@ -755,29 +849,29 @@ def render_activos(usuario: str):
                     help="Escribe manualmente el tipo específico si no existe una lista para este equipo.",
                 )
 
-            extra_edicion = _render_campos_componente(
-                df=df,
-                clase_registro=nueva_clase,
-                tipo_unidad=nueva_unidad,
-                vida_util_unidad=nueva_vida_unidad,
-                key_prefix=f"activos_editar_componente_{activo_id}",
-                activo_id=activo_id,
-                valores predeterminados={
-                    "activo_padre_id": datos.get("activo_padre_id"),
-                    "tipo_componente": datos.get("tipo_componente"),
-                    "uso_inicial": datos.get("uso_inicial"),
-                    "uso_acumulado": datos.get("uso_acumulado"),
-                    "costo_reposicion": datos.get("costo_reposicion"),
-                    "fecha_instalacion": datos.get("fecha_instalacion"),
-                    "estado_operativo": datos.get("estado_operativo"),
-                    "impacta_costo_padre": datos.get("impacta_costo_padre", 1),
-                    "impacta_desgaste_padre": datos.get("impacta_desgaste_padre", 0),
-                },
+            cc3, cc4 = st.columns(2)
+            impacta_costo_edicion = cc3.checkbox(
+                "Impacta costo del activo principal",
+                value=bool(datos.get("impacta_costo_padre", 1)),
+                key=f"activos_editar_impacta_costo_{activo_id}",
             )
+            impacta_desgaste_edicion = cc4.checkbox(
+                "Impacta seguimiento/desgaste del activo principal",
+                value=bool(datos.get("impacta_desgaste_padre", 0)),
+                key=f"activos_editar_impacta_desgaste_{activo_id}",
+            )
+            activo_padre_edicion = None
+            if nueva_clase != "equipo_principal":
+                activo_padre_edicion = _selector_activo_padre(
+                    df,
+                    key=f"activos_editar_padre_{activo_id}",
+                    excluir_id=activo_id,
+                    seleccionado_id=int(datos["activo_padre_id"]) if pd.notna(datos.get("activo_padre_id")) else None,
+                )
 
             guardar_edicion = st.button("💾 Guardar Cambios", key=f"activos_guardar_edicion_{activo_id}")
-            si save_edit:
-                intentar:
+            if guardar_edicion:
+                try:
                     nuevo_tipo_detalle = _resolver_tipo_detalle(
                         nueva_unidad,
                         nuevo_tipo_predefinido,
@@ -794,26 +888,20 @@ def render_activos(usuario: str):
                         nueva_unidad=nueva_unidad,
                         nuevo_tipo_detalle=nuevo_tipo_detalle,
                         clase_registro=nueva_clase,
-                        activo_padre_id=extra_edicion.get("activo_padre_id"),
-                        tipo_componente=extra_edicion.get("tipo_componente"),
-                        uso_inicial=float(extra_edicion.get("uso_inicial") or 0.0),
-                        uso_acumulado=float(extra_edicion.get("uso_acumulado") or 0.0),
-                        costo_reposicion=float(extra_edicion.get("costo_reposicion") or 0.0),
-                        fecha_instalacion=str(extra_edicion.get("fecha_instalacion") or ""),
-                        estado_operativo=str(extra_edicion.get("estado_operativo") or "Bueno"),
-                        impacta_costo_padre=bool(extra_edicion.get("impacta_costo_padre")),
-                        impacta_desgaste_padre=bool(extra_edicion.get("impacta_desgaste_padre")),
+                        activo_padre_id=activo_padre_edicion,
+                        impacta_costo_padre=impacta_costo_edicion,
+                        impacta_desgaste_padre=impacta_desgaste_edicion,
                     )
                     st.success("✅ Activo actualizado correctamente.")
                     st.rerun()
-                excepto Exception como e:
+                except Exception as e:
                     st.error(f"Error al actualizar activo: {e}")
 
     st.divider()
 
-    t1, t2, t3, t4, t5, t6 , t7 = st.tabs([
+    t1, t2, t3, t4, t5, t6, t7 = st.tabs([
         "🖨️ Impresoras",
-        "✂️ Cortar",
+        "✂️ Corte",
         "🪪 Plastificación",
         "🔥 Sublimación",
         "🔌 Conexión y Energía",
@@ -821,15 +909,15 @@ def render_activos(usuario: str):
         "📊 Resumen Global",
     ])
 
-    si df.empty:
-        con t1:
+    if df.empty:
+        with t1:
             st.info("No hay activos registrados todavía.")
-        devolver
+        return
 
-    con t1:
+    with t1:
         st.subheader("Impresoras")
         df_imp = df[df["unidad"].fillna("").str.contains("Impresora", case=False)].copy()
-        si no df_imp.empty:
+        if not df_imp.empty:
             df_imp["desgaste_cabezal_pct"] = 100.0 - pd.to_numeric(df_imp["vida_cabezal_pct"], errors="coerce")
             c_imp1, c_imp2, c_imp3 = st.columns(3)
             c_imp1.metric("Vida cabezal promedio", f"{df_imp['vida_cabezal_pct'].mean(skipna=True):.2f}%")
@@ -847,12 +935,6 @@ def render_activos(usuario: str):
             sel_label = st.selectbox("Seleccionar impresora para ver resumen", list(opciones_imp.keys()), key="activos_diag_sel")
             sel_id = opciones_imp[sel_label]
             resumen = get_printer_diagnostic_summary(sel_id)
-            componentes_imp = componentes_map.get(int(sel_id), pd.DataFrame()).copy()
-            maint = pd.DataFrame(list_printer_maintenance(sel_id, limit=50))
-            costo_mantenimiento = float(pd.to_numeric(maint.get("cost"), errors="coerce").fillna(0).sum()) if not maint.empty and "cost" in maint.columns else 0.0
-            costo_componentes = float(pd.to_numeric(componentes_imp.get("costo_reposicion_resuelto"), errors="coerce").fillna(0).sum()) if not componentes_imp.empty else 0.0
-            vida_componentes = pd.to_numeric(componentes_imp.get("vida_restante_pct"), errors="coerce") if not componentes_imp.empty else pd.Series(dtype=float)
-            proximo_reponer = str(componentes_imp.loc[vida_componentes.idxmin(), "equipo"]) if not vida_componentes.dropna().empty else "N/D"
             if resumen and resumen.get("diagnostico_id"):
                 r1, r2, r3, r4, r5, r6 = st.columns(6)
                 r1.metric("Último diagnóstico", str(resumen.get("fecha") or "N/D"))
@@ -870,50 +952,47 @@ def render_activos(usuario: str):
                 st.caption(
                     f"Sistema tinta: {resumen.get('ink_system_type') or 'N/D'} · Uso tinta: {resumen.get('ink_usage_type') or 'N/D'}"
                 )
-                rr1, rr2, rr3 = st.columns(3)
-                rr1.metric("Costo acumulado componentes", f"$ {costo_componentes:,.2f}")
-                rr2.metric("Costo acumulado mantenimiento", f"$ {costo_mantenimiento:,.2f}")
-                rr3.metric("Próximo componente a reponer", proximo_reponer)
                 _render_componentes_asociados(componentes_map, sel_id, titulo="Componentes, repuestos y accesorios vinculados")
-                si resumen.get("low_ink_alerts"):
-                    st.warning(f"Alertas de bajo nivel: {', '.join(summary.get('low_ink_alerts') or [])}")
+                if resumen.get("low_ink_alerts"):
+                    st.warning(f"Alertas de bajo nivel: {', '.join(resumen.get('low_ink_alerts') or [])}")
                 st.info(
                     "Exactitud de datos: "
-                    + str(resumen.get("diagnostic_accuracy") o "estimated")
+                    + str(resumen.get("diagnostic_accuracy") or "estimated")
                     + f" · Confianza: {resumen.get('confidence_level') or 'medium'}"
                 )
-            demás:
+            else:
                 st.info("Esta impresora aún no tiene diagnósticos técnicos registrados.")
 
             st.markdown("#### 📜 Historial de diagnósticos")
             historial = pd.DataFrame(list_printer_diagnostics(sel_id, limit=50))
-            si no histórico.vacío:
+            if not historial.empty:
                 cols_show = [
                     "id", "fecha", "total_pages", "color_pages", "bw_pages", "borderless_pages", "scanned_pages",
                     "black_ml", "cyan_ml", "magenta_ml", "yellow_ml", "estimation_mode", "confidence_level", "files_count"
 
                 ]
-                cols_show = [c para c en cols_show si c en historial.columns]
+                cols_show = [c for c in cols_show if c in historial.columns]
                 st.dataframe(historial[cols_show], use_container_width=True, hide_index=True)
-            demás:
+            else:
                 st.caption("Sin historial disponible.")
 
             st.markdown("#### 💧 Historial de recargas")
-            recargas = pd.DataFrame(list_printer_refills(sel_id, limit=50))
-            si no se rellena.vacío:
+            refills = pd.DataFrame(list_printer_refills(sel_id, limit=50))
+            if not refills.empty:
                 st.dataframe(refills, use_container_width=True, hide_index=True)
-            demás:
-                st.caption("No se registraron recargas.")
+            else:
+                st.caption("Sin recargas registradas.")
 
             st.markdown("#### 🛠️ Historial de mantenimiento")
-            si no está vacío:
+            maint = pd.DataFrame(list_printer_maintenance(sel_id, limit=50))
+            if not maint.empty:
                 st.dataframe(maint, use_container_width=True, hide_index=True)
-            demás:
+            else:
                 st.caption("Sin mantenimientos registrados.")
-        demás:
+        else:
             st.info("No hay impresoras activas registradas.")
 
-    con t2:
+    with t2:
         st.subheader("Equipos de corte")
         df_corte = df[df["unidad"].fillna("").eq("Corte")].copy()
         st.dataframe(df_corte.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
@@ -921,7 +1000,7 @@ def render_activos(usuario: str):
             with st.expander(f"Componentes de corte · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
 
-    con t3:
+    with t3:
         st.subheader("Equipos de plastificación")
         df_plast = df[df["unidad"].fillna("").eq("Plastificación")].copy()
         st.dataframe(df_plast.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
@@ -929,24 +1008,24 @@ def render_activos(usuario: str):
             with st.expander(f"Componentes de plastificación · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
 
-    con t4:
+    with t4:
         st.subheader("Equipos de sublimación")
         df_subl = df[df["unidad"].fillna("").eq("Sublimación")].copy()
         st.dataframe(df_subl.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
-        para fila en df_subl[df_subl["class_of_records"] == "main_team"].itertuples():
+        for row in df_subl[df_subl["clase_registro"] == "equipo_principal"].itertuples():
             with st.expander(f"Componentes de sublimación · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
 
-    con t5:
+    with t5:
         st.subheader("Conexión y energía")
         df_energy = df[df["unidad"].fillna("").eq("Conexión y Energía")].copy()
         st.dataframe(df_energy.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
         principales_energy = df_energy[df_energy["clase_registro"] == "equipo_principal"].copy()
-        para fila en principales_energy.itertuples():
+        for row in principales_energy.itertuples():
             with st.expander(f"Componentes de conexión/energía · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
 
-    con t6:
+    with t6:
         st.subheader("Otros equipos")
         df_otro = df[df["unidad"].fillna("").eq("Otro")].copy()
         st.dataframe(df_otro.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
@@ -954,7 +1033,7 @@ def render_activos(usuario: str):
             with st.expander(f"Componentes de otros equipos · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
 
-    con t 7 :
+    with t7:
         c_inv, c_des, c_prom = st.columns(3)
         c_inv.metric("Inversión Total", f"$ {df['inversion'].sum():,.2f}")
         c_des.metric("Activos Registrados", len(df))
@@ -964,28 +1043,25 @@ def render_activos(usuario: str):
         st.plotly_chart(fig, use_container_width=True)
         st.markdown("#### Relaciones padre → hijo")
         relacionados = df[df["activo_padre_id"].notna()].copy()
-        si está relacionado.vacío:
+        if relacionados.empty:
             st.caption("Aún no hay componentes o accesorios vinculados a equipos principales.")
-        demás:
+        else:
             st.dataframe(
-                relacionado[
+                relacionados[
                     [
-                        "identificación",
+                        "id",
                         "equipo",
                         "unidad",
                         "clase_registro_label",
                         "activo_padre_label",
-                        "tipo_componente",
                         "tipo_detalle",
-                        "costo_reposicion_resuelto",
-                        "fecha_instalacion",
                         "impacta_costo_padre",
                         "impacta_desgaste_padre",
                     ]
-                ].asignar(
+                ].assign(
                     impacta_costo_padre=lambda x: x["impacta_costo_padre"].map({1: "Sí", 0: "No"}),
                     impacta_desgaste_padre=lambda x: x["impacta_desgaste_padre"].map({1: "Sí", 0: "No"}),
                 ),
                 use_container_width=True,
-                ocultar_índice=Verdadero,
+                hide_index=True,
             )
