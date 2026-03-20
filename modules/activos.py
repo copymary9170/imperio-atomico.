@@ -149,7 +149,7 @@ TIPOS_POR_EQUIPO = {
     },
 }
 OPCION_TIPO_PERSONALIZADO = "Otro / No está en la lista"
-ACTIVOS_UI_VERSION = "Activos UI v3"
+ACTIVOS_UI_VERSION = "Activos UI v 4 "
 
 
 def _equipo_config(tipo_equipo: str | None) -> dict:
@@ -425,6 +425,47 @@ def _render_componentes_asociados(componentes_map: dict[int, pd.DataFrame], acti
             f"Próximo a reponer: {siguiente['equipo']} · {float(siguiente['vida_restante_pct']):.1f}% de vida restante"
         )
     st.dataframe(vista, use_container_width=True, hide_index=True)
+
+
+def _aplicar_filtros_activos(
+    df: pd.DataFrame,
+    texto_busqueda: str = "",
+    unidades: lista[str] | Ninguno = Ninguno,
+    clases: lista[str] | Ninguno = Ninguno,
+    riesgos: lista[str] | Ninguno = Ninguno,
+    solo_con_relacion: bool = False,
+) -> pd.DataFrame:
+    si df.empty:
+        devolver df.copy()
+
+    vista = df.copy()
+
+    texto = str(texto_busqueda or "").strip().lower()
+    if texto:
+        columnas_busqueda = [
+            "equipo",
+            "modelo",
+            "unidad",
+            "tipo_detalle",
+            "clase_registro_label",
+            "activo_padre_label",
+        ]
+        máscara = pd.Series(False, index=vista.index)
+        for columna in columnas_busqueda:
+            if columna in vista.columns:
+                máscara = máscara | vista[columna].fillna("").astype(str).str.lower().str.contains(texto, regex=False)
+        vista = vista[máscara].copia()
+
+    si unidades:
+        vista = vista[vista["unidad"].fillna("").isin(unidades)].copy()
+    si clases:
+        vista = vista[vista["clase_registro_label"].fillna("").isin(clases)].copy()
+    if riesgos:
+        vista = vista[vista["riesgo"].fillna("").isin(riesgos)].copy()
+    if solo_con_relacion:
+        vista = vista[vista["activo_padre_id"].notna()].copy()
+
+    vista de regreso
 
 
 def _key_tipo_equipo(base_key: str, tipo_equipo: str | None) -> str:
@@ -844,9 +885,82 @@ def render_activos(usuario: str):
             )
             st.plotly_chart(fig_riesgo, use_container_width=True)
 
-    else:
-        parent_info = {}
+        st.divider()
+        st.subheader("🧭 Vista operativa actualizada")
+        st.caption("Filtra, busca y revisa relaciones padre → hijo sin perder la edición completa del catálogo.")
+        f1, f2, f3, f4 = st.columns([1.4, 1, 1, 0.8])
+        texto_busqueda = f1.text_input(
+            "Buscar activo, modelo o tipo",
+            key="activos_busqueda_general_v4",
+            placeholder="Ej. Epson, Cameo, rodillo, UPS…",
+        )
+        unidades_sel = f2.multiselect(
+            "Tipo de equipo",
+            options=TIPOS_UNIDAD,
+            predeterminado=[],
+            key="activos_filtro_unidad_v4",
+        )
+        clases_sel = f3.multiselect(
+            "Clase de registro",
+            opciones=lista(CLASES_REGISTRO.values()),
+            predeterminado=[],
+            key="activos_filtro_clase_v4",
+        )
+        solo_relacionados = f4.checkbox(
+            "Solo vinculados",
+            valor=Falso,
+            key="activos_filtro_relacionados_v4",
+            help="Muestra solo componentes, repuestos o accesorios asociados a un activo principal.",
+        )
+        riesgos_sel = st.multiselect(
+            "Riesgo",
+            options=["🔴 Alto", "🟠 Medio", "🟢 Bajo"],
+            predeterminado=[],
+            key="activos_filtro_riesgo_v4",
+        )
+        df_vista = _aplicar_filtros_activos(
+            df,
+            texto_busqueda=texto_busqueda,
+            unidades=unidades_seleccionar,
+            clases=clases_sel,
+            riesgos=riesgos_sel,
+            solo_con_relacion=solo_relacionados,
+        )
+
+        vr1, vr2, vr3, vr4 = st.columns(4)
+        vr1.metric("Activos visibles", len(df_vista))
+        vr2.metric("Inversión visible", f"$ {df_vista['inversion_total_relacionada'].sum():,.2f}")
+        vr3.metric("Con relación padre/hijo", int(df_vista["activo_padre_id"].notna().sum()))
+        vr4.metric("Riesgo alto visible", int((df_vista["riesgo"] == "🔴 Alto").sum()))
+
+        columnas_vista_operativa = [
+            "identificación",
+            "equipo",
+            "modelo",
+            "unidad",
+            "tipo_detalle",
+            "clase_registro_label",
+            "activo_padre_label",
+            "estado_componente",
+            "componentes_vinculados",
+            "componentes_criticos_vinculados",
+            "inversion_total_relacionada",
+            "vida_restante_pct",
+            "riesgo",
+        ]
+        si df_vista.empty:
+            st.warning("No hay activos que coincidan con los filtros aplicados.")
+        demás:
+            st.dataframe(
+                df_vista[columnas_vista_operativa],
+                use_container_width=True,
+                ocultar_índice=Verdadero,
+            )
+
+    demás:
+        información_parental = {}
         componentes_map = {}
+        df_vista = df.copy()
 
     with st.expander("➕ Registrar Nuevo Activo", expanded=True):
         st.info("Selecciona el tipo de equipo, define si es equipo principal, componente o herramienta, y asócialo a un activo padre cuando corresponda. Si un tipo no aparece, puedes escribirlo manualmente.")
@@ -1154,7 +1268,7 @@ def render_activos(usuario: str):
 
     with t1:
         st.subheader("Impresoras")
-        df_imp = df[df["unidad"].fillna("").str.contains("Impresora", case=False)].copy()
+        df_imp = df_vista[df_vista["unidad"].fillna("").str.contains("Impresora", case=False)].copy()
         if not df_imp.empty:
             df_imp["desgaste_cabezal_pct"] = 100.0 - pd.to_numeric(df_imp["vida_cabezal_pct"], errors="coerce")
             c_imp1, c_imp2, c_imp3 = st.columns(3)
@@ -1264,28 +1378,28 @@ def render_activos(usuario: str):
             st.info("No hay impresoras activas registradas.")
 
     with t2:
-        _render_tab_activos(df[df["unidad"].fillna("").eq("Corte")].copy(), "Equipos de corte", "Componentes de corte")
+        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Corte")].copy(), "Equipos de corte", "Componentes de corte")
 
     with t3:
-        _render_tab_activos(df[df["unidad"].fillna("").eq("Plastificación")].copy(), "Equipos de plastificación", "Componentes de plastificación")
+        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Plastificación")].copy(), "Equipos de plastificación", "Componentes de plastificación")
 
     with t4:
-        _render_tab_activos(df[df["unidad"].fillna("").eq("Sublimación")].copy(), "Equipos de sublimación", "Componentes de sublimación")
+        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Sublimación")].copy(), "Equipos de sublimación", "Componentes de sublimación")
 
     with t5:
-        _render_tab_activos(df[df["unidad"].fillna("").eq("Conexión y Energía")].copy(), "Conexión y energía", "Componentes de conexión/energía")
+        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Conexión y Energía")].copy(), "Conexión y energía", "Componentes de conexión/energía")
 
     with t6:
-        _render_tab_activos(df[df["unidad"].fillna("").eq("Otro")].copy(), "Otros equipos", "Componentes de otros equipos")
+        _render_tab_activos(df_vista[df_vista["unidad"].fillna("").eq("Otro")].copy(), "Otros equipos", "Componentes de otros equipos")
 
     with t7:
         c_inv, c_des, c_prom = st.columns(3)
-        c_inv.metric("Inversión Total", f"$ {df['inversion_total_relacionada'].sum():,.2f}")
-        c_des.metric("Activos Registrados", len(df))
-        c_prom.metric("Desgaste Promedio por Uso", f"$ {df['desgaste'].mean():.4f}")
+        c_inv.metric("Inversión Total", f"$ {df_vista['inversion_total_relacionada'].sum():,.2f}")
+        c_des.metric("Activos Registrados", len(df_vista))
+        c_prom.metric("Desgaste Promedio por Uso", f"$ {df_vista['desgaste'].mean():.4f}")
 
         fig = px.bar(
-            df,
+            df_vista,
             x="equipo",
             y="inversion_total_relacionada",
             color="unidad",
@@ -1293,7 +1407,7 @@ def render_activos(usuario: str):
         )
         st.plotly_chart(fig, use_container_width=True)
         st.markdown("#### Relaciones padre → hijo")
-        relacionados = df[df["activo_padre_id"].notna()].copy()
+        relacionados = df_vista[df_vista["activo_padre_id"].notna()].copy()
         if relacionados.empty:
             st.caption("Aún no hay componentes o accesorios vinculados a equipos principales.")
         else:
