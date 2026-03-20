@@ -63,6 +63,13 @@ TIPOS_POR_EQUIPO = {
             "Plotter de corte",
             "Guillotina",
             "Guillotina manual",
+            "Cuchilla",
+            "Cuchilla premium",
+            "Tapete de corte",
+            "Tapete 12x12",
+            "Tapete 12x24",
+            "Espátula",
+            "Kit de desbaste",
             "Tijeras",
             "Exacto",
             "Bisturí",
@@ -131,7 +138,14 @@ TIPOS_POR_EQUIPO = {
         "categoria": "Otro",
         "label": "Detalle del equipo",
         "placeholder": "Escribe el detalle del equipo",
-        "opciones": [],
+        "opciones": [
+            "Repuesto genérico",
+            "Herramienta manual",
+            "Accesorio",
+            "Componente eléctrico",
+            "Componente mecánico",
+            "Consumible durable",
+        ],
     },
 }
 OPCION_TIPO_PERSONALIZADO = "Otro / No está en la lista"
@@ -191,7 +205,33 @@ def _valor_bool_db(valor: bool | int | None) -> int:
 
 def _normalizar_vida_util_unidad(valor: str | None) -> str:
     texto = str(valor or "usos").strip().lower()
-    return texto if texto in UNIDADES_VIDA_UTIL else "usos"
+   return texto if texto in UNIDADES_VIDA_UTIL else "usos"
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _estado_componente_desde_vida(vida_restante_pct: float | None) -> str:
+    if vida_restante_pct is None:
+        return "Sin seguimiento"
+    if vida_restante_pct <= 20:
+        return "Crítico"
+    if vida_restante_pct <= 50:
+        return "En seguimiento"
+    return "Operativo"
+
+
+def _calcular_vida_restante_pct(uso_acumulado: float | int | None, vida_util_valor: float | int | None) -> float | None:
+    vida = _safe_float(vida_util_valor, 0.0)
+    if vida <= 0:
+        return None
+    uso = max(0.0, _safe_float(uso_acumulado, 0.0))
+    restante = 100.0 - ((uso / vida) * 100.0)
+    return max(0.0, min(100.0, restante))
 
 
 def _formatear_activo_relacion(row: dict | pd.Series, incluir_unidad: bool = True) -> str:
@@ -282,7 +322,12 @@ def _render_componentes_asociados(componentes_map: dict[int, pd.DataFrame], acti
             "unidad",
             "tipo_detalle",
             "clase_registro_label",
+            "fecha_instalacion",
+            "uso_acumulado",
+            "vida_util_valor",
             "vida_util_unidad",
+            "vida_restante_pct",
+            "estado_componente",
             "impacta_costo_padre",
             "impacta_desgaste_padre",
             "inversion",
@@ -295,8 +340,14 @@ def _render_componentes_asociados(componentes_map: dict[int, pd.DataFrame], acti
     st.markdown(f"##### {titulo}")
     c1, c2, c3 = st.columns(3)
     c1.metric("Componentes vinculados", len(vista))
-    c2.metric("Costo asociado", f"$ {vista['inversion'].sum():,.2f}")
-    c3.metric("Componentes críticos", int((vista["riesgo"] == "🔴 Alto").sum()))
+    c2.metric("Costo asociado", f"$ {vista.loc[componentes['impacta_costo_padre'] == 1, 'inversion'].sum():,.2f}")
+    c3.metric("Componentes críticos", int((vista["estado_componente"] == "Crítico").sum()))
+    tracked = componentes[componentes["vida_restante_pct"].notna()].copy()
+    if not tracked.empty:
+        siguiente = tracked.sort_values(["vida_restante_pct", "id"], ascending=[True, True]).iloc[0]
+        st.caption(
+            f"Próximo a reponer: {siguiente['equipo']} · {float(siguiente['vida_restante_pct']):.1f}% de vida restante"
+        )
     st.dataframe(vista, use_container_width=True, hide_index=True)
 
 
@@ -391,8 +442,11 @@ def _ensure_activos_schema(conn) -> None:
         "tipo_impresora": "ALTER TABLE activos ADD COLUMN tipo_impresora TEXT",
         "tipo_detalle": "ALTER TABLE activos ADD COLUMN tipo_detalle TEXT",
         "clase_registro": "ALTER TABLE activos ADD COLUMN clase_registro TEXT NOT NULL DEFAULT 'equipo_principal'",
-        "activo_padre_id": "ALTER TABLE activos ADD COLUMN activo_padre_id INTEGER",
+       "activo_padre_id": "ALTER TABLE activos ADD COLUMN activo_padre_id INTEGER",
+        "vida_util_valor": "ALTER TABLE activos ADD COLUMN vida_util_valor REAL NOT NULL DEFAULT 1",
         "vida_util_unidad": "ALTER TABLE activos ADD COLUMN vida_util_unidad TEXT NOT NULL DEFAULT 'usos'",
+        "uso_acumulado": "ALTER TABLE activos ADD COLUMN uso_acumulado REAL NOT NULL DEFAULT 0",
+        "fecha_instalacion": "ALTER TABLE activos ADD COLUMN fecha_instalacion TEXT",
         "impacta_costo_padre": "ALTER TABLE activos ADD COLUMN impacta_costo_padre INTEGER NOT NULL DEFAULT 1",
         "impacta_desgaste_padre": "ALTER TABLE activos ADD COLUMN impacta_desgaste_padre INTEGER NOT NULL DEFAULT 0",
     }
@@ -425,7 +479,10 @@ def _load_activos_df() -> pd.DataFrame:
                 COALESCE(tipo_detalle, tipo_impresora) AS tipo_detalle,
                 COALESCE(clase_registro, 'equipo_principal') AS clase_registro,
                 activo_padre_id,
+                COALESCE(vida_util_valor, 1) AS vida_util_valor,
                 COALESCE(vida_util_unidad, 'usos') AS vida_util_unidad,
+                COALESCE(uso_acumulado, 0) AS uso_acumulado,
+                fecha_instalacion,
                 COALESCE(impacta_costo_padre, 1) AS impacta_costo_padre,
                 COALESCE(impacta_desgaste_padre, 0) AS impacta_desgaste_padre,
                 fecha,
@@ -441,7 +498,8 @@ def _load_activos_df() -> pd.DataFrame:
             columns=[
                 "id", "equipo", "categoria", "inversion", "unidad", "desgaste", "modelo", "costo_hora",
                 "vida_cabezal_pct", "vida_rodillo_pct", "vida_almohadillas_pct", "paginas_impresas", "tipo_impresora", "tipo_detalle",
-                "clase_registro", "activo_padre_id", "vida_util_unidad", "impacta_costo_padre", "impacta_desgaste_padre", "fecha", "activo"
+                "clase_registro", "activo_padre_id", "vida_util_valor", "vida_util_unidad", "uso_acumulado", "fecha_instalacion",
+                "impacta_costo_padre", "impacta_desgaste_padre", "fecha", "activo"
             ]
         )
 
@@ -457,7 +515,15 @@ def _load_activos_df() -> pd.DataFrame:
     df["activo_padre_id"] = pd.to_numeric(df.get("activo_padre_id"), errors="coerce")
     df["clase_registro"] = df.get("clase_registro", "equipo_principal").apply(_slug_clase_registro)
     df["clase_registro_label"] = df["clase_registro"].apply(_label_clase_registro)
+    df["vida_util_valor"] = pd.to_numeric(df.get("vida_util_valor"), errors="coerce").fillna(1.0)
     df["vida_util_unidad"] = df.get("vida_util_unidad", "usos").apply(_normalizar_vida_util_unidad)
+    df["uso_acumulado"] = pd.to_numeric(df.get("uso_acumulado"), errors="coerce").fillna(0.0)
+    df["fecha_instalacion"] = df.get("fecha_instalacion").fillna("")
+    df["vida_restante_pct"] = df.apply(
+        lambda row: _calcular_vida_restante_pct(row.get("uso_acumulado"), row.get("vida_util_valor")),
+        axis=1,
+    )
+    df["estado_componente"] = df["vida_restante_pct"].apply(_estado_componente_desde_vida)
     df["impacta_costo_padre"] = pd.to_numeric(df.get("impacta_costo_padre"), errors="coerce").fillna(1).astype(int)
     df["impacta_desgaste_padre"] = pd.to_numeric(df.get("impacta_desgaste_padre"), errors="coerce").fillna(0).astype(int)
     ranking_riesgo = df["desgaste"].rank(pct=True, method="average").fillna(0)
@@ -476,6 +542,8 @@ def _crear_activo(
     inversion: float,
     vida_util: int,
     vida_util_unidad: str,
+    uso_acumulado: float,
+    fecha_instalacion: str | None,
     modelo: str,
     tipo_detalle: str | None,
     clase_registro: str = "equipo_principal",
@@ -488,8 +556,10 @@ def _crear_activo(
     categoria = _categoria_por_equipo(tipo_unidad)
     inversion = as_positive(inversion, "Inversión", allow_zero=False)
     vida_util = max(1, int(vida_util or 1))
+    uso_acumulado = max(0.0, _safe_float(uso_acumulado, 0.0))
     desgaste_unitario = inversion / vida_util
     vida_util_unidad = _normalizar_vida_util_unidad(vida_util_unidad)
+    fecha_instalacion = str(fecha_instalacion or "").strip() or None
     tipo_detalle = (tipo_detalle or "").strip() or None
     tipo_impresora = tipo_detalle if _es_equipo_impresora(tipo_unidad) else None
     clase_registro = _slug_clase_registro(clase_registro)
@@ -500,8 +570,8 @@ def _crear_activo(
         cur = conn.execute(
             """
             INSERT INTO activos
-            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora, tipo_detalle, clase_registro, activo_padre_id, vida_util_unidad, impacta_costo_padre, impacta_desgaste_padre)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?, ?, ?, ?, ?, ?, ?)
+            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora, tipo_detalle, clase_registro, activo_padre_id, vida_util_valor, vida_util_unidad, uso_acumulado, fecha_instalacion, impacta_costo_padre, impacta_desgaste_padre)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 equipo,
@@ -516,7 +586,10 @@ def _crear_activo(
                 tipo_detalle,
                 clase_registro,
                 activo_padre_id,
+                float(vida_util),
                 vida_util_unidad,
+                uso_acumulado,
+                fecha_instalacion,
                 _valor_bool_db(impacta_costo_padre),
                 _valor_bool_db(impacta_desgaste_padre),
             ),
@@ -531,6 +604,8 @@ def _crear_activo(
                 "CREACIÓN",
                 (
                     f"Registro inicial (vida útil: {vida_util} {vida_util_unidad})"
+                    + (f" · uso acumulado: {uso_acumulado:g}" if uso_acumulado > 0 else "")
+                    + (f" · fecha instalación: {fecha_instalacion}" if fecha_instalacion else "")
                     + (f" · clase: {_label_clase_registro(clase_registro)}" if clase_registro else "")
                     + (f" · activo padre ID: {activo_padre_id}" if activo_padre_id else "")
                 ),
@@ -548,6 +623,8 @@ def _actualizar_activo(
     nueva_inversion: float,
     nueva_vida: int,
     nueva_vida_util_unidad: str,
+    nuevo_uso_acumulado: float,
+    nueva_fecha_instalacion: str | None,
     nuevo_modelo: str,
     nueva_unidad: str,
     nuevo_tipo_detalle: str | None,
@@ -558,10 +635,12 @@ def _actualizar_activo(
 ) -> None:
     nueva_inversion = as_positive(nueva_inversion, "Inversión")
     nueva_vida = max(1, int(nueva_vida or 1))
+    nuevo_uso_acumulado = max(0.0, _safe_float(nuevo_uso_acumulado, 0.0))
     nuevo_desgaste = (nueva_inversion / nueva_vida) if nueva_inversion > 0 else 0.0
     nueva_unidad = _normalizar_unidad(nueva_unidad)
     nueva_categoria = _categoria_por_equipo(nueva_unidad)
     nueva_vida_util_unidad = _normalizar_vida_util_unidad(nueva_vida_util_unidad)
+    nueva_fecha_instalacion = str(nueva_fecha_instalacion or "").strip() or None
     nuevo_tipo_detalle = (nuevo_tipo_detalle or "").strip() or None
     nuevo_tipo_impresora = nuevo_tipo_detalle if _es_equipo_impresora(nueva_unidad) else None
     clase_registro = _slug_clase_registro(clase_registro)
@@ -572,7 +651,7 @@ def _actualizar_activo(
         conn.execute(
             """
             UPDATE activos
-            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?, tipo_detalle = ?, clase_registro = ?, activo_padre_id = ?, vida_util_unidad = ?, impacta_costo_padre = ?, impacta_desgaste_padre = ?
+            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?, tipo_detalle = ?, clase_registro = ?, activo_padre_id = ?, vida_util_valor = ?, vida_util_unidad = ?, uso_acumulado = ?, fecha_instalacion = ?, impacta_costo_padre = ?, impacta_desgaste_padre = ?
             WHERE id = ?
             """,
             (
@@ -586,7 +665,10 @@ def _actualizar_activo(
                 nuevo_tipo_detalle,
                 clase_registro,
                 activo_padre_id,
+                float(nueva_vida),
                 nueva_vida_util_unidad,
+                nuevo_uso_acumulado,
+                nueva_fecha_instalacion,
                 _valor_bool_db(impacta_costo_padre),
                 _valor_bool_db(impacta_desgaste_padre),
                 int(activo_id),
@@ -602,6 +684,8 @@ def _actualizar_activo(
                 "EDICIÓN",
                 (
                     f"Actualización de valores (vida útil: {nueva_vida} {nueva_vida_util_unidad}, equipo: {nueva_unidad}, tipo: {nuevo_tipo_detalle or 'N/D'})"
+                    + f" · uso acumulado: {nuevo_uso_acumulado:g}"
+                    + (f" · fecha instalación: {nueva_fecha_instalacion}" if nueva_fecha_instalacion else "")
                     + f" · clase: {_label_clase_registro(clase_registro)}"
                     + (f" · activo padre ID: {activo_padre_id}" if activo_padre_id else "")
                 ),
@@ -688,6 +772,18 @@ def render_activos(usuario: str):
         monto_inv = c4.number_input("Inversión ($)", min_value=0.0, step=10.0, key="activos_inversion_nuevo_v2")
         vida_util = c5.number_input("Vida útil", min_value=1, value=1000, step=1, key="activos_vida_nuevo_v2")
         vida_util_unidad_nuevo = c6.selectbox("Unidad de vida útil", UNIDADES_VIDA_UTIL, key="activos_vida_unidad_nuevo_v2")
+        sc1, sc2 = st.columns(2)
+        uso_acumulado_nuevo = sc1.number_input(
+            "Uso acumulado",
+            min_value=0.0,
+            step=1.0,
+            key="activos_uso_acumulado_nuevo_v2",
+            help="Útil para componentes o herramientas con seguimiento de vida útil por páginas, cortes, horas, trabajos o usos.",
+        )
+        fecha_instalacion_nueva = sc2.text_input(
+            "Fecha de instalación / compra (YYYY-MM-DD, opcional)",
+            key="activos_fecha_instalacion_nuevo_v2",
+        )
 
         tipo_predefinido_nuevo = None
         tipo_personalizado_nuevo = ""
@@ -745,6 +841,8 @@ def render_activos(usuario: str):
                     inversion=monto_inv,
                     vida_util=int(vida_util),
                     vida_util_unidad=vida_util_unidad_nuevo,
+                    uso_acumulado=float(uso_acumulado_nuevo),
+                    fecha_instalacion=fecha_instalacion_nueva,
                     modelo=modelo,
                     tipo_detalle=tipo_detalle_nuevo,
                     clase_registro=clase_nueva,
@@ -812,6 +910,19 @@ def render_activos(usuario: str):
                 UNIDADES_VIDA_UTIL,
                 index=UNIDADES_VIDA_UTIL.index(_normalizar_vida_util_unidad(datos.get("vida_util_unidad"))),
                 key=f"activos_editar_vida_unidad_{activo_id}",
+            )
+            e4, e5 = st.columns(2)
+            nuevo_uso_acumulado = e4.number_input(
+                "Uso acumulado",
+                min_value=0.0,
+                value=float(datos.get("uso_acumulado") or 0.0),
+                step=1.0,
+                key=f"activos_editar_uso_acumulado_{activo_id}",
+            )
+            nueva_fecha_instalacion = e5.text_input(
+                "Fecha de instalación / compra (YYYY-MM-DD, opcional)",
+                value=str(datos.get("fecha_instalacion") or ""),
+                key=f"activos_editar_fecha_instalacion_{activo_id}",
             )
 
             nuevo_modelo = st.text_input(
@@ -884,6 +995,8 @@ def render_activos(usuario: str):
                         nueva_inversion=float(nueva_inv),
                         nueva_vida=int(nueva_vida),
                         nueva_vida_util_unidad=nueva_vida_unidad,
+                        nuevo_uso_acumulado=float(nuevo_uso_acumulado),
+                        nueva_fecha_instalacion=nueva_fecha_instalacion,
                         nuevo_modelo=nuevo_modelo,
                         nueva_unidad=nueva_unidad,
                         nuevo_tipo_detalle=nuevo_tipo_detalle,
@@ -909,67 +1022,7 @@ def render_activos(usuario: str):
         "📊 Resumen Global",
     ])
 
-    if df.empty:
-        with t1:
-            st.info("No hay activos registrados todavía.")
-        return
-
-    with t1:
-        st.subheader("Impresoras")
-        df_imp = df[df["unidad"].fillna("").str.contains("Impresora", case=False)].copy()
-        if not df_imp.empty:
-            df_imp["desgaste_cabezal_pct"] = 100.0 - pd.to_numeric(df_imp["vida_cabezal_pct"], errors="coerce")
-            c_imp1, c_imp2, c_imp3 = st.columns(3)
-            c_imp1.metric("Vida cabezal promedio", f"{df_imp['vida_cabezal_pct'].mean(skipna=True):.2f}%")
-            c_imp2.metric("Desgaste cabezal promedio", f"{df_imp['desgaste_cabezal_pct'].mean(skipna=True):.2f}%")
-            c_imp3.metric("Páginas impresas (total)", int(df_imp["paginas_impresas"].sum()))
-
-            mostrar_cols = [
-                "id", "equipo", "modelo", "tipo_detalle", "clase_registro_label", "vida_cabezal_pct", "vida_rodillo_pct",
-                "vida_almohadillas_pct", "desgaste_cabezal_pct", "paginas_impresas", "desgaste", "riesgo"
-            ]
-            st.dataframe(df_imp[mostrar_cols], use_container_width=True, hide_index=True)
-
-            st.markdown("#### 🩺 Resumen de diagnóstico por impresora")
-            opciones_imp = {f"#{int(r.id)} · {r.equipo}": int(r.id) for r in df_imp.itertuples()}
-            sel_label = st.selectbox("Seleccionar impresora para ver resumen", list(opciones_imp.keys()), key="activos_diag_sel")
-            sel_id = opciones_imp[sel_label]
-            resumen = get_printer_diagnostic_summary(sel_id)
-            if resumen and resumen.get("diagnostico_id"):
-                r1, r2, r3, r4, r5, r6 = st.columns(6)
-                r1.metric("Último diagnóstico", str(resumen.get("fecha") or "N/D"))
-                r2.metric("Páginas totales", int(resumen.get("total_pages") or 0))
-                r3.metric("Desgaste cabezal", f"{float(resumen.get('head_wear_pct') or 0.0):.2f}%")
-                r4.metric("Depreciación estimada", f"$ {float(resumen.get('depreciation_amount') or 0.0):.4f}")
-                r5.metric("Vida rodillo", f"{float(resumen.get('vida_rodillo_pct') or 0.0):.2f}%")
-                r6.metric("Vida almohadillas", f"{float(resumen.get('vida_almohadillas_pct') or 0.0):.2f}%")
-
-                st.caption(
-                    f"Niveles actuales (ml): BK {float(resumen.get('black_ml') or 0.0):.2f} | C {float(resumen.get('cyan_ml') or 0.0):.2f} | "
-                    f"M {float(resumen.get('magenta_ml') or 0.0):.2f} | Y {float(resumen.get('yellow_ml') or 0.0):.2f}"
-                )
-                st.write("Consumo acumulado por color (ml):", resumen.get("consumos") or {})
-                st.caption(
-                    f"Sistema tinta: {resumen.get('ink_system_type') or 'N/D'} · Uso tinta: {resumen.get('ink_usage_type') or 'N/D'}"
-                )
-                _render_componentes_asociados(componentes_map, sel_id, titulo="Componentes, repuestos y accesorios vinculados")
-                if resumen.get("low_ink_alerts"):
-                    st.warning(f"Alertas de bajo nivel: {', '.join(resumen.get('low_ink_alerts') or [])}")
-                st.info(
-                    "Exactitud de datos: "
-                    + str(resumen.get("diagnostic_accuracy") or "estimated")
-                    + f" · Confianza: {resumen.get('confidence_level') or 'medium'}"
-                )
-            else:
-                st.info("Esta impresora aún no tiene diagnósticos técnicos registrados.")
-
-            st.markdown("#### 📜 Historial de diagnósticos")
-            historial = pd.DataFrame(list_printer_diagnostics(sel_id, limit=50))
-            if not historial.empty:
-                cols_show = [
-                    "id", "fecha", "total_pages", "color_pages", "bw_pages", "borderless_pages", "scanned_pages",
-                    "black_ml", "cyan_ml", "magenta_ml", "yellow_ml", "estimation_mode", "confidence_level", "files_count"
-
+@@ -973,84 +1086,189 @@ def render_activos(usuario: str):
                 ]
                 cols_show = [c for c in cols_show if c in historial.columns]
                 st.dataframe(historial[cols_show], use_container_width=True, hide_index=True)
@@ -995,7 +1048,28 @@ def render_activos(usuario: str):
     with t2:
         st.subheader("Equipos de corte")
         df_corte = df[df["unidad"].fillna("").eq("Corte")].copy()
-        st.dataframe(df_corte.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_corte.drop(columns=["categoria"], errors="ignore")[
+                [
+                    "id",
+                    "equipo",
+                    "modelo",
+                    "tipo_detalle",
+                    "clase_registro_label",
+                    "activo_padre_label",
+                    "uso_acumulado",
+                    "vida_util_valor",
+                    "vida_util_unidad",
+                    "vida_restante_pct",
+                    "estado_componente",
+                    "inversion",
+                    "desgaste",
+                    "riesgo",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
         for row in df_corte[df_corte["clase_registro"] == "equipo_principal"].itertuples():
             with st.expander(f"Componentes de corte · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
@@ -1003,7 +1077,28 @@ def render_activos(usuario: str):
     with t3:
         st.subheader("Equipos de plastificación")
         df_plast = df[df["unidad"].fillna("").eq("Plastificación")].copy()
-        st.dataframe(df_plast.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_plast.drop(columns=["categoria"], errors="ignore")[
+                [
+                    "id",
+                    "equipo",
+                    "modelo",
+                    "tipo_detalle",
+                    "clase_registro_label",
+                    "activo_padre_label",
+                    "uso_acumulado",
+                    "vida_util_valor",
+                    "vida_util_unidad",
+                    "vida_restante_pct",
+                    "estado_componente",
+                    "inversion",
+                    "desgaste",
+                    "riesgo",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
         for row in df_plast[df_plast["clase_registro"] == "equipo_principal"].itertuples():
             with st.expander(f"Componentes de plastificación · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
@@ -1011,7 +1106,28 @@ def render_activos(usuario: str):
     with t4:
         st.subheader("Equipos de sublimación")
         df_subl = df[df["unidad"].fillna("").eq("Sublimación")].copy()
-        st.dataframe(df_subl.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_subl.drop(columns=["categoria"], errors="ignore")[
+                [
+                    "id",
+                    "equipo",
+                    "modelo",
+                    "tipo_detalle",
+                    "clase_registro_label",
+                    "activo_padre_label",
+                    "uso_acumulado",
+                    "vida_util_valor",
+                    "vida_util_unidad",
+                    "vida_restante_pct",
+                    "estado_componente",
+                    "inversion",
+                    "desgaste",
+                    "riesgo",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
         for row in df_subl[df_subl["clase_registro"] == "equipo_principal"].itertuples():
             with st.expander(f"Componentes de sublimación · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
@@ -1019,7 +1135,28 @@ def render_activos(usuario: str):
     with t5:
         st.subheader("Conexión y energía")
         df_energy = df[df["unidad"].fillna("").eq("Conexión y Energía")].copy()
-        st.dataframe(df_energy.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_energy.drop(columns=["categoria"], errors="ignore")[
+                [
+                    "id",
+                    "equipo",
+                    "modelo",
+                    "tipo_detalle",
+                    "clase_registro_label",
+                    "activo_padre_label",
+                    "uso_acumulado",
+                    "vida_util_valor",
+                    "vida_util_unidad",
+                    "vida_restante_pct",
+                    "estado_componente",
+                    "inversion",
+                    "desgaste",
+                    "riesgo",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
         principales_energy = df_energy[df_energy["clase_registro"] == "equipo_principal"].copy()
         for row in principales_energy.itertuples():
             with st.expander(f"Componentes de conexión/energía · {_formatear_activo_relacion(row)}", expanded=False):
@@ -1028,7 +1165,28 @@ def render_activos(usuario: str):
     with t6:
         st.subheader("Otros equipos")
         df_otro = df[df["unidad"].fillna("").eq("Otro")].copy()
-        st.dataframe(df_otro.drop(columns=["categoria"], errors="ignore"), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_otro.drop(columns=["categoria"], errors="ignore")[
+                [
+                    "id",
+                    "equipo",
+                    "modelo",
+                    "tipo_detalle",
+                    "clase_registro_label",
+                    "activo_padre_label",
+                    "uso_acumulado",
+                    "vida_util_valor",
+                    "vida_util_unidad",
+                    "vida_restante_pct",
+                    "estado_componente",
+                    "inversion",
+                    "desgaste",
+                    "riesgo",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
         for row in df_otro[df_otro["clase_registro"] == "equipo_principal"].itertuples():
             with st.expander(f"Componentes de otros equipos · {_formatear_activo_relacion(row)}", expanded=False):
                 _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
