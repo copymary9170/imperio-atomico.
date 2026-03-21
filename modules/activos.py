@@ -1922,3 +1922,13 @@ def render_activos(usuario: str):
 
 
 
+
+
+
+
+
+
+
+
+
+
