@@ -1533,3 +1533,6 @@ def render_activos(usuario: str):
                 use_container_width=True,
                 hide_index=True,
             )
+
+
+
