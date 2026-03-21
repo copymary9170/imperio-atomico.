@@ -759,6 +759,7 @@ def _crear_activo(
     tipo_detalle: str | None,
     tipo_cuchilla: str | None = None,
     parametro_cuchilla_cm: float | None = None,
+    carro_cuchilla: str | None = None,
     clase_registro: str = "equipo_principal",
     activo_padre_id: int | None = None,
     impacta_costo_padre: bool = True,
@@ -777,9 +778,11 @@ def _crear_activo(
     tipo_impresora = tipo_detalle if _es_equipo_impresora(tipo_unidad) else None
     tipo_cuchilla = (tipo_cuchilla or "").strip() or None
     parametro_cuchilla_cm = _safe_float(parametro_cuchilla_cm, 0.0) if parametro_cuchilla_cm is not None else None
-    if not _es_tipo_cuchilla_corte(tipo_unidad, tipo_detalle):
+    carro_cuchilla = (carro_cuchilla or "").strip() or None
+    if not _es_tipo_cuchilla_corte(tipo_unidad, tipo_detalle, es_cuchilla=bool(tipo_cuchilla or parametro_cuchilla_cm or carro_cuchilla)):
         tipo_cuchilla = None
         parametro_cuchilla_cm = None
+        carro_cuchilla = None
     clase_registro = _slug_clase_registro(clase_registro)
     activo_padre_id = int(activo_padre_id) if activo_padre_id and clase_registro != "equipo_principal" else None
 
@@ -788,8 +791,8 @@ def _crear_activo(
         cur = conn.execute(
             """
             INSERT INTO activos
-            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora, tipo_detalle, clase_registro, activo_padre_id, vida_util_valor, vida_util_unidad, uso_acumulado, fecha_instalacion, impacta_costo_padre, impacta_desgaste_padre, tipo_cuchilla, parametro_cuchilla_cm)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (equipo, modelo, categoria, inversion, unidad, desgaste, costo_hora, usuario, activo, estado, tipo_impresora, tipo_detalle, clase_registro, activo_padre_id, vida_util_valor, vida_util_unidad, uso_acumulado, fecha_instalacion, impacta_costo_padre, impacta_desgaste_padre, tipo_cuchilla, parametro_cuchilla_cm, carro_cuchilla)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'activo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 equipo,
@@ -812,6 +815,7 @@ def _crear_activo(
                 _valor_bool_db(impacta_desgaste_padre),
                 tipo_cuchilla,
                 parametro_cuchilla_cm,
+                carro_cuchilla,
             ),
         )
         conn.execute(
@@ -830,6 +834,7 @@ def _crear_activo(
                     + (f" · activo padre ID: {activo_padre_id}" if activo_padre_id else "")
                     + (f" · cuchilla: {tipo_cuchilla}" if tipo_cuchilla else "")
                     + (f" · parámetro: {parametro_cuchilla_cm:g} cm" if parametro_cuchilla_cm is not None else "")
+                    + (f" · carro Cameo 5: {carro_cuchilla}" if carro_cuchilla else "")
                 ),
                 inversion,
                 usuario,
@@ -852,6 +857,7 @@ def _actualizar_activo(
     nuevo_tipo_detalle: str | None,
     tipo_cuchilla: str | None = None,
     parametro_cuchilla_cm: float | None = None,
+    carro_cuchilla: str | None = None,
     clase_registro: str = "equipo_principal",
     activo_padre_id: int | None = None,
     impacta_costo_padre: bool = True,
@@ -869,9 +875,11 @@ def _actualizar_activo(
     nuevo_tipo_impresora = nuevo_tipo_detalle if _es_equipo_impresora(nueva_unidad) else None
     tipo_cuchilla = (tipo_cuchilla or "").strip() or None
     parametro_cuchilla_cm = _safe_float(parametro_cuchilla_cm, 0.0) if parametro_cuchilla_cm is not None else None
-    if not _es_tipo_cuchilla_corte(nueva_unidad, nuevo_tipo_detalle):
+    carro_cuchilla = (carro_cuchilla or "").strip() or None
+    if not _es_tipo_cuchilla_corte(nueva_unidad, nuevo_tipo_detalle, es_cuchilla=bool(tipo_cuchilla or parametro_cuchilla_cm or carro_cuchilla)):
         tipo_cuchilla = None
         parametro_cuchilla_cm = None
+        carro_cuchilla = None
     clase_registro = _slug_clase_registro(clase_registro)
     activo_padre_id = int(activo_padre_id) if activo_padre_id and clase_registro != "equipo_principal" else None
 
@@ -880,7 +888,7 @@ def _actualizar_activo(
         conn.execute(
             """
             UPDATE activos
-            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?, tipo_detalle = ?, clase_registro = ?, activo_padre_id = ?, vida_util_valor = ?, vida_util_unidad = ?, uso_acumulado = ?, fecha_instalacion = ?, impacta_costo_padre = ?, impacta_desgaste_padre = ?, tipo_cuchilla = ?, parametro_cuchilla_cm = ?
+            SET inversion = ?, categoria = ?, desgaste = ?, modelo = ?, unidad = ?, usuario = ?, tipo_impresora = ?, tipo_detalle = ?, clase_registro = ?, activo_padre_id = ?, vida_util_valor = ?, vida_util_unidad = ?, uso_acumulado = ?, fecha_instalacion = ?, impacta_costo_padre = ?, impacta_desgaste_padre = ?, tipo_cuchilla = ?, parametro_cuchilla_cm = ?, carro_cuchilla = ?
             WHERE id = ?
             """,
             (
@@ -902,6 +910,7 @@ def _actualizar_activo(
                 _valor_bool_db(impacta_desgaste_padre),
                 tipo_cuchilla,
                 parametro_cuchilla_cm,
+                carro_cuchilla,
                 int(activo_id),
             ),
         )
@@ -921,6 +930,7 @@ def _actualizar_activo(
                     + (f" · activo padre ID: {activo_padre_id}" if activo_padre_id else "")
                     + (f" · cuchilla: {tipo_cuchilla}" if tipo_cuchilla else "")
                     + (f" · parámetro: {parametro_cuchilla_cm:g} cm" if parametro_cuchilla_cm is not None else "")
+                    + (f" · carro Cameo 5: {carro_cuchilla}" if carro_cuchilla else "")
                 ),
                 nueva_inversion,
                 usuario,
@@ -931,6 +941,7 @@ def _actualizar_activo(
 # =========================================================
 # INTERFAZ ACTIVOS
 # =========================================================
+
 
 
 
@@ -1007,7 +1018,7 @@ def render_activos(usuario: str):
         componentes_map = {}
 
     with st.expander("➕ Registrar Nuevo Activo", expanded=True):
-        st.info("Selecciona el tipo de equipo, define si es equipo principal, componente o herramienta, y asócialo a un activo padre cuando corresponda. Si registras una cuchilla de Cameo/corte, ahora puedes elegir la variante (autoajustable, morada, kraft, etc.) y autocompletar su parámetro en cm. Si un tipo no aparece, puedes escribirlo manualmente.")
+        st.info("Selecciona el tipo de equipo, define si es equipo principal, componente o herramienta, y asócialo a un activo padre cuando corresponda. En corte ahora primero preguntas si el activo sí es una cuchilla, para no pedir esos datos cuando registras la Cameo principal, un tapete u otro accesorio. Si un tipo no aparece, puedes escribirlo manualmente.")
         c1, c2, c3 = st.columns(3)
         nombre_eq = c1.text_input("Nombre del activo", key="activos_nombre_nuevo_v2")
         tipo_unidad_nuevo = c2.selectbox("Tipo de equipo", TIPOS_UNIDAD, key="activos_tipo_equipo_nuevo_v2")
@@ -1064,9 +1075,10 @@ def render_activos(usuario: str):
             if tipo_predefinido_nuevo and tipo_predefinido_nuevo != OPCION_TIPO_PERSONALIZADO
             else tipo_personalizado_nuevo
         )
-        tipo_cuchilla_nuevo, parametro_cuchilla_nuevo = _render_campos_cuchilla(
+        es_cuchilla_nuevo, tipo_cuchilla_nuevo, parametro_cuchilla_nuevo, carro_cuchilla_nuevo = _render_campos_cuchilla(
             tipo_unidad_nuevo,
             tipo_detalle_preview_nuevo,
+            clase_nueva,
             prefijo_key="activos_nuevo",
         )
 
@@ -1108,6 +1120,7 @@ def render_activos(usuario: str):
                     tipo_detalle=tipo_detalle_nuevo,
                     tipo_cuchilla=tipo_cuchilla_nuevo,
                     parametro_cuchilla_cm=parametro_cuchilla_nuevo,
+                    carro_cuchilla=carro_cuchilla_nuevo if es_cuchilla_nuevo else None,
                     clase_registro=clase_nueva,
                     activo_padre_id=activo_padre_id_nuevo,
                     impacta_costo_padre=impacta_costo_nuevo,
@@ -1196,6 +1209,8 @@ def render_activos(usuario: str):
 
             tipo_cuchilla_actual = str(datos.get("tipo_cuchilla") or "")
             parametro_cuchilla_actual = datos.get("parametro_cuchilla_cm")
+            carro_cuchilla_actual = str(datos.get("carro_cuchilla") or "")
+            es_cuchilla_actual = bool(tipo_cuchilla_actual or pd.notna(parametro_cuchilla_actual) or carro_cuchilla_actual)
             nuevo_tipo_predefinido = None
             nuevo_tipo_personalizado = tipo_personalizado_actual
             if opciones_tipo_edicion:
@@ -1215,9 +1230,7 @@ def render_activos(usuario: str):
                     nuevo_tipo_personalizado = st.text_input(
                         f"Especifica {label_tipo_edicion.lower()}",
                         value=tipo_personalizado_actual,
-
-
-                                                key=_key_tipo_equipo(f"activos_editar_tipo_detalle_custom_{activo_id}", nueva_unidad),
+                        key=_key_tipo_equipo(f"activos_editar_tipo_detalle_custom_{activo_id}", nueva_unidad),
                     )
             else:
                 nuevo_tipo_personalizado = st.text_input(
@@ -1232,12 +1245,15 @@ def render_activos(usuario: str):
                 if nuevo_tipo_predefinido and nuevo_tipo_predefinido != OPCION_TIPO_PERSONALIZADO
                 else nuevo_tipo_personalizado
             )
-            tipo_cuchilla_edicion, parametro_cuchilla_edicion = _render_campos_cuchilla(
+            es_cuchilla_edicion, tipo_cuchilla_edicion, parametro_cuchilla_edicion, carro_cuchilla_edicion = _render_campos_cuchilla(
                 nueva_unidad,
                 tipo_detalle_preview_edicion,
+                nueva_clase,
                 prefijo_key=f"activos_editar_{activo_id}",
+                es_cuchilla_actual=es_cuchilla_actual,
                 tipo_cuchilla_actual=tipo_cuchilla_actual,
                 parametro_actual=parametro_cuchilla_actual,
+                carro_cuchilla_actual=carro_cuchilla_actual,
             )
 
             cc3, cc4 = st.columns(2)
@@ -1282,6 +1298,7 @@ def render_activos(usuario: str):
                         nuevo_tipo_detalle=nuevo_tipo_detalle,
                         tipo_cuchilla=tipo_cuchilla_edicion,
                         parametro_cuchilla_cm=parametro_cuchilla_edicion,
+                        carro_cuchilla=carro_cuchilla_edicion if es_cuchilla_edicion else None,
                         clase_registro=nueva_clase,
                         activo_padre_id=activo_padre_edicion,
                         impacta_costo_padre=impacta_costo_edicion,
@@ -1500,6 +1517,7 @@ def render_activos(usuario: str):
                         "tipo_detalle",
                         "tipo_cuchilla",
                         "parametro_cuchilla_cm",
+                        "carro_cuchilla",
                         "inversion",
                         "uso_acumulado",
                         "vida_util_valor",
