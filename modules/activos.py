@@ -806,10 +806,12 @@ def _ensure_activos_schema(conn) -> None:
             unidad TEXT,
             desgaste REAL NOT NULL DEFAULT 0,
             costo_hora REAL NOT NULL DEFAULT 0,
+            herramientas_faltantes TEXT,
             activo INTEGER NOT NULL DEFAULT 1
         )
         """
     )
+
 
     conn.execute(
         """
@@ -853,6 +855,7 @@ def _ensure_activos_schema(conn) -> None:
         "tipo_cuchilla": "ALTER TABLE activos ADD COLUMN tipo_cuchilla TEXT",
         "parametro_cuchilla_cm": "ALTER TABLE activos ADD COLUMN parametro_cuchilla_cm REAL",
         "carro_cuchilla": "ALTER TABLE activos ADD COLUMN carro_cuchilla TEXT",
+        "herramientas_faltantes": "ALTER TABLE activos ADD COLUMN herramientas_faltantes TEXT",
     }
     for col, alter_sql in optional_cols.items():
         if col not in cols:
