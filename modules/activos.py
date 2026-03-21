@@ -38,15 +38,90 @@ UNIDADES_VIDA_UTIL = [
     "manual",
 ]
 CUCHILLAS_CORTE_CONFIG = {
-    "Autoajustable": {"parametro_cm": 0.1, "descripcion": "AutoBlade estándar para materiales delgados."},
-    "Premium": {"parametro_cm": 0.1, "descripcion": "Cuchilla Premium de 1 mm para corte fino."},
-    "Morada": {"parametro_cm": 0.1, "descripcion": "Cuchilla manual tipo ratchet (morada) de 1 mm."},
-    "Deep Cut": {"parametro_cm": 0.2, "descripcion": "Cuchilla Deep Cut para materiales más gruesos."},
-    "Kraft 2 mm": {"parametro_cm": 0.2, "descripcion": "Cuchilla Kraft con exposición máxima de 2 mm."},
-    "Kraft 3 mm": {"parametro_cm": 0.3, "descripcion": "Cuchilla Kraft para materiales gruesos de hasta 3 mm."},
-    "Rotatoria": {"parametro_cm": 0.1, "descripcion": "Cuchilla rotatoria para tela y materiales especiales."},
+    "Cuchilla automática (Tipo B)": {
+        "parametro_cm": 0.1,
+        "descripcion": "AutoBlade estándar para papeles, cartulinas, vinil adhesivo y materiales delgados.",
+        "carro": "Carro 1",
+    },
+    "Cuchilla manual (1 mm)": {
+        "parametro_cm": 0.1,
+        "descripcion": "Cuchilla manual tipo ratchet de 1 mm para corte fino.",
+        "carro": "Carro 1",
+    },
+    "Cuchilla manual (2 mm)": {
+        "parametro_cm": 0.2,
+        "descripcion": "Cuchilla manual de 2 mm para cartulinas, vinil textil, acetato y goma EVA.",
+        "carro": "Carro 1",
+    },
+    "Cuchilla craft (2 mm)": {
+        "parametro_cm": 0.2,
+        "descripcion": "Cuchilla Craft de 2 mm para goma EVA, falso cuero y acetatos.",
+        "carro": "Carro 1",
+    },
+    "Cuchilla rotatoria": {
+        "parametro_cm": 0.1,
+        "descripcion": "Cuchilla rotatoria para telas de algodón, cuero, fieltro y lana.",
+        "carro": "Carro 2",
+    },
+    "Cuchilla kraft (3 mm)": {
+        "parametro_cm": 0.3,
+        "descripcion": "Cuchilla Kraft de 3 mm para acetato, cartón, goma EVA y cuero.",
+        "carro": "Carro 2",
+    },
+    # Alias heredados para no romper registros existentes.
+    "Autoajustable": {
+        "parametro_cm": 0.1,
+        "descripcion": "Alias heredado de Cuchilla automática (Tipo B).",
+        "carro": "Carro 1",
+    },
+    "Premium": {
+        "parametro_cm": 0.1,
+        "descripcion": "Alias heredado de Cuchilla manual (1 mm).",
+        "carro": "Carro 1",
+    },
+    "Morada": {
+        "parametro_cm": 0.1,
+        "descripcion": "Alias heredado de Cuchilla manual (1 mm).",
+        "carro": "Carro 1",
+    },
+    "Deep Cut": {
+        "parametro_cm": 0.2,
+        "descripcion": "Alias heredado de Cuchilla manual (2 mm).",
+        "carro": "Carro 1",
+    },
+    "Kraft 2 mm": {
+        "parametro_cm": 0.2,
+        "descripcion": "Alias heredado de Cuchilla craft (2 mm).",
+        "carro": "Carro 1",
+    },
+    "Kraft 3 mm": {
+        "parametro_cm": 0.3,
+        "descripcion": "Alias heredado de Cuchilla kraft (3 mm).",
+        "carro": "Carro 2",
+    },
+    "Rotatoria": {
+        "parametro_cm": 0.1,
+        "descripcion": "Alias heredado de Cuchilla rotatoria.",
+        "carro": "Carro 2",
+    },
 }
-TIPOS_CUCHILLA_CORTE = list(CUCHILLAS_CORTE_CONFIG.keys())
+TIPOS_CUCHILLA_CORTE = [
+    "Cuchilla automática (Tipo B)",
+    "Cuchilla manual (1 mm)",
+    "Cuchilla manual (2 mm)",
+    "Cuchilla craft (2 mm)",
+    "Cuchilla rotatoria",
+    "Cuchilla kraft (3 mm)",
+]
+TIPOS_CUCHILLA_ALIAS = {
+    "Autoajustable": "Cuchilla automática (Tipo B)",
+    "Premium": "Cuchilla manual (1 mm)",
+    "Morada": "Cuchilla manual (1 mm)",
+    "Deep Cut": "Cuchilla manual (2 mm)",
+    "Kraft 2 mm": "Cuchilla craft (2 mm)",
+    "Kraft 3 mm": "Cuchilla kraft (3 mm)",
+    "Rotatoria": "Cuchilla rotatoria",
+}
 POSICIONES_CARRO_CAMEO = [
     "No aplica / intercambiable",
     "Carro 1",
@@ -84,6 +159,17 @@ TIPOS_POR_EQUIPO = {
             "Cuchilla Cameo",
             "Cuchilla Cricut",
             "Cuchilla",
+            "Cuchilla automática (Tipo B)",
+            "Cuchilla manual (1 mm)",
+            "Cuchilla manual (2 mm)",
+            "Cuchilla craft (2 mm)",
+            "Cuchilla rotatoria",
+            "Cuchilla kraft (3 mm)",
+            "Punzón perforador",
+            "Herramientas embossing",
+            "Herramientas de transferencia de foil",
+            "Portabolígrafos (Tipo B)",
+            "Portabolígrafos (Tipo C)",
             "Cuchilla premium",
             "Tapete de corte",
             "Tapete 12x12",
@@ -481,16 +567,29 @@ def _es_equipo_principal_corte(tipo_equipo: str | None, clase_registro: str | No
     return str(tipo_equipo or "").strip().lower() == "corte" and _slug_clase_registro(clase_registro) == "equipo_principal"
 
 
+def _normalizar_tipo_cuchilla(tipo_cuchilla: str | None) -> str | None:
+    valor = str(tipo_cuchilla or "").strip()
+    if not valor:
+        return None
+    return TIPOS_CUCHILLA_ALIAS.get(valor, valor)
+
+
 def _parametro_cuchilla_por_tipo(tipo_cuchilla: str | None) -> float | None:
-    config = CUCHILLAS_CORTE_CONFIG.get(str(tipo_cuchilla or "").strip())
+    config = CUCHILLAS_CORTE_CONFIG.get(str(_normalizar_tipo_cuchilla(tipo_cuchilla) or "").strip())
     if not config:
         return None
     return float(config.get("parametro_cm") or 0.0)
 
 
 def _descripcion_cuchilla(tipo_cuchilla: str | None) -> str:
-    config = CUCHILLAS_CORTE_CONFIG.get(str(tipo_cuchilla or "").strip())
+    config = CUCHILLAS_CORTE_CONFIG.get(str(_normalizar_tipo_cuchilla(tipo_cuchilla) or "").strip())
     return str(config.get("descripcion") or "") if config else ""
+
+
+def _carro_sugerido_por_cuchilla(tipo_cuchilla: str | None) -> str | None:
+    config = CUCHILLAS_CORTE_CONFIG.get(str(_normalizar_tipo_cuchilla(tipo_cuchilla) or "").strip())
+    carro = str(config.get("carro") or "") if config else ""
+    return carro.strip() or None
 
 
 def _render_campos_cuchilla(
@@ -522,7 +621,7 @@ def _render_campos_cuchilla(
         return False, None, None, None
 
     opciones = ["Selecciona la cuchilla"] + TIPOS_CUCHILLA_CORTE
-    valor_inicial = str(tipo_cuchilla_actual or "").strip()
+    valor_inicial = str(_normalizar_tipo_cuchilla(tipo_cuchilla_actual) or "").strip()
     indice = opciones.index(valor_inicial) if valor_inicial in opciones else 0
     col1, col2 = st.columns(2)
     tipo_cuchilla = col1.selectbox(
@@ -534,6 +633,8 @@ def _render_campos_cuchilla(
     )
     if tipo_cuchilla == opciones[0]:
         tipo_cuchilla = None
+    else:
+        tipo_cuchilla = _normalizar_tipo_cuchilla(tipo_cuchilla)
 
     parametro_sugerido = _parametro_cuchilla_por_tipo(tipo_cuchilla)
     parametro_default = parametro_sugerido if parametro_sugerido is not None else _safe_float(parametro_actual, 0.1)
@@ -545,7 +646,8 @@ def _render_campos_cuchilla(
         key=f"{prefijo_key}_parametro_cuchilla_cm",
         help="Se autocompleta según la cuchilla seleccionada, pero puedes ajustarlo manualmente.",
     )
-    carro_inicial = str(carro_cuchilla_actual or POSICIONES_CARRO_CAMEO[0]).strip()
+    carro_sugerido = _carro_sugerido_por_cuchilla(tipo_cuchilla)
+    carro_inicial = str(carro_cuchilla_actual or carro_sugerido or POSICIONES_CARRO_CAMEO[0]).strip()
     if carro_inicial not in POSICIONES_CARRO_CAMEO:
         carro_inicial = POSICIONES_CARRO_CAMEO[0]
     carro_cuchilla = st.selectbox(
@@ -734,7 +836,7 @@ def _load_activos_df() -> pd.DataFrame:
     df["estado_componente"] = df["vida_restante_pct"].apply(_estado_componente_desde_vida)
     df["impacta_costo_padre"] = pd.to_numeric(df.get("impacta_costo_padre"), errors="coerce").fillna(1).astype(int)
     df["impacta_desgaste_padre"] = pd.to_numeric(df.get("impacta_desgaste_padre"), errors="coerce").fillna(0).astype(int)
-    df["tipo_cuchilla"] = df.get("tipo_cuchilla", pd.Series(dtype="object")).fillna("")
+    df["tipo_cuchilla"] = df.get("tipo_cuchilla", pd.Series(dtype="object")).fillna("").apply(_normalizar_tipo_cuchilla).fillna("")
     df["parametro_cuchilla_cm"] = pd.to_numeric(df.get("parametro_cuchilla_cm"), errors="coerce")
     df["carro_cuchilla"] = df.get("carro_cuchilla", pd.Series(dtype="object")).fillna("")
     ranking_riesgo = df["desgaste"].rank(pct=True, method="average").fillna(0)
@@ -776,7 +878,7 @@ def _crear_activo(
     fecha_instalacion = str(fecha_instalacion or "").strip() or None
     tipo_detalle = (tipo_detalle or "").strip() or None
     tipo_impresora = tipo_detalle if _es_equipo_impresora(tipo_unidad) else None
-    tipo_cuchilla = (tipo_cuchilla or "").strip() or None
+    tipo_cuchilla = _normalizar_tipo_cuchilla(tipo_cuchilla)
     parametro_cuchilla_cm = _safe_float(parametro_cuchilla_cm, 0.0) if parametro_cuchilla_cm is not None else None
     carro_cuchilla = (carro_cuchilla or "").strip() or None
     if not _es_tipo_cuchilla_corte(tipo_unidad, tipo_detalle, es_cuchilla=bool(tipo_cuchilla or parametro_cuchilla_cm or carro_cuchilla)):
@@ -873,7 +975,7 @@ def _actualizar_activo(
     nueva_fecha_instalacion = str(nueva_fecha_instalacion or "").strip() or None
     nuevo_tipo_detalle = (nuevo_tipo_detalle or "").strip() or None
     nuevo_tipo_impresora = nuevo_tipo_detalle if _es_equipo_impresora(nueva_unidad) else None
-    tipo_cuchilla = (tipo_cuchilla or "").strip() or None
+    tipo_cuchilla = _normalizar_tipo_cuchilla(tipo_cuchilla)
     parametro_cuchilla_cm = _safe_float(parametro_cuchilla_cm, 0.0) if parametro_cuchilla_cm is not None else None
     carro_cuchilla = (carro_cuchilla or "").strip() or None
     if not _es_tipo_cuchilla_corte(nueva_unidad, nuevo_tipo_detalle, es_cuchilla=bool(tipo_cuchilla or parametro_cuchilla_cm or carro_cuchilla)):
