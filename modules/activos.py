@@ -291,6 +291,8 @@ def _migrar_valores_legados_activos(conn) -> None:
         )
 
 
+
+
 def _opciones_tipo_equipo(tipo_equipo: str | None) -> list[str]:
     opciones = list(_equipo_config(tipo_equipo).get("opciones") or [])
     return opciones + [OPCION_TIPO_PERSONALIZADO] if opciones else []
