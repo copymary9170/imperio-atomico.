@@ -53,7 +53,7 @@ CUCHILLAS_CORTE_CONFIG = {
         "descripcion": "Cuchilla manual de 2 mm para cartulinas, vinil textil, acetato y goma EVA.",
         "carro": "Carro 1",
     },
-    "Cuchilla craft (2 mm)": {
+    "Cuchilla kraft (2 mm)": {
         "parametro_cm": 0.2,
         "descripcion": "Cuchilla Craft de 2 mm para goma EVA, falso cuero y acetatos.",
         "carro": "Carro 1",
@@ -91,7 +91,12 @@ CUCHILLAS_CORTE_CONFIG = {
     },
     "Kraft 2 mm": {
         "parametro_cm": 0.2,
-        "descripcion": "Alias heredado de Cuchilla craft (2 mm).",
+        "descripcion": "Alias heredado de Cuchilla kraft (2 mm).",
+        "carro": "Carro 1",
+    },
+    "Cuchilla craft (2 mm)": {
+        "parametro_cm": 0.2,
+        "descripcion": "Alias heredado de Cuchilla kraft (2 mm).",
         "carro": "Carro 1",
     },
     "Kraft 3 mm": {
@@ -109,7 +114,7 @@ TIPOS_CUCHILLA_CORTE = [
     "Cuchilla automática (Tipo B)",
     "Cuchilla manual (1 mm)",
     "Cuchilla manual (2 mm)",
-    "Cuchilla craft (2 mm)",
+    "Cuchilla kraft (2 mm)",
     "Cuchilla rotatoria",
     "Cuchilla kraft (3 mm)",
 ]
@@ -118,7 +123,7 @@ TIPOS_CUCHILLA_ALIAS = {
     "Premium": "Cuchilla manual (1 mm)",
     "Morada": "Cuchilla manual (1 mm)",
     "Deep Cut": "Cuchilla manual (2 mm)",
-    "Kraft 2 mm": "Cuchilla craft (2 mm)",
+    "Kraft 2 mm": "Cuchilla kraft (2 mm)",
     "Kraft 3 mm": "Cuchilla kraft (3 mm)",
     "Rotatoria": "Cuchilla rotatoria",
 }
@@ -162,7 +167,7 @@ TIPOS_POR_EQUIPO = {
             "Cuchilla automática (Tipo B)",
             "Cuchilla manual (1 mm)",
             "Cuchilla manual (2 mm)",
-            "Cuchilla craft (2 mm)",
+            "Cuchilla kraft (2 mm)",
             "Cuchilla rotatoria",
             "Cuchilla kraft (3 mm)",
             "Punzón perforador",
@@ -667,7 +672,19 @@ def _render_campos_cuchilla(
         st.caption(f"Parámetro sugerido: {parametro_default:.1f} cm · {descripcion}")
     else:
         st.caption("Puedes indicar manualmente el parámetro en cm para esta cuchilla.")
+
+    st.info(
+        "Sí, en la Silhouette Cameo 5 no todas las herramientas son cuchillas de corte. "
+        "Cuchillas compatibles: automática tipo B (1 mm), manual 1 mm, manual 2 mm, kraft 2 mm, rotatoria (1 mm) y kraft 3 mm. "
+        "Otras herramientas compatibles que no son cuchillas: portabolígrafos tipo B y C, punzón perforador, embossing y foil."
+    )
+    st.caption(
+        "Recomendación rápida: papel, cartulina y vinilo → automática tipo B; "
+        "foami, goma EVA y cuero sintético → kraft 2 mm o 3 mm; "
+        "tela y fieltro → rotatoria."
+    )
     return True, tipo_cuchilla, float(parametro_cuchilla_cm), carro_cuchilla
+
 
 
 
