@@ -131,6 +131,7 @@ TIPOS_CUCHILLA_ALIAS = {
 POSICIONES_CARRO_CAMEO = [
     "No aplica / intercambiable",
     "Carro 1",
+    "Carro 2",
 ]
 HERRAMIENTAS_COMPATIBLES_CAMEO_5 = [
     "Cuchilla automática (Tipo B)",
@@ -663,12 +664,21 @@ def _render_herramientas_faltantes_cameo(
         return []
 
     seleccion_actual = _normalizar_herramientas_faltantes(herramientas_faltantes_actual)
+    st.info(
+        "Herramientas compatibles con la Silhouette Cameo 5: cuchilla automática tipo B, "
+        "cuchillas manuales de 1 mm y 2 mm, cuchilla kraft de 2 mm y 3 mm, cuchilla rotatoria, "
+        "portabolígrafos tipo B y C, punzón perforador, embossing y foil."
+    )
     seleccion = st.multiselect(
         "Herramientas o accesorios que te faltan para esta Cameo 5",
         HERRAMIENTAS_COMPATIBLES_CAMEO_5,
         default=[item for item in seleccion_actual if item in HERRAMIENTAS_COMPATIBLES_CAMEO_5],
         key=f"{prefijo_key}_herramientas_faltantes_cameo_5",
         help="Marca solo lo que todavía te hace falta comprar o reponer para esta máquina.",
+    )
+    st.caption(
+        "Las herramientas que no son cuchillas también se pueden registrar aquí: "
+        "portabolígrafos tipo B y C, punzón perforador, embossing y foil."
     )
     if seleccion:
         st.caption(f"Pendiente por completar: {', '.join(seleccion)}.")
