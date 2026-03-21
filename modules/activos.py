@@ -5,9 +5,18 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from pathlib import Path
 
 from database.connection import db_transaction
 from modules.common import as_positive, require_text
+from services.asset_diagnostics_service import (
+    VISUAL_LEVEL_SCORES,
+    create_asset_diagnostic,
+    get_asset_profile,
+    get_latest_asset_diagnostic,
+    list_asset_diagnostics,
+    save_asset_diagnostic_file,
+)
 from services.diagnostics_service import (
     get_printer_diagnostic_summary,
     list_printer_diagnostics,
@@ -558,6 +567,128 @@ def _render_componentes_asociados(componentes_map: dict[int, pd.DataFrame], acti
             f"Próximo a reponer: {siguiente['equipo']} · {float(siguiente['vida_restante_pct']):.1f}% de vida restante"
         )
     st.dataframe(vista, use_container_width=True, hide_index=True)
+
+
+def _format_asset_diagnostic_files(files: object) -> str:
+    if not files:
+        return ""
+    if isinstance(files, str):
+        try:
+            files = json.loads(files)
+        except json.JSONDecodeError:
+            return str(files)
+    nombres = [Path(str(item.get("file_path") or item.get("file_name") or "")).name for item in files if isinstance(item, dict)]
+    return ", ".join([nombre for nombre in nombres if nombre])
+
+
+def _render_asset_diagnostic_panel(activo: dict | pd.Series, usuario: str) -> None:
+    data = activo.to_dict() if isinstance(activo, pd.Series) else dict(activo)
+    activo_id = int(data["id"])
+    profile = get_asset_profile(data)
+    latest = get_latest_asset_diagnostic(activo_id)
+
+    st.markdown("##### 🧪 Evaluación de diagnóstico del activo")
+    st.caption(
+        "Este diagnóstico es complementario al seguimiento actual: te deja subir fotos, registrar notas y obtener una estimación visual del desgaste restante."
+    )
+    st.info(f"Perfil detectado: {profile['label']}. {profile['intro']}")
+
+    if latest:
+        lm1, lm2, lm3, lm4 = st.columns(4)
+        lm1.metric("Última severidad", str(latest.get("severity") or "N/D"))
+        lm2.metric("Desgaste estimado", f"{float(latest.get('estimated_wear_pct') or 0.0):.1f}%")
+        lm3.metric("Vida restante", f"{float(latest.get('remaining_life_pct') or 0.0):.1f}%")
+        lm4.metric("Fotos de evidencia", int(latest.get("photos_count") or 0))
+        if latest.get("recommendation"):
+            st.caption(f"Última recomendación: {latest['recommendation']}")
+
+    observation_values: dict[str, str] = {}
+    visual_options = list(VISUAL_LEVEL_SCORES.keys())
+    for idx in range(0, len(profile["factors"]), 2):
+        cols = st.columns(min(2, len(profile["factors"]) - idx))
+        for col, factor in zip(cols, profile["factors"][idx : idx + 2]):
+            observation_values[factor["key"]] = col.select_slider(
+                factor["label"],
+                options=visual_options,
+                value="Óptimo",
+                key=f"asset_diag_factor_{activo_id}_{factor['key']}",
+                help=factor.get("help"),
+            )
+
+    notes = st.text_area(
+        "Notas / avisos interpretables",
+        key=f"asset_diag_notes_{activo_id}",
+        placeholder=(
+            "Ej.: el tapete ya no pega en la esquina superior, la cuchilla arrastra el vinil, "
+            "la plancha tiene zonas frías, el exacto está perdiendo filo..."
+        ),
+        help="Puedes describir síntomas; el sistema los interpreta para sugerir si requiere pegamento, mantenimiento o cambio.",
+    )
+    photo_cam = st.camera_input("Tomar foto de evidencia", key=f"asset_diag_camera_{activo_id}")
+    extra_files = st.file_uploader(
+        "Subir fotos del activo",
+        type=["png", "jpg", "jpeg", "webp"],
+        accept_multiple_files=True,
+        key=f"asset_diag_files_{activo_id}",
+    )
+
+    if photo_cam is not None:
+        st.image(photo_cam, caption="Foto capturada", use_container_width=True)
+    if extra_files:
+        st.caption(f"Fotos adicionales cargadas: {len(extra_files)}")
+
+    if st.button("🧠 Evaluar diagnóstico visual", key=f"asset_diag_eval_{activo_id}"):
+        files_meta: list[dict] = []
+        if photo_cam is not None:
+            meta = save_asset_diagnostic_file(photo_cam, activo_id, category="camara")
+            if meta:
+                files_meta.append(meta)
+        for file_obj in extra_files or []:
+            meta = save_asset_diagnostic_file(file_obj, activo_id, category="foto")
+            if meta:
+                files_meta.append(meta)
+
+        resultado = create_asset_diagnostic(
+            activo=data,
+            usuario=usuario,
+            observations=observation_values,
+            notes=notes,
+            files=files_meta,
+        )
+        st.success(
+            f"Diagnóstico guardado. Desgaste estimado: {float(resultado['estimated_wear_pct']):.1f}% · "
+            f"vida restante: {float(resultado['remaining_life_pct']):.1f}%."
+        )
+        if resultado.get("note_signals"):
+            st.caption("Señales detectadas en notas: " + ", ".join(resultado["note_signals"]))
+        st.info(resultado["recommendation"])
+        st.rerun()
+
+    historial = pd.DataFrame(list_asset_diagnostics(activo_id, limit=10))
+    st.markdown("###### Historial de evaluaciones del activo")
+    if historial.empty:
+        st.caption("Aún no hay evaluaciones visuales registradas para este activo.")
+    else:
+        if "files" in historial.columns:
+            historial["evidencias"] = historial["files"].apply(_format_asset_diagnostic_files)
+        if "note_signals" in historial.columns:
+            historial["señales"] = historial["note_signals"].apply(lambda vals: ", ".join(vals) if isinstance(vals, list) else "")
+        cols = [
+            "id",
+            "created_at",
+            "created_by",
+            "profile_key",
+            "estimated_wear_pct",
+            "remaining_life_pct",
+            "severity",
+            "photos_count",
+            "señales",
+            "recommendation",
+            "evidencias",
+            "notes",
+        ]
+        cols = [col for col in cols if col in historial.columns]
+        st.dataframe(historial[cols], use_container_width=True, hide_index=True)
 
 
 def _key_tipo_equipo(base_key: str, tipo_equipo: str | None) -> str:
@@ -1598,9 +1729,12 @@ def render_activos(usuario: str):
             use_container_width=True,
             hide_index=True,
         )
-        for row in df_categoria[df_categoria["clase_registro"] == "equipo_principal"].itertuples():
+        for row in df_categoria.itertuples():
             with st.expander(f"{prefijo_expandir} · {_formatear_activo_relacion(row)}", expanded=False):
-                _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
+                row_dict = row._asdict()
+                if str(row_dict.get("clase_registro") or "") == "equipo_principal":
+                    _render_componentes_asociados(componentes_map, int(row.id), titulo="Vinculados a este equipo")
+                _render_asset_diagnostic_panel(row_dict, usuario)
 
     with t1:
         st.subheader("Impresoras")
@@ -1668,10 +1802,16 @@ def render_activos(usuario: str):
                     rc1, rc2, rc3 = st.columns(3)
                     rc1.metric("Costo vinculado", f"$ {float(impresora_data.get('costo_componentes_asociados') or 0.0):,.2f}")
                     rc2.metric("Componentes vinculados", int(impresora_data.get("componentes_vinculados") or 0))
-                    rc3.metric("Componentes críticos", int(impresora_data.get("componentes_criticos_vinculados") or 0))
+                         rc3.metric("Componentes críticos", int(impresora_data.get("componentes_criticos_vinculados") or 0))
+                    with st.expander("📸 Diagnóstico visual complementario del activo", expanded=False):
+                        _render_asset_diagnostic_panel(impresora_data, usuario)
             else:
                 st.info("Esta impresora aún no tiene diagnósticos técnicos registrados.")
                 _render_componentes_asociados(componentes_map, sel_id, titulo="Componentes, repuestos y accesorios vinculados")
+                fila_impresora = df_imp[df_imp["id"] == sel_id]
+                if not fila_impresora.empty:
+                    with st.expander("📸 Diagnóstico visual complementario del activo", expanded=False):
+                        _render_asset_diagnostic_panel(fila_impresora.iloc[0], usuario)
 
             st.markdown("#### 📜 Historial de diagnósticos")
             historial = pd.DataFrame(list_printer_diagnostics(sel_id, limit=50))
