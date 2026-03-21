@@ -1801,8 +1801,8 @@ def render_activos(usuario: str):
                     impresora_data = fila_impresora.iloc[0]
                     rc1, rc2, rc3 = st.columns(3)
                     rc1.metric("Costo vinculado", f"$ {float(impresora_data.get('costo_componentes_asociados') or 0.0):,.2f}")
-                    rc2.metric("Componentes vinculados", int(impresora_data.get("componentes_vinculados") or 0))
-                         rc3.metric("Componentes críticos", int(impresora_data.get("componentes_criticos_vinculados") or 0))
+                       rc2.metric("Componentes vinculados", int(impresora_data.get("componentes_vinculados") or 0))
+                    rc3.metric("Componentes críticos", int(impresora_data.get("componentes_criticos_vinculados") or 0))
                     with st.expander("📸 Diagnóstico visual complementario del activo", expanded=False):
                         _render_asset_diagnostic_panel(impresora_data, usuario)
             else:
