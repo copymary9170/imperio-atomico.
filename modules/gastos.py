@@ -161,9 +161,44 @@ def _sync_rate_state(
     return float(st.session_state.get(rate_key, suggested_rate))
 
 
+def _render_currency_rate_inputs(
+    moneda_key: str,
+    tasa_key: str,
+    metodo_pago: str,
+    config: dict[str, object],
+    *,
+    moneda_default: str = "USD",
+    tasa_inicial: float | None = None,
+    moneda_label: str = "Moneda",
+    tasa_label: str = "Tasa",
+) -> tuple[str, float, float]:
+    moneda_actual = str(st.session_state.get(moneda_key, moneda_default) or moneda_default).upper().strip()
+    if moneda_actual not in MONEDAS_GASTO:
+        moneda_actual = moneda_default if moneda_default in MONEDAS_GASTO else MONEDAS_GASTO[0]
+        st.session_state[moneda_key] = moneda_actual
+
+    col_moneda, col_tasa = st.columns(2)
+    moneda = col_moneda.selectbox(
+        moneda_label,
+        MONEDAS_GASTO,
+        index=MONEDAS_GASTO.index(moneda_actual),
+        key=moneda_key,
+    )
+    tasa_sugerida = _resolve_rate(moneda, metodo_pago, config)
+    _sync_rate_state(tasa_key, moneda, metodo_pago, config, initial_rate=tasa_inicial)
+    tasa = col_tasa.number_input(
+        tasa_label,
+        min_value=0.0001,
+        format="%.4f",
+        key=tasa_key,
+    )
+    return moneda, float(tasa), float(tasa_sugerida)
+
+
 # ============================================================
 # REGISTRAR GASTO
 # ============================================================
+
 
 def registrar_gasto(
     usuario: str,
@@ -249,13 +284,15 @@ def _render_tab_registro(usuario: str) -> None:
     descripcion = c1.text_input("Descripción del gasto", key="gastos_registro_descripcion")
     categoria = c2.selectbox("Categoría", CATEGORIAS_GASTO, key="gastos_registro_categoria")
 
-    c3, c4, c5, c6 = st.columns(4)
+    c3, c4 = st.columns(2)
     monto = c3.number_input("Monto", min_value=0.01, format="%.2f", key="gastos_registro_monto")
     metodo = c4.selectbox("Método de pago", METODOS_GASTO, key="gastos_registro_metodo")
-    moneda = c5.selectbox("Moneda", MONEDAS_GASTO, key="gastos_registro_moneda")
-    tasa_sugerida = _resolve_rate(moneda, metodo, config)
-    _sync_rate_state("gastos_registro_tasa", moneda, metodo, config)
-    tasa = c6.number_input("Tasa", min_value=0.0001, format="%.4f", key="gastos_registro_tasa")
+    moneda, tasa, tasa_sugerida = _render_currency_rate_inputs(
+        "gastos_registro_moneda",
+        "gastos_registro_tasa",
+        metodo,
+        config,
+    )
 
     taxes_default = _suggest_tax_flags(metodo)
     tx1, tx2, tx3, tx4 = st.columns(4)
@@ -466,18 +503,11 @@ def _render_tab_historial() -> None:
                 key=f"cat_gasto_{gasto_id}",
             )
 
-            e3, e4, e5, e6 = st.columns(4)
-            nuevo_metodo = e3.selectbox(
+            nuevo_metodo = st.selectbox(
                 "Método de pago",
                 METODOS_GASTO,
                 index=METODOS_GASTO.index(row["metodo_pago"]) if row["metodo_pago"] in METODOS_GASTO else 0,
                 key=f"metodo_gasto_{gasto_id}",
-            )
-            nueva_moneda = e4.selectbox(
-                "Moneda",
-                MONEDAS_GASTO,
-                index=MONEDAS_GASTO.index(row["moneda"]) if row["moneda"] in MONEDAS_GASTO else 0,
-                key=f"moneda_gasto_{gasto_id}",
             )
             subtotal_base = float(row.get("subtotal_usd", row["monto_usd"]) or 0)
             monto_referencia = float(row["monto_bs"]) if row["moneda"] == "BS" else float(row["monto_usd"])
@@ -487,19 +517,20 @@ def _render_tab_historial() -> None:
                     if row["moneda"] == "BS"
                     else subtotal_base
                 )
-            nuevo_monto = e5.number_input(
+            nuevo_monto = st.number_input(
                 "Monto",
                 min_value=0.01,
                 value=monto_referencia,
                 format="%.2f",
                 key=f"monto_gasto_{gasto_id}",
             )
-            nueva_tasa = e6.number_input(
-                "Tasa",
-                min_value=0.0001,
-                value=float(row["tasa_cambio"] or _resolve_rate(nueva_moneda, nuevo_metodo, config)),
-                format="%.4f",
-                key=f"tasa_gasto_{gasto_id}",
+            nueva_moneda, nueva_tasa, tasa_sugerida_edit = _render_currency_rate_inputs(
+                f"moneda_gasto_{gasto_id}",
+                f"tasa_gasto_{gasto_id}",
+                nuevo_metodo,
+                config,
+                moneda_default=str(row["moneda"] or "USD"),
+                tasa_inicial=float(row["tasa_cambio"] or _resolve_rate(str(row["moneda"] or "USD"), nuevo_metodo, config)),
             )
 
             impuesto_pct_actual = float(row["impuesto_pct"]) if "impuesto_pct" in row.index else 0.0
@@ -521,7 +552,7 @@ def _render_tab_historial() -> None:
             )
             info_periodicidad = _periodicidad_meta(nueva_periodicidad)
             e8.caption(
-                f"Tasa sugerida actual en Configuración para {nuevo_metodo}/{nueva_moneda}: {_resolve_rate(nueva_moneda, nuevo_metodo, config):,.2f}."
+                f"Tasa sugerida actual en Configuración para {nuevo_metodo}/{nueva_moneda}: {tasa_sugerida_edit:,.2f}."
             )
 
             subtotal_edit_usd = round(convert_to_usd(float(nuevo_monto), nueva_moneda, float(nueva_tasa)), 4)
@@ -547,6 +578,7 @@ def _render_tab_historial() -> None:
                             UPDATE gastos
                             SET descripcion=?, categoria=?, metodo_pago=?, moneda=?, tasa_cambio=?, subtotal_usd=?, impuesto_pct=?, impuesto_usd=?, monto_usd=?, monto_bs=?, periodicidad=?, dias_periodicidad=?, factor_mensual=?, monto_mensual_usd=?, monto_mensual_bs=?
                             WHERE id=?
+
                             """,
                             (
                                 require_text(nueva_desc, "Descripción"),
