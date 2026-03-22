@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, require_text
+from modules.configuracion import DEFAULT_CONFIG, get_current_config
 from utils.currency import convert_to_bs, convert_to_usd
 
 
@@ -30,6 +31,50 @@ METODOS_GASTO = [
     "kontigo",
 ]
 
+PERIODICIDADES_GASTO = {
+    "Único": {"dias": None, "factor_mensual": 1.0, "descripcion": "Se registra solo una vez."},
+    "Semanal": {"dias": 7, "factor_mensual": 30 / 7, "descripcion": "Se convierte a equivalente mensual usando 30/7."},
+    "Cada 15 días": {"dias": 15, "factor_mensual": 2.0, "descripcion": "Se multiplica por 2 para estimar el mes."},
+    "Mensual": {"dias": 30, "factor_mensual": 1.0, "descripcion": "Ya corresponde a un ciclo mensual."},
+    "Bimestral": {"dias": 60, "factor_mensual": 0.5, "descripcion": "Se divide entre 2 para el equivalente mensual."},
+    "Trimestral": {"dias": 90, "factor_mensual": 1 / 3, "descripcion": "Se divide entre 3 para el equivalente mensual."},
+}
+
+MONEDAS_GASTO = ["USD", "BS", "USDT", "KONTIGO"]
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def _to_float(value: object, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _load_config_snapshot() -> dict[str, object]:
+    try:
+        return get_current_config()
+    except Exception:
+        return {}
+
+
+def _resolve_rate_for_currency(moneda: str, config: dict[str, object] | None = None) -> float:
+    cfg = config or _load_config_snapshot()
+    tasa_bcv = _to_float(cfg.get("tasa_bcv"), DEFAULT_CONFIG["tasa_bcv"])
+    tasa_binance = _to_float(cfg.get("tasa_binance"), DEFAULT_CONFIG["tasa_binance"])
+
+    moneda_normalizada = str(moneda or "USD").upper().strip()
+    if moneda_normalizada in {"USDT", "KONTIGO"}:
+        return tasa_binance
+    return tasa_bcv
+
+
+def _periodicidad_meta(periodicidad: str) -> dict[str, float | int | None | str]:
+    return PERIODICIDADES_GASTO.get(periodicidad, PERIODICIDADES_GASTO["Único"])
+
 
 # ============================================================
 # REGISTRAR GASTO
@@ -43,16 +88,24 @@ def registrar_gasto(
     moneda: str,
     tasa_cambio: float,
     monto: float,
+    periodicidad: str,
 ) -> int:
     descripcion = require_text(descripcion, "Descripción")
     categoria = require_text(categoria, "Categoría")
     metodo_pago = require_text(metodo_pago, "Método de pago")
+    periodicidad = require_text(periodicidad, "Periodicidad")
 
     tasa_cambio = as_positive(tasa_cambio, "Tasa de cambio", allow_zero=False)
     monto = as_positive(monto, "Monto", allow_zero=False)
 
     monto_usd = convert_to_usd(monto, moneda, tasa_cambio)
     monto_bs = convert_to_bs(monto_usd, tasa_cambio)
+
+    periodicidad_info = _periodicidad_meta(periodicidad)
+    factor_mensual = float(periodicidad_info["factor_mensual"] or 1.0)
+    dias_periodicidad = periodicidad_info["dias"]
+    monto_mensual_usd = round(monto_usd * factor_mensual, 4)
+    monto_mensual_bs = round(convert_to_bs(monto_mensual_usd, tasa_cambio), 2)
 
     with db_transaction() as conn:
         cur = conn.execute(
@@ -65,9 +118,14 @@ def registrar_gasto(
                 moneda,
                 tasa_cambio,
                 monto_usd,
-                monto_bs
+                monto_bs,
+                periodicidad,
+                dias_periodicidad,
+                factor_mensual,
+                monto_mensual_usd,
+                monto_mensual_bs
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario,
@@ -78,6 +136,11 @@ def registrar_gasto(
                 tasa_cambio,
                 monto_usd,
                 monto_bs,
+                periodicidad,
+                dias_periodicidad,
+                factor_mensual,
+                monto_mensual_usd,
+                monto_mensual_bs,
             ),
         )
 
@@ -85,6 +148,8 @@ def registrar_gasto(
 
 
 def _render_tab_registro(usuario: str) -> None:
+    config = _load_config_snapshot()
+
     with st.form("form_gastos_pro", clear_on_submit=True):
         c1, c2 = st.columns([2, 1])
 
@@ -94,15 +159,26 @@ def _render_tab_registro(usuario: str) -> None:
         c3, c4, c5, c6 = st.columns(4)
         monto = c3.number_input("Monto", min_value=0.01, format="%.2f")
         metodo = c4.selectbox("Método de pago", METODOS_GASTO)
-        moneda = c5.selectbox("Moneda", ["USD", "BS", "USDT", "KONTIGO"])
-        tasa = c6.number_input("Tasa", min_value=0.0001, value=36.5)
+        moneda = c5.selectbox("Moneda", MONEDAS_GASTO)
+        tasa_sugerida = _resolve_rate_for_currency(moneda, config)
+        tasa = c6.number_input("Tasa", min_value=0.0001, value=float(tasa_sugerida), format="%.4f")
+
+        c7, c8 = st.columns([1, 2])
+        periodicidad = c7.selectbox("Periodicidad", list(PERIODICIDADES_GASTO.keys()), index=0)
+        info_periodicidad = _periodicidad_meta(periodicidad)
+        c8.caption(
+            f"{info_periodicidad['descripcion']} Tasa sugerida desde Configuración: {tasa_sugerida:,.2f}."
+        )
 
         monto_usd = convert_to_usd(float(monto), moneda, float(tasa))
         monto_bs = convert_to_bs(monto_usd, float(tasa))
+        monto_mensual_usd = monto_usd * float(info_periodicidad["factor_mensual"] or 1.0)
+        monto_mensual_bs = convert_to_bs(monto_mensual_usd, float(tasa))
 
-        p1, p2 = st.columns(2)
+        p1, p2, p3 = st.columns(3)
         p1.metric("Equivalente USD", f"$ {monto_usd:,.2f}")
         p2.metric("Equivalente Bs", f"Bs {monto_bs:,.2f}")
+        p3.metric("Equivalente mensual", f"$ {monto_mensual_usd:,.2f}")
 
         submit = st.form_submit_button("📉 Registrar egreso")
 
@@ -118,8 +194,10 @@ def _render_tab_registro(usuario: str) -> None:
             moneda=moneda,
             tasa_cambio=float(tasa),
             monto=float(monto),
+            periodicidad=periodicidad,
         )
         st.success(f"✅ Gasto #{gid} registrado")
+        st.caption(f"Equivalente mensual estimado: $ {monto_mensual_usd:,.2f} / Bs {monto_mensual_bs:,.2f}")
         st.balloons()
         st.rerun()
     except ValueError as exc:
@@ -144,6 +222,11 @@ def _load_gastos() -> pd.DataFrame:
                 tasa_cambio,
                 monto_usd,
                 monto_bs,
+                periodicidad,
+                dias_periodicidad,
+                factor_mensual,
+                monto_mensual_usd,
+                monto_mensual_bs,
                 estado
             FROM gastos
             WHERE estado='activo'
@@ -169,13 +252,19 @@ def _render_tab_historial() -> None:
 
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
     df["metodo_pago"] = df["metodo_pago"].fillna("sin definir")
+    df["periodicidad"] = df["periodicidad"].fillna("Único")
+    if "monto_mensual_usd" not in df.columns:
+        df["monto_mensual_usd"] = df["monto_usd"]
+    if "monto_mensual_bs" not in df.columns:
+        df["monto_mensual_bs"] = df["monto_bs"]
 
-    c1, c2, c3, c4, c5 = st.columns([1, 1, 2, 1, 1])
+    c1, c2, c3, c4, c5, c6 = st.columns([1, 1, 2, 1, 1, 1])
     desde = c1.date_input("Desde", date.today() - timedelta(days=30), key="gastos_desde")
     hasta = c2.date_input("Hasta", date.today(), key="gastos_hasta")
     buscar = c3.text_input("Buscar por descripción")
     categoria_f = c4.selectbox("Categoría", ["Todas"] + sorted(df["categoria"].dropna().unique().tolist()))
     metodo_f = c5.selectbox("Método", ["Todos"] + sorted(df["metodo_pago"].str.title().unique().tolist()))
+    periodicidad_f = c6.selectbox("Periodicidad", ["Todas"] + list(PERIODICIDADES_GASTO.keys()))
 
     filtro_fecha = (df["fecha"].dt.date >= desde) & (df["fecha"].dt.date <= hasta)
     df_fil = df[filtro_fecha].copy()
@@ -186,14 +275,31 @@ def _render_tab_historial() -> None:
         df_fil = df_fil[df_fil["categoria"] == categoria_f]
     if metodo_f != "Todos":
         df_fil = df_fil[df_fil["metodo_pago"].str.lower() == metodo_f.lower()]
+    if periodicidad_f != "Todas":
+        df_fil = df_fil[df_fil["periodicidad"] == periodicidad_f]
 
-    k1, k2, k3 = st.columns(3)
+    k1, k2, k3, k4 = st.columns(4)
     k1.metric("Total del periodo", f"$ {float(df_fil['monto_usd'].sum()):,.2f}")
     k2.metric("N° gastos", str(len(df_fil)))
     promedio = float(df_fil["monto_usd"].mean()) if not df_fil.empty else 0.0
     k3.metric("Promedio por gasto", f"$ {promedio:,.2f}")
+    k4.metric("Equiv. mensual total", f"$ {float(df_fil['monto_mensual_usd'].sum()):,.2f}")
 
-    st.dataframe(df_fil, use_container_width=True, hide_index=True)
+    columnas_tabla = [
+        "fecha",
+        "usuario",
+        "descripcion",
+        "categoria",
+        "metodo_pago",
+        "moneda",
+        "tasa_cambio",
+        "monto_usd",
+        "monto_bs",
+        "periodicidad",
+        "monto_mensual_usd",
+        "monto_mensual_bs",
+    ]
+    st.dataframe(df_fil[columnas_tabla], use_container_width=True, hide_index=True)
 
     if not df_fil.empty:
         g1, g2 = st.columns(2)
@@ -202,14 +308,22 @@ def _render_tab_historial() -> None:
             st.caption("Distribución por categoría")
             st.bar_chart(por_cat.set_index("categoria")["monto_usd"])
         with g2:
-            diaria = (
-                df_fil.assign(dia=df_fil["fecha"].dt.date)
-                .groupby("dia", as_index=False)["monto_usd"]
+            por_periodicidad = (
+                df_fil.groupby("periodicidad", as_index=False)["monto_mensual_usd"]
                 .sum()
-                .sort_values("dia")
+                .sort_values("monto_mensual_usd", ascending=False)
             )
-            st.caption("Tendencia de egresos")
-            st.line_chart(diaria.set_index("dia")["monto_usd"])
+            st.caption("Equivalente mensual por periodicidad")
+            st.bar_chart(por_periodicidad.set_index("periodicidad")["monto_mensual_usd"])
+
+        diaria = (
+            df_fil.assign(dia=df_fil["fecha"].dt.date)
+            .groupby("dia", as_index=False)["monto_usd"]
+            .sum()
+            .sort_values("dia")
+        )
+        st.caption("Tendencia de egresos")
+        st.line_chart(diaria.set_index("dia")["monto_usd"])
 
     st.subheader("Gestión de gastos")
 
@@ -221,6 +335,8 @@ def _render_tab_historial() -> None:
         row = df_fil[df_fil["id"] == gasto_id].iloc[0]
 
         with st.expander("✏️ Editar gasto"):
+            config = _load_config_snapshot()
+
             e1, e2 = st.columns([2, 1])
             nueva_desc = e1.text_input("Descripción", value=str(row["descripcion"]), key=f"desc_gasto_{gasto_id}")
             nueva_cat = e2.selectbox(
@@ -239,8 +355,8 @@ def _render_tab_historial() -> None:
             )
             nueva_moneda = e4.selectbox(
                 "Moneda",
-                ["USD", "BS", "USDT", "KONTIGO"],
-                index=["USD", "BS", "USDT", "KONTIGO"].index(row["moneda"]) if row["moneda"] in ["USD", "BS", "USDT", "KONTIGO"] else 0,
+                MONEDAS_GASTO,
+                index=MONEDAS_GASTO.index(row["moneda"]) if row["moneda"] in MONEDAS_GASTO else 0,
                 key=f"moneda_gasto_{gasto_id}",
             )
             monto_referencia = float(row["monto_bs"]) if row["moneda"] == "BS" else float(row["monto_usd"])
@@ -254,16 +370,33 @@ def _render_tab_historial() -> None:
             nueva_tasa = e6.number_input(
                 "Tasa",
                 min_value=0.0001,
-                value=float(row["tasa_cambio"] or 1.0),
+                value=float(row["tasa_cambio"] or _resolve_rate_for_currency(nueva_moneda, config)),
                 format="%.4f",
                 key=f"tasa_gasto_{gasto_id}",
             )
 
+            e7, e8 = st.columns([1, 2])
+            periodicidad_actual = row["periodicidad"] if row["periodicidad"] in PERIODICIDADES_GASTO else "Único"
+            nueva_periodicidad = e7.selectbox(
+                "Periodicidad",
+                list(PERIODICIDADES_GASTO.keys()),
+                index=list(PERIODICIDADES_GASTO.keys()).index(periodicidad_actual),
+                key=f"periodicidad_gasto_{gasto_id}",
+            )
+            info_periodicidad = _periodicidad_meta(nueva_periodicidad)
+            e8.caption(
+                f"Tasa sugerida actual en Configuración para {nueva_moneda}: {_resolve_rate_for_currency(nueva_moneda, config):,.2f}."
+            )
+
             monto_edit_usd = convert_to_usd(float(nuevo_monto), nueva_moneda, float(nueva_tasa))
             monto_edit_bs = convert_to_bs(monto_edit_usd, float(nueva_tasa))
-            p1, p2 = st.columns(2)
+            factor_mensual = float(info_periodicidad["factor_mensual"] or 1.0)
+            monto_edit_mensual_usd = round(monto_edit_usd * factor_mensual, 4)
+            monto_edit_mensual_bs = round(convert_to_bs(monto_edit_mensual_usd, float(nueva_tasa)), 2)
+            p1, p2, p3 = st.columns(3)
             p1.metric("Equivalente USD", f"$ {monto_edit_usd:,.2f}")
             p2.metric("Equivalente Bs", f"Bs {monto_edit_bs:,.2f}")
+            p3.metric("Equiv. mensual", f"$ {monto_edit_mensual_usd:,.2f}")
 
             if st.button("💾 Guardar cambios", key=f"edit_gasto_{gasto_id}"):
                 try:
@@ -271,7 +404,7 @@ def _render_tab_historial() -> None:
                         conn.execute(
                             """
                             UPDATE gastos
-                            SET descripcion=?, categoria=?, metodo_pago=?, moneda=?, tasa_cambio=?, monto_usd=?, monto_bs=?
+                            SET descripcion=?, categoria=?, metodo_pago=?, moneda=?, tasa_cambio=?, monto_usd=?, monto_bs=?, periodicidad=?, dias_periodicidad=?, factor_mensual=?, monto_mensual_usd=?, monto_mensual_bs=?
                             WHERE id=?
                             """,
                             (
@@ -282,6 +415,11 @@ def _render_tab_historial() -> None:
                                 as_positive(float(nueva_tasa), "Tasa de cambio", allow_zero=False),
                                 monto_edit_usd,
                                 monto_edit_bs,
+                                nueva_periodicidad,
+                                info_periodicidad["dias"],
+                                factor_mensual,
+                                monto_edit_mensual_usd,
+                                monto_edit_mensual_bs,
                                 int(gasto_id),
                             ),
                         )
@@ -335,10 +473,15 @@ def _render_tab_resumen() -> None:
         return
 
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+    df["periodicidad"] = df["periodicidad"].fillna("Único")
+    if "monto_mensual_usd" not in df.columns:
+        df["monto_mensual_usd"] = df["monto_usd"]
 
     total = float(df["monto_usd"].sum())
+    total_mensual = float(df["monto_mensual_usd"].sum())
     por_cat = df.groupby("categoria", as_index=False)["monto_usd"].sum().sort_values("monto_usd", ascending=False)
     por_metodo = df.groupby("metodo_pago", as_index=False)["monto_usd"].sum().sort_values("monto_usd", ascending=False)
+    por_periodicidad = df.groupby("periodicidad", as_index=False)["monto_mensual_usd"].sum().sort_values("monto_mensual_usd", ascending=False)
 
     periodo_30 = df[df["fecha"].dt.date >= (date.today() - timedelta(days=30))]
     periodo_prev = df[
@@ -349,23 +492,27 @@ def _render_tab_resumen() -> None:
     anterior_30 = float(periodo_prev["monto_usd"].sum())
     delta = actual_30 - anterior_30
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Total gastado", f"$ {total:,.2f}")
-    c2.metric("Categoría principal", str(por_cat.iloc[0]["categoria"]))
-    c3.metric("Últimos 30 días", f"$ {actual_30:,.2f}", delta=f"{delta:,.2f}")
-    c4.metric("Ticket promedio", f"$ {float(df['monto_usd'].mean()):,.2f}")
+    c2.metric("Equiv. mensual", f"$ {total_mensual:,.2f}")
+    c3.metric("Categoría principal", str(por_cat.iloc[0]["categoria"]))
+    c4.metric("Últimos 30 días", f"$ {actual_30:,.2f}", delta=f"{delta:,.2f}")
+    c5.metric("Ticket promedio", f"$ {float(df['monto_usd'].mean()):,.2f}")
 
-    g1, g2 = st.columns(2)
+    g1, g2, g3 = st.columns(3)
     with g1:
         st.caption("Gastos por categoría")
         st.bar_chart(por_cat.set_index("categoria")["monto_usd"])
     with g2:
         st.caption("Gastos por método")
         st.bar_chart(por_metodo.set_index("metodo_pago")["monto_usd"])
+    with g3:
+        st.caption("Equivalente mensual por periodicidad")
+        st.bar_chart(por_periodicidad.set_index("periodicidad")["monto_mensual_usd"])
 
     st.subheader("Control de presupuesto")
-    presupuesto = st.number_input("Presupuesto mensual objetivo (USD)", min_value=0.0, value=max(actual_30, 1.0), step=50.0)
-    uso = (actual_30 / presupuesto * 100) if presupuesto > 0 else 0.0
+    presupuesto = st.number_input("Presupuesto mensual objetivo (USD)", min_value=0.0, value=max(total_mensual, 1.0), step=50.0)
+    uso = (total_mensual / presupuesto * 100) if presupuesto > 0 else 0.0
     st.progress(min(int(uso), 100))
     if uso >= 100:
         st.error(f"🚨 Presupuesto excedido: {uso:,.1f}%")
@@ -381,6 +528,7 @@ def _render_tab_resumen() -> None:
 
 def render_gastos(usuario: str) -> None:
     st.subheader("📉 Control integral de gastos")
+    st.caption("Las tasas sugeridas salen de Configuración y los gastos recurrentes muestran su equivalente mensual.")
 
     rol = st.session_state.get("rol", "Admin")
     if rol not in ["Admin", "Administration", "Administracion"]:
@@ -401,7 +549,3 @@ def render_gastos(usuario: str) -> None:
 
     with tab3:
         _render_tab_resumen()
-
-
-
-
