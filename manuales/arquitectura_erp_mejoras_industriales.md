@@ -317,3 +317,125 @@ Con esta evolución, el ERP pasa de ser un sistema funcional integrado a una pla
 - control real de merma y desgaste,
 - cotizaciones más precisas,
 - mayor margen y previsibilidad operativa.
+
+
+---
+
+## 10. Portafolio ampliado de módulos estratégicos
+
+Para llevar el sistema a un ERP industrial y administrativo más completo, se incorpora el siguiente portafolio funcional priorizado.
+
+### 10.1 Finanzas operativas
+1. **Compras / Proveedores**
+   - registro de proveedores
+   - órdenes de compra
+   - recepción de mercancía
+   - precios por proveedor
+   - historial de compras
+   - cuentas por pagar a proveedores
+   - conecta con inventario, gastos y costos reales
+2. **Cuentas por pagar**
+   - deudas con proveedores
+   - pagos pendientes
+   - fechas de vencimiento
+   - control del flujo de salida
+3. **Tesorería / Flujo de caja**
+   - entradas vs salidas
+   - proyección de efectivo
+   - alertas de liquidez
+   - balance diario/semanal
+4. **Costos / Costeo industrial**
+   - costo real por producto
+   - costo por orden de producción
+   - costo por servicio
+   - margen real
+5. **Mermas y desperdicio**
+   - errores de impresión
+   - materiales dañados
+   - fallas de producción
+   - desperdicio CMYK
+
+### 10.2 Operación industrial
+6. **Mantenimiento de activos**
+   - historial de mantenimiento
+   - mantenimientos preventivos
+   - alertas por uso
+   - costos de reparación
+7. **Planificación de producción**
+   - ordenar trabajos por prioridad
+   - asignar tiempos
+   - evitar cuellos de botella
+   - calendarizar producción
+8. **Control de calidad**
+   - productos defectuosos
+   - reprocesos
+   - validaciones antes de entrega
+9. **Rutas de producción**
+   - diseño → impresión → corte → sublimado → entrega
+   - secuencia operativa estándar por trabajo
+   - tiempos por operación
+
+### 10.3 Capa contable
+10. **Contabilidad**
+    - libro diario
+    - libro mayor
+    - balances
+    - estados financieros
+11. **Impuestos**
+    - cálculo automático de IVA
+    - reportes fiscales
+    - declaraciones
+12. **Conciliación bancaria**
+    - comparar sistema vs banco
+    - detectar diferencias
+    - validar ingresos reales
+
+### 10.4 Negocio y crecimiento
+13. **CRM**
+    - historial completo
+    - seguimiento de clientes
+    - clientes frecuentes
+    - campañas
+14. **Marketing / Ventas**
+    - promociones
+    - descuentos
+    - combos
+    - análisis de ventas
+15. **Fidelización**
+    - puntos
+    - descuentos por recurrencia
+    - clientes VIP
+16. **Catálogo**
+    - productos
+    - precios
+    - servicios
+    - paquetes
+
+### 10.5 Administración interna
+17. **RRHH**
+    - usuarios/empleados
+    - roles
+    - asistencia
+    - comisiones
+18. **Seguridad / Roles**
+    - permisos avanzados por módulo
+    - restricciones por acción crítica
+    - trazabilidad por perfil
+19. **Manuales / SOP**
+    - documentación operativa
+    - procedimientos estándar
+    - versionado de manuales internos
+
+### 10.6 Orden sugerido de implementación
+1. Costeo industrial
+2. Compras / Proveedores
+3. Cuentas por pagar
+4. Tesorería / Flujo de caja
+5. Mermas y desperdicio
+6. Planificación de producción
+7. Rutas de producción
+8. Control de calidad
+9. Mantenimiento de activos
+10. Contabilidad, Impuestos y Conciliación bancaria
+11. CRM, Marketing, Fidelización y Catálogo
+12. RRHH, Seguridad / Roles y Manuales / SOP
