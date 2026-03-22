@@ -1,8 +1,29 @@
-import streamlit as st
+import re
+
 import pandas as pd
+import streamlit as st
 
 from database.connection import db_transaction
 from modules.inventario import add_inventory_movement
+
+
+CSV_COLUMNS = [
+    "fecha",
+    "tipo",
+    "cantidad",
+    "saldo",
+    "usuario",
+    "sku",
+    "nombre",
+    "costo_unitario_usd",
+    "costo_total_usd",
+    "referencia",
+]
+
+
+def _slugify_filename(value: str) -> str:
+    safe_value = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "kardex").strip())
+    return safe_value.strip("_") or "kardex"
 
 
 def render_kardex(usuario: str):
@@ -40,7 +61,7 @@ def render_kardex(usuario: str):
                 FROM movimientos_inventario
                 m LEFT JOIN inventario i ON i.id = m.inventario_id
                 ORDER BY m.fecha DESC
-                LIMIT 2500
+                LIMIT 5000
                 """
             ).fetchall()
 
@@ -78,6 +99,10 @@ def render_kardex(usuario: str):
 
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
     df["tipo"] = df["tipo"].fillna("AJUSTE").astype(str).str.upper()
+    df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce").fillna(0.0)
+    df["costo_unitario_usd"] = pd.to_numeric(df["costo_unitario_usd"], errors="coerce").fillna(0.0)
+    df["costo_total_usd"] = pd.to_numeric(df["costo_total_usd"], errors="coerce").fillna(0.0)
+    df["cantidad_abs"] = df["cantidad"].abs()
 
     df_items = pd.DataFrame(
         productos,
@@ -108,7 +133,6 @@ def render_kardex(usuario: str):
     )
     tipo_filtro = f3.multiselect(
         "Tipo",
-
         ["ENTRADA", "SALIDA", "AJUSTE"],
         default=["ENTRADA", "SALIDA", "AJUSTE"],
     )
@@ -117,70 +141,114 @@ def render_kardex(usuario: str):
         st.error("La fecha inicial no puede ser mayor a la fecha final.")
         return
 
-    view = df[df["inventario_id"] == int(selected_label)].copy()
-    view = view[
-        view["fecha"].dt.date.between(fecha_inicio, fecha_fin)
-    ]
+    producto_df = df[df["inventario_id"] == int(selected_label)].copy()
+    producto_df = producto_df.sort_values("fecha")
+    buscar = st.text_input("🔎 Buscar", placeholder="usuario o referencia")
+
+    fecha_inicio_ts = pd.Timestamp(fecha_inicio)
+    fecha_fin_ts = pd.Timestamp(fecha_fin) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+
+    view = producto_df[
+        producto_df["fecha"].between(fecha_inicio_ts, fecha_fin_ts)
+    ].copy()
     if tipo_filtro:
         view = view[view["tipo"].isin(tipo_filtro)]
-
-    buscar = st.text_input("🔎 Buscar", placeholder="usuario o referencia")
 
     if buscar:
         view = view[
             view.astype(str)
-            .apply(lambda x: x.str.contains(buscar, case=False))
+            .apply(lambda x: x.str.contains(buscar, case=False, na=False))
             .any(axis=1)
         ]
 
     stock_actual = float(item_row["stock_actual"] or 0.0)
     costo_ref = float(item_row["costo_unitario_usd"] or 0.0)
 
-    costo_promedio = float(view["costo_unitario_usd"].mean()) if not view.empty else costo_ref
-    total_invertido = float(view[view["tipo"] == "ENTRADA"]["costo_total_usd"].sum()) if not view.empty else 0.0
-    valor_total_actual = stock_actual * costo_promedio
-    salidas_periodo = float(view[view["tipo"] == "SALIDA"]["cantidad"].abs().sum()) if not view.empty else 0.0
+    movimientos_despues_fin = producto_df[producto_df["fecha"] > fecha_fin_ts].copy()
+    stock_cierre_periodo = float(stock_actual - movimientos_despues_fin["cantidad"].sum())
+
+    movimientos_desde_inicio = producto_df[producto_df["fecha"] >= fecha_inicio_ts].copy()
+    stock_inicial_periodo = float(stock_actual - movimientos_desde_inicio["cantidad"].sum())
 
     if not view.empty:
-        stock_eje = float((view["cantidad"].cumsum() + stock_actual - view["cantidad"].sum()).mean())
-        rotacion = (salidas_periodo / stock_eje) if stock_eje > 0 else 0.0
+        saldo = stock_inicial_periodo + view["cantidad"].cumsum()
+        view = view.assign(saldo=saldo)
     else:
-        rotacion = 0.0
+        view = view.assign(saldo=pd.Series(dtype=float))
+
+    entradas_periodo = float(view[view["cantidad"] > 0]["cantidad"].sum()) if not view.empty else 0.0
+    salidas_periodo = float(view[view["cantidad"] < 0]["cantidad"].abs().sum()) if not view.empty else 0.0
+    neto_periodo = entradas_periodo - salidas_periodo
+    costo_promedio = float(view["costo_unitario_usd"].mean()) if not view.empty else costo_ref
+    total_invertido = float(view[view["cantidad"] > 0]["costo_total_usd"].sum()) if not view.empty else 0.0
+    valor_total_actual = stock_actual * costo_promedio
+
+    stock_base_rotacion = (stock_inicial_periodo + stock_actual) / 2 if (stock_inicial_periodo + stock_actual) > 0 else 0.0
+    rotacion = (salidas_periodo / stock_base_rotacion) if stock_base_rotacion > 0 else 0.0
 
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Stock actual", f"{stock_actual:,.2f}")
-    k2.metric("Costo promedio", f"$ {costo_promedio:,.4f}")
-    k3.metric("Total invertido", f"$ {total_invertido:,.2f}")
-    k4.metric("Valor total actual", f"$ {valor_total_actual:,.2f}")
-    k5.metric("Rotación inventario", f"{rotacion:,.2f}")
+    k1.metric("Stock inicial período", f"{stock_inicial_periodo:,.2f}")
+    k2.metric("Entradas", f"{entradas_periodo:,.2f}")
+    k3.metric("Salidas", f"{salidas_periodo:,.2f}")
+    k4.metric("Neto período", f"{neto_periodo:,.2f}")
+    k5.metric("Stock actual", f"{stock_actual:,.2f}")
+
+    k6, k7, k8, k9 = st.columns(4)
+    k6.metric("Costo promedio", f"$ {costo_promedio:,.4f}")
+    k7.metric("Total invertido", f"$ {total_invertido:,.2f}")
+    k8.metric("Valor total actual", f"$ {valor_total_actual:,.2f}")
+    k9.metric("Rotación inventario", f"{rotacion:,.2f}")
+
+    st.caption(
+        f"Cierre calculado del período: {stock_cierre_periodo:,.2f} unidades. "
+        f"Movimientos analizados: {len(view)}"
+    )
 
     if view.empty:
         st.info("Sin movimientos para los filtros seleccionados.")
     else:
+        table_view = view.sort_values("fecha", ascending=False).copy()
+        table_view["cantidad"] = table_view["cantidad"].map(lambda value: float(value))
+        table_view["saldo"] = table_view["saldo"].map(lambda value: float(value))
+
         st.dataframe(
-            view,
+            table_view[
+                [
+                    "fecha",
+                    "tipo",
+                    "cantidad",
+                    "saldo",
+                    "usuario",
+                    "sku",
+                    "nombre",
+                    "costo_unitario_usd",
+                    "costo_total_usd",
+                    "referencia",
+                ]
+            ],
             use_container_width=True,
             hide_index=True,
             column_config={
-                "id": "ID",
                 "fecha": st.column_config.DatetimeColumn("Fecha", format="YYYY-MM-DD HH:mm:ss"),
+                "tipo": "Tipo",
+                "cantidad": st.column_config.NumberColumn("Movimiento", format="%.3f"),
+                "saldo": st.column_config.NumberColumn("Saldo", format="%.3f"),
                 "usuario": "Usuario",
-                "inventario_id": "ID Inventario",
                 "sku": "SKU",
                 "nombre": "Producto",
-                "tipo": "Tipo",
-                "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
                 "costo_unitario_usd": st.column_config.NumberColumn("Costo unit", format="%.4f"),
                 "costo_total_usd": st.column_config.NumberColumn("Costo total", format="%.2f"),
                 "referencia": "Referencia",
             },
         )
 
-        csv_data = view.to_csv(index=False).encode("utf-8")
+        csv_data = table_view[CSV_COLUMNS].to_csv(index=False).encode("utf-8")
         st.download_button(
             "📥 Exportar CSV",
             data=csv_data,
-            file_name=f"kardex_{item_row['nombre']}_{fecha_inicio}_{fecha_fin}.csv",
+            file_name=(
+                f"kardex_{_slugify_filename(item_row['nombre'])}_{fecha_inicio}_{fecha_fin}.csv"
+            ),
             mime="text/csv",
         )
 
@@ -206,10 +274,3 @@ def render_kardex(usuario: str):
                 inventario_id=int(selected_label),
                 tipo="ajuste",
                 cantidad=delta,
-                costo_unitario_usd=float(costo_ref),
-                referencia=f"{motivo_ajuste} | {'Ajuste entrada' if delta > 0 else 'Ajuste salida'}",
-            )
-            st.success("Ajuste aplicado y registrado en Kardex.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"No se pudo aplicar el ajuste: {e}")
