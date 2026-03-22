@@ -731,3 +731,6 @@ def render_gastos(usuario: str) -> None:
 
 
 
+
+
+
