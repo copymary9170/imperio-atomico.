@@ -148,15 +148,15 @@ def _sync_rate_state(
 ) -> float:
     cfg = config or _load_config_snapshot()
     suggested_rate = float(_resolve_rate(moneda, metodo_pago, cfg))
-    combo_key = f"{rate_key}__combo"
-    current_combo = (str(moneda), str(metodo_pago))
+    source_key = f"{rate_key}__source"
+    current_source = (str(moneda), str(metodo_pago), round(suggested_rate, 6))
 
     if rate_key not in st.session_state:
         st.session_state[rate_key] = float(initial_rate if initial_rate is not None else suggested_rate)
-        st.session_state[combo_key] = current_combo
-    elif st.session_state.get(combo_key) != current_combo:
+        st.session_state[source_key] = current_source
+    elif st.session_state.get(source_key) != current_source:
         st.session_state[rate_key] = suggested_rate
-        st.session_state[combo_key] = current_combo
+        st.session_state[source_key] = current_source
 
     return float(st.session_state.get(rate_key, suggested_rate))
 
@@ -185,12 +185,15 @@ def _render_currency_rate_inputs(
         key=moneda_key,
     )
     tasa_sugerida = _resolve_rate(moneda, metodo_pago, config)
-    _sync_rate_state(tasa_key, moneda, metodo_pago, config, initial_rate=tasa_inicial)
+    tasa_actual = _sync_rate_state(tasa_key, moneda, metodo_pago, config, initial_rate=tasa_inicial)
     tasa = col_tasa.number_input(
         tasa_label,
         min_value=0.0001,
+        value=float(tasa_actual),
         format="%.4f",
         key=tasa_key,
+        disabled=True,
+        help="La tasa se completa automáticamente desde Configuración según la moneda y el método de pago.",
     )
     return moneda, float(tasa), float(tasa_sugerida)
 
@@ -306,9 +309,9 @@ def _render_tab_registro(usuario: str) -> None:
     periodicidad = c7.selectbox("Periodicidad", list(PERIODICIDADES_GASTO.keys()), index=0, key="gastos_registro_periodicidad")
     info_periodicidad = _periodicidad_meta(periodicidad)
     c8.caption(
-        f"{info_periodicidad['descripcion']} Tasa aplicada automáticamente desde Configuración: {tasa_sugerida:,.2f}."
+        f"{info_periodicidad['descripcion']} La tasa se completa automáticamente desde Configuración: {tasa_sugerida:,.2f}."
     )
-
+    
     subtotal_usd = round(convert_to_usd(float(monto), moneda, float(tasa)), 4)
     impuesto_usd = round(subtotal_usd * (impuesto_pct / 100), 4)
     monto_usd = subtotal_usd + impuesto_usd
@@ -552,7 +555,7 @@ def _render_tab_historial() -> None:
             )
             info_periodicidad = _periodicidad_meta(nueva_periodicidad)
             e8.caption(
-                f"Tasa sugerida actual en Configuración para {nuevo_metodo}/{nueva_moneda}: {tasa_sugerida_edit:,.2f}."
+                f"La tasa se actualiza automáticamente desde Configuración para {nuevo_metodo}/{nueva_moneda}: {tasa_sugerida_edit:,.2f}."
             )
 
             subtotal_edit_usd = round(convert_to_usd(float(nuevo_monto), nueva_moneda, float(nueva_tasa)), 4)
