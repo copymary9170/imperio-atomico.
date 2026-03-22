@@ -369,3 +369,7 @@ def render_clientes(usuario: str) -> None:
             )
         st.success("Cliente eliminado")
         st.rerun()
+
+
+
+
