@@ -98,6 +98,11 @@ CREATE TABLE IF NOT EXISTS gastos (
     tasa_cambio REAL NOT NULL,
     monto_usd REAL NOT NULL,
     monto_bs REAL NOT NULL,
+    periodicidad TEXT NOT NULL DEFAULT 'Único',
+    dias_periodicidad INTEGER,
+    factor_mensual REAL NOT NULL DEFAULT 1,
+    monto_mensual_usd REAL NOT NULL DEFAULT 0,
+    monto_mensual_bs REAL NOT NULL DEFAULT 0,
     cancelado_motivo TEXT
 );
 
@@ -123,51 +128,7 @@ CREATE TABLE IF NOT EXISTS cierres_caja (
     sales_transfer REAL NOT NULL,
     sales_zelle REAL NOT NULL,
     sales_binance REAL NOT NULL,
-    expenses_cash REAL NOT NULL,
-    expenses_transfer REAL NOT NULL,
-    cash_end REAL NOT NULL,
-    observaciones TEXT
-);
-
-CREATE TABLE IF NOT EXISTS auditoria (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    usuario TEXT,
-    accion TEXT,
-    valor_anterior TEXT,
-    valor_nuevo TEXT
-);
-
-CREATE TABLE IF NOT EXISTS cotizaciones (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario TEXT,
-    cliente_id INTEGER,
-    descripcion TEXT,
-    costo_estimado_usd REAL,
-    margen_pct REAL,
-    precio_final_usd REAL,
-    estado TEXT DEFAULT 'Cotización',
-    fecha TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-
-
-CREATE TABLE IF NOT EXISTS ordenes_produccion (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    usuario TEXT NOT NULL,
-    tipo TEXT NOT NULL,
-    referencia TEXT NOT NULL,
-    costo_estimado REAL NOT NULL DEFAULT 0,
-    estado TEXT NOT NULL DEFAULT 'Pendiente'
-);
-
-CREATE TABLE IF NOT EXISTS ordenes_produccion_detalle (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    orden_id INTEGER NOT NULL,
-    inventario_id INTEGER NOT NULL,
-    cantidad REAL NOT NULL,
-    costo_unitario REAL NOT NULL,
+@@ -171,28 +176,64 @@ CREATE TABLE IF NOT EXISTS ordenes_produccion_detalle (
     FOREIGN KEY (orden_id) REFERENCES ordenes_produccion(id)
 );
 
@@ -193,6 +154,43 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """
 
 
+def _ensure_gastos_migration(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(gastos)").fetchall()}
+
+    if "periodicidad" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN periodicidad TEXT NOT NULL DEFAULT 'Único'")
+    if "dias_periodicidad" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN dias_periodicidad INTEGER")
+    if "factor_mensual" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN factor_mensual REAL NOT NULL DEFAULT 1")
+    if "monto_mensual_usd" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN monto_mensual_usd REAL NOT NULL DEFAULT 0")
+    if "monto_mensual_bs" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN monto_mensual_bs REAL NOT NULL DEFAULT 0")
+
+    conn.execute(
+        """
+        UPDATE gastos
+        SET periodicidad = COALESCE(NULLIF(periodicidad, ''), 'Único'),
+            factor_mensual = CASE
+                WHEN factor_mensual IS NULL OR factor_mensual <= 0 THEN 1
+                ELSE factor_mensual
+            END,
+            monto_mensual_usd = CASE
+                WHEN monto_mensual_usd IS NULL OR monto_mensual_usd <= 0 THEN ROUND(monto_usd * COALESCE(NULLIF(factor_mensual, 0), 1), 4)
+                ELSE monto_mensual_usd
+            END,
+            monto_mensual_bs = CASE
+                WHEN monto_mensual_bs IS NULL OR monto_mensual_bs <= 0 THEN ROUND(monto_bs * COALESCE(NULLIF(factor_mensual, 0), 1), 2)
+                ELSE monto_mensual_bs
+            END
+        WHERE 1=1
+        """
+    )
+
+
 def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
+        _ensure_gastos_migration(conn)
+
