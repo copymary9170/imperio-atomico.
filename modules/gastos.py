@@ -136,7 +136,29 @@ def _tax_flags_from_pct(config: dict[str, object], impuesto_pct: float, metodo_p
 
 
 def _periodicidad_meta(periodicidad: str) -> dict[str, float | int | None | str]:
-    return PERIODICIDADES_GASTO.get(periodicidad, PERIODICIDADES_GASTO["Único"])
+   return PERIODICIDADES_GASTO.get(periodicidad, PERIODICIDADES_GASTO["Único"])
+
+
+def _sync_rate_state(
+    rate_key: str,
+    moneda: str,
+    metodo_pago: str,
+    config: dict[str, object] | None = None,
+    initial_rate: float | None = None,
+) -> float:
+    cfg = config or _load_config_snapshot()
+    suggested_rate = float(_resolve_rate(moneda, metodo_pago, cfg))
+    combo_key = f"{rate_key}__combo"
+    current_combo = (str(moneda), str(metodo_pago))
+
+    if rate_key not in st.session_state:
+        st.session_state[rate_key] = float(initial_rate if initial_rate is not None else suggested_rate)
+        st.session_state[combo_key] = current_combo
+    elif st.session_state.get(combo_key) != current_combo:
+        st.session_state[rate_key] = suggested_rate
+        st.session_state[combo_key] = current_combo
+
+    return float(st.session_state.get(rate_key, suggested_rate))
 
 
 # ============================================================
@@ -223,53 +245,52 @@ def registrar_gasto(
 def _render_tab_registro(usuario: str) -> None:
     config = _load_config_snapshot()
 
-    with st.form("form_gastos_pro", clear_on_submit=True):
-        c1, c2 = st.columns([2, 1])
+    c1, c2 = st.columns([2, 1])
+    descripcion = c1.text_input("Descripción del gasto", key="gastos_registro_descripcion")
+    categoria = c2.selectbox("Categoría", CATEGORIAS_GASTO, key="gastos_registro_categoria")
 
-        descripcion = c1.text_input("Descripción del gasto")
-        categoria = c2.selectbox("Categoría", CATEGORIAS_GASTO)
+    c3, c4, c5, c6 = st.columns(4)
+    monto = c3.number_input("Monto", min_value=0.01, format="%.2f", key="gastos_registro_monto")
+    metodo = c4.selectbox("Método de pago", METODOS_GASTO, key="gastos_registro_metodo")
+    moneda = c5.selectbox("Moneda", MONEDAS_GASTO, key="gastos_registro_moneda")
+    tasa_sugerida = _resolve_rate(moneda, metodo, config)
+    _sync_rate_state("gastos_registro_tasa", moneda, metodo, config)
+    tasa = c6.number_input("Tasa", min_value=0.0001, format="%.4f", key="gastos_registro_tasa")
 
-        c3, c4, c5, c6 = st.columns(4)
-        monto = c3.number_input("Monto", min_value=0.01, format="%.2f")
-        metodo = c4.selectbox("Método de pago", METODOS_GASTO)
-        moneda = c5.selectbox("Moneda", MONEDAS_GASTO)
-        tasa_sugerida = _resolve_rate(moneda, metodo, config)
-        tasa = c6.number_input("Tasa", min_value=0.0001, value=float(tasa_sugerida), format="%.4f")
+    taxes_default = _suggest_tax_flags(metodo)
+    tx1, tx2, tx3, tx4 = st.columns(4)
+    aplicar_iva = tx1.checkbox("IVA", value=taxes_default["iva"], key="gastos_registro_iva")
+    aplicar_igtf = tx2.checkbox("IGTF", value=taxes_default["igtf"], key="gastos_registro_igtf")
+    aplicar_banco = tx3.checkbox("Banco", value=taxes_default["banco"], key="gastos_registro_banco")
+    aplicar_kontigo = tx4.checkbox("Kontigo", value=taxes_default["kontigo"], key="gastos_registro_kontigo")
+    impuesto_pct, impuestos_detalle = _build_tax_breakdown(config, aplicar_iva, aplicar_igtf, aplicar_banco, aplicar_kontigo)
 
-        taxes_default = _suggest_tax_flags(metodo)
-        tx1, tx2, tx3, tx4 = st.columns(4)
-        aplicar_iva = tx1.checkbox("IVA", value=taxes_default["iva"])
-        aplicar_igtf = tx2.checkbox("IGTF", value=taxes_default["igtf"])
-        aplicar_banco = tx3.checkbox("Banco", value=taxes_default["banco"])
-        aplicar_kontigo = tx4.checkbox("Kontigo", value=taxes_default["kontigo"])
-        impuesto_pct, impuestos_detalle = _build_tax_breakdown(config, aplicar_iva, aplicar_igtf, aplicar_banco, aplicar_kontigo)
+    c7, c8 = st.columns([1, 2])
+    periodicidad = c7.selectbox("Periodicidad", list(PERIODICIDADES_GASTO.keys()), index=0, key="gastos_registro_periodicidad")
+    info_periodicidad = _periodicidad_meta(periodicidad)
+    c8.caption(
+        f"{info_periodicidad['descripcion']} Tasa aplicada automáticamente desde Configuración: {tasa_sugerida:,.2f}."
+    )
 
-        c7, c8 = st.columns([1, 2])
-        periodicidad = c7.selectbox("Periodicidad", list(PERIODICIDADES_GASTO.keys()), index=0)
-        info_periodicidad = _periodicidad_meta(periodicidad)
-        c8.caption(
-            f"{info_periodicidad['descripcion']} Tasa sugerida desde Configuración: {tasa_sugerida:,.2f}."
-        )
+    subtotal_usd = round(convert_to_usd(float(monto), moneda, float(tasa)), 4)
+    impuesto_usd = round(subtotal_usd * (impuesto_pct / 100), 4)
+    monto_usd = subtotal_usd + impuesto_usd
+    monto_bs = convert_to_bs(monto_usd, float(tasa))
+    monto_mensual_usd = monto_usd * float(info_periodicidad["factor_mensual"] or 1.0)
+    monto_mensual_bs = convert_to_bs(monto_mensual_usd, float(tasa))
 
-        subtotal_usd = round(convert_to_usd(float(monto), moneda, float(tasa)), 4)
-        impuesto_usd = round(subtotal_usd * (impuesto_pct / 100), 4)
-        monto_usd = subtotal_usd + impuesto_usd
-        monto_bs = convert_to_bs(monto_usd, float(tasa))
-        monto_mensual_usd = monto_usd * float(info_periodicidad["factor_mensual"] or 1.0)
-        monto_mensual_bs = convert_to_bs(monto_mensual_usd, float(tasa))
+    detalle_impuestos = ", ".join(f"{nombre} {valor:,.2f}%" for nombre, valor in impuestos_detalle.items() if valor > 0)
+    st.caption(
+        f"Impuestos/comisiones aplicados: {detalle_impuestos if detalle_impuestos else 'ninguno'}."
+    )
 
-        detalle_impuestos = ", ".join(f"{nombre} {valor:,.2f}%" for nombre, valor in impuestos_detalle.items() if valor > 0)
-        st.caption(
-            f"Impuestos/comisiones aplicados: {detalle_impuestos if detalle_impuestos else 'ninguno'}."
-        )
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Subtotal USD", f"$ {subtotal_usd:,.2f}")
+    p2.metric("Impuestos USD", f"$ {impuesto_usd:,.2f}")
+    p3.metric("Total Bs", f"Bs {monto_bs:,.2f}")
+    p4.metric("Equivalente mensual", f"$ {monto_mensual_usd:,.2f}")
 
-        p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Subtotal USD", f"$ {subtotal_usd:,.2f}")
-        p2.metric("Impuestos USD", f"$ {impuesto_usd:,.2f}")
-        p3.metric("Total Bs", f"Bs {monto_bs:,.2f}")
-        p4.metric("Equivalente mensual", f"$ {monto_mensual_usd:,.2f}")
-
-        submit = st.form_submit_button("📉 Registrar egreso")
+    submit = st.button("📉 Registrar egreso", key="gastos_registro_submit")
 
     if not submit:
         return
