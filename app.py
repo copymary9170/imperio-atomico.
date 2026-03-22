@@ -41,6 +41,7 @@ from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
 from views.calculadora import render_calculadora
 from views.configuracion import render_configuracion
+from views.tasas import render_tasas
 
 # NUEVA VISTA DEL MOTOR INDUSTRIAL
 from views.engine_demo import render_engine_demo
@@ -95,6 +96,8 @@ MENU_ROUTES = {
     "🧮 Calculadora": lambda: render_calculadora(usuario),
 
     "⚙️ Configuración": lambda: render_configuracion(usuario),
+
+    "👀 Tasas activas": lambda: render_tasas(usuario),
 
     # NUEVA HERRAMIENTA DEL MOTOR
     "⚙️ Motor Industrial": lambda: render_engine_demo(usuario),
