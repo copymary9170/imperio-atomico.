@@ -41,6 +41,28 @@ from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
 from views.calculadora import render_calculadora
 from views.configuracion import render_configuracion
+from views.erp_nuevos_modulos import (
+    render_portafolio_modulos,
+    render_compras_proveedores,
+    render_cuentas_por_pagar,
+    render_tesoreria,
+    render_costeo_industrial,
+    render_mermas_desperdicio,
+    render_mantenimiento_activos,
+    render_planificacion_produccion,
+    render_control_calidad,
+    render_rutas_produccion,
+    render_contabilidad,
+    render_impuestos,
+    render_conciliacion_bancaria,
+    render_crm,
+    render_marketing_ventas,
+    render_fidelizacion,
+    render_catalogo,
+    render_rrhh,
+    render_seguridad_roles,
+    render_manuales_sop,
+)
 from modules.configuracion import render_sidebar_config_snapshot
 
 # NUEVA VISTA DEL MOTOR INDUSTRIAL
@@ -99,6 +121,28 @@ MENU_ROUTES = {
 
     # NUEVA HERRAMIENTA DEL MOTOR
     "⚙️ Motor Industrial": lambda: render_engine_demo(usuario),
+
+    # PORTAFOLIO DE EXPANSIÓN ERP
+    "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
+    "🚚 Compras / Proveedores": lambda: render_compras_proveedores(usuario),
+    "💸 Cuentas por pagar": lambda: render_cuentas_por_pagar(usuario),
+    "🏦 Tesorería / Flujo de caja": lambda: render_tesoreria(usuario),
+    "🧮 Costos / Costeo industrial": lambda: render_costeo_industrial(usuario),
+    "♻️ Mermas y desperdicio": lambda: render_mermas_desperdicio(usuario),
+    "🛠️ Mantenimiento de activos": lambda: render_mantenimiento_activos(usuario),
+    "🗓️ Planificación de producción": lambda: render_planificacion_produccion(usuario),
+    "✅ Control de calidad": lambda: render_control_calidad(usuario),
+    "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
+    "📚 Contabilidad": lambda: render_contabilidad(usuario),
+    "🧾 Impuestos": lambda: render_impuestos(usuario),
+    "🏛️ Conciliación bancaria": lambda: render_conciliacion_bancaria(usuario),
+    "🤝 CRM": lambda: render_crm(usuario),
+    "📣 Marketing / Ventas": lambda: render_marketing_ventas(usuario),
+    "⭐ Fidelización": lambda: render_fidelizacion(usuario),
+    "🛍️ Catálogo": lambda: render_catalogo(usuario),
+    "👨‍💼 RRHH": lambda: render_rrhh(usuario),
+    "🔐 Seguridad / Roles": lambda: render_seguridad_roles(usuario),
+    "📘 Manuales / SOP": lambda: render_manuales_sop(usuario),
 
 }
 
