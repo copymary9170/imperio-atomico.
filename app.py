@@ -38,10 +38,10 @@ from views.ventas import render_ventas
 from views.gastos import render_gastos
 from views.caja import render_caja
 from views.auditoria import render_auditoria
-from views.cotizaciones import render_cotizaciones
-from views.calculadora import render_calculadora
-from views.configuracion import render_configuracion
-from views.tasas import render_tasas
+from views.cotizaciones import render_cotizaciones␊
+from views.calculadora import render_calculadora␊
+from views.configuracion import render_configuracion␊
+from modules.configuracion import render_sidebar_config_snapshot
 
 # NUEVA VISTA DEL MOTOR INDUSTRIAL
 from views.engine_demo import render_engine_demo
@@ -97,8 +97,6 @@ MENU_ROUTES = {
 
     "⚙️ Configuración": lambda: render_configuracion(usuario),
 
-    "👀 Tasas activas": lambda: render_tasas(usuario),
-
     # NUEVA HERRAMIENTA DEL MOTOR
     "⚙️ Motor Industrial": lambda: render_engine_demo(usuario),
 
@@ -114,6 +112,8 @@ menu = st.sidebar.selectbox(
     "Menú",
     list(MENU_ROUTES.keys())
 )
+
+render_sidebar_config_snapshot()
 
 # ==================================================
 # EJECUTAR VISTA
