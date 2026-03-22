@@ -221,36 +221,67 @@ def _render_tab_historial() -> None:
         row = df_fil[df_fil["id"] == gasto_id].iloc[0]
 
         with st.expander("✏️ Editar gasto"):
-            e1, e2, e3 = st.columns(3)
+            e1, e2 = st.columns([2, 1])
             nueva_desc = e1.text_input("Descripción", value=str(row["descripcion"]), key=f"desc_gasto_{gasto_id}")
-            nuevo_monto = e2.number_input(
-                "Nuevo monto USD",
-                min_value=0.01,
-                value=float(row["monto_usd"]),
-                format="%.2f",
-                key=f"monto_gasto_{gasto_id}",
-            )
-            nueva_cat = e3.selectbox(
+            nueva_cat = e2.selectbox(
                 "Categoría",
                 CATEGORIAS_GASTO,
                 index=CATEGORIAS_GASTO.index(row["categoria"]) if row["categoria"] in CATEGORIAS_GASTO else 0,
                 key=f"cat_gasto_{gasto_id}",
             )
+
+            e3, e4, e5, e6 = st.columns(4)
+            nuevo_metodo = e3.selectbox(
+                "Método de pago",
+                METODOS_GASTO,
+                index=METODOS_GASTO.index(row["metodo_pago"]) if row["metodo_pago"] in METODOS_GASTO else 0,
+                key=f"metodo_gasto_{gasto_id}",
+            )
+            nueva_moneda = e4.selectbox(
+                "Moneda",
+                ["USD", "BS", "USDT", "KONTIGO"],
+                index=["USD", "BS", "USDT", "KONTIGO"].index(row["moneda"]) if row["moneda"] in ["USD", "BS", "USDT", "KONTIGO"] else 0,
+                key=f"moneda_gasto_{gasto_id}",
+            )
+            monto_referencia = float(row["monto_bs"]) if row["moneda"] == "BS" else float(row["monto_usd"])
+            nuevo_monto = e5.number_input(
+                "Monto",
+                min_value=0.01,
+                value=monto_referencia,
+                format="%.2f",
+                key=f"monto_gasto_{gasto_id}",
+            )
+            nueva_tasa = e6.number_input(
+                "Tasa",
+                min_value=0.0001,
+                value=float(row["tasa_cambio"] or 1.0),
+                format="%.4f",
+                key=f"tasa_gasto_{gasto_id}",
+            )
+
+            monto_edit_usd = convert_to_usd(float(nuevo_monto), nueva_moneda, float(nueva_tasa))
+            monto_edit_bs = convert_to_bs(monto_edit_usd, float(nueva_tasa))
+            p1, p2 = st.columns(2)
+            p1.metric("Equivalente USD", f"$ {monto_edit_usd:,.2f}")
+            p2.metric("Equivalente Bs", f"Bs {monto_edit_bs:,.2f}")
+
             if st.button("💾 Guardar cambios", key=f"edit_gasto_{gasto_id}"):
                 try:
                     with db_transaction() as conn:
-                        tasa = float(row["tasa_cambio"] or 1.0)
                         conn.execute(
                             """
                             UPDATE gastos
-                            SET descripcion=?, categoria=?, monto_usd=?, monto_bs=?
+                            SET descripcion=?, categoria=?, metodo_pago=?, moneda=?, tasa_cambio=?, monto_usd=?, monto_bs=?
                             WHERE id=?
                             """,
                             (
                                 require_text(nueva_desc, "Descripción"),
                                 nueva_cat,
-                                float(nuevo_monto),
-                                convert_to_bs(float(nuevo_monto), tasa),
+                                require_text(nuevo_metodo, "Método de pago"),
+                                nueva_moneda,
+                                as_positive(float(nueva_tasa), "Tasa de cambio", allow_zero=False),
+                                monto_edit_usd,
+                                monto_edit_bs,
                                 int(gasto_id),
                             ),
                         )
@@ -368,3 +399,5 @@ def render_gastos(usuario: str) -> None:
     with tab2:
         _render_tab_historial()
 
+    with tab3:
+        _render_tab_resumen()
