@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+from typing import Dict, Optional
 
 from database.connection import db_transaction
 
@@ -44,7 +45,7 @@ READONLY_RATE_FIELDS = [
 ]
 
 
-def get_current_config() -> dict[str, object]:
+def get_current_config() -> Dict[str, object]:
     with db_transaction() as conn:
         rows = conn.execute(
             """
@@ -56,7 +57,7 @@ def get_current_config() -> dict[str, object]:
     return {r["parametro"]: r["valor"] for r in rows}
 
 
-def build_rates_dataframe(config: dict[str, object]) -> pd.DataFrame:
+def build_rates_dataframe(config: Dict[str, object]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
@@ -69,7 +70,7 @@ def build_rates_dataframe(config: dict[str, object]) -> pd.DataFrame:
     )
 
 
-def render_rates_overview(config: dict[str, object]) -> None:
+def render_rates_overview(config: Dict[str, object]) -> None:
     st.caption("Vista rápida de las tasas y comisiones activas del sistema.")
 
     for start in range(0, len(READONLY_RATE_FIELDS), 3):
@@ -107,14 +108,14 @@ def render_sidebar_config_snapshot() -> None:
             st.sidebar.metric(label, f"{fmt % value} {unit}")
 
 
-def _to_float(config: dict[str, object], key: str, default: float) -> float:
+def _to_float(config: Dict[str, object], key: str, default: float) -> float:
     try:
         return float(config.get(key, default))
     except Exception:
         return default
 
 
-def _detectar_costo_tinta() -> float | None:
+def _detectar_costo_tinta() -> Optional[float]:
     try:
         with db_transaction() as conn:
             df_tintas = pd.read_sql_query(
