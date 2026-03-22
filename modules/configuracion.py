@@ -31,6 +31,58 @@ DEFAULT_CONFIG = {
 }
 
 
+READONLY_RATE_FIELDS = [
+    ("tasa_bcv", "Tasa BCV", "Bs/$", "%.2f"),
+    ("tasa_binance", "Tasa Binance", "Bs/$", "%.2f"),
+    ("iva_perc", "IVA", "%", "%.2f"),
+    ("igtf_perc", "IGTF", "%", "%.2f"),
+    ("banco_perc", "Comisión bancaria", "%", "%.3f"),
+    ("kontigo_perc", "Comisión Kontigo", "%", "%.3f"),
+    ("kontigo_perc_entrada", "Kontigo entrada", "%", "%.3f"),
+    ("kontigo_perc_salida", "Kontigo salida", "%", "%.3f"),
+    ("kontigo_saldo", "Saldo Kontigo", "$", "%.2f"),
+]
+
+
+def get_current_config() -> dict[str, object]:
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT parametro, valor
+            FROM configuracion
+            """
+        ).fetchall()
+
+    return {r["parametro"]: r["valor"] for r in rows}
+
+
+def build_rates_dataframe(config: dict[str, object]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Concepto": label,
+                "Valor": _to_float(config, key, DEFAULT_CONFIG[key]),
+                "Unidad": unit,
+            }
+            for key, label, unit, _fmt in READONLY_RATE_FIELDS
+        ]
+    )
+
+
+def render_rates_overview(config: dict[str, object]) -> None:
+    st.caption("Vista rápida de las tasas y comisiones activas del sistema.")
+
+    for start in range(0, len(READONLY_RATE_FIELDS), 3):
+        columns = st.columns(3)
+        for column, (key, label, unit, fmt) in zip(columns, READONLY_RATE_FIELDS[start : start + 3]):
+            value = _to_float(config, key, DEFAULT_CONFIG[key])
+            prefix = "$ " if unit == "$" else ""
+            suffix = "" if unit == "$" else f" {unit}"
+            column.metric(label, f"{prefix}{fmt % value}{suffix}")
+
+    st.dataframe(build_rates_dataframe(config), use_container_width=True, hide_index=True)
+
+
 def _to_float(config: dict[str, object], key: str, default: float) -> float:
     try:
         return float(config.get(key, default))
@@ -71,14 +123,9 @@ def render_configuracion(usuario: str):
     st.info("Estos parámetros afectan cotizaciones, costos operativos y análisis financieros.")
 
     try:
-        with db_transaction() as conn:
-            rows = conn.execute(
-                """
-                SELECT parametro, valor
-                FROM configuracion
-                """
-            ).fetchall()
+        config = get_current_config()
 
+        with db_transaction() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS historial_config (
@@ -92,7 +139,6 @@ def render_configuracion(usuario: str):
                 """
             )
 
-        config = {r["parametro"]: r["valor"] for r in rows}
     except Exception as e:
         st.error("Error cargando configuración")
         st.exception(e)
@@ -241,7 +287,7 @@ def render_configuracion(usuario: str):
 
                     conn.execute(
                         "INSERT OR REPLACE INTO configuracion (parametro, valor) VALUES (?, ?)",
-                        (param, str(nuevo_valor)),
+(param, str(nuevo_valor)),
                     )
 
                     if valor_anterior != float(nuevo_valor):
@@ -266,20 +312,12 @@ def render_configuracion(usuario: str):
     st.divider()
     st.subheader("📋 Tabla de control")
 
-    tabla_cfg = pd.DataFrame(
-        [
-            {"Concepto": "Tasa BCV (Bs/$)", "Valor": _to_float(config, "tasa_bcv", DEFAULT_CONFIG["tasa_bcv"])},
-            {"Concepto": "Tasa Binance (Bs/$)", "Valor": _to_float(config, "tasa_binance", DEFAULT_CONFIG["tasa_binance"])},
-            {"Concepto": "IVA (%)", "Valor": _to_float(config, "iva_perc", DEFAULT_CONFIG["iva_perc"])},
-            {"Concepto": "IGTF (%)", "Valor": _to_float(config, "igtf_perc", DEFAULT_CONFIG["igtf_perc"])},
-            {"Concepto": "Comisión Bancaria (%)", "Valor": _to_float(config, "banco_perc", DEFAULT_CONFIG["banco_perc"])},
-            {"Concepto": "Comisión Kontigo (%)", "Valor": _to_float(config, "kontigo_perc", DEFAULT_CONFIG["kontigo_perc"])},
-            {"Concepto": "Kontigo Entrada (%)", "Valor": _to_float(config, "kontigo_perc_entrada", DEFAULT_CONFIG["kontigo_perc_entrada"])},
-            {"Concepto": "Kontigo Salida (%)", "Valor": _to_float(config, "kontigo_perc_salida", DEFAULT_CONFIG["kontigo_perc_salida"])},
-            {"Concepto": "Saldo Cuenta Kontigo ($)", "Valor": _to_float(config, "kontigo_saldo", DEFAULT_CONFIG["kontigo_saldo"])},
-            {"Concepto": "Costo Tinta por ml ($)", "Valor": _to_float(config, "costo_tinta_ml", DEFAULT_CONFIG["costo_tinta_ml"])},
-        ]
-    )
+    tabla_cfg = build_rates_dataframe(config)
+    tabla_cfg.loc[len(tabla_cfg)] = {
+        "Concepto": "Costo Tinta por ml",
+        "Valor": _to_float(config, "costo_tinta_ml", DEFAULT_CONFIG["costo_tinta_ml"]),
+        "Unidad": "$/ml",
+    }
     st.dataframe(tabla_cfg, use_container_width=True, hide_index=True)
 
     with st.expander("📜 Ver historial de cambios"):
