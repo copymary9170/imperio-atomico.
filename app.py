@@ -39,7 +39,7 @@ from views.gastos import render_gastos
 from views.caja import render_caja
 from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
-from views.kontigo import render_kontigo
+from views.calculadora import render_calculadora
 from views.configuracion import render_configuracion
 
 # NUEVA VISTA DEL MOTOR INDUSTRIAL
@@ -92,7 +92,7 @@ MENU_ROUTES = {
 
     "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
 
-    "💳 Kontigo": lambda: render_kontigo(usuario),
+    "🧮 Calculadora": lambda: render_calculadora(usuario),
 
     "⚙️ Configuración": lambda: render_configuracion(usuario),
 
