@@ -128,7 +128,49 @@ CREATE TABLE IF NOT EXISTS cierres_caja (
     sales_transfer REAL NOT NULL,
     sales_zelle REAL NOT NULL,
     sales_binance REAL NOT NULL,
-@@ -171,28 +176,64 @@ CREATE TABLE IF NOT EXISTS ordenes_produccion_detalle (
+    expenses_cash REAL NOT NULL,
+    expenses_transfer REAL NOT NULL,
+    cash_end REAL NOT NULL,
+    observaciones TEXT
+);
+
+CREATE TABLE IF NOT EXISTS auditoria (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT,
+    accion TEXT,
+    valor_anterior TEXT,
+    valor_nuevo TEXT
+);
+
+CREATE TABLE IF NOT EXISTS cotizaciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario TEXT,
+    cliente_id INTEGER,
+    descripcion TEXT,
+    costo_estimado_usd REAL,
+    margen_pct REAL,
+    precio_final_usd REAL,
+    estado TEXT DEFAULT 'Cotización',
+    fecha TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ordenes_produccion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    referencia TEXT NOT NULL,
+    costo_estimado REAL NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'Pendiente'
+);
+
+CREATE TABLE IF NOT EXISTS ordenes_produccion_detalle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_id INTEGER NOT NULL,
+    inventario_id INTEGER NOT NULL,
+    cantidad REAL NOT NULL,
+    costo_unitario REAL NOT NULL,
     FOREIGN KEY (orden_id) REFERENCES ordenes_produccion(id)
 );
 
@@ -144,8 +186,6 @@ CREATE TABLE IF NOT EXISTS produccion_auditoria (
 CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_fecha ON ordenes_produccion(fecha);
 CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_detalle_orden ON ordenes_produccion_detalle(orden_id);
 CREATE INDEX IF NOT EXISTS idx_produccion_auditoria_fecha ON produccion_auditoria(fecha);
-
-
 
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
@@ -193,4 +233,3 @@ def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
         _ensure_gastos_migration(conn)
-
