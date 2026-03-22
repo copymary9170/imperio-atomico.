@@ -72,6 +72,8 @@ def _cargar_clientes() -> pd.DataFrame:
                 c.fecha,
                 c.nombre,
                 COALESCE(c.telefono, '') AS whatsapp,
+                COALESCE(c.email, '') AS email,
+                COALESCE(c.direccion, '') AS direccion,
                 COALESCE(c.categoria, 'General') AS categoria,
                 c.limite_credito_usd,
                 c.saldo_por_cobrar_usd,
@@ -192,14 +194,14 @@ def render_clientes(usuario: str) -> None:
             )
 
             c4, c5 = st.columns(2)
-            email_n = c4.text_input("Email", "")
+            email_n = c4.text_input("Email", str(row.get("email", "") or ""))
             limite_credito_n = c5.number_input(
                 "Límite de crédito ($)",
                 min_value=0.0,
                 step=1.0,
                 value=float(row.get("limite_credito_usd", 0) or 0),
             )
-            direccion_n = st.text_area("Dirección", "")
+            direccion_n = st.text_area("Dirección", str(row.get("direccion", "") or ""))
 
             actualizar = st.form_submit_button("Actualizar")
 
@@ -276,6 +278,10 @@ def render_clientes(usuario: str) -> None:
     df["ultima_compra"] = pd.to_datetime(df["ultima_compra"], errors="coerce")
     df["recencia"] = (datetime.now() - df["ultima_compra"]).dt.days
     df["score"] = df["total"] * 0.5 + df["operaciones"] * 10 + (100 - df["recencia"].fillna(100))
+    df["credito_disponible"] = (df["limite_credito_usd"] - df["deuda"]).clip(lower=0)
+    df["uso_credito_pct"] = (
+        (df["deuda"] / df["limite_credito_usd"].replace({0: pd.NA})) * 100
+    ).fillna(0)
 
     df["segmento"] = "Riesgo"
     df.loc[df["score"] > 200, "segmento"] = "Ocasional"
@@ -283,13 +289,22 @@ def render_clientes(usuario: str) -> None:
     df.loc[df["score"] > 1000, "segmento"] = "VIP"
 
     st.divider()
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Clientes", len(df))
     m2.metric("Ventas", f"$ {float(df['total'].sum()):,.2f}")
     m3.metric("Deuda", f"$ {float(df['deuda'].sum()):,.2f}")
     operaciones = float(df["operaciones"].sum() or 0)
     ticket_prom = float(df["total"].sum()) / operaciones if operaciones > 0 else 0.0
     m4.metric("Ticket", f"$ {ticket_prom:,.2f}")
+    m5.metric("Crédito disponible", f"$ {float(df['credito_disponible'].sum()):,.2f}")
+
+    clientes_sobre_limite = df[df["deuda"] > df["limite_credito_usd"]]
+    if not clientes_sobre_limite.empty:
+        nombres = ", ".join(clientes_sobre_limite["nombre"].astype(str).head(5).tolist())
+        sufijo = "..." if len(clientes_sobre_limite) > 5 else ""
+        st.warning(
+            f"{len(clientes_sobre_limite)} cliente(s) superan su límite de crédito: {nombres}{sufijo}"
+        )
 
     seg = df.groupby("segmento", as_index=False).agg(clientes=("id", "count"))
     fig = px.bar(seg, x="segmento", y="clientes", color="segmento", title="Segmentación de clientes")
@@ -300,10 +315,15 @@ def render_clientes(usuario: str) -> None:
             "id",
             "nombre",
             "whatsapp",
+            "email",
+            "direccion",
             "categoria",
+            "limite_credito_usd",
             "operaciones",
             "total",
             "deuda",
+            "credito_disponible",
+            "uso_credito_pct",
             "ultima_compra",
             "segmento",
             "score",
