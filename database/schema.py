@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS gastos (
     metodo_pago TEXT NOT NULL,
     moneda TEXT NOT NULL,
     tasa_cambio REAL NOT NULL,
+    subtotal_usd REAL NOT NULL DEFAULT 0,
+    impuesto_pct REAL NOT NULL DEFAULT 0,
+    impuesto_usd REAL NOT NULL DEFAULT 0,
     monto_usd REAL NOT NULL,
     monto_bs REAL NOT NULL,
     periodicidad TEXT NOT NULL DEFAULT 'Único',
@@ -207,11 +210,23 @@ def _ensure_gastos_migration(conn) -> None:
         conn.execute("ALTER TABLE gastos ADD COLUMN monto_mensual_usd REAL NOT NULL DEFAULT 0")
     if "monto_mensual_bs" not in columns:
         conn.execute("ALTER TABLE gastos ADD COLUMN monto_mensual_bs REAL NOT NULL DEFAULT 0")
+    if "subtotal_usd" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN subtotal_usd REAL NOT NULL DEFAULT 0")
+    if "impuesto_pct" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN impuesto_pct REAL NOT NULL DEFAULT 0")
+    if "impuesto_usd" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN impuesto_usd REAL NOT NULL DEFAULT 0")
 
     conn.execute(
         """
         UPDATE gastos
         SET periodicidad = COALESCE(NULLIF(periodicidad, ''), 'Único'),
+            subtotal_usd = CASE
+                WHEN subtotal_usd IS NULL OR subtotal_usd <= 0 THEN ROUND(monto_usd - COALESCE(impuesto_usd, 0), 4)
+                ELSE subtotal_usd
+            END,
+            impuesto_pct = COALESCE(impuesto_pct, 0),
+            impuesto_usd = COALESCE(impuesto_usd, 0),
             factor_mensual = CASE
                 WHEN factor_mensual IS NULL OR factor_mensual <= 0 THEN 1
                 ELSE factor_mensual
