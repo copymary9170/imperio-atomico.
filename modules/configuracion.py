@@ -83,6 +83,30 @@ def render_rates_overview(config: dict[str, object]) -> None:
     st.dataframe(build_rates_dataframe(config), use_container_width=True, hide_index=True)
 
 
+def render_sidebar_config_snapshot() -> None:
+    try:
+        config = get_current_config()
+    except Exception:
+        st.sidebar.warning("No se pudo cargar el resumen de configuración.")
+        return
+
+    with st.sidebar.expander("👀 Configuración activa", expanded=False):
+        st.caption("Resumen rápido de tasas y comisiones definidas en Configuración.")
+
+        snapshot_fields = [
+            ("tasa_bcv", "BCV", "Bs/$", "%.2f"),
+            ("tasa_binance", "Binance", "Bs/$", "%.2f"),
+            ("iva_perc", "IVA", "%", "%.2f"),
+            ("igtf_perc", "IGTF", "%", "%.2f"),
+            ("banco_perc", "Banco", "%", "%.3f"),
+            ("kontigo_perc", "Kontigo", "%", "%.3f"),
+        ]
+
+        for key, label, unit, fmt in snapshot_fields:
+            value = _to_float(config, key, DEFAULT_CONFIG[key])
+            st.sidebar.metric(label, f"{fmt % value} {unit}")
+
+
 def _to_float(config: dict[str, object], key: str, default: float) -> float:
     try:
         return float(config.get(key, default))
