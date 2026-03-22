@@ -72,6 +72,69 @@ def _resolve_rate_for_currency(moneda: str, config: dict[str, object] | None = N
     return tasa_bcv
 
 
+def _resolve_rate(moneda: str, metodo_pago: str, config: dict[str, object] | None = None) -> float:
+    cfg = config or _load_config_snapshot()
+    metodo_normalizado = str(metodo_pago or "").strip().lower()
+
+    if metodo_normalizado in {"binance", "kontigo"}:
+        return _to_float(cfg.get("tasa_binance"), DEFAULT_CONFIG["tasa_binance"])
+
+    return _resolve_rate_for_currency(moneda, cfg)
+
+
+def _suggest_tax_flags(metodo_pago: str) -> dict[str, bool]:
+    metodo_normalizado = str(metodo_pago or "").strip().lower()
+    return {
+        "iva": False,
+        "igtf": False,
+        "banco": metodo_normalizado in {"transferencia", "pago móvil"},
+        "kontigo": metodo_normalizado == "kontigo",
+    }
+
+
+def _build_tax_breakdown(
+    config: dict[str, object],
+    aplicar_iva: bool,
+    aplicar_igtf: bool,
+    aplicar_banco: bool,
+    aplicar_kontigo: bool,
+) -> tuple[float, dict[str, float]]:
+    breakdown = {
+        "IVA": _to_float(config.get("iva_perc"), DEFAULT_CONFIG["iva_perc"]) if aplicar_iva else 0.0,
+        "IGTF": _to_float(config.get("igtf_perc"), DEFAULT_CONFIG["igtf_perc"]) if aplicar_igtf else 0.0,
+        "Banco": _to_float(config.get("banco_perc"), DEFAULT_CONFIG["banco_perc"]) if aplicar_banco else 0.0,
+        "Kontigo": _to_float(config.get("kontigo_perc_salida"), _to_float(config.get("kontigo_perc"), DEFAULT_CONFIG["kontigo_perc"])) if aplicar_kontigo else 0.0,
+    }
+    impuesto_pct = round(sum(breakdown.values()), 4)
+    return impuesto_pct, breakdown
+
+
+def _tax_flags_from_pct(config: dict[str, object], impuesto_pct: float, metodo_pago: str) -> dict[str, bool]:
+    impuesto_pct = round(float(impuesto_pct or 0.0), 4)
+    base_flags = _suggest_tax_flags(metodo_pago)
+    if impuesto_pct <= 0:
+        return base_flags
+
+    options = {
+        "iva": _to_float(config.get("iva_perc"), DEFAULT_CONFIG["iva_perc"]),
+        "igtf": _to_float(config.get("igtf_perc"), DEFAULT_CONFIG["igtf_perc"]),
+        "banco": _to_float(config.get("banco_perc"), DEFAULT_CONFIG["banco_perc"]),
+        "kontigo": _to_float(
+            config.get("kontigo_perc_salida"),
+            _to_float(config.get("kontigo_perc"), DEFAULT_CONFIG["kontigo_perc"]),
+        ),
+    }
+
+    ordered_keys = list(options.keys())
+    for mask in range(1, 1 << len(ordered_keys)):
+        flags = {key: bool(mask & (1 << idx)) for idx, key in enumerate(ordered_keys)}
+        total = round(sum(options[key] for key, active in flags.items() if active), 4)
+        if abs(total - impuesto_pct) < 0.0001:
+            return flags
+
+    return base_flags
+
+
 def _periodicidad_meta(periodicidad: str) -> dict[str, float | int | None | str]:
     return PERIODICIDADES_GASTO.get(periodicidad, PERIODICIDADES_GASTO["Único"])
 
@@ -89,6 +152,7 @@ def registrar_gasto(
     tasa_cambio: float,
     monto: float,
     periodicidad: str,
+    impuesto_pct: float = 0.0,
 ) -> int:
     descripcion = require_text(descripcion, "Descripción")
     categoria = require_text(categoria, "Categoría")
@@ -97,9 +161,12 @@ def registrar_gasto(
 
     tasa_cambio = as_positive(tasa_cambio, "Tasa de cambio", allow_zero=False)
     monto = as_positive(monto, "Monto", allow_zero=False)
+    impuesto_pct = as_positive(impuesto_pct, "Impuestos", allow_zero=True)
 
-    monto_usd = convert_to_usd(monto, moneda, tasa_cambio)
-    monto_bs = convert_to_bs(monto_usd, tasa_cambio)
+    subtotal_usd = round(convert_to_usd(monto, moneda, tasa_cambio), 4)
+    impuesto_usd = round(subtotal_usd * (impuesto_pct / 100), 4)
+    monto_usd = round(subtotal_usd + impuesto_usd, 4)
+    monto_bs = round(convert_to_bs(monto_usd, tasa_cambio), 2)
 
     periodicidad_info = _periodicidad_meta(periodicidad)
     factor_mensual = float(periodicidad_info["factor_mensual"] or 1.0)
@@ -117,6 +184,9 @@ def registrar_gasto(
                 metodo_pago,
                 moneda,
                 tasa_cambio,
+                subtotal_usd,
+                impuesto_pct,
+                impuesto_usd,
                 monto_usd,
                 monto_bs,
                 periodicidad,
@@ -125,7 +195,7 @@ def registrar_gasto(
                 monto_mensual_usd,
                 monto_mensual_bs
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario,
@@ -134,6 +204,9 @@ def registrar_gasto(
                 metodo_pago,
                 moneda,
                 tasa_cambio,
+                subtotal_usd,
+                impuesto_pct,
+                impuesto_usd,
                 monto_usd,
                 monto_bs,
                 periodicidad,
@@ -160,8 +233,16 @@ def _render_tab_registro(usuario: str) -> None:
         monto = c3.number_input("Monto", min_value=0.01, format="%.2f")
         metodo = c4.selectbox("Método de pago", METODOS_GASTO)
         moneda = c5.selectbox("Moneda", MONEDAS_GASTO)
-        tasa_sugerida = _resolve_rate_for_currency(moneda, config)
+        tasa_sugerida = _resolve_rate(moneda, metodo, config)
         tasa = c6.number_input("Tasa", min_value=0.0001, value=float(tasa_sugerida), format="%.4f")
+
+        taxes_default = _suggest_tax_flags(metodo)
+        tx1, tx2, tx3, tx4 = st.columns(4)
+        aplicar_iva = tx1.checkbox("IVA", value=taxes_default["iva"])
+        aplicar_igtf = tx2.checkbox("IGTF", value=taxes_default["igtf"])
+        aplicar_banco = tx3.checkbox("Banco", value=taxes_default["banco"])
+        aplicar_kontigo = tx4.checkbox("Kontigo", value=taxes_default["kontigo"])
+        impuesto_pct, impuestos_detalle = _build_tax_breakdown(config, aplicar_iva, aplicar_igtf, aplicar_banco, aplicar_kontigo)
 
         c7, c8 = st.columns([1, 2])
         periodicidad = c7.selectbox("Periodicidad", list(PERIODICIDADES_GASTO.keys()), index=0)
@@ -170,15 +251,23 @@ def _render_tab_registro(usuario: str) -> None:
             f"{info_periodicidad['descripcion']} Tasa sugerida desde Configuración: {tasa_sugerida:,.2f}."
         )
 
-        monto_usd = convert_to_usd(float(monto), moneda, float(tasa))
+        subtotal_usd = round(convert_to_usd(float(monto), moneda, float(tasa)), 4)
+        impuesto_usd = round(subtotal_usd * (impuesto_pct / 100), 4)
+        monto_usd = subtotal_usd + impuesto_usd
         monto_bs = convert_to_bs(monto_usd, float(tasa))
         monto_mensual_usd = monto_usd * float(info_periodicidad["factor_mensual"] or 1.0)
         monto_mensual_bs = convert_to_bs(monto_mensual_usd, float(tasa))
 
-        p1, p2, p3 = st.columns(3)
-        p1.metric("Equivalente USD", f"$ {monto_usd:,.2f}")
-        p2.metric("Equivalente Bs", f"Bs {monto_bs:,.2f}")
-        p3.metric("Equivalente mensual", f"$ {monto_mensual_usd:,.2f}")
+        detalle_impuestos = ", ".join(f"{nombre} {valor:,.2f}%" for nombre, valor in impuestos_detalle.items() if valor > 0)
+        st.caption(
+            f"Impuestos/comisiones aplicados: {detalle_impuestos if detalle_impuestos else 'ninguno'}."
+        )
+
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Subtotal USD", f"$ {subtotal_usd:,.2f}")
+        p2.metric("Impuestos USD", f"$ {impuesto_usd:,.2f}")
+        p3.metric("Total Bs", f"Bs {monto_bs:,.2f}")
+        p4.metric("Equivalente mensual", f"$ {monto_mensual_usd:,.2f}")
 
         submit = st.form_submit_button("📉 Registrar egreso")
 
@@ -195,9 +284,13 @@ def _render_tab_registro(usuario: str) -> None:
             tasa_cambio=float(tasa),
             monto=float(monto),
             periodicidad=periodicidad,
+            impuesto_pct=impuesto_pct,
         )
         st.success(f"✅ Gasto #{gid} registrado")
-        st.caption(f"Equivalente mensual estimado: $ {monto_mensual_usd:,.2f} / Bs {monto_mensual_bs:,.2f}")
+        st.caption(
+            f"Subtotal: $ {subtotal_usd:,.2f} | Impuestos: $ {impuesto_usd:,.2f} | "
+            f"Equivalente mensual estimado: $ {monto_mensual_usd:,.2f} / Bs {monto_mensual_bs:,.2f}"
+        )
         st.balloons()
         st.rerun()
     except ValueError as exc:
@@ -220,6 +313,9 @@ def _load_gastos() -> pd.DataFrame:
                 metodo_pago,
                 moneda,
                 tasa_cambio,
+                subtotal_usd,
+                impuesto_pct,
+                impuesto_usd,
                 monto_usd,
                 monto_bs,
                 periodicidad,
@@ -293,6 +389,9 @@ def _render_tab_historial() -> None:
         "metodo_pago",
         "moneda",
         "tasa_cambio",
+        "subtotal_usd",
+        "impuesto_pct",
+        "impuesto_usd",
         "monto_usd",
         "monto_bs",
         "periodicidad",
@@ -359,7 +458,14 @@ def _render_tab_historial() -> None:
                 index=MONEDAS_GASTO.index(row["moneda"]) if row["moneda"] in MONEDAS_GASTO else 0,
                 key=f"moneda_gasto_{gasto_id}",
             )
+            subtotal_base = float(row.get("subtotal_usd", row["monto_usd"]) or 0)
             monto_referencia = float(row["monto_bs"]) if row["moneda"] == "BS" else float(row["monto_usd"])
+            if subtotal_base > 0:
+                monto_referencia = (
+                    round(convert_to_bs(subtotal_base, float(row["tasa_cambio"] or 1)), 2)
+                    if row["moneda"] == "BS"
+                    else subtotal_base
+                )
             nuevo_monto = e5.number_input(
                 "Monto",
                 min_value=0.01,
@@ -370,10 +476,19 @@ def _render_tab_historial() -> None:
             nueva_tasa = e6.number_input(
                 "Tasa",
                 min_value=0.0001,
-                value=float(row["tasa_cambio"] or _resolve_rate_for_currency(nueva_moneda, config)),
+                value=float(row["tasa_cambio"] or _resolve_rate(nueva_moneda, nuevo_metodo, config)),
                 format="%.4f",
                 key=f"tasa_gasto_{gasto_id}",
             )
+
+            impuesto_pct_actual = float(row["impuesto_pct"]) if "impuesto_pct" in row.index else 0.0
+            taxes_flags = _tax_flags_from_pct(config, impuesto_pct_actual, nuevo_metodo)
+            txe1, txe2, txe3, txe4 = st.columns(4)
+            edit_iva = txe1.checkbox("IVA", value=taxes_flags["iva"], key=f"iva_gasto_{gasto_id}")
+            edit_igtf = txe2.checkbox("IGTF", value=taxes_flags["igtf"], key=f"igtf_gasto_{gasto_id}")
+            edit_banco = txe3.checkbox("Banco", value=taxes_flags["banco"], key=f"banco_gasto_{gasto_id}")
+            edit_kontigo = txe4.checkbox("Kontigo", value=taxes_flags["kontigo"], key=f"kontigo_gasto_{gasto_id}")
+            impuesto_edit_pct, impuestos_detalle_edit = _build_tax_breakdown(config, edit_iva, edit_igtf, edit_banco, edit_kontigo)
 
             e7, e8 = st.columns([1, 2])
             periodicidad_actual = row["periodicidad"] if row["periodicidad"] in PERIODICIDADES_GASTO else "Único"
@@ -385,18 +500,23 @@ def _render_tab_historial() -> None:
             )
             info_periodicidad = _periodicidad_meta(nueva_periodicidad)
             e8.caption(
-                f"Tasa sugerida actual en Configuración para {nueva_moneda}: {_resolve_rate_for_currency(nueva_moneda, config):,.2f}."
+                f"Tasa sugerida actual en Configuración para {nuevo_metodo}/{nueva_moneda}: {_resolve_rate(nueva_moneda, nuevo_metodo, config):,.2f}."
             )
 
-            monto_edit_usd = convert_to_usd(float(nuevo_monto), nueva_moneda, float(nueva_tasa))
+            subtotal_edit_usd = round(convert_to_usd(float(nuevo_monto), nueva_moneda, float(nueva_tasa)), 4)
+            impuesto_edit_usd = round(subtotal_edit_usd * (impuesto_edit_pct / 100), 4)
+            monto_edit_usd = subtotal_edit_usd + impuesto_edit_usd
             monto_edit_bs = convert_to_bs(monto_edit_usd, float(nueva_tasa))
             factor_mensual = float(info_periodicidad["factor_mensual"] or 1.0)
             monto_edit_mensual_usd = round(monto_edit_usd * factor_mensual, 4)
             monto_edit_mensual_bs = round(convert_to_bs(monto_edit_mensual_usd, float(nueva_tasa)), 2)
-            p1, p2, p3 = st.columns(3)
-            p1.metric("Equivalente USD", f"$ {monto_edit_usd:,.2f}")
-            p2.metric("Equivalente Bs", f"Bs {monto_edit_bs:,.2f}")
-            p3.metric("Equiv. mensual", f"$ {monto_edit_mensual_usd:,.2f}")
+            detalle_edit = ", ".join(f"{nombre} {valor:,.2f}%" for nombre, valor in impuestos_detalle_edit.items() if valor > 0)
+            st.caption(f"Impuestos/comisiones aplicados: {detalle_edit if detalle_edit else 'ninguno'}.")
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Subtotal USD", f"$ {subtotal_edit_usd:,.2f}")
+            p2.metric("Impuestos USD", f"$ {impuesto_edit_usd:,.2f}")
+            p3.metric("Total Bs", f"Bs {monto_edit_bs:,.2f}")
+            p4.metric("Equiv. mensual", f"$ {monto_edit_mensual_usd:,.2f}")
 
             if st.button("💾 Guardar cambios", key=f"edit_gasto_{gasto_id}"):
                 try:
@@ -404,7 +524,7 @@ def _render_tab_historial() -> None:
                         conn.execute(
                             """
                             UPDATE gastos
-                            SET descripcion=?, categoria=?, metodo_pago=?, moneda=?, tasa_cambio=?, monto_usd=?, monto_bs=?, periodicidad=?, dias_periodicidad=?, factor_mensual=?, monto_mensual_usd=?, monto_mensual_bs=?
+                            SET descripcion=?, categoria=?, metodo_pago=?, moneda=?, tasa_cambio=?, subtotal_usd=?, impuesto_pct=?, impuesto_usd=?, monto_usd=?, monto_bs=?, periodicidad=?, dias_periodicidad=?, factor_mensual=?, monto_mensual_usd=?, monto_mensual_bs=?
                             WHERE id=?
                             """,
                             (
@@ -413,6 +533,9 @@ def _render_tab_historial() -> None:
                                 require_text(nuevo_metodo, "Método de pago"),
                                 nueva_moneda,
                                 as_positive(float(nueva_tasa), "Tasa de cambio", allow_zero=False),
+                                subtotal_edit_usd,
+                                impuesto_edit_pct,
+                                impuesto_edit_usd,
                                 monto_edit_usd,
                                 monto_edit_bs,
                                 nueva_periodicidad,
@@ -528,7 +651,7 @@ def _render_tab_resumen() -> None:
 
 def render_gastos(usuario: str) -> None:
     st.subheader("📉 Control integral de gastos")
-    st.caption("Las tasas sugeridas salen de Configuración y los gastos recurrentes muestran su equivalente mensual.")
+    st.caption("Las tasas sugeridas salen de Configuración según método/moneda, y puedes sumar impuestos o comisiones cuando sí te los cobran.")
 
     rol = st.session_state.get("rol", "Admin")
     if rol not in ["Admin", "Administration", "Administracion"]:
