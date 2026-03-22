@@ -274,3 +274,13 @@ def render_kardex(usuario: str):
                 inventario_id=int(selected_label),
                 tipo="ajuste",
                 cantidad=delta,
+                costo_unitario_usd=costo_ref,
+                referencia=motivo_ajuste,
+            )
+        except Exception as e:
+            st.error("No se pudo aplicar el ajuste manual.")
+            st.exception(e)
+            return
+
+        st.success("✅ Ajuste manual aplicado correctamente.")
+        st.rerun()
