@@ -551,3 +551,5 @@ def render_gastos(usuario: str) -> None:
         _render_tab_resumen()
 
 
+
+
