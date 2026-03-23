@@ -9,6 +9,7 @@ import streamlit as st
 from database.connection import db_transaction
 from modules.common import as_positive, require_text
 from modules.configuracion import DEFAULT_CONFIG, get_current_config
+from services.tesoreria_service import registrar_egreso
 from utils.currency import convert_to_bs, convert_to_usd
 
 
@@ -34,7 +35,6 @@ METODOS_GASTO = [
 PERIODICIDADES_GASTO = {
     "Único": {"dias": None, "factor_mensual": 1.0, "descripcion": "Se registra solo una vez."},
     "Semanal": {"dias": 7, "factor_mensual": 30 / 7, "descripcion": "Se convierte a equivalente mensual usando 30/7."},
-    "Cada 15 días": {"dias": 15, "factor_mensual": 2.0, "descripcion": "Se multiplica por 2 para estimar el mes."},
     "Mensual": {"dias": 30, "factor_mensual": 1.0, "descripcion": "Ya corresponde a un ciclo mensual."},
     "Bimestral": {"dias": 60, "factor_mensual": 0.5, "descripcion": "Se divide entre 2 para el equivalente mensual."},
     "Trimestral": {"dias": 90, "factor_mensual": 1 / 3, "descripcion": "Se divide entre 3 para el equivalente mensual."},
@@ -276,8 +276,26 @@ def registrar_gasto(
                 monto_mensual_bs,
             ),
         )
+        gasto_id = int(cur.lastrowid)
+        registrar_egreso(
+            conn,
+            origen="gasto",
+            referencia_id=gasto_id,
+            descripcion=descripcion,
+            monto_usd=float(monto_usd),
+            moneda=str(moneda),
+            monto_moneda=float(monto),
+            tasa_cambio=float(tasa_cambio),
+            metodo_pago=str(metodo_pago).lower(),
+            usuario=usuario,
+            metadata={
+                "categoria": categoria,
+                "periodicidad": periodicidad,
+                "impuesto_pct": float(impuesto_pct),
+            },
+        )
 
-        return int(cur.lastrowid)
+        return gasto_id
 
 
 def _render_tab_registro(usuario: str) -> None:
