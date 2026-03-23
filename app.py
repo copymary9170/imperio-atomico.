@@ -150,11 +150,39 @@ MENU_ROUTES = {
 # SIDEBAR
 # ==================================================
 
-st.sidebar.title("⚛️ Imperio Atómico ERP")
+st.markdown(
+    """
+    <style>
+        section[data-testid="stSidebar"] {
+            min-width: 320px;
+            max-width: 320px;
+        }
+        section[data-testid="stSidebar"] [role="radiogroup"] {
+            gap: 0.35rem;
+        }
+        section[data-testid="stSidebar"] [role="radiogroup"] label {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 0.75rem;
+            padding: 0.35rem 0.75rem;
+            transition: all 0.2s ease;
+        }
+        section[data-testid="stSidebar"] [role="radiogroup"] label:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-menu = st.sidebar.selectbox(
-    "Menú",
-    list(MENU_ROUTES.keys())
+st.sidebar.title("⚛️ Imperio Atómico ERP")
+st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral fijo.")
+
+menu = st.sidebar.radio(
+    "Menú principal",
+    list(MENU_ROUTES.keys()),
+    label_visibility="collapsed",
 )
 
 render_sidebar_config_snapshot()
