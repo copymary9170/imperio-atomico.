@@ -313,7 +313,6 @@ def add_inventory_movement(
             """,
             (usuario, int(inventario_id), tipo, float(delta), money(costo_unitario_usd), referencia),
         )
-        )
         connection.execute(
             "UPDATE inventario SET stock_actual = stock_actual + ? WHERE id=?",
             (float(delta), int(inventario_id)),
