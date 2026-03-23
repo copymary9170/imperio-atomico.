@@ -121,6 +121,39 @@ CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
     notas TEXT
 );
 
+CREATE TABLE IF NOT EXISTS cuentas_por_pagar_proveedores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente','parcial','pagada','vencida')),
+    proveedor_id INTEGER,
+    compra_id INTEGER NOT NULL,
+    tipo_documento TEXT NOT NULL DEFAULT 'compra',
+    monto_original_usd REAL NOT NULL,
+    monto_pagado_usd REAL NOT NULL DEFAULT 0,
+    saldo_usd REAL NOT NULL,
+    fecha_vencimiento TEXT,
+    notas TEXT,
+    FOREIGN KEY (proveedor_id) REFERENCES proveedores(id),
+    FOREIGN KEY (compra_id) REFERENCES historial_compras(id)
+);
+
+CREATE TABLE IF NOT EXISTS pagos_proveedores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    cuenta_por_pagar_id INTEGER NOT NULL,
+    proveedor_id INTEGER,
+    monto_usd REAL NOT NULL,
+    moneda_pago TEXT NOT NULL DEFAULT 'USD',
+    monto_moneda_pago REAL NOT NULL DEFAULT 0,
+    tasa_cambio REAL NOT NULL DEFAULT 1,
+    referencia TEXT,
+    observaciones TEXT,
+    FOREIGN KEY (cuenta_por_pagar_id) REFERENCES cuentas_por_pagar_proveedores(id),
+    FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
+);
+
 CREATE TABLE IF NOT EXISTS cierres_caja (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -189,6 +222,9 @@ CREATE TABLE IF NOT EXISTS produccion_auditoria (
 CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_fecha ON ordenes_produccion(fecha);
 CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_detalle_orden ON ordenes_produccion_detalle(orden_id);
 CREATE INDEX IF NOT EXISTS idx_produccion_auditoria_fecha ON produccion_auditoria(fecha);
+CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_estado ON cuentas_por_pagar_proveedores(estado);
+CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_vencimiento ON cuentas_por_pagar_proveedores(fecha_vencimiento);
+CREATE INDEX IF NOT EXISTS idx_pagos_proveedores_cxp ON pagos_proveedores(cuenta_por_pagar_id);
 
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
