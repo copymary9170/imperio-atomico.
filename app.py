@@ -75,8 +75,6 @@ from views.engine_demo import render_engine_demo
 
 usuario = st.session_state.get("usuario", "Sistema")
 
-
-
 # ==================================================
 # MENÚ PRINCIPAL
 # ==================================================
@@ -148,11 +146,6 @@ MENU_ROUTES = {
 
 }
 
-
-
-render_sidebar_config_snapshot()
-
-
 # ==================================================
 # SIDEBAR
 # ==================================================
@@ -191,6 +184,9 @@ menu = st.sidebar.radio(
     list(MENU_ROUTES.keys()),
     label_visibility="collapsed",
 )
+
+render_sidebar_config_snapshot()
+
 # ==================================================
 # EJECUTAR VISTA
 # ==================================================
