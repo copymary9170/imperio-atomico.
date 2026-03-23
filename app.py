@@ -41,6 +41,7 @@ from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
 from views.calculadora import render_calculadora
 from views.configuracion import render_configuracion
+from views.contabilidad import render_contabilidad
 from views.erp_nuevos_modulos import (
     render_portafolio_modulos,
     render_compras_proveedores,
@@ -52,7 +53,6 @@ from views.erp_nuevos_modulos import (
     render_planificacion_produccion,
     render_control_calidad,
     render_rutas_produccion,
-    render_contabilidad,
     render_impuestos,
     render_conciliacion_bancaria,
     render_crm,
@@ -153,6 +153,8 @@ MENU_ROUTES = {
 
     "⚙️ Configuración": lambda: render_configuracion(usuario),
 
+    "📚 Contabilidad": lambda: render_contabilidad(usuario),
+
     # NUEVA HERRAMIENTA DEL MOTOR
     "⚙️ Motor Industrial": lambda: render_engine_demo(usuario),
 
@@ -167,7 +169,6 @@ MENU_ROUTES = {
     "🗓️ Planificación de producción": lambda: render_planificacion_produccion(usuario),
     "✅ Control de calidad": lambda: render_control_calidad(usuario),
     "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
-    "📚 Contabilidad": lambda: render_contabilidad(usuario),
     "🧾 Impuestos": lambda: render_impuestos(usuario),
     "🏛️ Conciliación bancaria": lambda: render_conciliacion_bancaria(usuario),
     "🤝 CRM": lambda: render_crm(usuario),
