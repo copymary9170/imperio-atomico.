@@ -16,6 +16,12 @@ __all__ = [
     "ConsumoInsumo",
     "ProduccionService",
     "crear_cuenta_por_pagar_desde_compra",
+    "listar_movimientos_tesoreria",
+    "listar_vencimientos",
+    "obtener_resumen_tesoreria",
+    "registrar_egreso",
+    "registrar_ingreso",
+    "registrar_movimiento_tesoreria",
     "registrar_pago_cuenta_por_pagar",
     "validar_condicion_compra",
     "VentaItem",
@@ -49,6 +55,12 @@ _EXPORTS = {
 
     # Compras / CxP proveedores
     "crear_cuenta_por_pagar_desde_compra": ("services.cxp_proveedores_service", "crear_cuenta_por_pagar_desde_compra"),
+    "listar_movimientos_tesoreria": ("services.tesoreria_service", "listar_movimientos_tesoreria"),
+    "listar_vencimientos": ("services.tesoreria_service", "listar_vencimientos"),
+    "obtener_resumen_tesoreria": ("services.tesoreria_service", "obtener_resumen_tesoreria"),
+    "registrar_egreso": ("services.tesoreria_service", "registrar_egreso"),
+    "registrar_ingreso": ("services.tesoreria_service", "registrar_ingreso"),
+    "registrar_movimiento_tesoreria": ("services.tesoreria_service", "registrar_movimiento_tesoreria"),
     "registrar_pago_cuenta_por_pagar": ("services.cxp_proveedores_service", "registrar_pago_cuenta_por_pagar"),
     "validar_condicion_compra": ("services.cxp_proveedores_service", "validar_condicion_compra"),
 
