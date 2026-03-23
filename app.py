@@ -137,7 +137,21 @@ MENU_ROUTES = {
 
     "🔥 Sublimación Industrial": lambda: render_sublimacion(usuario),
 
-@@ -163,35 +155,42 @@ MENU_ROUTES = {
+    "🎨 Producción Manual": lambda: render_produccion_manual(usuario),
+
+    "💰 Ventas": lambda: render_ventas(usuario),
+
+    "📉 Gastos": lambda: render_gastos(usuario),
+
+    "🏁 Cierre de Caja": lambda: render_caja(usuario),
+
+    "📊 Auditoría y Métricas": lambda: render_auditoria(usuario),
+
+    "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
+
+    "🧮 Calculadora": lambda: render_calculadora(usuario),
+
+    "⚙️ Configuración": lambda: render_configuracion(usuario),
 
     # NUEVA HERRAMIENTA DEL MOTOR
     "⚙️ Motor Industrial": lambda: render_engine_demo(usuario),
