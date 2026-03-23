@@ -154,6 +154,34 @@ CREATE TABLE IF NOT EXISTS pagos_proveedores (
     FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
 );
 
+CREATE TABLE IF NOT EXISTS movimientos_tesoreria (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tipo TEXT NOT NULL CHECK (tipo IN ('ingreso','egreso')),
+    origen TEXT NOT NULL CHECK (
+        origen IN (
+            'venta',
+            'cobro_cliente',
+            'gasto',
+            'pago_proveedor',
+            'compra_pago_inicial',
+            'ajuste_manual',
+            'cierre_caja'
+        )
+    ),
+    referencia_id INTEGER,
+    descripcion TEXT NOT NULL,
+    monto_usd REAL NOT NULL CHECK (monto_usd > 0),
+    moneda TEXT NOT NULL DEFAULT 'USD',
+    monto_moneda REAL NOT NULL DEFAULT 0 CHECK (monto_moneda >= 0),
+    tasa_cambio REAL NOT NULL DEFAULT 1 CHECK (tasa_cambio > 0),
+    metodo_pago TEXT NOT NULL DEFAULT 'efectivo',
+    usuario TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'confirmado' CHECK (estado IN ('confirmado','anulado')),
+    metadata TEXT,
+    fecha_creacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS cierres_caja (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -225,6 +253,13 @@ CREATE INDEX IF NOT EXISTS idx_produccion_auditoria_fecha ON produccion_auditori
 CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_estado ON cuentas_por_pagar_proveedores(estado);
 CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_vencimiento ON cuentas_por_pagar_proveedores(fecha_vencimiento);
 CREATE INDEX IF NOT EXISTS idx_pagos_proveedores_cxp ON pagos_proveedores(cuenta_por_pagar_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tesoreria_origen_referencia_tipo
+ON movimientos_tesoreria(origen, referencia_id, tipo)
+WHERE referencia_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tesoreria_fecha ON movimientos_tesoreria(fecha);
+CREATE INDEX IF NOT EXISTS idx_tesoreria_tipo_fecha ON movimientos_tesoreria(tipo, fecha);
+CREATE INDEX IF NOT EXISTS idx_tesoreria_origen_fecha ON movimientos_tesoreria(origen, fecha);
+CREATE INDEX IF NOT EXISTS idx_tesoreria_metodo_pago ON movimientos_tesoreria(metodo_pago);
 
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
@@ -280,7 +315,37 @@ def _ensure_gastos_migration(conn) -> None:
     )
 
 
+def _ensure_tesoreria_migration(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(movimientos_tesoreria)").fetchall()}
+    if not columns:
+        return
+
+    if "metadata" not in columns:
+        conn.execute("ALTER TABLE movimientos_tesoreria ADD COLUMN metadata TEXT")
+    if "fecha_creacion" not in columns:
+        conn.execute("ALTER TABLE movimientos_tesoreria ADD COLUMN fecha_creacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+
+    conn.execute(
+        """
+        UPDATE movimientos_tesoreria
+        SET moneda = COALESCE(NULLIF(moneda, ''), 'USD'),
+            monto_moneda = CASE
+                WHEN COALESCE(monto_moneda, 0) <= 0 THEN COALESCE(monto_usd, 0)
+                ELSE monto_moneda
+            END,
+            tasa_cambio = CASE
+                WHEN COALESCE(tasa_cambio, 0) <= 0 THEN 1
+                ELSE tasa_cambio
+            END,
+            metodo_pago = COALESCE(NULLIF(metodo_pago, ''), 'efectivo'),
+            estado = COALESCE(NULLIF(estado, ''), 'confirmado'),
+            fecha_creacion = COALESCE(fecha_creacion, fecha, CURRENT_TIMESTAMP)
+        """
+    )
+
+
 def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
         _ensure_gastos_migration(conn)
+        _ensure_tesoreria_migration(conn)
