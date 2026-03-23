@@ -15,6 +15,8 @@ from services.cxp_proveedores_service import (
     validar_condicion_compra,
 )
 
+from services.tesoreria_service import registrar_egreso
+
 
 # ============================================================
 # AUXILIARES
@@ -410,6 +412,24 @@ def registrar_compra(
             ),
         )
         compra_id = int(cur_hist.lastrowid)
+        if monto_pagado_inicial_usd > 0:
+            registrar_egreso(
+                conn,
+                origen="compra_pago_inicial",
+                referencia_id=compra_id,
+                descripcion=f"Pago inicial compra #{compra_id} · {row['nombre']}",
+                monto_usd=float(monto_pagado_inicial_usd),
+                moneda=str(moneda_pago),
+                monto_moneda=float(monto_pagado_inicial_usd if str(moneda_pago).upper() == "USD" else costo_total_usd * (monto_pagado_inicial_usd / max(float(costo_total_usd), 0.0001)) * float(tasa_usada)),
+                tasa_cambio=float(tasa_usada or 1.0),
+                metodo_pago=str(moneda_pago).lower(),
+                usuario=usuario,
+                metadata={
+                    "modulo": "inventario",
+                    "tipo_pago_compra": clean_text(financial_input.tipo_pago).lower(),
+                    "proveedor_id": int(proveedor_id) if proveedor_id is not None else None,
+                },
+            )
         crear_cuenta_por_pagar_desde_compra(
             conn,
             usuario=usuario,
