@@ -164,22 +164,6 @@ MODULE_BLUEPRINTS: tuple[ModuleBlueprint, ...] = (
         priority="Alta",
     ),
     ModuleBlueprint(
-        key="contabilidad",
-        name="Contabilidad",
-        icon="📚",
-        category="Contabilidad",
-        summary="Formaliza la capa contable con libros, balances y estados financieros.",
-        capabilities=(
-            "Libro diario",
-            "Libro mayor",
-            "Balances",
-            "Estados financieros",
-        ),
-        integrations=("Ventas", "Gastos", "CxC", "CxP", "Impuestos"),
-        business_value="Permite cerrar mes, auditar la operación y llevar el ERP a un nivel contable real.",
-        priority="Crítica",
-    ),
-    ModuleBlueprint(
         key="impuestos",
         name="Impuestos",
         icon="🧾",
@@ -343,7 +327,6 @@ CATEGORY_KEYS = {
         "rutas_produccion",
     ),
     "contable": (
-        "contabilidad",
         "impuestos",
         "conciliacion_bancaria",
     ),
@@ -425,7 +408,7 @@ def render_module_portfolio(usuario: str | None = None) -> None:
     if usuario:
         st.caption(f"Mapa de expansión solicitado para {usuario}.")
     st.write(
-        "Se incorporó un portafolio de 19 módulos estratégicos para cubrir finanzas operativas, operación industrial, contabilidad, crecimiento y administración interna."
+        "Se incorporó un portafolio de módulos estratégicos para cubrir finanzas operativas, operación industrial, crecimiento y administración interna, mientras Contabilidad ahora opera como módulo independiente."
     )
 
     total_modules = len(MODULE_BLUEPRINTS)
