@@ -180,13 +180,13 @@ MENU_ROUTES = {
 
 }
 
+render_sidebar_config_snapshot()
+
 menu = st.sidebar.radio(
     "Menú principal",
     list(MENU_ROUTES.keys()),
     label_visibility="collapsed",
 )
-
-render_sidebar_config_snapshot()
 
 
 # ==================================================
