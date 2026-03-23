@@ -51,7 +51,25 @@ ACCOUNTING_CAPABILITIES: tuple[AccountingCapability, ...] = (
         outputs=(
             "Resumen de IVA",
             "Base imponible",
-@@ -59,110 +73,216 @@ ACCOUNTING_INTEGRATIONS: tuple[str, ...] = (
+            "Calendario fiscal",
+        ),
+    ),
+    AccountingCapability(
+        title="Auditoría y trazabilidad",
+        description="Relaciona cada asiento con ventas, gastos, compras, tesorería y conciliación bancaria para soportar revisiones.",
+        outputs=(
+            "Bitácora contable",
+            "Rastreo por documento",
+            "Alertas de diferencias",
+        ),
+    ),
+)
+
+ACCOUNTING_INTEGRATIONS: tuple[str, ...] = (
+    "Ventas",
+    "Gastos",
+    "Caja",
+    "Tesorería",
     "Cuentas por pagar",
     "Impuestos",
     "Conciliación bancaria",
