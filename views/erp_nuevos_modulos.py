@@ -44,10 +44,6 @@ def render_rutas_produccion(usuario):
     render_module_blueprint("rutas_produccion", usuario)
 
 
-def render_contabilidad(usuario):
-    render_module_blueprint("contabilidad", usuario)
-
-
 def render_impuestos(usuario):
     render_module_blueprint("impuestos", usuario)
 
@@ -69,6 +65,10 @@ def render_fidelizacion(usuario):
 
 
 def render_catalogo(usuario):
+    render_module_blueprint("catalogo", usuario)
+
+
+def render_rrhh(usuario):
     render_module_blueprint("catalogo", usuario)
 
 
