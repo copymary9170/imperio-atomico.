@@ -9,11 +9,15 @@ from importlib import import_module
 
 __all__ = [
     "CotizacionService",
+    "CompraFinancialInput",
     "DiagnosticsService",
     "InventoryMovement",
     "InventoryService",
     "ConsumoInsumo",
     "ProduccionService",
+    "crear_cuenta_por_pagar_desde_compra",
+    "registrar_pago_cuenta_por_pagar",
+    "validar_condicion_compra",
     "VentaItem",
     "VentasService",
     "analizar_hoja_diagnostico",
@@ -27,6 +31,7 @@ _EXPORTS = {
 
     # Cotizaciones
     "CotizacionService": ("services.cotizacion_service", "CotizacionService"),
+    "CompraFinancialInput": ("services.cxp_proveedores_service", "CompraFinancialInput"),
 
     # Diagnósticos
     "DiagnosticsService": ("services.diagnostics_service", "DiagnosticsService"),
@@ -41,6 +46,11 @@ _EXPORTS = {
     # Producción
     "ConsumoInsumo": ("services.produccion_service", "ConsumoInsumo"),
     "ProduccionService": ("services.produccion_service", "ProduccionService"),
+
+    # Compras / CxP proveedores
+    "crear_cuenta_por_pagar_desde_compra": ("services.cxp_proveedores_service", "crear_cuenta_por_pagar_desde_compra"),
+    "registrar_pago_cuenta_por_pagar": ("services.cxp_proveedores_service", "registrar_pago_cuenta_por_pagar"),
+    "validar_condicion_compra": ("services.cxp_proveedores_service", "validar_condicion_compra"),
 
     # Ventas
     "VentaItem": ("services.ventas_service", "VentaItem"),
