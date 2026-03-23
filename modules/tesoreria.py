@@ -171,3 +171,6 @@ def render_tesoreria(usuario: str) -> None:
 
     with tab4:
         _render_form_ajuste_manual(usuario)
+
+
+
