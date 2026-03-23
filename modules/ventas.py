@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text
+from services.tesoreria_service import registrar_ingreso
 from utils.currency import convert_to_bs
 
 
@@ -141,6 +142,23 @@ def registrar_venta(
                 WHERE id = ?
                 """,
                 (total, cliente_id),
+            )
+        else:
+            registrar_ingreso(
+                conn,
+                origen="venta",
+                referencia_id=venta_id,
+                descripcion=f"Venta #{venta_id}",
+                monto_usd=float(total),
+                moneda=str(moneda),
+                monto_moneda=float(total if str(moneda).upper() == "USD" else total_bs),
+                tasa_cambio=float(tasa_cambio),
+                metodo_pago=str(metodo_pago).lower(),
+                usuario=usuario,
+                metadata={
+                    "cliente_id": int(cliente_id) if cliente_id is not None else None,
+                    "metodo_pago": str(metodo_pago).lower(),
+                },
             )
 
     return venta_id
@@ -352,12 +370,24 @@ def _render_tab_historial() -> None:
                     try:
                         with db_transaction() as conn:
                             conn.execute(
-                                "UPDATE ventas SET metodo_pago='efectivo' WHERE id=?",
-                                (int(row["id"]),),
-                            )
-                            conn.execute(
                                 "UPDATE cuentas_por_cobrar SET estado='pagada', saldo_usd=0 WHERE venta_id=?",
                                 (int(row["id"]),),
+                            )
+                            registrar_ingreso(
+                                conn,
+                                origen="cobro_cliente",
+                                referencia_id=int(row["id"]),
+                                descripcion=f"Cobro venta a crédito #{int(row['id'])}",
+                                monto_usd=float(row["total_usd"]),
+                                moneda="USD",
+                                monto_moneda=float(row["total_usd"]),
+                                tasa_cambio=1.0,
+                                metodo_pago="efectivo",
+                                usuario="Sistema",
+                                metadata={
+                                    "venta_id": int(row["id"]),
+                                    "cliente": str(row["cliente"]),
+                                },
                             )
                         st.success("Cuenta actualizada")
                         st.rerun()
