@@ -1,6 +1,8 @@
 import streamlit as st
+import streamlit as st
 
 from modules.erp_nuevos_modulos import render_module_blueprint, render_module_portfolio
+from modules.tesoreria import render_tesoreria as render_tesoreria_module
 
 
 def render_portafolio_modulos(usuario):
@@ -17,7 +19,7 @@ def render_cuentas_por_pagar(usuario):
 
 
 def render_tesoreria(usuario):
-    render_module_blueprint("tesoreria", usuario)
+    render_tesoreria_module(usuario)
 
 
 def render_costeo_industrial(usuario):
