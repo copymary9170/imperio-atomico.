@@ -1,13 +1,15 @@
-from __future__ import annotations
+rom __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 from modules.common import as_positive, clean_text, money
+from services.tesoreria_service import registrar_egreso
 
 
 TIPOS_PAGO_COMPRA = ("contado", "credito", "mixto")
+ESTADOS_CXP = ("pendiente", "parcial", "pagada", "vencida")
 ESTADOS_CXP = ("pendiente", "parcial", "pagada", "vencida")
 
 
@@ -203,5 +205,23 @@ def registrar_pago_cuenta_por_pagar(
         WHERE id=?
         """,
         (nuevo_pagado, nuevo_saldo, nuevo_estado, int(cuenta_por_pagar_id)),
+    )
+    registrar_egreso(
+        conn,
+        origen="pago_proveedor",
+        referencia_id=int(cur.lastrowid),
+        descripcion=f"Pago a proveedor por compra #{int(row['compra_id'])}",
+        monto_usd=float(monto),
+        moneda=clean_text(moneda_pago).upper() or "USD",
+        monto_moneda=float(monto_moneda),
+        tasa_cambio=float(tasa),
+        metodo_pago=clean_text(moneda_pago).lower() or "usd",
+        usuario=usuario,
+        metadata={
+            "cuenta_por_pagar_id": int(cuenta_por_pagar_id),
+            "compra_id": int(row["compra_id"]),
+            "proveedor_id": int(row["proveedor_id"]) if row["proveedor_id"] is not None else None,
+            "referencia_pago": clean_text(referencia),
+        },
     )
     return int(cur.lastrowid)
