@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 
 import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, money, require_text
+from services.cxp_proveedores_service import (
+    CompraFinancialInput,
+    crear_cuenta_por_pagar_desde_compra,
+    registrar_pago_cuenta_por_pagar,
+    validar_condicion_compra,
+)
 
 
 # ============================================================
@@ -31,7 +38,6 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
-
 
 def _ensure_inventory_support_tables() -> None:
     with db_transaction() as conn:
@@ -76,6 +82,71 @@ def _ensure_inventory_support_tables() -> None:
             )
             """
         )
+
+        compra_cols = {r[1] for r in conn.execute("PRAGMA table_info(historial_compras)").fetchall()}
+        if "tipo_pago" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN tipo_pago TEXT DEFAULT 'contado'")
+        if "monto_pagado_inicial_usd" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN monto_pagado_inicial_usd REAL DEFAULT 0")
+        if "saldo_pendiente_usd" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN saldo_pendiente_usd REAL DEFAULT 0")
+        if "fecha_vencimiento" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN fecha_vencimiento TEXT")
+        conn.execute(
+            """
+            UPDATE historial_compras
+            SET tipo_pago = COALESCE(NULLIF(tipo_pago, ''), 'contado'),
+                monto_pagado_inicial_usd = CASE
+                    WHEN COALESCE(tipo_pago, 'contado') = 'contado' AND COALESCE(monto_pagado_inicial_usd, 0) = 0
+                        THEN COALESCE(costo_total_usd, 0)
+                    ELSE COALESCE(monto_pagado_inicial_usd, 0)
+                END,
+                saldo_pendiente_usd = COALESCE(saldo_pendiente_usd, 0)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cuentas_por_pagar_proveedores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                usuario TEXT NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'pendiente',
+                proveedor_id INTEGER,
+                compra_id INTEGER NOT NULL,
+                tipo_documento TEXT NOT NULL DEFAULT 'compra',
+                monto_original_usd REAL NOT NULL,
+                monto_pagado_usd REAL NOT NULL DEFAULT 0,
+                saldo_usd REAL NOT NULL,
+                fecha_vencimiento TEXT,
+                notas TEXT,
+                FOREIGN KEY (proveedor_id) REFERENCES proveedores(id),
+                FOREIGN KEY (compra_id) REFERENCES historial_compras(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pagos_proveedores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                usuario TEXT NOT NULL,
+                cuenta_por_pagar_id INTEGER NOT NULL,
+                proveedor_id INTEGER,
+                monto_usd REAL NOT NULL,
+                moneda_pago TEXT NOT NULL DEFAULT 'USD',
+                monto_moneda_pago REAL NOT NULL DEFAULT 0,
+                tasa_cambio REAL NOT NULL DEFAULT 1,
+                referencia TEXT,
+                observaciones TEXT,
+                FOREIGN KEY (cuenta_por_pagar_id) REFERENCES cuentas_por_pagar_proveedores(id),
+                FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_estado ON cuentas_por_pagar_proveedores(estado)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_vencimiento ON cuentas_por_pagar_proveedores(fecha_vencimiento)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pagos_proveedores_cxp ON pagos_proveedores(cuenta_por_pagar_id)")
 
 
 def _ensure_config_defaults() -> None:
@@ -242,6 +313,7 @@ def add_inventory_movement(
             """,
             (usuario, int(inventario_id), tipo, float(delta), money(costo_unitario_usd), referencia),
         )
+        )
         connection.execute(
             "UPDATE inventario SET stock_actual = stock_actual + ? WHERE id=?",
             (float(delta), int(inventario_id)),
@@ -266,10 +338,18 @@ def registrar_compra(
     tasa_usada: float,
     moneda_pago: str,
     referencia_extra: str = "",
+    financial_input: CompraFinancialInput | None = None,
 ) -> None:
     cantidad = as_positive(cantidad, "Cantidad", allow_zero=False)
     costo_total_usd = as_positive(costo_total_usd, "Costo total", allow_zero=False)
     costo_unit = costo_total_usd / cantidad
+    financial_input = financial_input or CompraFinancialInput()
+    monto_pagado_inicial_usd, saldo_pendiente_usd = validar_condicion_compra(
+        total_compra_usd=float(costo_total_usd),
+        tipo_pago=financial_input.tipo_pago,
+        monto_pagado_inicial_usd=financial_input.monto_pagado_inicial_usd,
+        fecha_vencimiento=financial_input.fecha_vencimiento,
+    )
 
     with db_transaction() as conn:
         row = conn.execute(
@@ -303,12 +383,13 @@ def registrar_compra(
             conn=conn,
         )
 
-        conn.execute(
+        cur_hist = conn.execute(
             """
             INSERT INTO historial_compras
             (usuario, inventario_id, proveedor_id, item, cantidad, unidad, costo_total_usd, costo_unit_usd,
-             impuestos, delivery, tasa_usada, moneda_pago, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+             impuestos, delivery, tasa_usada, moneda_pago, tipo_pago, monto_pagado_inicial_usd,
+             saldo_pendiente_usd, fecha_vencimiento, activo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 usuario,
@@ -323,7 +404,20 @@ def registrar_compra(
                 money(delivery_usd),
                 float(tasa_usada),
                 str(moneda_pago),
+                clean_text(financial_input.tipo_pago).lower(),
+                money(monto_pagado_inicial_usd),
+                money(saldo_pendiente_usd),
+                financial_input.fecha_vencimiento,
             ),
+        )
+        compra_id = int(cur_hist.lastrowid)
+        crear_cuenta_por_pagar_desde_compra(
+            conn,
+            usuario=usuario,
+            compra_id=compra_id,
+            proveedor_id=proveedor_id,
+            total_compra_usd=float(costo_total_usd),
+            financial_input=financial_input,
         )
 
 
@@ -349,7 +443,7 @@ def _create_inventory_item_for_purchase(
         sku = _build_unique_sku(conn, desired_sku)
         cur = conn.execute(
             """
-            INSERT INTO inventario(usuario, sku, nombre, categoria, unidad, stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd)
+            INSERT INTO inventario(usuario, sku, nombre, categoria, unidad, stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd)            
             VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
             """,
             (
@@ -478,6 +572,94 @@ def _load_proveedores_df() -> pd.DataFrame:
     return df
 
 
+def _load_cuentas_por_pagar_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT cxp.id,
+                   cxp.fecha,
+                   cxp.compra_id,
+                   COALESCE(p.nombre, 'SIN PROVEEDOR') AS proveedor,
+                   hc.item,
+                   hc.tipo_pago,
+                   cxp.monto_original_usd,
+                   cxp.monto_pagado_usd,
+                   cxp.saldo_usd,
+                   CASE
+                       WHEN cxp.saldo_usd <= 0 THEN 'pagada'
+                       WHEN cxp.fecha_vencimiento IS NOT NULL AND DATE(cxp.fecha_vencimiento) < DATE('now') THEN 'vencida'
+                       ELSE cxp.estado
+                   END AS estado,
+                   cxp.fecha_vencimiento,
+                   cxp.notas
+            FROM cuentas_por_pagar_proveedores cxp
+            LEFT JOIN proveedores p ON p.id = cxp.proveedor_id
+            LEFT JOIN historial_compras hc ON hc.id = cxp.compra_id
+            ORDER BY
+                CASE
+                    WHEN cxp.saldo_usd > 0 AND cxp.fecha_vencimiento IS NOT NULL THEN 0
+                    ELSE 1
+                END,
+                cxp.fecha_vencimiento ASC,
+                cxp.fecha DESC
+            """
+        ).fetchall()
+    cols = [
+        "id",
+        "fecha",
+        "compra_id",
+        "proveedor",
+        "item",
+        "tipo_pago",
+        "monto_original_usd",
+        "monto_pagado_usd",
+        "saldo_usd",
+        "estado",
+        "fecha_vencimiento",
+        "notas",
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _load_pagos_proveedores_df(cuenta_por_pagar_id: int | None = None) -> pd.DataFrame:
+    params: tuple = ()
+    sql = """
+        SELECT pp.id,
+               pp.fecha,
+               pp.cuenta_por_pagar_id,
+               COALESCE(p.nombre, 'SIN PROVEEDOR') AS proveedor,
+               pp.monto_usd,
+               pp.moneda_pago,
+               pp.monto_moneda_pago,
+               pp.tasa_cambio,
+               pp.referencia,
+               pp.observaciones
+        FROM pagos_proveedores pp
+        LEFT JOIN proveedores p ON p.id = pp.proveedor_id
+    """
+    if cuenta_por_pagar_id is not None:
+        sql += " WHERE pp.cuenta_por_pagar_id=?"
+        params = (int(cuenta_por_pagar_id),)
+    sql += " ORDER BY pp.fecha DESC, pp.id DESC"
+
+    with db_transaction() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    cols = [
+        "id",
+        "fecha",
+        "cuenta_por_pagar_id",
+        "proveedor",
+        "monto_usd",
+        "moneda_pago",
+        "monto_moneda_pago",
+        "tasa_cambio",
+        "referencia",
+        "observaciones",
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
 # ============================================================
 # UI
 # ============================================================
@@ -510,7 +692,7 @@ def render_inventario(usuario: str) -> None:
         else:
             st.dataframe(df_diag_mov, use_container_width=True, hide_index=True)
 
-    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "📊 Historial Compras", "👤 Proveedores", "🔧 Ajustes"])
+    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "📊 Historial Compras", "💳 Cuentas por Pagar", "👤 Proveedores", "🔧 Ajustes"])
 
     with tabs[0]:
         if df.empty:
@@ -694,6 +876,29 @@ def render_inventario(usuario: str) -> None:
         pc2.metric("Costo unitario estimado", f"${costo_unit_preview:,.4f}")
         pc3.metric("Cantidad efectiva", f"{float(stock_real):,.3f}")
 
+        st.divider()
+        st.subheader("💳 Condición financiera de la compra")
+        fin1, fin2, fin3 = st.columns(3)
+        tipo_pago_compra = fin1.selectbox("Tipo de pago", ["contado", "credito", "mixto"], format_func=lambda x: x.capitalize())
+        requiere_abono = tipo_pago_compra in {"contado", "mixto"}
+        monto_pagado_inicial = fin2.number_input(
+            "Monto pagado inicial (USD)",
+            min_value=0.0,
+            value=0.0 if tipo_pago_compra == "credito" else float(costo_factura_total_preview if tipo_pago_compra == "contado" else 0.0),
+            disabled=not requiere_abono,
+        )
+        fecha_vencimiento = fin3.date_input(
+            "Fecha de vencimiento",
+            value=date.today(),
+            disabled=tipo_pago_compra == "contado",
+        )
+
+        saldo_estimado = max(float(costo_factura_total_preview) - float(monto_pagado_inicial), 0.0)
+        fx1, fx2 = st.columns(2)
+        fx1.metric("Pagado inicial (USD)", f"${float(monto_pagado_inicial):,.2f}")
+        fx2.metric("Saldo pendiente estimado", f"${float(saldo_estimado):,.2f}")
+        notas_financieras = st.text_input("Notas financieras", placeholder="Factura, acuerdo de pago, condiciones, etc.")
+
         hay_variantes = st.checkbox("¿Hay variantes?", value=False)
         variantes_payload: dict[str, float] = {}
 
@@ -748,10 +953,13 @@ def render_inventario(usuario: str) -> None:
                 costo_unitario_var = costo_factura_total / total_var
                 base_name = clean_text(nombre_base_var or producto_nombre)
                 base_sku = clean_text(sku_base or _slug(base_name))
+                factor_pagado = (float(monto_pagado_inicial) / float(costo_factura_total)) if float(costo_factura_total) > 0 else 0.0
 
                 for var, qty in variantes_payload.items():
                     if qty <= 0:
                         continue
+                    costo_linea = float(qty * costo_unitario_var)
+                    pagado_linea = money(costo_linea if tipo_pago_compra == "contado" else costo_linea * factor_pagado)
                     nombre_final = f"{base_name} - {var}"
                     sku_variant = f"{base_sku}-{_slug(var)}"
                     inv_id = _create_inventory_item_for_purchase(
@@ -768,7 +976,7 @@ def render_inventario(usuario: str) -> None:
                         usuario=usuario,
                         inventario_id=inv_id,
                         cantidad=float(qty),
-                        costo_total_usd=float(qty * costo_unitario_var),
+                        costo_total_usd=costo_linea,
                         proveedor_id=proveedor_id,
                         proveedor_nombre=proveedor_nombre,
                         impuestos_pct=float(impuestos_pct),
@@ -776,6 +984,12 @@ def render_inventario(usuario: str) -> None:
                         tasa_usada=float(tasa_usada),
                         moneda_pago=moneda_pago,
                         referencia_extra=referencia_unidad,
+                        financial_input=CompraFinancialInput(
+                            tipo_pago=tipo_pago_compra,
+                            monto_pagado_inicial_usd=pagado_linea,
+                            fecha_vencimiento=None if tipo_pago_compra == "contado" else fecha_vencimiento.isoformat(),
+                            notas=notas_financieras,
+                        ),
                     )
 
                 st.session_state.variantes_editor = {}
@@ -816,6 +1030,12 @@ def render_inventario(usuario: str) -> None:
                     tasa_usada=float(tasa_usada),
                     moneda_pago=moneda_pago,
                     referencia_extra=referencia_unidad,
+                    financial_input=CompraFinancialInput(
+                        tipo_pago=tipo_pago_compra,
+                        monto_pagado_inicial_usd=float(monto_pagado_inicial),
+                        fecha_vencimiento=None if tipo_pago_compra == "contado" else fecha_vencimiento.isoformat(),
+                        notas=notas_financieras,
+                    ),
                 )
                 st.success("✅ Compra guardada correctamente")
                 st.rerun()
@@ -827,6 +1047,7 @@ def render_inventario(usuario: str) -> None:
                 """
                 SELECT h.id compra_id, h.fecha, h.item, h.cantidad, h.unidad,
                        h.costo_total_usd, h.costo_unit_usd, h.impuestos, h.delivery, h.moneda_pago,
+                       h.tipo_pago, h.monto_pagado_inicial_usd, h.saldo_pendiente_usd, h.fecha_vencimiento,
                        COALESCE(p.nombre,'SIN PROVEEDOR') proveedor, h.inventario_id
                 FROM historial_compras h
                 LEFT JOIN proveedores p ON p.id = h.proveedor_id
@@ -866,6 +1087,17 @@ def render_inventario(usuario: str) -> None:
 
             if st.button("🗑 Eliminar compra"):
                 with db_transaction() as conn:
+                    deuda = conn.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM cuentas_por_pagar_proveedores
+                        WHERE compra_id=? AND (COALESCE(monto_pagado_usd,0) > 0 OR COALESCE(saldo_usd,0) > 0)
+                        """,
+                        (int(compra_id),),
+                    ).fetchone()
+                    if int(deuda["c"] or 0) > 0:
+                        st.error("No puedes eliminar una compra con cuenta por pagar o pagos asociados.")
+                        st.stop()
                     add_inventory_movement(
                         usuario=usuario,
                         inventario_id=int(row["inventario_id"]),
@@ -880,6 +1112,88 @@ def render_inventario(usuario: str) -> None:
                 st.rerun()
 
     with tabs[3]:
+        st.subheader("💳 Cuentas por pagar a proveedores")
+        df_cxp = _load_cuentas_por_pagar_df()
+
+        if df_cxp.empty:
+            st.info("No hay cuentas por pagar registradas.")
+        else:
+            r1, r2, r3, r4 = st.columns(4)
+            total_deuda = float(df_cxp["saldo_usd"].sum())
+            total_vencida = float(df_cxp.loc[df_cxp["estado"] == "vencida", "saldo_usd"].sum())
+            r1.metric("Saldo pendiente", f"${total_deuda:,.2f}")
+            r2.metric("Documentos abiertos", int((df_cxp["saldo_usd"] > 0).sum()))
+            r3.metric("Vencidas", int((df_cxp["estado"] == "vencida").sum()))
+            r4.metric("Saldo vencido", f"${total_vencida:,.2f}")
+
+            fc1, fc2 = st.columns(2)
+            filtro_proveedor_cxp = fc1.text_input("🔍 Filtrar proveedor", key="cxp_filtro_proveedor")
+            filtro_estado_cxp = fc2.multiselect("Estado", ["pendiente", "parcial", "pagada", "vencida"], default=["pendiente", "parcial", "vencida"])
+
+            df_cxp_view = df_cxp.copy()
+            if filtro_proveedor_cxp:
+                df_cxp_view = df_cxp_view[df_cxp_view["proveedor"].astype(str).str.contains(filtro_proveedor_cxp, case=False, na=False)]
+            if filtro_estado_cxp:
+                df_cxp_view = df_cxp_view[df_cxp_view["estado"].isin(filtro_estado_cxp)]
+
+            st.dataframe(df_cxp_view, use_container_width=True, hide_index=True)
+
+            opciones_cxp = {
+                f"#{int(r.id)} | Compra #{int(r.compra_id)} | {r.proveedor} | Saldo ${float(r.saldo_usd):,.2f}": int(r.id)
+                for r in df_cxp.itertuples()
+            }
+            cuenta_sel = st.selectbox("Seleccionar cuenta por pagar", list(opciones_cxp.keys()))
+            cuenta_id = opciones_cxp[cuenta_sel]
+            cuenta_row = df_cxp[df_cxp["id"] == cuenta_id].iloc[0]
+
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Compra asociada", f"#{int(cuenta_row['compra_id'])}")
+            d2.metric("Estado actual", str(cuenta_row["estado"]).capitalize())
+            d3.metric("Saldo actual", f"${float(cuenta_row['saldo_usd']):,.2f}")
+
+            st.write("### Registrar abono")
+            p1, p2, p3 = st.columns(3)
+            abono_usd = p1.number_input(
+                "Monto a abonar (USD)",
+                min_value=0.0,
+                max_value=float(cuenta_row["saldo_usd"] or 0.0),
+                value=0.0,
+                key=f"cxp_abono_{cuenta_id}",
+            )
+            moneda_abono = p2.selectbox("Moneda pago", ["USD", "BS", "USDT"], key=f"cxp_moneda_{cuenta_id}")
+            tasa_abono = p3.number_input("Tasa", min_value=0.0001, value=1.0 if moneda_abono == "USD" else tasa_bcv, key=f"cxp_tasa_{cuenta_id}")
+            p4, p5 = st.columns(2)
+            referencia_abono = p4.text_input("Referencia", key=f"cxp_ref_{cuenta_id}")
+            observacion_abono = p5.text_input("Observaciones", key=f"cxp_obs_{cuenta_id}")
+
+            if st.button("💸 Registrar abono", use_container_width=True):
+                if abono_usd <= 0:
+                    st.error("Debes indicar un monto válido para el abono.")
+                else:
+                    monto_moneda = abono_usd if moneda_abono == "USD" else money(abono_usd * float(tasa_abono))
+                    with db_transaction() as conn:
+                        registrar_pago_cuenta_por_pagar(
+                            conn,
+                            usuario=usuario,
+                            cuenta_por_pagar_id=int(cuenta_id),
+                            monto_usd=float(abono_usd),
+                            moneda_pago=moneda_abono,
+                            monto_moneda_pago=float(monto_moneda),
+                            tasa_cambio=float(tasa_abono),
+                            referencia=referencia_abono,
+                            observaciones=observacion_abono,
+                        )
+                    st.success("Pago registrado correctamente.")
+                    st.rerun()
+
+            st.write("### Historial de pagos")
+            df_pagos = _load_pagos_proveedores_df(int(cuenta_id))
+            if df_pagos.empty:
+                st.caption("Todavía no hay pagos registrados para esta cuenta.")
+            else:
+                st.dataframe(df_pagos, use_container_width=True, hide_index=True)
+
+    with tabs[4]:
         st.subheader("👤 Directorio de Proveedores")
         df_prov = _load_proveedores_df()
 
@@ -888,6 +1202,7 @@ def render_inventario(usuario: str) -> None:
         else:
             cfp1, cfp2 = st.columns([2, 1])
             filtro = cfp1.text_input("🔍 Buscar proveedor")
+
 
             # especialidades disponibles para filtro
             tags = set()
@@ -979,7 +1294,7 @@ def render_inventario(usuario: str) -> None:
                         st.success("Proveedor eliminado")
                         st.rerun()
 
-    with tabs[4]:
+    with tabs[5]:
         st.subheader("🔧 Ajustes de Inventario 360°")
 
         df_adj = _load_inventory_df()
