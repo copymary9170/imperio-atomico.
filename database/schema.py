@@ -280,6 +280,30 @@ CREATE TABLE IF NOT EXISTS cierres_periodo (
     notas TEXT
 );
 
+CREATE TABLE IF NOT EXISTS presupuesto_operativo (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    periodo TEXT NOT NULL,
+    categoria TEXT NOT NULL,
+    tipo TEXT NOT NULL CHECK (tipo IN ('ingreso','egreso')),
+    monto_presupuestado_usd REAL NOT NULL DEFAULT 0,
+    meta_kpi_usd REAL NOT NULL DEFAULT 0,
+    usuario TEXT NOT NULL DEFAULT 'Sistema',
+    notas TEXT,
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(periodo, categoria, tipo)
+);
+
+CREATE TABLE IF NOT EXISTS alertas_gerenciales_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    periodo TEXT NOT NULL,
+    tipo_alerta TEXT NOT NULL,
+    prioridad TEXT NOT NULL CHECK (prioridad IN ('baja','media','alta')),
+    mensaje TEXT NOT NULL,
+    valor_usd REAL NOT NULL DEFAULT 0,
+    metadata TEXT
+);
+
 CREATE TABLE IF NOT EXISTS auditoria (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -416,7 +440,9 @@ CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_estado ON movimientos_banca
 CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_cuenta_fecha ON movimientos_bancarios(cuenta_bancaria, fecha);
 CREATE INDEX IF NOT EXISTS idx_conciliaciones_tesoreria ON conciliaciones_bancarias(tesoreria_movimiento_id);
 CREATE INDEX IF NOT EXISTS idx_cierres_periodo_rango ON cierres_periodo(tipo_cierre, fecha_desde, fecha_hasta, estado);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_cierres_periodo_unique ON cierres_periodo(periodo, tipo_cierre, estado);
+REATE UNIQUE INDEX IF NOT EXISTS idx_cierres_periodo_unique ON cierres_periodo(periodo, tipo_cierre, estado);
+CREATE INDEX IF NOT EXISTS idx_presupuesto_operativo_periodo ON presupuesto_operativo(periodo, tipo);
+CREATE INDEX IF NOT EXISTS idx_alertas_gerenciales_fecha ON alertas_gerenciales_log(fecha, prioridad);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_fecha ON costeo_ordenes(fecha);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_tipo_fecha ON costeo_ordenes(tipo_proceso, fecha);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_estado ON costeo_ordenes(estado);
