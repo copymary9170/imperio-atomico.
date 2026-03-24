@@ -116,9 +116,45 @@ CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
     estado TEXT NOT NULL DEFAULT 'pendiente',
     cliente_id INTEGER NOT NULL,
     venta_id INTEGER,
+    tipo_documento TEXT NOT NULL DEFAULT 'venta',
+    monto_original_usd REAL NOT NULL DEFAULT 0,
+    monto_cobrado_usd REAL NOT NULL DEFAULT 0,
     saldo_usd REAL NOT NULL,
     fecha_vencimiento TEXT,
+    dias_vencimiento INTEGER NOT NULL DEFAULT 30,
     notas TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pagos_clientes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    cuenta_por_cobrar_id INTEGER NOT NULL,
+    cliente_id INTEGER NOT NULL,
+    venta_id INTEGER,
+    monto_usd REAL NOT NULL,
+    moneda_pago TEXT NOT NULL DEFAULT 'USD',
+    monto_moneda_pago REAL NOT NULL DEFAULT 0,
+    tasa_cambio REAL NOT NULL DEFAULT 1,
+    metodo_pago TEXT NOT NULL DEFAULT 'efectivo',
+    referencia TEXT,
+    observaciones TEXT,
+    promesa_pago_fecha TEXT,
+    proxima_gestion_fecha TEXT,
+    FOREIGN KEY (cuenta_por_cobrar_id) REFERENCES cuentas_por_cobrar(id),
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+    FOREIGN KEY (venta_id) REFERENCES ventas(id)
+);
+
+CREATE TABLE IF NOT EXISTS gestiones_cobranza (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    cuenta_por_cobrar_id INTEGER NOT NULL,
+    observaciones TEXT,
+    promesa_pago_fecha TEXT,
+    proxima_gestion_fecha TEXT,
+    FOREIGN KEY (cuenta_por_cobrar_id) REFERENCES cuentas_por_cobrar(id)
 );
 
 CREATE TABLE IF NOT EXISTS cuentas_por_pagar_proveedores (
@@ -362,6 +398,12 @@ CREATE INDEX IF NOT EXISTS idx_produccion_auditoria_fecha ON produccion_auditori
 CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_estado ON cuentas_por_pagar_proveedores(estado);
 CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_vencimiento ON cuentas_por_pagar_proveedores(fecha_vencimiento);
 CREATE INDEX IF NOT EXISTS idx_pagos_proveedores_cxp ON pagos_proveedores(cuenta_por_pagar_id);
+CREATE INDEX IF NOT EXISTS idx_cxc_estado ON cuentas_por_cobrar(estado);
+CREATE INDEX IF NOT EXISTS idx_cxc_cliente_estado ON cuentas_por_cobrar(cliente_id, estado);
+CREATE INDEX IF NOT EXISTS idx_cxc_vencimiento ON cuentas_por_cobrar(fecha_vencimiento);
+CREATE INDEX IF NOT EXISTS idx_pagos_clientes_cxc ON pagos_clientes(cuenta_por_cobrar_id);
+CREATE INDEX IF NOT EXISTS idx_pagos_clientes_cliente ON pagos_clientes(cliente_id, fecha);
+CREATE INDEX IF NOT EXISTS idx_gestiones_cobranza_cxc ON gestiones_cobranza(cuenta_por_cobrar_id, fecha);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tesoreria_origen_referencia_tipo
 ON movimientos_tesoreria(origen, referencia_id, tipo)
 WHERE referencia_id IS NOT NULL;
@@ -481,6 +523,49 @@ def _ensure_gastos_migration(conn) -> None:
                 ELSE monto_mensual_bs
             END
         WHERE 1=1
+        """
+    )
+
+
+def _ensure_cxc_migration(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(cuentas_por_cobrar)").fetchall()}
+    if not columns:
+        return
+
+    if "tipo_documento" not in columns:
+        conn.execute("ALTER TABLE cuentas_por_cobrar ADD COLUMN tipo_documento TEXT NOT NULL DEFAULT 'venta'")
+    if "monto_original_usd" not in columns:
+        conn.execute("ALTER TABLE cuentas_por_cobrar ADD COLUMN monto_original_usd REAL NOT NULL DEFAULT 0")
+    if "monto_cobrado_usd" not in columns:
+        conn.execute("ALTER TABLE cuentas_por_cobrar ADD COLUMN monto_cobrado_usd REAL NOT NULL DEFAULT 0")
+    if "dias_vencimiento" not in columns:
+        conn.execute("ALTER TABLE cuentas_por_cobrar ADD COLUMN dias_vencimiento INTEGER NOT NULL DEFAULT 30")
+
+    conn.execute(
+        """
+        UPDATE cuentas_por_cobrar
+        SET tipo_documento = COALESCE(NULLIF(tipo_documento, ''), 'venta'),
+            monto_original_usd = CASE
+                WHEN COALESCE(monto_original_usd, 0) <= 0 THEN COALESCE(saldo_usd, 0) + COALESCE(monto_cobrado_usd, 0)
+                ELSE monto_original_usd
+            END,
+            monto_cobrado_usd = CASE
+                WHEN COALESCE(monto_cobrado_usd, 0) < 0 THEN 0
+                ELSE COALESCE(monto_cobrado_usd, 0)
+            END,
+            saldo_usd = CASE
+                WHEN COALESCE(saldo_usd, 0) < 0 THEN 0
+                ELSE COALESCE(saldo_usd, 0)
+            END,
+            dias_vencimiento = CASE
+                WHEN COALESCE(dias_vencimiento, 0) <= 0 THEN 30
+                ELSE dias_vencimiento
+            END,
+            estado = CASE
+                WHEN LOWER(COALESCE(estado, '')) IN ('pendiente','parcial','pagada','vencida','incobrable') THEN LOWER(estado)
+                WHEN COALESCE(saldo_usd, 0) <= 0 THEN 'pagada'
+                ELSE 'pendiente'
+            END
         """
     )
 
@@ -627,6 +712,7 @@ def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
         _ensure_gastos_migration(conn)
+        _ensure_cxc_migration(conn)
         _ensure_tesoreria_migration(conn)
         _ensure_costeo_migration(conn)
         _ensure_contabilidad_migration(conn)
