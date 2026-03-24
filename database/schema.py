@@ -198,6 +198,52 @@ CREATE TABLE IF NOT EXISTS cierres_caja (
     observaciones TEXT
 );
 
+CREATE TABLE IF NOT EXISTS movimientos_bancarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    descripcion TEXT NOT NULL,
+    monto REAL NOT NULL CHECK (monto > 0),
+    tipo TEXT NOT NULL CHECK (tipo IN ('ingreso','egreso')),
+    cuenta_bancaria TEXT NOT NULL,
+    referencia_banco TEXT,
+    origen TEXT NOT NULL DEFAULT 'manual',
+    moneda TEXT NOT NULL DEFAULT 'USD',
+    saldo_reportado REAL,
+    usuario TEXT NOT NULL,
+    estado_conciliacion TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado_conciliacion IN ('pendiente','conciliado','con_diferencia')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS conciliaciones_bancarias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    banco_movimiento_id INTEGER NOT NULL UNIQUE,
+    tesoreria_movimiento_id INTEGER NOT NULL UNIQUE,
+    estado_resultado TEXT NOT NULL CHECK (estado_resultado IN ('conciliado','con_diferencia')),
+    diferencia_usd REAL NOT NULL DEFAULT 0,
+    notas TEXT,
+    conciliado_por TEXT NOT NULL,
+    conciliado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (banco_movimiento_id) REFERENCES movimientos_bancarios(id),
+    FOREIGN KEY (tesoreria_movimiento_id) REFERENCES movimientos_tesoreria(id)
+);
+
+CREATE TABLE IF NOT EXISTS cierres_periodo (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    periodo TEXT NOT NULL,
+    tipo_cierre TEXT NOT NULL CHECK (tipo_cierre IN ('diario','mensual')),
+    fecha_desde TEXT NOT NULL,
+    fecha_hasta TEXT NOT NULL,
+    total_ingresos_usd REAL NOT NULL DEFAULT 0,
+    total_egresos_usd REAL NOT NULL DEFAULT 0,
+    saldo_neto_usd REAL NOT NULL DEFAULT 0,
+    no_conciliados_banco INTEGER NOT NULL DEFAULT 0,
+    no_conciliados_tesoreria INTEGER NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'cerrado' CHECK (estado IN ('abierto','cerrado')),
+    cerrado_por TEXT NOT NULL,
+    cerrado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notas TEXT
+);
+
 CREATE TABLE IF NOT EXISTS auditoria (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -323,6 +369,12 @@ CREATE INDEX IF NOT EXISTS idx_tesoreria_fecha ON movimientos_tesoreria(fecha);
 CREATE INDEX IF NOT EXISTS idx_tesoreria_tipo_fecha ON movimientos_tesoreria(tipo, fecha);
 CREATE INDEX IF NOT EXISTS idx_tesoreria_origen_fecha ON movimientos_tesoreria(origen, fecha);
 CREATE INDEX IF NOT EXISTS idx_tesoreria_metodo_pago ON movimientos_tesoreria(metodo_pago);
+CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_fecha ON movimientos_bancarios(fecha);
+CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_estado ON movimientos_bancarios(estado_conciliacion);
+CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_cuenta_fecha ON movimientos_bancarios(cuenta_bancaria, fecha);
+CREATE INDEX IF NOT EXISTS idx_conciliaciones_tesoreria ON conciliaciones_bancarias(tesoreria_movimiento_id);
+CREATE INDEX IF NOT EXISTS idx_cierres_periodo_rango ON cierres_periodo(tipo_cierre, fecha_desde, fecha_hasta, estado);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cierres_periodo_unique ON cierres_periodo(periodo, tipo_cierre, estado);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_fecha ON costeo_ordenes(fecha);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_tipo_fecha ON costeo_ordenes(tipo_proceso, fecha);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_estado ON costeo_ordenes(estado);
@@ -551,6 +603,26 @@ def _ensure_contabilidad_migration(conn) -> None:
     )
 
 
+def _ensure_conciliacion_migration(conn) -> None:
+    movimientos_banco_cols = {row[1] for row in conn.execute("PRAGMA table_info(movimientos_bancarios)").fetchall()}
+    if movimientos_banco_cols:
+        if "estado_conciliacion" not in movimientos_banco_cols:
+            conn.execute(
+                "ALTER TABLE movimientos_bancarios ADD COLUMN estado_conciliacion TEXT NOT NULL DEFAULT 'pendiente'"
+            )
+        if "created_at" not in movimientos_banco_cols:
+            conn.execute("ALTER TABLE movimientos_bancarios ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+        conn.execute(
+            """
+            UPDATE movimientos_bancarios
+            SET estado_conciliacion = CASE
+                WHEN LOWER(COALESCE(estado_conciliacion, '')) IN ('pendiente','conciliado','con_diferencia') THEN LOWER(estado_conciliacion)
+                ELSE 'pendiente'
+            END
+            """
+        )
+
+
 def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
@@ -558,3 +630,4 @@ def init_schema() -> None:
         _ensure_tesoreria_migration(conn)
         _ensure_costeo_migration(conn)
         _ensure_contabilidad_migration(conn)
+        _ensure_conciliacion_migration(conn)
