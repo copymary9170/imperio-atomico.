@@ -40,6 +40,7 @@ from views.caja import render_caja
 from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
 from views.calculadora import render_calculadora
+from views.costeo import render_costeo
 from views.configuracion import render_configuracion
 from views.contabilidad import render_contabilidad
 from views.erp_nuevos_modulos import (
@@ -148,6 +149,8 @@ MENU_ROUTES = {
     "📊 Auditoría y Métricas": lambda: render_auditoria(usuario),
 
     "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
+   
+    "🧮 Costeo": lambda: render_costeo(usuario),
 
     "🧮 Calculadora": lambda: render_calculadora(usuario),
 
