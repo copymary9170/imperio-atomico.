@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, money, require_text
+from services.contabilidad_service import contabilizar_compra
 from services.cxp_proveedores_service import (
     CompraFinancialInput,
     crear_cuenta_por_pagar_desde_compra,
@@ -438,6 +439,7 @@ def registrar_compra(
             total_compra_usd=float(costo_total_usd),
             financial_input=financial_input,
         )
+        contabilizar_compra(conn, compra_id=compra_id, usuario=usuario)
 
 
 def _create_inventory_item_for_purchase(
