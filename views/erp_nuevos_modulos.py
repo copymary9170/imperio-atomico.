@@ -71,10 +71,6 @@ def render_catalogo(usuario):
 
 
 def render_rrhh(usuario):
-    render_module_blueprint("catalogo", usuario)
-
-
-def render_rrhh(usuario):
     render_module_blueprint("rrhh", usuario)
 
 
@@ -84,3 +80,5 @@ def render_seguridad_roles(usuario):
 
 def render_manuales_sop(usuario):
     render_module_blueprint("manuales_sop", usuario)
+
+
