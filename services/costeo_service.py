@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any
 
 import pandas as pd
@@ -28,17 +29,25 @@ def _parse_metadata(value: str | None) -> dict[str, Any]:
 
 def obtener_parametros_costeo(conn: Any | None = None) -> dict[str, float]:
     def _load(connection: Any) -> dict[str, float]:
-        rows = connection.execute(
-            """
-            SELECT clave, valor_num
-            FROM parametros_costeo
-            WHERE estado = 'activo'
-            """
-        ).fetchall()
         params = dict(DEFAULT_PARAMETROS)
-        for row in rows:
-            if row["clave"] in params and row["valor_num"] is not None:
-                params[row["clave"]] = float(row["valor_num"])
+        try:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(parametros_costeo)").fetchall()}
+            if not columns:
+                return params
+
+            where_clause = " WHERE COALESCE(estado, 'activo') = 'activo'" if "estado" in columns else ""
+            rows = connection.execute(
+                f"""
+                SELECT clave, valor_num
+                FROM parametros_costeo
+                {where_clause}
+                """
+            ).fetchall()
+            for row in rows:
+                if row["clave"] in params and row["valor_num"] is not None:
+                    params[row["clave"]] = float(row["valor_num"])
+        except sqlite3.OperationalError:
+            return params
         return params
 
     if conn is not None:
@@ -63,6 +72,7 @@ def calcular_costo_servicio(
     materiales = as_positive(costo_materiales_usd, "Costo materiales")
     mano_obra = as_positive(costo_mano_obra_usd, "Costo mano de obra")
     indirecto_input = as_positive(costo_indirecto_usd, "Costo indirecto")
+
 
     parametros = dict(DEFAULT_PARAMETROS)
     parametros.update({k: float(v) for k, v in (parametros_override or {}).items() if k in parametros})
