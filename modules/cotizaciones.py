@@ -7,7 +7,12 @@ import plotly.express as px
 import streamlit as st
 
 from database.connection import db_transaction
-from services.costeo_service import calcular_costo_servicio, calcular_margen_estimado, obtener_parametros_costeo
+from services.costeo_service import (
+    calcular_costo_servicio,
+    calcular_margen_estimado,
+    guardar_costeo,
+    obtener_parametros_costeo,
+)
 
 ESTADOS_COTIZACION = [
     "Cotización",
@@ -86,7 +91,8 @@ def render_cotizaciones(usuario: str):
     datos_pre = st.session_state.get("datos_pre_cotizacion", {})
     descripcion_pre, costo_base_pre = _normalizar_payload(datos_pre) if datos_pre else ("", 0.0)
 
-    with st.expander("⚡ Generador rápido de cotizaciones", expanded=True):
+   with st.expander("⚡ Generador rápido de cotizaciones", expanded=True):
+        costeo_calculado: dict | None = None
         modo_precio = st.radio(
             "Modo de cotización",
             options=["Manual", "Calculada (costeo)"],
@@ -183,6 +189,15 @@ def render_cotizaciones(usuario: str):
             st.caption(
                 f"Costo estimado calculado: $ {costo_estimado:,.2f} · Precio sugerido: $ {precio_final:,.2f}"
             )
+            costeo_calculado = {
+                "tipo_proceso": tipo_proceso,
+                "cantidad": float(cantidad),
+                "costo_materiales_usd": float(costo_materiales),
+                "costo_mano_obra_usd": float(costo_mano_obra),
+                "costo_indirecto_usd": float(costo_indirecto),
+                "margen_pct": float(margen_pct),
+                "precio_sugerido_usd": float(precio_final),
+            }
 
         estado_nuevo = st.selectbox("Estado inicial", ESTADOS_COTIZACION, index=0)
         if modo_precio == "Manual":
@@ -208,6 +223,22 @@ def render_cotizaciones(usuario: str):
                         precio_final_usd=_safe_float(precio_final, 0.0),
                         estado=estado_nuevo,
                     )
+                    if modo_precio == "Calculada (costeo)" and costeo_calculado is not None:
+                        guardar_costeo(
+                            usuario=usuario,
+                            tipo_proceso=str(costeo_calculado["tipo_proceso"]),
+                            descripcion=descripcion.strip(),
+                            cantidad=float(costeo_calculado["cantidad"]),
+                            costo_materiales_usd=float(costeo_calculado["costo_materiales_usd"]),
+                            costo_mano_obra_usd=float(costeo_calculado["costo_mano_obra_usd"]),
+                            costo_indirecto_usd=float(costeo_calculado["costo_indirecto_usd"]),
+                            margen_pct=float(costeo_calculado["margen_pct"]),
+                            precio_sugerido_usd=float(costeo_calculado["precio_sugerido_usd"]),
+                            origen="cotizacion",
+                            referencia_id=int(cid),
+                            cotizacion_id=int(cid),
+                            estado="cotizado",
+                        )
                     if "datos_pre_cotizacion" in st.session_state:
                         del st.session_state["datos_pre_cotizacion"]
                     st.success(f"Cotización #{cid} registrada correctamente.")
