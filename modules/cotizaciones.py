@@ -7,6 +7,7 @@ import plotly.express as px
 import streamlit as st
 
 from database.connection import db_transaction
+from services.costeo_service import calcular_costo_servicio, calcular_margen_estimado, obtener_parametros_costeo
 
 ESTADOS_COTIZACION = [
     "Cotización",
@@ -86,6 +87,12 @@ def render_cotizaciones(usuario: str):
     descripcion_pre, costo_base_pre = _normalizar_payload(datos_pre) if datos_pre else ("", 0.0)
 
     with st.expander("⚡ Generador rápido de cotizaciones", expanded=True):
+        modo_precio = st.radio(
+            "Modo de cotización",
+            options=["Manual", "Calculada (costeo)"],
+            horizontal=True,
+            help="Manual mantiene el flujo actual. Calculada usa el motor básico de costeo.",
+        )
         c1, c2 = st.columns([2, 1])
         with c1:
             descripcion = st.text_area(
@@ -102,7 +109,10 @@ def render_cotizaciones(usuario: str):
                 step=0.5,
                 format="%.2f",
             )
-            margen_pct = st.slider("Margen (%)", min_value=0, max_value=250, value=65, step=1)
+            if modo_precio == "Manual":
+                margen_pct = st.slider("Margen (%)", min_value=0, max_value=250, value=65, step=1)
+            else:
+                margen_pct = 0.0
             ajuste_usd = st.number_input(
                 "Ajustes extras (USD)",
                 value=0.0,
@@ -111,9 +121,73 @@ def render_cotizaciones(usuario: str):
                 help="Incluye flete, instalación, urgencia o descuento (usa negativo).",
             )
 
+        if modo_precio == "Calculada (costeo)":
+            parametros_costeo = obtener_parametros_costeo()
+            st.caption("Costeo incremental: usa parámetros del sistema y no altera el flujo actual.")
+            k1, k2, k3, k4 = st.columns(4)
+            with k1:
+                tipo_proceso = st.selectbox(
+                    "Tipo proceso",
+                    options=["Servicio general", "Impresión", "Sublimación", "Corte", "Instalación"],
+                    key="cot_tipo_proceso",
+                )
+            with k2:
+                cantidad = st.number_input("Cantidad", min_value=0.01, value=1.0, step=1.0, key="cot_cantidad")
+            with k3:
+                costo_materiales = st.number_input("Materiales (USD)", min_value=0.0, value=0.0, step=0.5, key="cot_mat")
+            with k4:
+                costo_mano_obra = st.number_input("Mano de obra (USD)", min_value=0.0, value=0.0, step=0.5, key="cot_mo")
+
+            costo_indirecto = st.number_input(
+                "Indirecto directo (USD)",
+                min_value=0.0,
+                value=0.0,
+                step=0.5,
+                key="cot_ind",
+            )
+            margen_pct = st.number_input(
+                "Margen objetivo (%)",
+                min_value=0.0,
+                max_value=300.0,
+                value=float(parametros_costeo.get("margen_objetivo_pct", 35.0)),
+                step=1.0,
+                key="cot_margen_calc",
+            )
+
+            costeo = calcular_costo_servicio(
+                tipo_proceso=tipo_proceso,
+                cantidad=float(cantidad),
+                costo_materiales_usd=float(costo_materiales),
+                costo_mano_obra_usd=float(costo_mano_obra),
+                costo_indirecto_usd=float(costo_indirecto),
+                parametros_override=parametros_costeo,
+            )
+            margen = calcular_margen_estimado(
+                costo_total_usd=float(costeo["costo_total_usd"]),
+                margen_pct=float(margen_pct),
+            )
+            costo_estimado = float(costeo["costo_total_usd"])
+            precio_final = round(float(margen["precio_sugerido_usd"]) + _safe_float(ajuste_usd, 0.0), 2)
+
+            desglose = pd.DataFrame(
+                [
+                    ("Materiales", costeo["componentes"]["materiales_usd"]),
+                    ("Mano de obra", costeo["componentes"]["mano_obra_usd"]),
+                    ("Indirecto directo", costeo["componentes"]["indirecto_directo_usd"]),
+                    ("Imprevistos", costeo["componentes"]["imprevistos_usd"]),
+                    ("Indirecto factor", costeo["componentes"]["indirecto_factor_usd"]),
+                ],
+                columns=["Concepto", "Monto USD"],
+            )
+            st.dataframe(desglose, use_container_width=True, hide_index=True)
+            st.caption(
+                f"Costo estimado calculado: $ {costo_estimado:,.2f} · Precio sugerido: $ {precio_final:,.2f}"
+            )
+
         estado_nuevo = st.selectbox("Estado inicial", ESTADOS_COTIZACION, index=0)
-        subtotal = _safe_float(costo_estimado, 0.0) * (1 + _safe_float(margen_pct, 0.0) / 100)
-        precio_final = round(subtotal + _safe_float(ajuste_usd, 0.0), 2)
+        if modo_precio == "Manual":
+            subtotal = _safe_float(costo_estimado, 0.0) * (1 + _safe_float(margen_pct, 0.0) / 100)
+            precio_final = round(subtotal + _safe_float(ajuste_usd, 0.0), 2)
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Costo base", f"$ {float(costo_estimado):,.2f}")
@@ -138,7 +212,6 @@ def render_cotizaciones(usuario: str):
                         del st.session_state["datos_pre_cotizacion"]
                     st.success(f"Cotización #{cid} registrada correctamente.")
                     st.rerun()
-
         with b2:
             if st.button("🧹 Limpiar borrador", use_container_width=True):
                 if "datos_pre_cotizacion" in st.session_state:
