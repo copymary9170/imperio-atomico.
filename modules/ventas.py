@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text
+from services.costeo_service import actualizar_vinculos_costeo
 from services.tesoreria_service import registrar_ingreso
 from utils.currency import convert_to_bs
 
@@ -22,6 +23,7 @@ METODOS_PAGO_VENTA = [
 ]
 
 
+
 # ============================================================
 # REGISTRAR VENTA
 # ============================================================
@@ -33,6 +35,7 @@ def registrar_venta(
     tasa_cambio: float,
     metodo_pago: str,
     items: list[dict],
+    costeo_orden_id: int | None = None,
 ) -> int:
     if not items:
         raise ValueError("Debe agregar al menos un item")
@@ -47,6 +50,7 @@ def registrar_venta(
         ),
         2,
     )
+
 
     impuesto = round(subtotal * 0.16, 2)
     total = round(subtotal + impuesto, 2)
@@ -160,6 +164,13 @@ def registrar_venta(
                     "metodo_pago": str(metodo_pago).lower(),
                 },
             )
+
+    if costeo_orden_id:
+        actualizar_vinculos_costeo(
+            orden_id=int(costeo_orden_id),
+            venta_id=int(venta_id),
+            estado="aprobado",
+        )
 
     return venta_id
 
