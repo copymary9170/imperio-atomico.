@@ -219,6 +219,59 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
     fecha TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS parametros_costeo (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    clave TEXT NOT NULL UNIQUE,
+    valor_num REAL,
+    valor_texto TEXT,
+    descripcion TEXT,
+    estado TEXT NOT NULL DEFAULT 'activo',
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS plantillas_costeo (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    nombre TEXT NOT NULL,
+    tipo_proceso TEXT NOT NULL,
+    descripcion TEXT,
+    margen_objetivo_pct REAL NOT NULL DEFAULT 35,
+    estado TEXT NOT NULL DEFAULT 'activa',
+    metadata TEXT
+);
+
+CREATE TABLE IF NOT EXISTS costeo_ordenes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    tipo_proceso TEXT NOT NULL,
+    descripcion TEXT NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 1,
+    moneda TEXT NOT NULL DEFAULT 'USD',
+    costo_materiales_usd REAL NOT NULL DEFAULT 0,
+    costo_mano_obra_usd REAL NOT NULL DEFAULT 0,
+    costo_indirecto_usd REAL NOT NULL DEFAULT 0,
+    costo_total_usd REAL NOT NULL DEFAULT 0,
+    margen_pct REAL NOT NULL DEFAULT 0,
+    precio_sugerido_usd REAL NOT NULL DEFAULT 0,
+    origen TEXT NOT NULL DEFAULT 'manual',
+    referencia_id INTEGER,
+    estado TEXT NOT NULL DEFAULT 'calculado'
+);
+
+CREATE TABLE IF NOT EXISTS costeo_detalle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_id INTEGER NOT NULL,
+    concepto TEXT NOT NULL,
+    categoria TEXT NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 1,
+    costo_unitario_usd REAL NOT NULL DEFAULT 0,
+    subtotal_usd REAL NOT NULL DEFAULT 0,
+    metadata TEXT,
+    FOREIGN KEY (orden_id) REFERENCES costeo_ordenes(id)
+);
+
 CREATE TABLE IF NOT EXISTS ordenes_produccion (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -260,6 +313,9 @@ CREATE INDEX IF NOT EXISTS idx_tesoreria_fecha ON movimientos_tesoreria(fecha);
 CREATE INDEX IF NOT EXISTS idx_tesoreria_tipo_fecha ON movimientos_tesoreria(tipo, fecha);
 CREATE INDEX IF NOT EXISTS idx_tesoreria_origen_fecha ON movimientos_tesoreria(origen, fecha);
 CREATE INDEX IF NOT EXISTS idx_tesoreria_metodo_pago ON movimientos_tesoreria(metodo_pago);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_fecha ON costeo_ordenes(fecha);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_tipo_fecha ON costeo_ordenes(tipo_proceso, fecha);
+CREATE INDEX IF NOT EXISTS idx_costeo_detalle_orden ON costeo_detalle(orden_id);
 
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
@@ -344,8 +400,24 @@ def _ensure_tesoreria_migration(conn) -> None:
     )
 
 
+def _ensure_costeo_migration(conn) -> None:
+    conn.executemany(
+        """
+        INSERT INTO parametros_costeo (clave, valor_num, descripcion)
+        VALUES (?, ?, ?)
+        ON CONFLICT(clave) DO NOTHING
+        """,
+        [
+            ("factor_imprevistos_pct", 5.0, "Porcentaje extra para variaciones no planificadas."),
+            ("factor_indirecto_pct", 10.0, "Porcentaje indirecto estándar aplicado al subtotal."),
+            ("margen_objetivo_pct", 35.0, "Margen sugerido inicial para cotizaciones."),
+        ],
+    )
+
+
 def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
         _ensure_gastos_migration(conn)
         _ensure_tesoreria_migration(conn)
+        _ensure_costeo_migration(conn)
