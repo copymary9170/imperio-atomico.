@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -91,6 +91,12 @@ def registrar_movimiento_tesoreria(
     monto_moneda_normalizado = money(monto if monto_moneda is None else as_positive(monto_moneda, "Monto en moneda", allow_zero=True))
     metodo_pago_normalizado = clean_text(metodo_pago).lower() or "efectivo"
     fecha_normalizada = clean_text(fecha) or None
+    fecha_control = fecha_normalizada or datetime.now().date().isoformat()
+
+    from services.conciliacion_service import periodo_esta_cerrado
+
+    if periodo_esta_cerrado(conn, fecha_movimiento=fecha_control, tipo_cierre="mensual"):
+        raise ValueError(f"El período mensual de la fecha {fecha_control} está cerrado")
 
     if referencia_id is not None and not allow_duplicate:
         existing = conn.execute(
