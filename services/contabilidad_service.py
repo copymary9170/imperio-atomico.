@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -140,10 +141,10 @@ def contabilizar_venta(conn: Any, venta_id: int, usuario: str = "Sistema") -> in
     )
 
 
-def contabilizar_cobro_cliente(conn: Any, movimiento_id: int, usuario: str = "Sistema") -> int | None:
+ef contabilizar_cobro_cliente(conn: Any, movimiento_id: int, usuario: str = "Sistema") -> int | None:
     mov = conn.execute(
         """
-        SELECT id, fecha, referencia_id, metodo_pago, monto_usd
+        SELECT id, fecha, referencia_id, metodo_pago, monto_usd, metadata
         FROM movimientos_tesoreria
         WHERE id=? AND origen='cobro_cliente' AND estado='confirmado'
         """,
@@ -155,8 +156,32 @@ def contabilizar_cobro_cliente(conn: Any, movimiento_id: int, usuario: str = "Si
     if _asiento_existe(conn, evento_tipo="cobro_cliente", referencia_tabla="movimientos_tesoreria", referencia_id=int(mov["id"])):
         return None
 
-    venta = conn.execute("SELECT id, cliente_id FROM ventas WHERE id=?", (int(mov["referencia_id"] or 0),)).fetchone()
-    cliente_id = int(venta["cliente_id"]) if venta and venta["cliente_id"] is not None else None
+    metadata = {}
+    try:
+        metadata = json.loads(str(mov["metadata"] or "{}"))
+    except Exception:
+        metadata = {}
+
+    cliente_id = None
+    venta_id = None
+    pago_cliente_id = metadata.get("pago_cliente_id")
+    if pago_cliente_id:
+        pago = conn.execute(
+            """
+            SELECT cliente_id, venta_id
+            FROM pagos_clientes
+            WHERE id=?
+            """,
+            (int(pago_cliente_id),),
+        ).fetchone()
+        if pago:
+            cliente_id = int(pago["cliente_id"]) if pago["cliente_id"] is not None else None
+            venta_id = int(pago["venta_id"]) if pago["venta_id"] is not None else None
+
+    if cliente_id is None:
+        venta = conn.execute("SELECT id, cliente_id FROM ventas WHERE id=?", (int(mov["referencia_id"] or 0),)).fetchone()
+        cliente_id = int(venta["cliente_id"]) if venta and venta["cliente_id"] is not None else None
+        venta_id = int(venta["id"]) if venta else None
 
     monto = float(money(mov["monto_usd"] or 0.0))
     cuenta_financiera = _metodo_a_cuenta_caja_banco(str(mov["metodo_pago"] or ""))
@@ -167,7 +192,7 @@ def contabilizar_cobro_cliente(conn: Any, movimiento_id: int, usuario: str = "Si
         evento_tipo="cobro_cliente",
         referencia_tabla="movimientos_tesoreria",
         referencia_id=int(mov["id"]),
-        descripcion=f"Cobro de cuenta por cobrar venta #{int(mov['referencia_id'] or 0)}",
+        descripcion=f"Cobro de cuenta por cobrar venta #{int(venta_id or mov['referencia_id'] or 0)}",
         usuario=usuario,
         lineas=[
             AsientoLinea(cuenta_codigo=cuenta_financiera, debe_usd=monto, descripcion="Entrada de tesorería", tercero_tipo="cliente", tercero_id=cliente_id),
