@@ -9,6 +9,13 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, require_text
+from services.cxc_cobranza_service import (
+    CobranzaInput,
+    marcar_cuenta_incobrable,
+    obtener_reporte_cartera,
+    registrar_abono_cuenta_por_cobrar,
+    registrar_gestion_cobranza,
+)
 
 
 def create_cliente(
@@ -88,7 +95,7 @@ def _cargar_clientes() -> pd.DataFrame:
             LEFT JOIN (
                 SELECT cliente_id, SUM(saldo_usd) AS deuda_total
                 FROM cuentas_por_cobrar
-                WHERE estado = 'pendiente'
+                WHERE estado IN ('pendiente','parcial','vencida','incobrable')
                 GROUP BY cliente_id
             ) pxc
                 ON pxc.cliente_id = c.id
@@ -370,6 +377,137 @@ def render_clientes(usuario: str) -> None:
         st.success("Cliente eliminado")
         st.rerun()
 
+    st.divider()
+    st.subheader("💳 Cuentas por cobrar y cobranza")
 
+    try:
+        with db_transaction() as conn:
+            reporte = obtener_reporte_cartera(conn)
+    except Exception as exc:
+        st.error("No se pudo cargar la cartera.")
+        st.exception(exc)
+        return
+
+    cartera = reporte["cartera"]
+    if cartera.empty:
+        st.info("No hay cartera activa para gestionar.")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Cartera total", f"$ {float(cartera['saldo_usd'].sum()):,.2f}")
+    c2.metric("Vencida", f"$ {float(cartera[cartera['estado'] == 'vencida']['saldo_usd'].sum()):,.2f}")
+    c3.metric("Incobrable", f"$ {float(cartera[cartera['estado'] == 'incobrable']['saldo_usd'].sum()):,.2f}")
+    c4.metric("Cuentas", int(cartera["id"].nunique()))
+
+    st.caption("Top deudores")
+    st.dataframe(reporte["top_deudores"], use_container_width=True, hide_index=True)
+
+    g1, g2 = st.columns(2)
+    with g1:
+        st.caption("Antigüedad de saldos")
+        if not reporte["antiguedad"].empty:
+            st.bar_chart(reporte["antiguedad"].set_index("rango")["saldo_usd"])
+        else:
+            st.info("Sin datos de antigüedad.")
+    with g2:
+        st.caption("Vencimientos")
+        cols = ["id", "cliente", "venta_id", "estado", "saldo_usd", "fecha_vencimiento", "dias_mora"]
+        st.dataframe(reporte["vencimientos"][cols], use_container_width=True, hide_index=True)
+
+    st.caption("Detalle por cliente / cuenta")
+    st.dataframe(cartera, use_container_width=True, hide_index=True)
+
+    export_csv = cartera.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "📥 Exportar cartera CSV",
+        export_csv,
+        "cartera_clientes.csv",
+        "text/csv",
+        key="download_cartera_csv",
+    )
+
+    cuentas_options = cartera["id"].astype(int).tolist()
+    cuenta_sel = st.selectbox("Cuenta por cobrar", cuentas_options, key="cxc_selector")
+    cuenta_row = cartera[cartera["id"] == cuenta_sel].iloc[0]
+    st.caption(
+        f"Cliente: {cuenta_row['cliente']} · Venta: #{int(cuenta_row['venta_id'] or 0)} · "
+        f"Saldo: $ {float(cuenta_row['saldo_usd']):,.2f} · Estado: {cuenta_row['estado']}"
+    )
+
+    f1, f2 = st.columns(2)
+    with f1:
+        with st.form("form_abono_cxc"):
+            monto_abono = st.number_input("Abono USD", min_value=0.01, step=1.0)
+            metodo_abono = st.selectbox("Método", ["efectivo", "transferencia", "zelle", "binance", "kontigo"])
+            referencia_abono = st.text_input("Referencia")
+            obs_abono = st.text_area("Observaciones de abono")
+            promesa_abono = st.text_input("Promesa de pago (YYYY-MM-DD)")
+            proxima_abono = st.text_input("Próxima gestión (YYYY-MM-DD)")
+            send_abono = st.form_submit_button("Registrar abono")
+        if send_abono:
+            try:
+                with db_transaction() as conn:
+                    result = registrar_abono_cuenta_por_cobrar(
+                        conn,
+                        usuario=usuario,
+                        payload=CobranzaInput(
+                            cuenta_por_cobrar_id=int(cuenta_sel),
+                            monto_usd=float(monto_abono),
+                            metodo_pago=str(metodo_abono),
+                            referencia=str(referencia_abono),
+                            observaciones=str(obs_abono),
+                            promesa_pago_fecha=str(promesa_abono).strip() or None,
+                            proxima_gestion_fecha=str(proxima_abono).strip() or None,
+                        ),
+                    )
+                st.success(
+                    f"Abono registrado. Pago #{result['pago_id']} · Nuevo saldo: $ {result['nuevo_saldo_usd']:,.2f} "
+                    f"· Estado: {result['nuevo_estado']}"
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error("No se pudo registrar el abono.")
+                st.exception(exc)
+
+    with f2:
+        with st.form("form_gestion_cobranza"):
+            obs_gestion = st.text_area("Observaciones de cobranza")
+            promesa = st.text_input("Promesa de pago (YYYY-MM-DD)", key="gestion_promesa")
+            proxima = st.text_input("Próxima gestión (YYYY-MM-DD)", key="gestion_proxima")
+            save_gestion = st.form_submit_button("Guardar gestión")
+        if save_gestion:
+            try:
+                with db_transaction() as conn:
+                    gid = registrar_gestion_cobranza(
+                        conn,
+                        usuario=usuario,
+                        cuenta_por_cobrar_id=int(cuenta_sel),
+                        observaciones=str(obs_gestion),
+                        promesa_pago_fecha=str(promesa).strip() or None,
+                        proxima_gestion_fecha=str(proxima).strip() or None,
+                    )
+                st.success(f"Gestión registrada #{gid}")
+            except Exception as exc:
+                st.error("No se pudo guardar la gestión.")
+                st.exception(exc)
+
+        motivo_incobrable = st.text_input("Motivo incobrable", key="motivo_incobrable")
+        if st.button("⚠️ Marcar incobrable", key="btn_incobrable"):
+            try:
+                with db_transaction() as conn:
+                    marcar_cuenta_incobrable(
+                        conn,
+                        cuenta_por_cobrar_id=int(cuenta_sel),
+                        usuario=usuario,
+                        motivo=str(motivo_incobrable),
+                    )
+                st.success("Cuenta marcada como incobrable.")
+                st.rerun()
+            except Exception as exc:
+                st.error("No se pudo marcar como incobrable.")
+                st.exception(exc)
+
+    st.caption("Últimos abonos registrados")
+    st.dataframe(reporte["historial_abonos"], use_container_width=True, hide_index=True)
 
 
