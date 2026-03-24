@@ -5,6 +5,7 @@ from datetime import date
 from typing import Any
 
 from modules.common import as_positive, clean_text, money
+from services.contabilidad_service import contabilizar_pago_proveedor
 from services.tesoreria_service import registrar_egreso
 
 
@@ -118,7 +119,7 @@ def crear_cuenta_por_pagar_desde_compra(
     cuenta_id = int(cur.lastrowid)
 
     if pagado_inicial > 0:
-        conn.execute(
+        cur_pago = conn.execute(
             """
             INSERT INTO pagos_proveedores
             (usuario, cuenta_por_pagar_id, proveedor_id, monto_usd, moneda_pago,
@@ -135,6 +136,7 @@ def crear_cuenta_por_pagar_desde_compra(
                 clean_text(financial_input.notas or "Pago inicial registrado al crear la compra"),
             ),
         )
+        contabilizar_pago_proveedor(conn, pago_id=int(cur_pago.lastrowid), usuario=usuario)
 
     return cuenta_id
 
@@ -224,4 +226,5 @@ def registrar_pago_cuenta_por_pagar(
             "referencia_pago": clean_text(referencia),
         },
     )
+    contabilizar_pago_proveedor(conn, pago_id=int(cur.lastrowid), usuario=usuario)
     return int(cur.lastrowid)
