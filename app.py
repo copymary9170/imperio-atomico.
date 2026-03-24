@@ -44,6 +44,7 @@ from views.costeo import render_costeo
 from views.configuracion import render_configuracion
 from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
+from views.planeacion_financiera import render_planeacion_financiera
 from views.erp_nuevos_modulos import (
     render_portafolio_modulos,
     render_compras_proveedores,
@@ -160,11 +161,10 @@ MENU_ROUTES = {
     "📚 Contabilidad": lambda: render_contabilidad(usuario),
 
     "📈 Rentabilidad analítica": lambda: render_rentabilidad(usuario),
+    
+    "🔮 Planeación financiera": lambda: render_planeacion_financiera(usuario),
 
     # NUEVA HERRAMIENTA DEL MOTOR
-    "⚙️ Motor Industrial": lambda: render_engine_demo(usuario),
-
-    # PORTAFOLIO DE EXPANSIÓN ERP
     "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
     "🚚 Compras / Proveedores": lambda: render_compras_proveedores(usuario),
     "💸 Cuentas por pagar": lambda: render_cuentas_por_pagar(usuario),
