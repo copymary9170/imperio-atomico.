@@ -9,6 +9,7 @@ from services.costeo_service import (
     guardar_costeo,
     listar_costeos,
     obtener_parametros_costeo,
+    registrar_costeo_real,
 )
 
 TIPOS_PROCESO = [
@@ -34,7 +35,7 @@ def _df_desglose(costo_data: dict) -> pd.DataFrame:
 
 
 def render_costeo(usuario: str):
-    st.subheader("🧮 Costeo básico (Fase 1)")
+    st.subheader("🧮 Costeo unificado (Fase 1 + Fase 2)")
 
     parametros = obtener_parametros_costeo()
 
@@ -123,6 +124,67 @@ def render_costeo(usuario: str):
             precio_sugerido_usd=float(margen_data["precio_sugerido_usd"]),
         )
         st.success(f"Costeo #{orden_id} guardado correctamente.")
+
+    st.divider()
+    st.subheader("🏁 Cierre de costeo real (Fase 2)")
+    historial_cierre = listar_costeos(limit=100)
+    if historial_cierre.empty:
+        st.info("No hay costeos para cerrar.")
+    else:
+        opciones = {
+            int(row["id"]): (
+                f"#{int(row['id'])} · {row['descripcion']} · "
+                f"Est: $ {float(row['costo_total_usd']):,.2f} · Estado: {row['estado']}"
+            )
+            for _, row in historial_cierre.iterrows()
+        }
+        orden_sel = st.selectbox(
+            "Selecciona orden de costeo",
+            options=list(opciones.keys()),
+            format_func=lambda oid: opciones[oid],
+            key="costeo_cierre_orden",
+        )
+        with st.form("form_cierre_costeo_real"):
+            c1, c2, c3 = st.columns(3)
+            materiales_real = c1.number_input("Materiales consumidos (USD)", min_value=0.0, value=0.0, step=0.5)
+            merma_real = c2.number_input("Merma (USD)", min_value=0.0, value=0.0, step=0.5)
+            mano_obra_real = c3.number_input("Mano de obra real (USD)", min_value=0.0, value=0.0, step=0.5)
+
+            c4, c5, c6 = st.columns(3)
+            tiempo_real = c4.number_input("Tiempo real (horas)", min_value=0.0, value=0.0, step=0.25)
+            energia_real = c5.number_input("Energía / indirectos reales (USD)", min_value=0.0, value=0.0, step=0.5)
+            ajustes_real = c6.number_input("Ajustes manuales (USD)", value=0.0, step=0.5)
+
+            c7, c8, c9 = st.columns(3)
+            precio_vendido = c7.number_input("Precio vendido (USD, opcional)", min_value=0.0, value=0.0, step=0.5)
+            venta_id = c8.number_input("ID venta (opcional)", min_value=0, value=0, step=1)
+            orden_prod_id = c9.number_input("ID orden producción (opcional)", min_value=0, value=0, step=1)
+            cerrar_directo = st.checkbox("Cerrar costeo ahora", value=True)
+
+            submit_cierre = st.form_submit_button("Registrar costo real", use_container_width=True)
+
+        if submit_cierre:
+            resultado = registrar_costeo_real(
+                orden_id=int(orden_sel),
+                usuario=usuario,
+                materiales_consumidos_usd=float(materiales_real),
+                merma_usd=float(merma_real),
+                mano_obra_real_usd=float(mano_obra_real),
+                tiempo_real_horas=float(tiempo_real),
+                energia_indirectos_reales_usd=float(energia_real),
+                ajustes_manual_usd=float(ajustes_real),
+                precio_vendido_usd=float(precio_vendido) if float(precio_vendido) > 0 else None,
+                venta_id=int(venta_id) if int(venta_id) > 0 else None,
+                orden_produccion_id=int(orden_prod_id) if int(orden_prod_id) > 0 else None,
+                cerrar=bool(cerrar_directo),
+            )
+            st.success(
+                "Costeo real registrado. "
+                f"Costo real: $ {resultado['costo_real_usd']:,.2f} · "
+                f"Margen real: {resultado['margen_real_pct']:,.2f}% · "
+                f"Δ vs estimado: $ {resultado['diferencia_vs_estimado_usd']:,.2f}"
+            )
+            st.rerun()
 
     st.divider()
     st.caption("Últimos cálculos guardados")
