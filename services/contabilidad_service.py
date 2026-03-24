@@ -141,7 +141,7 @@ def contabilizar_venta(conn: Any, venta_id: int, usuario: str = "Sistema") -> in
     )
 
 
-ef contabilizar_cobro_cliente(conn: Any, movimiento_id: int, usuario: str = "Sistema") -> int | None:
+def contabilizar_cobro_cliente(conn: Any, movimiento_id: int, usuario: str = "Sistema") -> int | None:
     mov = conn.execute(
         """
         SELECT id, fecha, referencia_id, metodo_pago, monto_usd, metadata
