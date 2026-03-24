@@ -257,7 +257,16 @@ CREATE TABLE IF NOT EXISTS costeo_ordenes (
     precio_sugerido_usd REAL NOT NULL DEFAULT 0,
     origen TEXT NOT NULL DEFAULT 'manual',
     referencia_id INTEGER,
-    estado TEXT NOT NULL DEFAULT 'calculado'
+    cotizacion_id INTEGER,
+    venta_id INTEGER,
+    orden_produccion_id INTEGER,
+    costo_real_usd REAL NOT NULL DEFAULT 0,
+    precio_vendido_usd REAL NOT NULL DEFAULT 0,
+    margen_real_pct REAL NOT NULL DEFAULT 0,
+    diferencia_vs_estimado_usd REAL NOT NULL DEFAULT 0,
+    ejecutado_en TEXT,
+    cerrado_en TEXT,
+    estado TEXT NOT NULL DEFAULT 'borrador' CHECK (estado IN ('borrador','cotizado','aprobado','ejecutado','cerrado'))
 );
 
 CREATE TABLE IF NOT EXISTS costeo_detalle (
@@ -269,6 +278,7 @@ CREATE TABLE IF NOT EXISTS costeo_detalle (
     costo_unitario_usd REAL NOT NULL DEFAULT 0,
     subtotal_usd REAL NOT NULL DEFAULT 0,
     metadata TEXT,
+    tipo_registro TEXT NOT NULL DEFAULT 'estimado' CHECK (tipo_registro IN ('estimado','real')),
     FOREIGN KEY (orden_id) REFERENCES costeo_ordenes(id)
 );
 
@@ -315,7 +325,12 @@ CREATE INDEX IF NOT EXISTS idx_tesoreria_origen_fecha ON movimientos_tesoreria(o
 CREATE INDEX IF NOT EXISTS idx_tesoreria_metodo_pago ON movimientos_tesoreria(metodo_pago);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_fecha ON costeo_ordenes(fecha);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_tipo_fecha ON costeo_ordenes(tipo_proceso, fecha);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_estado ON costeo_ordenes(estado);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_cotizacion ON costeo_ordenes(cotizacion_id);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_venta ON costeo_ordenes(venta_id);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_produccion ON costeo_ordenes(orden_produccion_id);
 CREATE INDEX IF NOT EXISTS idx_costeo_detalle_orden ON costeo_detalle(orden_id);
+CREATE INDEX IF NOT EXISTS idx_costeo_detalle_orden_tipo ON costeo_detalle(orden_id, tipo_registro);
 
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
@@ -420,6 +435,42 @@ def _ensure_costeo_migration(conn) -> None:
             ("margen_objetivo_pct", 35.0, "Margen sugerido inicial para cotizaciones."),
         ],
     )
+
+    ordenes_columns = {row[1] for row in conn.execute("PRAGMA table_info(costeo_ordenes)").fetchall()}
+    if ordenes_columns:
+        if "cotizacion_id" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN cotizacion_id INTEGER")
+        if "venta_id" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN venta_id INTEGER")
+        if "orden_produccion_id" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN orden_produccion_id INTEGER")
+        if "costo_real_usd" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN costo_real_usd REAL NOT NULL DEFAULT 0")
+        if "precio_vendido_usd" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN precio_vendido_usd REAL NOT NULL DEFAULT 0")
+        if "margen_real_pct" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN margen_real_pct REAL NOT NULL DEFAULT 0")
+        if "diferencia_vs_estimado_usd" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN diferencia_vs_estimado_usd REAL NOT NULL DEFAULT 0")
+        if "ejecutado_en" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN ejecutado_en TEXT")
+        if "cerrado_en" not in ordenes_columns:
+            conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN cerrado_en TEXT")
+
+        conn.execute(
+            """
+            UPDATE costeo_ordenes
+            SET estado = CASE
+                WHEN LOWER(COALESCE(estado, '')) IN ('borrador','cotizado','aprobado','ejecutado','cerrado') THEN LOWER(estado)
+                WHEN LOWER(COALESCE(estado, '')) IN ('calculado', 'cotizacion') THEN 'borrador'
+                ELSE 'borrador'
+            END
+            """
+        )
+
+    detalle_columns = {row[1] for row in conn.execute("PRAGMA table_info(costeo_detalle)").fetchall()}
+    if detalle_columns and "tipo_registro" not in detalle_columns:
+        conn.execute("ALTER TABLE costeo_detalle ADD COLUMN tipo_registro TEXT NOT NULL DEFAULT 'estimado'")
 
 
 def init_schema() -> None:
