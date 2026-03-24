@@ -9,6 +9,7 @@ import streamlit as st
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text
 from services.costeo_service import actualizar_vinculos_costeo
+from services.contabilidad_service import contabilizar_cobro_cliente, contabilizar_venta
 from services.tesoreria_service import registrar_ingreso
 from utils.currency import convert_to_bs
 
@@ -164,6 +165,7 @@ def registrar_venta(
                     "metodo_pago": str(metodo_pago).lower(),
                 },
             )
+        contabilizar_venta(conn, venta_id=venta_id, usuario=usuario)
 
     if costeo_orden_id:
         actualizar_vinculos_costeo(
@@ -400,6 +402,18 @@ def _render_tab_historial() -> None:
                                     "cliente": str(row["cliente"]),
                                 },
                             )
+                            mov_id = conn.execute(
+                                """
+                                SELECT id
+                                FROM movimientos_tesoreria
+                                WHERE origen='cobro_cliente' AND referencia_id=?
+                                ORDER BY id DESC
+                                LIMIT 1
+                                """,
+                                (int(row["id"]),),
+                            ).fetchone()
+                            if mov_id:
+                                contabilizar_cobro_cliente(conn, movimiento_id=int(mov_id["id"]), usuario="Sistema")
                         st.success("Cuenta actualizada")
                         st.rerun()
                     except Exception as e:
