@@ -218,6 +218,7 @@ def guardar_costeo(
                 costo_mano_obra_usd,
                 costo_indirecto_usd,
                 costo_total_usd,
+                margen_pct,
                 precio_sugerido_usd,
                 origen,
                 referencia_id,
