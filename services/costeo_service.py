@@ -16,6 +16,8 @@ DEFAULT_PARAMETROS = {
     "margen_objetivo_pct": 35.0,
 }
 
+COSTEO_ESTADOS = ("borrador", "cotizado", "aprobado", "ejecutado", "cerrado")
+
 
 def _parse_metadata(value: str | None) -> dict[str, Any]:
     if not value:
@@ -139,6 +141,14 @@ def calcular_margen_estimado(
     }
 
 
+def _normalizar_estado_costeo(estado: str | None) -> str:
+    estado_ok = clean_text(estado or "") or "borrador"
+    estado_ok = estado_ok.lower()
+    if estado_ok not in COSTEO_ESTADOS:
+        raise ValueError(f"Estado de costeo inválido: {estado}")
+    return estado_ok
+
+
 def guardar_costeo(
     *,
     usuario: str,
@@ -152,6 +162,10 @@ def guardar_costeo(
     precio_sugerido_usd: float,
     origen: str = "manual",
     referencia_id: int | None = None,
+    cotizacion_id: int | None = None,
+    venta_id: int | None = None,
+    orden_produccion_id: int | None = None,
+    estado: str = "borrador",
     detalle: list[dict[str, Any]] | None = None,
 ) -> int:
     usuario_ok = require_text(usuario, "Usuario")
@@ -164,6 +178,7 @@ def guardar_costeo(
     costo_indirecto_ok = as_positive(costo_indirecto_usd, "Costo indirecto")
     margen_ok = as_positive(margen_pct, "Margen %")
     precio_ok = as_positive(precio_sugerido_usd, "Precio sugerido", allow_zero=False)
+    estado_ok = _normalizar_estado_costeo(estado)
 
     costo_total = money(costo_materiales_ok + costo_mano_obra_ok + costo_indirecto_ok)
 
@@ -203,11 +218,14 @@ def guardar_costeo(
                 costo_mano_obra_usd,
                 costo_indirecto_usd,
                 costo_total_usd,
-                margen_pct,
                 precio_sugerido_usd,
                 origen,
-                referencia_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                referencia_id,
+                cotizacion_id,
+                venta_id,
+                orden_produccion_id,
+                estado
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario_ok,
@@ -222,6 +240,10 @@ def guardar_costeo(
                 money(precio_ok),
                 clean_text(origen) or "manual",
                 int(referencia_id) if referencia_id else None,
+                int(cotizacion_id) if cotizacion_id else None,
+                int(venta_id) if venta_id else None,
+                int(orden_produccion_id) if orden_produccion_id else None,
+                estado_ok,
             ),
         )
         orden_id = int(cur.lastrowid)
@@ -243,8 +265,9 @@ def guardar_costeo(
                     cantidad,
                     costo_unitario_usd,
                     subtotal_usd,
-                    metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    metadata,
+                    tipo_registro
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     orden_id,
@@ -254,6 +277,7 @@ def guardar_costeo(
                     money(costo_unitario_item),
                     money(subtotal_item),
                     json.dumps(metadata, ensure_ascii=False) if metadata is not None else None,
+                    "estimado",
                 ),
             )
 
@@ -295,6 +319,15 @@ def listar_costeos(
             precio_sugerido_usd,
             origen,
             referencia_id,
+            cotizacion_id,
+            venta_id,
+            orden_produccion_id,
+            costo_real_usd,
+            precio_vendido_usd,
+            margen_real_pct,
+            diferencia_vs_estimado_usd,
+            ejecutado_en,
+            cerrado_en,
             estado
         FROM costeo_ordenes
         WHERE {' AND '.join(filtros)}
@@ -319,7 +352,8 @@ def obtener_detalle_costeo(orden_id: int) -> pd.DataFrame:
                 cantidad,
                 costo_unitario_usd,
                 subtotal_usd,
-                metadata
+                metadata,
+                tipo_registro
             FROM costeo_detalle
             WHERE orden_id = ?
             ORDER BY id ASC
@@ -327,3 +361,146 @@ def obtener_detalle_costeo(orden_id: int) -> pd.DataFrame:
             conn,
             params=[int(orden_id)],
         )
+
+
+def actualizar_vinculos_costeo(
+    *,
+    orden_id: int,
+    cotizacion_id: int | None = None,
+    venta_id: int | None = None,
+    orden_produccion_id: int | None = None,
+    estado: str | None = None,
+) -> None:
+    campos = []
+    params: list[Any] = []
+
+    if cotizacion_id is not None:
+        campos.append("cotizacion_id = ?")
+        params.append(int(cotizacion_id))
+    if venta_id is not None:
+        campos.append("venta_id = ?")
+        params.append(int(venta_id))
+    if orden_produccion_id is not None:
+        campos.append("orden_produccion_id = ?")
+        params.append(int(orden_produccion_id))
+    if estado is not None:
+        campos.append("estado = ?")
+        params.append(_normalizar_estado_costeo(estado))
+
+    if not campos:
+        return
+
+    params.append(int(orden_id))
+    with db_transaction() as conn:
+        conn.execute(
+            f"UPDATE costeo_ordenes SET {', '.join(campos)} WHERE id = ?",
+            params,
+        )
+
+
+def registrar_costeo_real(
+    *,
+    orden_id: int,
+    usuario: str,
+    materiales_consumidos_usd: float,
+    merma_usd: float,
+    mano_obra_real_usd: float,
+    tiempo_real_horas: float,
+    energia_indirectos_reales_usd: float,
+    ajustes_manual_usd: float,
+    precio_vendido_usd: float | None = None,
+    venta_id: int | None = None,
+    orden_produccion_id: int | None = None,
+    cerrar: bool = False,
+) -> dict[str, float]:
+    orden_id_ok = int(orden_id)
+    usuario_ok = require_text(usuario, "Usuario")
+    costo_materiales = as_positive(materiales_consumidos_usd, "Materiales consumidos")
+    costo_merma = as_positive(merma_usd, "Merma")
+    costo_mo = as_positive(mano_obra_real_usd, "Mano de obra real")
+    horas_reales = as_positive(tiempo_real_horas, "Tiempo real")
+    costo_indirectos = as_positive(energia_indirectos_reales_usd, "Energía/indirectos reales")
+    costo_ajustes = float(ajustes_manual_usd or 0.0)
+
+    with db_transaction() as conn:
+        row = conn.execute(
+            """
+            SELECT costo_total_usd, precio_sugerido_usd
+            FROM costeo_ordenes
+            WHERE id = ?
+            """,
+            (orden_id_ok,),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Costeo #{orden_id_ok} no existe")
+
+        costo_estimado = money(float(row["costo_total_usd"] or 0.0))
+        precio_referencia = money(float(row["precio_sugerido_usd"] or 0.0))
+        precio_vendido = money(float(precio_vendido_usd)) if precio_vendido_usd is not None else precio_referencia
+
+        costo_real = money(costo_materiales + costo_merma + costo_mo + costo_indirectos + costo_ajustes)
+        diferencia = money(costo_real - costo_estimado)
+        utilidad_real = money(precio_vendido - costo_real)
+        margen_real = money((utilidad_real / precio_vendido) * 100) if precio_vendido > 0 else 0.0
+
+        detalle_real = [
+            ("Materiales consumidos", "material_real", costo_materiales, {"usuario": usuario_ok}),
+            ("Merma", "merma_real", costo_merma, {"usuario": usuario_ok}),
+            ("Mano de obra real", "mano_obra_real", costo_mo, {"usuario": usuario_ok, "horas": horas_reales}),
+            ("Energía/indirectos reales", "indirecto_real", costo_indirectos, {"usuario": usuario_ok}),
+            ("Ajustes manuales", "ajuste_real", costo_ajustes, {"usuario": usuario_ok}),
+        ]
+        for concepto, categoria, subtotal, metadata in detalle_real:
+            conn.execute(
+                """
+                INSERT INTO costeo_detalle (
+                    orden_id, concepto, categoria, cantidad, costo_unitario_usd, subtotal_usd, metadata, tipo_registro
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    orden_id_ok,
+                    concepto,
+                    categoria,
+                    1.0,
+                    money(subtotal),
+                    money(subtotal),
+                    json.dumps(metadata, ensure_ascii=False),
+                    "real",
+                ),
+            )
+
+        nuevo_estado = "cerrado" if cerrar else "ejecutado"
+        conn.execute(
+            """
+            UPDATE costeo_ordenes
+            SET costo_real_usd = ?,
+                precio_vendido_usd = ?,
+                margen_real_pct = ?,
+                diferencia_vs_estimado_usd = ?,
+                venta_id = COALESCE(?, venta_id),
+                orden_produccion_id = COALESCE(?, orden_produccion_id),
+                estado = ?,
+                ejecutado_en = COALESCE(ejecutado_en, CURRENT_TIMESTAMP),
+                cerrado_en = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE cerrado_en END
+            WHERE id = ?
+            """,
+            (
+                costo_real,
+                precio_vendido,
+                margen_real,
+                diferencia,
+                int(venta_id) if venta_id else None,
+                int(orden_produccion_id) if orden_produccion_id else None,
+                nuevo_estado,
+                1 if cerrar else 0,
+                orden_id_ok,
+            ),
+        )
+
+    return {
+        "costo_estimado_usd": costo_estimado,
+        "costo_real_usd": costo_real,
+        "precio_vendido_usd": precio_vendido,
+        "margen_real_pct": margen_real,
+        "diferencia_vs_estimado_usd": diferencia,
+    }
