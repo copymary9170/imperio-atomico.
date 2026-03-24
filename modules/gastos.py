@@ -9,6 +9,7 @@ import streamlit as st
 from database.connection import db_transaction
 from modules.common import as_positive, require_text
 from modules.configuracion import DEFAULT_CONFIG, get_current_config
+from services.contabilidad_service import contabilizar_gasto
 from services.tesoreria_service import registrar_egreso
 from utils.currency import convert_to_bs, convert_to_usd
 
@@ -294,6 +295,7 @@ def registrar_gasto(
                 "impuesto_pct": float(impuesto_pct),
             },
         )
+        contabilizar_gasto(conn, gasto_id=gasto_id, usuario=usuario)
 
         return gasto_id
 
