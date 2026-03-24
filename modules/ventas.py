@@ -9,7 +9,8 @@ import streamlit as st
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text
 from services.costeo_service import actualizar_vinculos_costeo
-from services.contabilidad_service import contabilizar_cobro_cliente, contabilizar_venta
+from services.contabilidad_service import contabilizar_venta
+from services.cxc_cobranza_service import CobranzaInput, registrar_abono_cuenta_por_cobrar
 from services.tesoreria_service import registrar_ingreso
 from utils.currency import convert_to_bs
 
@@ -135,10 +136,10 @@ def registrar_venta(
             conn.execute(
                 """
                 INSERT INTO cuentas_por_cobrar
-                (usuario, cliente_id, venta_id, saldo_usd, notas)
-                VALUES (?, ?, ?, ?, ?)
+                (usuario, cliente_id, venta_id, tipo_documento, monto_original_usd, monto_cobrado_usd, saldo_usd, estado, dias_vencimiento, notas)
+                VALUES (?, ?, ?, 'venta', ?, 0, ?, 'pendiente', 30, ?)
                 """,
-                (usuario, cliente_id, venta_id, total, "Generada desde venta"),
+                (usuario, cliente_id, venta_id, total, total, "Generada desde venta"),
             )
             conn.execute(
                 """
@@ -382,38 +383,22 @@ def _render_tab_historial() -> None:
                 if st.button(f"Marcar pagada #{int(row['id'])}", key=f"venta_pagada_{int(row['id'])}"):
                     try:
                         with db_transaction() as conn:
-                            conn.execute(
-                                "UPDATE cuentas_por_cobrar SET estado='pagada', saldo_usd=0 WHERE venta_id=?",
-                                (int(row["id"]),),
-                            )
-                            registrar_ingreso(
-                                conn,
-                                origen="cobro_cliente",
-                                referencia_id=int(row["id"]),
-                                descripcion=f"Cobro venta a crédito #{int(row['id'])}",
-                                monto_usd=float(row["total_usd"]),
-                                moneda="USD",
-                                monto_moneda=float(row["total_usd"]),
-                                tasa_cambio=1.0,
-                                metodo_pago="efectivo",
-                                usuario="Sistema",
-                                metadata={
-                                    "venta_id": int(row["id"]),
-                                    "cliente": str(row["cliente"]),
-                                },
-                            )
-                            mov_id = conn.execute(
-                                """
-                                SELECT id
-                                FROM movimientos_tesoreria
-                                WHERE origen='cobro_cliente' AND referencia_id=?
-                                ORDER BY id DESC
-                                LIMIT 1
-                                """,
+                            cxc = conn.execute(
+                                "SELECT id, saldo_usd FROM cuentas_por_cobrar WHERE venta_id=? ORDER BY id DESC LIMIT 1",
                                 (int(row["id"]),),
                             ).fetchone()
-                            if mov_id:
-                                contabilizar_cobro_cliente(conn, movimiento_id=int(mov_id["id"]), usuario="Sistema")
+                            if not cxc:
+                                raise ValueError("No existe cuenta por cobrar para esta venta")
+                            registrar_abono_cuenta_por_cobrar(
+                                conn,
+                                usuario="Sistema",
+                                payload=CobranzaInput(
+                                    cuenta_por_cobrar_id=int(cxc["id"]),
+                                    monto_usd=float(cxc["saldo_usd"] or 0.0),
+                                    metodo_pago="efectivo",
+                                    observaciones="Pago total desde historial de ventas",
+                                ),
+                            )
                         st.success("Cuenta actualizada")
                         st.rerun()
                     except Exception as e:
