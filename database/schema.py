@@ -336,6 +336,53 @@ CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
     valor TEXT
 );
+
+CREATE TABLE IF NOT EXISTS catalogo_cuentas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo TEXT NOT NULL UNIQUE,
+    nombre TEXT NOT NULL,
+    tipo TEXT NOT NULL CHECK (tipo IN ('activo','pasivo','patrimonio','ingreso','gasto')),
+    naturaleza TEXT NOT NULL CHECK (naturaleza IN ('deudora','acreedora')),
+    permite_movimiento INTEGER NOT NULL DEFAULT 1 CHECK (permite_movimiento IN (0,1)),
+    estado TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo','inactivo')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS asientos_contables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    evento_tipo TEXT NOT NULL,
+    referencia_tabla TEXT NOT NULL,
+    referencia_id INTEGER NOT NULL,
+    descripcion TEXT NOT NULL,
+    moneda TEXT NOT NULL DEFAULT 'USD',
+    total_debe_usd REAL NOT NULL DEFAULT 0,
+    total_haber_usd REAL NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'contabilizado' CHECK (estado IN ('contabilizado','anulado')),
+    usuario TEXT NOT NULL DEFAULT 'Sistema',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(evento_tipo, referencia_tabla, referencia_id)
+);
+
+CREATE TABLE IF NOT EXISTS asientos_contables_detalle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asiento_id INTEGER NOT NULL,
+    cuenta_codigo TEXT NOT NULL,
+    descripcion TEXT,
+    tercero_tipo TEXT,
+    tercero_id INTEGER,
+    debe_usd REAL NOT NULL DEFAULT 0,
+    haber_usd REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (asiento_id) REFERENCES asientos_contables(id),
+    FOREIGN KEY (cuenta_codigo) REFERENCES catalogo_cuentas(codigo)
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalogo_cuentas_tipo ON catalogo_cuentas(tipo);
+CREATE INDEX IF NOT EXISTS idx_asientos_fecha ON asientos_contables(fecha);
+CREATE INDEX IF NOT EXISTS idx_asientos_evento_ref ON asientos_contables(evento_tipo, referencia_tabla, referencia_id);
+CREATE INDEX IF NOT EXISTS idx_asientos_detalle_asiento ON asientos_contables_detalle(asiento_id);
+CREATE INDEX IF NOT EXISTS idx_asientos_detalle_cuenta ON asientos_contables_detalle(cuenta_codigo);
 """
 
 
@@ -473,9 +520,41 @@ def _ensure_costeo_migration(conn) -> None:
         conn.execute("ALTER TABLE costeo_detalle ADD COLUMN tipo_registro TEXT NOT NULL DEFAULT 'estimado'")
 
 
+def _ensure_contabilidad_migration(conn) -> None:
+    catalogo = conn.execute("PRAGMA table_info(catalogo_cuentas)").fetchall()
+    if not catalogo:
+        return
+
+    cuentas_base = [
+        ("110101", "Caja general", "activo", "deudora"),
+        ("110201", "Bancos", "activo", "deudora"),
+        ("120101", "Cuentas por cobrar clientes", "activo", "deudora"),
+        ("130101", "Inventario de mercadería", "activo", "deudora"),
+        ("210301", "IVA débito fiscal", "pasivo", "acreedora"),
+        ("210302", "IVA crédito fiscal", "activo", "deudora"),
+        ("220101", "Cuentas por pagar proveedores", "pasivo", "acreedora"),
+        ("410101", "Ingresos por ventas", "ingreso", "acreedora"),
+        ("420101", "Otros ingresos operativos", "ingreso", "acreedora"),
+        ("510101", "Gastos operativos", "gasto", "deudora"),
+        ("590101", "Ajustes y diferencias", "gasto", "deudora"),
+    ]
+    conn.executemany(
+        """
+        INSERT INTO catalogo_cuentas (codigo, nombre, tipo, naturaleza)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(codigo) DO UPDATE SET
+            nombre=excluded.nombre,
+            tipo=excluded.tipo,
+            naturaleza=excluded.naturaleza
+        """,
+        cuentas_base,
+    )
+
+
 def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
         _ensure_gastos_migration(conn)
         _ensure_tesoreria_migration(conn)
         _ensure_costeo_migration(conn)
+        _ensure_contabilidad_migration(conn)
