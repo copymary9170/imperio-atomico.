@@ -91,7 +91,7 @@ def render_cotizaciones(usuario: str):
     datos_pre = st.session_state.get("datos_pre_cotizacion", {})
     descripcion_pre, costo_base_pre = _normalizar_payload(datos_pre) if datos_pre else ("", 0.0)
 
-   with st.expander("⚡ Generador rápido de cotizaciones", expanded=True):
+    with st.expander("⚡ Generador rápido de cotizaciones", expanded=True):
         costeo_calculado: dict | None = None
         modo_precio = st.radio(
             "Modo de cotización",
@@ -168,12 +168,28 @@ def render_cotizaciones(usuario: str):
                 costo_indirecto_usd=float(costo_indirecto),
                 parametros_override=parametros_costeo,
             )
-            margen = calcular_margen_estimado(
-                costo_total_usd=float(costeo["costo_total_usd"]),
-                margen_pct=float(margen_pct),
-            )
             costo_estimado = float(costeo["costo_total_usd"])
-            precio_final = round(float(margen["precio_sugerido_usd"]) + _safe_float(ajuste_usd, 0.0), 2)
+
+            if costo_estimado <= 0:
+                precio_final = round(_safe_float(ajuste_usd, 0.0), 2)
+                st.warning(
+                    "El costo total calculado es 0. Ingresa al menos un costo (> 0) para estimar margen y precio."
+                )
+            else:
+                margen = calcular_margen_estimado(
+                    costo_total_usd=float(costeo["costo_total_usd"]),
+                    margen_pct=float(margen_pct),
+                )
+                precio_final = round(float(margen["precio_sugerido_usd"]) + _safe_float(ajuste_usd, 0.0), 2)
+                costeo_calculado = {
+                    "tipo_proceso": tipo_proceso,
+                    "cantidad": float(cantidad),
+                    "costo_materiales_usd": float(costo_materiales),
+                    "costo_mano_obra_usd": float(costo_mano_obra),
+                    "costo_indirecto_usd": float(costo_indirecto),
+                    "margen_pct": float(margen_pct),
+                    "precio_sugerido_usd": float(precio_final),
+                }
 
             desglose = pd.DataFrame(
                 [
@@ -189,15 +205,6 @@ def render_cotizaciones(usuario: str):
             st.caption(
                 f"Costo estimado calculado: $ {costo_estimado:,.2f} · Precio sugerido: $ {precio_final:,.2f}"
             )
-            costeo_calculado = {
-                "tipo_proceso": tipo_proceso,
-                "cantidad": float(cantidad),
-                "costo_materiales_usd": float(costo_materiales),
-                "costo_mano_obra_usd": float(costo_mano_obra),
-                "costo_indirecto_usd": float(costo_indirecto),
-                "margen_pct": float(margen_pct),
-                "precio_sugerido_usd": float(precio_final),
-            }
 
         estado_nuevo = st.selectbox("Estado inicial", ESTADOS_COTIZACION, index=0)
         if modo_precio == "Manual":
