@@ -9,6 +9,7 @@ from importlib import import_module
 
 __all__ = [
     "CotizacionService",
+    "AsientoLinea",
     "CompraFinancialInput",
     "DiagnosticsService",
     "InventoryMovement",
@@ -16,6 +17,12 @@ __all__ = [
     "ConsumoInsumo",
     "ProduccionService",
     "crear_cuenta_por_pagar_desde_compra",
+    "contabilizar_ajuste_manual_tesoreria",
+    "contabilizar_cobro_cliente",
+    "contabilizar_compra",
+    "contabilizar_gasto",
+    "contabilizar_pago_proveedor",
+    "contabilizar_venta",
     "listar_movimientos_tesoreria",
     "listar_vencimientos",
     "obtener_resumen_tesoreria",
@@ -23,6 +30,7 @@ __all__ = [
     "registrar_ingreso",
     "registrar_movimiento_tesoreria",
     "registrar_pago_cuenta_por_pagar",
+    "sincronizar_contabilidad",
     "validar_condicion_compra",
     "VentaItem",
     "VentasService",
@@ -37,6 +45,7 @@ _EXPORTS = {
 
     # Cotizaciones
     "CotizacionService": ("services.cotizacion_service", "CotizacionService"),
+    "AsientoLinea": ("services.contabilidad_service", "AsientoLinea"),
     "CompraFinancialInput": ("services.cxp_proveedores_service", "CompraFinancialInput"),
 
     # Diagnósticos
@@ -55,6 +64,12 @@ _EXPORTS = {
 
     # Compras / CxP proveedores
     "crear_cuenta_por_pagar_desde_compra": ("services.cxp_proveedores_service", "crear_cuenta_por_pagar_desde_compra"),
+    "contabilizar_ajuste_manual_tesoreria": ("services.contabilidad_service", "contabilizar_ajuste_manual_tesoreria"),
+    "contabilizar_cobro_cliente": ("services.contabilidad_service", "contabilizar_cobro_cliente"),
+    "contabilizar_compra": ("services.contabilidad_service", "contabilizar_compra"),
+    "contabilizar_gasto": ("services.contabilidad_service", "contabilizar_gasto"),
+    "contabilizar_pago_proveedor": ("services.contabilidad_service", "contabilizar_pago_proveedor"),
+    "contabilizar_venta": ("services.contabilidad_service", "contabilizar_venta"),
     "listar_movimientos_tesoreria": ("services.tesoreria_service", "listar_movimientos_tesoreria"),
     "listar_vencimientos": ("services.tesoreria_service", "listar_vencimientos"),
     "obtener_resumen_tesoreria": ("services.tesoreria_service", "obtener_resumen_tesoreria"),
@@ -62,6 +77,7 @@ _EXPORTS = {
     "registrar_ingreso": ("services.tesoreria_service", "registrar_ingreso"),
     "registrar_movimiento_tesoreria": ("services.tesoreria_service", "registrar_movimiento_tesoreria"),
     "registrar_pago_cuenta_por_pagar": ("services.cxp_proveedores_service", "registrar_pago_cuenta_por_pagar"),
+    "sincronizar_contabilidad": ("services.contabilidad_service", "sincronizar_contabilidad"),
     "validar_condicion_compra": ("services.cxp_proveedores_service", "validar_condicion_compra"),
 
     # Ventas
