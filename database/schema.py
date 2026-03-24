@@ -401,6 +401,13 @@ def _ensure_tesoreria_migration(conn) -> None:
 
 
 def _ensure_costeo_migration(conn) -> None:
+    params_columns = {row[1] for row in conn.execute("PRAGMA table_info(parametros_costeo)").fetchall()}
+    if params_columns and "estado" not in params_columns:
+        conn.execute("ALTER TABLE parametros_costeo ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo'")
+    if params_columns and "actualizado_en" not in params_columns:
+        conn.execute("ALTER TABLE parametros_costeo ADD COLUMN actualizado_en TEXT")
+        conn.execute("UPDATE parametros_costeo SET actualizado_en = COALESCE(actualizado_en, CURRENT_TIMESTAMP)")
+
     conn.executemany(
         """
         INSERT INTO parametros_costeo (clave, valor_num, descripcion)
