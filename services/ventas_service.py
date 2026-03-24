@@ -88,10 +88,11 @@ class VentasService:
             if metodo_pago.lower() == "credito" and cliente_id:
                 conn.execute(
                     """
-                    INSERT INTO cuentas_por_cobrar (usuario, cliente_id, venta_id, saldo_usd, estado)
-                    VALUES (?, ?, ?, ?, 'pendiente')
+                    INSERT INTO cuentas_por_cobrar
+                    (usuario, cliente_id, venta_id, tipo_documento, monto_original_usd, monto_cobrado_usd, saldo_usd, estado, dias_vencimiento)
+                    VALUES (?, ?, ?, 'venta', ?, 0, ?, 'pendiente', 30)
                     """,
-                    (usuario, cliente_id, venta_id, total),
+                    (usuario, cliente_id, venta_id, total, total),
                 )
 
         return venta_id
