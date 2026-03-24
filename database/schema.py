@@ -440,7 +440,7 @@ CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_estado ON movimientos_banca
 CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_cuenta_fecha ON movimientos_bancarios(cuenta_bancaria, fecha);
 CREATE INDEX IF NOT EXISTS idx_conciliaciones_tesoreria ON conciliaciones_bancarias(tesoreria_movimiento_id);
 CREATE INDEX IF NOT EXISTS idx_cierres_periodo_rango ON cierres_periodo(tipo_cierre, fecha_desde, fecha_hasta, estado);
-REATE UNIQUE INDEX IF NOT EXISTS idx_cierres_periodo_unique ON cierres_periodo(periodo, tipo_cierre, estado);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cierres_periodo_unique ON cierres_periodo(periodo, tipo_cierre, estado);
 CREATE INDEX IF NOT EXISTS idx_presupuesto_operativo_periodo ON presupuesto_operativo(periodo, tipo);
 CREATE INDEX IF NOT EXISTS idx_alertas_gerenciales_fecha ON alertas_gerenciales_log(fecha, prioridad);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_fecha ON costeo_ordenes(fecha);
