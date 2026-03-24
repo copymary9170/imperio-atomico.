@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit as st
 
 from modules.erp_nuevos_modulos import render_module_blueprint, render_module_portfolio
+from modules.conciliacion_bancaria import render_conciliacion_bancaria as render_conciliacion_bancaria_module
 from modules.tesoreria import render_tesoreria as render_tesoreria_module
 
 
@@ -50,8 +51,8 @@ def render_impuestos(usuario):
     render_module_blueprint("impuestos", usuario)
 
 
-def render_conciliacion_bancaria(usuario):
-    render_module_blueprint("conciliacion_bancaria", usuario)
+ef render_conciliacion_bancaria(usuario):
+    render_conciliacion_bancaria_module(usuario)
 
 
 def render_crm(usuario):
