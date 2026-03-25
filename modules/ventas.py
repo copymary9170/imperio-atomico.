@@ -10,6 +10,7 @@ from database.connection import db_transaction
 from modules.common import as_positive, clean_text
 from services.costeo_service import actualizar_vinculos_costeo
 from services.contabilidad_service import contabilizar_venta
+from services.conciliacion_service import periodo_esta_cerrado
 from services.cxc_cobranza_service import CobranzaInput, registrar_abono_cuenta_por_cobrar
 from services.tesoreria_service import registrar_ingreso
 from utils.currency import convert_to_bs
@@ -59,12 +60,15 @@ def registrar_venta(
     total_bs = round(convert_to_bs(total, tasa_cambio), 2)
 
     with db_transaction() as conn:
+        if periodo_esta_cerrado(conn, fecha_movimiento=date.today().isoformat(), tipo_cierre="mensual"):
+            raise ValueError("Periodo mensual cerrado: no se permiten nuevas ventas en esta fecha.")
+
         cur = conn.execute(
             """
             INSERT INTO ventas
             (usuario, cliente_id, moneda, tasa_cambio, metodo_pago,
-             subtotal_usd, impuesto_usd, total_usd, total_bs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             subtotal_usd, impuesto_usd, fiscal_tipo, fiscal_tasa_iva, fiscal_iva_debito_usd, total_usd, total_bs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario,
@@ -73,6 +77,9 @@ def registrar_venta(
                 tasa_cambio,
                 metodo_pago,
                 subtotal,
+                impuesto,
+                "gravada" if impuesto > 0 else "exenta",
+                0.16,
                 impuesto,
                 total,
                 total_bs,
