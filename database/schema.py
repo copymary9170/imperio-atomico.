@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS ventas (
     metodo_pago TEXT NOT NULL,
     subtotal_usd REAL NOT NULL,
     impuesto_usd REAL NOT NULL DEFAULT 0,
+    fiscal_tipo TEXT NOT NULL DEFAULT 'gravada' CHECK (fiscal_tipo IN ('gravada','exenta','no_sujeta')),
+    fiscal_tasa_iva REAL NOT NULL DEFAULT 0.16,
+    fiscal_iva_debito_usd REAL NOT NULL DEFAULT 0,
     total_usd REAL NOT NULL,
     total_bs REAL NOT NULL DEFAULT 0,
     observaciones TEXT
@@ -99,6 +102,10 @@ CREATE TABLE IF NOT EXISTS gastos (
     subtotal_usd REAL NOT NULL DEFAULT 0,
     impuesto_pct REAL NOT NULL DEFAULT 0,
     impuesto_usd REAL NOT NULL DEFAULT 0,
+    fiscal_tipo TEXT NOT NULL DEFAULT 'gravada' CHECK (fiscal_tipo IN ('gravada','exenta','no_sujeta')),
+    fiscal_tasa_iva REAL NOT NULL DEFAULT 0.16,
+    fiscal_iva_credito_usd REAL NOT NULL DEFAULT 0,
+    fiscal_credito_iva_deducible INTEGER NOT NULL DEFAULT 1 CHECK (fiscal_credito_iva_deducible IN (0,1)),
     monto_usd REAL NOT NULL,
     monto_bs REAL NOT NULL,
     periodicidad TEXT NOT NULL DEFAULT 'Único',
@@ -108,6 +115,7 @@ CREATE TABLE IF NOT EXISTS gastos (
     monto_mensual_bs REAL NOT NULL DEFAULT 0,
     cancelado_motivo TEXT
 );
+
 
 CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -523,6 +531,14 @@ def _ensure_gastos_migration(conn) -> None:
         conn.execute("ALTER TABLE gastos ADD COLUMN impuesto_pct REAL NOT NULL DEFAULT 0")
     if "impuesto_usd" not in columns:
         conn.execute("ALTER TABLE gastos ADD COLUMN impuesto_usd REAL NOT NULL DEFAULT 0")
+    if "fiscal_tipo" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN fiscal_tipo TEXT NOT NULL DEFAULT 'gravada'")
+    if "fiscal_tasa_iva" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN fiscal_tasa_iva REAL NOT NULL DEFAULT 0.16")
+    if "fiscal_iva_credito_usd" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN fiscal_iva_credito_usd REAL NOT NULL DEFAULT 0")
+    if "fiscal_credito_iva_deducible" not in columns:
+        conn.execute("ALTER TABLE gastos ADD COLUMN fiscal_credito_iva_deducible INTEGER NOT NULL DEFAULT 1")
 
     conn.execute(
         """
@@ -534,6 +550,23 @@ def _ensure_gastos_migration(conn) -> None:
             END,
             impuesto_pct = COALESCE(impuesto_pct, 0),
             impuesto_usd = COALESCE(impuesto_usd, 0),
+            fiscal_tipo = CASE
+                WHEN LOWER(COALESCE(fiscal_tipo, '')) IN ('gravada','exenta','no_sujeta') THEN LOWER(fiscal_tipo)
+                WHEN COALESCE(impuesto_usd, 0) > 0 THEN 'gravada'
+                ELSE 'exenta'
+            END,
+            fiscal_tasa_iva = CASE
+                WHEN COALESCE(fiscal_tasa_iva, 0) <= 0 THEN 0.16
+                ELSE fiscal_tasa_iva
+            END,
+            fiscal_iva_credito_usd = CASE
+                WHEN COALESCE(fiscal_credito_iva_deducible, 1) = 1 THEN COALESCE(impuesto_usd, 0)
+                ELSE 0
+            END,
+            fiscal_credito_iva_deducible = CASE
+                WHEN COALESCE(fiscal_credito_iva_deducible, 1) IN (0,1) THEN COALESCE(fiscal_credito_iva_deducible, 1)
+                ELSE 1
+            END,
             factor_mensual = CASE
                 WHEN factor_mensual IS NULL OR factor_mensual <= 0 THEN 1
                 ELSE factor_mensual
@@ -551,10 +584,43 @@ def _ensure_gastos_migration(conn) -> None:
     )
 
 
+def _ensure_ventas_migration(conn) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(ventas)").fetchall()}
+    if not columns:
+        return
+
+    if "fiscal_tipo" not in columns:
+        conn.execute("ALTER TABLE ventas ADD COLUMN fiscal_tipo TEXT NOT NULL DEFAULT 'gravada'")
+    if "fiscal_tasa_iva" not in columns:
+        conn.execute("ALTER TABLE ventas ADD COLUMN fiscal_tasa_iva REAL NOT NULL DEFAULT 0.16")
+    if "fiscal_iva_debito_usd" not in columns:
+        conn.execute("ALTER TABLE ventas ADD COLUMN fiscal_iva_debito_usd REAL NOT NULL DEFAULT 0")
+
+    conn.execute(
+        """
+        UPDATE ventas
+        SET fiscal_tipo = CASE
+                WHEN LOWER(COALESCE(fiscal_tipo, '')) IN ('gravada','exenta','no_sujeta') THEN LOWER(fiscal_tipo)
+                WHEN COALESCE(impuesto_usd, 0) > 0 THEN 'gravada'
+                ELSE 'exenta'
+            END,
+            fiscal_tasa_iva = CASE
+                WHEN COALESCE(fiscal_tasa_iva, 0) <= 0 THEN 0.16
+                ELSE fiscal_tasa_iva
+            END,
+            fiscal_iva_debito_usd = CASE
+                WHEN LOWER(COALESCE(fiscal_tipo, 'gravada')) = 'gravada' THEN COALESCE(impuesto_usd, 0)
+                ELSE 0
+            END
+        """
+    )
+
+
 def _ensure_cxc_migration(conn) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(cuentas_por_cobrar)").fetchall()}
     if not columns:
         return
+
 
     if "tipo_documento" not in columns:
         conn.execute("ALTER TABLE cuentas_por_cobrar ADD COLUMN tipo_documento TEXT NOT NULL DEFAULT 'venta'")
@@ -739,6 +805,7 @@ def _ensure_conciliacion_migration(conn) -> None:
 def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
+        _ensure_ventas_migration(conn)
         _ensure_gastos_migration(conn)
         _ensure_cxc_migration(conn)
         _ensure_tesoreria_migration(conn)
