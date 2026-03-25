@@ -1319,3 +1319,6 @@ def render_kardex(usuario: str) -> None:
 
 
 
+
+
+
