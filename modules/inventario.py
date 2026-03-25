@@ -43,6 +43,38 @@ def _safe_float(value, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return float(default)
 
+
+def _filter_df_by_query(df: pd.DataFrame, query: str, columns: list[str]) -> pd.DataFrame:
+    txt = clean_text(query)
+    if not txt or df.empty:
+        return df
+    mask = pd.Series(False, index=df.index)
+    for col in columns:
+        if col in df.columns:
+            mask = mask | df[col].astype(str).str.contains(txt, case=False, na=False)
+    return df[mask]
+
+
+def _select_inventory_item(df: pd.DataFrame, label: str, key: str) -> int:
+    return int(
+        st.selectbox(
+            label,
+            df["id"].tolist(),
+            format_func=lambda i: f"{df.loc[df['id'] == i, 'nombre'].iloc[0]} ({df.loc[df['id'] == i, 'sku'].iloc[0]})",
+            key=key,
+        )
+    )
+
+
+def _extract_supplier_tags(df_prov: pd.DataFrame) -> list[str]:
+    tags: set[str] = set()
+    if df_prov.empty or "especialidades" not in df_prov.columns:
+        return []
+    for txt in df_prov["especialidades"].fillna("").astype(str):
+        for tag in [clean_text(x) for x in txt.split(",") if clean_text(x)]:
+            tags.add(tag)
+    return sorted(tags)
+
 def _ensure_inventory_support_tables() -> None:
     with db_transaction() as conn:
         conn.execute(
@@ -878,13 +910,7 @@ def render_inventario(usuario: str) -> None:
                     )
 
             buscar_inv = st.text_input("🔎 Buscar producto", key="inv_existencias_buscar")
-            view_inv = df.copy()
-            if buscar_inv:
-                view_inv = view_inv[
-                    view_inv["sku"].astype(str).str.contains(buscar_inv, case=False, na=False)
-                    | view_inv["nombre"].astype(str).str.contains(buscar_inv, case=False, na=False)
-                    | view_inv["categoria"].astype(str).str.contains(buscar_inv, case=False, na=False)
-                ]
+            view_inv = _filter_df_by_query(df.copy(), buscar_inv, ["sku", "nombre", "categoria"])
             st.dataframe(
                 view_inv,
                 use_container_width=True,
@@ -1002,15 +1028,9 @@ def render_inventario(usuario: str) -> None:
             st.info("No hay compras registradas.")
         else:
             h1, h2 = st.columns([2, 1])
-            buscar_hist = h1.text_input("🔎 Buscar compra", key="inv_hist_buscar")
+           buscar_hist = h1.text_input("🔎 Buscar compra", key="inv_hist_buscar")
             tipo_hist = h2.selectbox("Condición", ["Todos", "contado", "credito"], key="inv_hist_tipo")
-            view_hist = df_hist.copy()
-            if buscar_hist:
-                view_hist = view_hist[
-                    view_hist["item"].astype(str).str.contains(buscar_hist, case=False, na=False)
-                    | view_hist["proveedor"].astype(str).str.contains(buscar_hist, case=False, na=False)
-                    | view_hist["sku"].astype(str).str.contains(buscar_hist, case=False, na=False)
-                ]
+            view_hist = _filter_df_by_query(df_hist.copy(), buscar_hist, ["item", "proveedor", "sku"])
             if tipo_hist != "Todos":
                 view_hist = view_hist[view_hist["tipo_pago"].astype(str).str.lower() == tipo_hist]
             st.dataframe(
@@ -1036,19 +1056,14 @@ def render_inventario(usuario: str) -> None:
             st.info("No hay proveedores registrados todavía.")
         else:
             cfp1, cfp2 = st.columns([2, 1])
+           cfp1, cfp2 = st.columns([2, 1])
             filtro = cfp1.text_input("🔍 Buscar proveedor")
-
-
-            # especialidades disponibles para filtro
-            tags = set()
-            for txt in df_prov["especialidades"].fillna("").astype(str):
-                for t in [clean_text(x) for x in txt.split(",") if clean_text(x)]:
-                    tags.add(t)
-            selected_tags = cfp2.multiselect("Filtrar por especialidad", sorted(tags))
+            selected_tags = cfp2.multiselect("Filtrar por especialidad", _extract_supplier_tags(df_prov))
 
             df_view = df_prov.copy()
             if filtro:
-                df_view = df_view[df_view.astype(str).apply(lambda x: x.str.contains(filtro, case=False, na=False)).any(axis=1)]
+                searchable_cols = ["nombre", "telefono", "rif", "contacto", "observaciones", "especialidades"]
+                df_view = _filter_df_by_query(df_view, filtro, searchable_cols)
             if selected_tags:
                 df_view = df_view[
                     df_view["especialidades"].fillna("").astype(str).apply(
@@ -1148,12 +1163,7 @@ def render_inventario(usuario: str) -> None:
                 a1, a2 = st.tabs(["Individual", "Masivo por CSV"])
 
                 with a1:
-                    aid = st.selectbox(
-                        "Producto",
-                        df_adj["id"].tolist(),
-                        format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
-                        key="inv_adj_stock_item",
-                    )
+                    aid = _select_inventory_item(df_adj, "Producto", "inv_adj_stock_item")
                     arow = df_adj[df_adj["id"] == aid].iloc[0]
                     stock_sistema = float(arow["stock_actual"] or 0.0)
                     stock_fisico = st.number_input("Stock físico contado", min_value=0.0, value=stock_sistema, key="inv_adj_stock_fisico")
@@ -1224,12 +1234,7 @@ def render_inventario(usuario: str) -> None:
                             st.error(f"Error procesando CSV: {exc}")
 
             with t2:
-                rid = st.selectbox(
-                    "Producto a revalorizar",
-                    df_adj["id"].tolist(),
-                    format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
-                    key="inv_adj_reval_item",
-                )
+                rid = _select_inventory_item(df_adj, "Producto a revalorizar", "inv_adj_reval_item")
                 rrow = df_adj[df_adj["id"] == rid].iloc[0]
                 costo_actual = float(rrow["costo_unitario_usd"] or 0.0)
                 precio_actual = float(rrow["precio_venta_usd"] or 0.0)
@@ -1286,12 +1291,7 @@ def render_inventario(usuario: str) -> None:
 
             with t4:
                 st.markdown("#### Mantenimiento de estructura")
-                mid = st.selectbox(
-                    "Producto",
-                    df_adj["id"].tolist(),
-                    format_func=lambda i: f"{df_adj.loc[df_adj['id']==i,'nombre'].iloc[0]} ({df_adj.loc[df_adj['id']==i,'sku'].iloc[0]})",
-                    key="inv_maint_item",
-                )
+                mid = _select_inventory_item(df_adj, "Producto", "inv_maint_item")
                 mrow = df_adj[df_adj["id"] == mid].iloc[0]
                 nuevo_nombre = st.text_input("Nuevo nombre", value=str(mrow["nombre"]), key="inv_maint_nombre")
                 nueva_categoria = st.text_input("Nueva categoría", value=str(mrow["categoria"]), key="inv_maint_cat")
@@ -1359,13 +1359,7 @@ def render_kardex(usuario: str) -> None:
     tipo = f2.selectbox("Tipo", ["Todos", "entrada", "salida", "ajuste"])
 
     view = df.copy()
-    if buscar:
-        view = view[
-            view["referencia"].astype(str).str.contains(buscar, case=False, na=False)
-            | view["nombre"].astype(str).str.contains(buscar, case=False, na=False)
-            | view["sku"].astype(str).str.contains(buscar, case=False, na=False)
-            | view["usuario"].astype(str).str.contains(buscar, case=False, na=False)
-        ]
+    view = _filter_df_by_query(view, buscar, ["referencia", "nombre", "sku", "usuario"])
     if tipo != "Todos":
         view = view[view["tipo"] == tipo]
 
@@ -1388,6 +1382,7 @@ def render_kardex(usuario: str) -> None:
             "referencia": "Referencia",
         },
     )
+
 
 
 
