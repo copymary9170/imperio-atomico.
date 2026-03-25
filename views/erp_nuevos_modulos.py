@@ -17,7 +17,7 @@ def render_compras_proveedores(usuario):
     render_module_blueprint("compras_proveedores", usuario)
 
 
-ef render_cuentas_por_pagar(usuario):
+def render_cuentas_por_pagar(usuario):
     render_cuentas_por_pagar_module(usuario)
 
 
