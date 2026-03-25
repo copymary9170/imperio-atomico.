@@ -61,11 +61,11 @@ from views.erp_nuevos_modulos import (
     render_crm,
     render_marketing_ventas,
     render_fidelizacion,
-    render_catalogo,
     render_rrhh,
     render_seguridad_roles,
     render_manuales_sop,
 )
+from views.catalogo import render_catalogo
 from modules.configuracion import render_sidebar_config_snapshot
 
 # NUEVA VISTA DEL MOTOR INDUSTRIAL
