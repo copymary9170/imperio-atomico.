@@ -10,6 +10,7 @@ from database.connection import db_transaction
 from modules.common import as_positive, require_text
 from modules.configuracion import DEFAULT_CONFIG, get_current_config
 from services.contabilidad_service import contabilizar_gasto
+from services.conciliacion_service import periodo_esta_cerrado
 from services.tesoreria_service import registrar_egreso
 from utils.currency import convert_to_bs, convert_to_usd
 
@@ -236,6 +237,9 @@ def registrar_gasto(
     monto_mensual_bs = round(convert_to_bs(monto_mensual_usd, tasa_cambio), 2)
 
     with db_transaction() as conn:
+        if periodo_esta_cerrado(conn, fecha_movimiento=date.today().isoformat(), tipo_cierre="mensual"):
+            raise ValueError("Periodo mensual cerrado: no se permiten nuevos gastos en esta fecha.")
+
         cur = conn.execute(
             """
             INSERT INTO gastos (
@@ -248,6 +252,10 @@ def registrar_gasto(
                 subtotal_usd,
                 impuesto_pct,
                 impuesto_usd,
+                fiscal_tipo,
+                fiscal_tasa_iva,
+                fiscal_iva_credito_usd,
+                fiscal_credito_iva_deducible,
                 monto_usd,
                 monto_bs,
                 periodicidad,
@@ -256,7 +264,7 @@ def registrar_gasto(
                 monto_mensual_usd,
                 monto_mensual_bs
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario,
@@ -268,6 +276,10 @@ def registrar_gasto(
                 subtotal_usd,
                 impuesto_pct,
                 impuesto_usd,
+                "gravada" if impuesto_usd > 0 else "exenta",
+                0.16,
+                impuesto_usd,
+                1,
                 monto_usd,
                 monto_bs,
                 periodicidad,
