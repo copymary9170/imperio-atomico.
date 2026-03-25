@@ -2,12 +2,14 @@ import streamlit as st
 
 from modules.erp_nuevos_modulos import render_module_blueprint, render_module_portfolio
 from modules.conciliacion_bancaria import render_conciliacion_bancaria as render_conciliacion_bancaria_module
+from modules.impuestos import render_impuestos as render_impuestos_module
 from modules.tesoreria import render_tesoreria as render_tesoreria_module
 
 
 def render_portafolio_modulos(usuario):
     st.title("🧩 Nuevos módulos ERP")
     render_module_portfolio(usuario)
+
 
 
 def render_compras_proveedores(usuario):
@@ -47,7 +49,7 @@ def render_rutas_produccion(usuario):
 
 
 def render_impuestos(usuario):
-    render_module_blueprint("impuestos", usuario)
+    render_impuestos_module(usuario)
 
 
 def render_conciliacion_bancaria(usuario):
