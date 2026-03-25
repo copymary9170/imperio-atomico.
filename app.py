@@ -27,6 +27,7 @@ from views.venta_directa import render_venta_directa
 from views.inventario import render_inventario
 from views.kardex import render_kardex
 from views.clientes import render_clientes
+from views.crm import render_crm
 from views.cmyk import render_cmyk
 from views.activos import render_activos
 from views.diagnostico import render_diagnostico
@@ -58,7 +59,6 @@ from views.erp_nuevos_modulos import (
     render_rutas_produccion,
     render_impuestos,
     render_conciliacion_bancaria,
-    render_crm,
     render_marketing_ventas,
     render_fidelizacion,
     render_rrhh,
@@ -128,8 +128,10 @@ MENU_ROUTES = {
 
     "👥 Clientes": lambda: render_clientes(usuario),
 
-    "🎨 Análisis CMYK": lambda: render_cmyk(usuario),
+    "🤝 CRM": lambda: render_crm(usuario),
 
+    "🎨 Análisis CMYK": lambda: render_cmyk(usuario),
+    
     "🏗️ Activos": lambda: render_activos(usuario),
 
     "🧠 Diagnóstico IA": lambda: render_diagnostico(usuario),
@@ -177,7 +179,6 @@ MENU_ROUTES = {
     "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
     "🧾 Impuestos": lambda: render_impuestos(usuario),
     "🏛️ Conciliación bancaria": lambda: render_conciliacion_bancaria(usuario),
-    "🤝 CRM": lambda: render_crm(usuario),
     "📣 Marketing / Ventas": lambda: render_marketing_ventas(usuario),
     "⭐ Fidelización": lambda: render_fidelizacion(usuario),
     "🛍️ Catálogo": lambda: render_catalogo(usuario),
