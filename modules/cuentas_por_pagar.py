@@ -192,3 +192,8 @@ def render_cuentas_por_pagar(usuario: str) -> None:
         st.caption("Todavía no hay pagos registrados para esta cuenta.")
     else:
         st.dataframe(df_pagos, use_container_width=True, hide_index=True)
+
+
+
+
+
