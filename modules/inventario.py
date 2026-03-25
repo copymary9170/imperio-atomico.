@@ -713,6 +713,58 @@ def _load_pagos_proveedores_df(cuenta_por_pagar_id: int | None = None) -> pd.Dat
     return pd.DataFrame(rows, columns=cols)
 
 
+def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT hc.id,
+                   hc.fecha,
+                   hc.usuario,
+                   i.sku,
+                   hc.item,
+                   COALESCE(p.nombre, 'SIN PROVEEDOR') AS proveedor,
+                   hc.cantidad,
+                   hc.unidad,
+                   hc.costo_total_usd,
+                   hc.costo_unit_usd,
+                   hc.impuestos,
+                   hc.delivery,
+                   hc.moneda_pago,
+                   COALESCE(hc.tipo_pago, 'contado') AS tipo_pago,
+                   COALESCE(hc.monto_pagado_inicial_usd, 0) AS monto_pagado_inicial_usd,
+                   COALESCE(hc.saldo_pendiente_usd, 0) AS saldo_pendiente_usd,
+                   hc.fecha_vencimiento
+            FROM historial_compras hc
+            LEFT JOIN inventario i ON i.id = hc.inventario_id
+            LEFT JOIN proveedores p ON p.id = hc.proveedor_id
+            WHERE COALESCE(hc.activo, 1)=1
+            ORDER BY hc.fecha DESC, hc.id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    cols = [
+        "id",
+        "fecha",
+        "usuario",
+        "sku",
+        "item",
+        "proveedor",
+        "cantidad",
+        "unidad",
+        "costo_total_usd",
+        "costo_unit_usd",
+        "impuestos",
+        "delivery",
+        "moneda_pago",
+        "tipo_pago",
+        "monto_pagado_inicial_usd",
+        "saldo_pendiente_usd",
+        "fecha_vencimiento",
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
 # ============================================================
 # UI
 # ============================================================
@@ -746,6 +798,162 @@ def render_inventario(usuario: str) -> None:
             st.dataframe(df_diag_mov, use_container_width=True, hide_index=True)
 
     tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "📊 Historial Compras", "👤 Proveedores", "🔧 Ajustes"])
+
+    with tabs[0]:
+        st.subheader("📋 Existencias actuales")
+        if df.empty:
+            st.info("No hay productos activos.")
+        else:
+            buscar_inv = st.text_input("🔎 Buscar producto", key="inv_existencias_buscar")
+            view_inv = df.copy()
+            if buscar_inv:
+                view_inv = view_inv[
+                    view_inv["sku"].astype(str).str.contains(buscar_inv, case=False, na=False)
+                    | view_inv["nombre"].astype(str).str.contains(buscar_inv, case=False, na=False)
+                    | view_inv["categoria"].astype(str).str.contains(buscar_inv, case=False, na=False)
+                ]
+            st.dataframe(
+                view_inv,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
+                    "stock_minimo": st.column_config.NumberColumn("Mínimo", format="%.3f"),
+                    "costo_unitario_usd": st.column_config.NumberColumn("Costo USD", format="%.4f"),
+                    "precio_venta_usd": st.column_config.NumberColumn("Precio USD", format="%.4f"),
+                    "valor_stock": st.column_config.NumberColumn("Valor stock", format="%.2f"),
+                },
+            )
+
+    with tabs[1]:
+        st.subheader("📥 Registrar Compra")
+
+        with db_transaction() as conn:
+            items_rows = conn.execute(
+                "SELECT id, sku, nombre, categoria, unidad, costo_unitario_usd, precio_venta_usd FROM inventario WHERE estado='activo' ORDER BY nombre"
+            ).fetchall()
+        items_map = {int(r["id"]): r for r in items_rows}
+
+        modo_item = st.radio("Ítem", ["Usar existente", "Crear y comprar"], horizontal=True, key="inv_compra_modo_item")
+        inv_id = None
+        if modo_item == "Usar existente" and items_map:
+            inv_id = st.selectbox(
+                "Producto",
+                list(items_map.keys()),
+                format_func=lambda i: f"{items_map[i]['nombre']} ({items_map[i]['sku']})",
+                key="inv_compra_item_id",
+            )
+        elif modo_item == "Usar existente":
+            st.warning("No hay productos creados. Usa 'Crear y comprar'.")
+
+        if modo_item == "Crear y comprar":
+            cnew1, cnew2, cnew3, cnew4 = st.columns(4)
+            nuevo_nombre = cnew1.text_input("Nombre", key="inv_compra_new_nombre")
+            nuevo_sku = cnew2.text_input("SKU base", key="inv_compra_new_sku")
+            nueva_categoria = cnew3.text_input("Categoría", value="General", key="inv_compra_new_cat")
+            tipo_unidad = cnew4.selectbox("Tipo unidad", ["Unidad", "Área (cm²)", "Líquido (ml)", "Peso (gr)"], key="inv_compra_new_tipo_unidad")
+            cantidad, unidad_resuelta, _ = _calc_stock_by_unit_type(tipo_unidad)
+            nuevo_min = st.number_input("Stock mínimo", min_value=0.0, value=0.0, key="inv_compra_new_min")
+            costo_base = st.number_input("Costo inicial unitario USD", min_value=0.0, value=0.0, format="%.4f", key="inv_compra_new_costo")
+            precio_base = st.number_input("Precio inicial USD", min_value=0.0, value=0.0, format="%.4f", key="inv_compra_new_precio")
+        else:
+            cantidad = st.number_input("Cantidad comprada", min_value=0.001, value=1.0, key="inv_compra_qty_existente")
+            unidad_resuelta = str(items_map[inv_id]["unidad"]) if inv_id in items_map else "unidad"
+
+        d1, d2, d3 = st.columns(3)
+        proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
+        costo_total = d2.number_input("Costo total USD", min_value=0.0001, value=1.0, format="%.4f", key="inv_compra_total")
+        impuesto_pct = d3.number_input("Impuesto (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("inv_impuesto_default", 16.0)), format="%.2f", key="inv_compra_impuesto")
+
+        d4, d5, d6 = st.columns(3)
+        delivery_monto = d4.number_input("Delivery", min_value=0.0, value=float(st.session_state.get("inv_delivery_default", 0.0)), format="%.4f", key="inv_compra_delivery")
+        delivery_moneda = d5.selectbox("Moneda delivery", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_delivery_moneda")
+        delivery_manual = d6.checkbox("Tasa manual delivery", key="inv_compra_delivery_manual")
+        delivery_usd, tasa_delivery = _resolve_delivery_usd(delivery_monto, delivery_moneda, tasa_bcv, tasa_binance, delivery_manual)
+
+        p1, p2, p3, p4 = st.columns(4)
+        tipo_pago = p1.selectbox("Tipo de pago", ["contado", "credito"], key="inv_compra_tipo_pago")
+        monto_pagado = p2.number_input("Pago inicial USD", min_value=0.0, value=float(costo_total if tipo_pago == "contado" else 0.0), format="%.4f", key="inv_compra_pagado")
+        fecha_venc = p3.date_input("Vence", value=None, key="inv_compra_vence")
+        moneda_pago = p4.selectbox("Moneda pago", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_moneda")
+        tasa_pago = _rate_from_label(moneda_pago, tasa_bcv, tasa_binance)
+        if p4.checkbox("Tasa manual pago", key="inv_compra_tasa_manual"):
+            tasa_pago = st.number_input("Tasa usada en pago", min_value=0.0001, value=float(tasa_pago), format="%.4f", key="inv_compra_tasa_pago")
+
+        if st.button("✅ Guardar compra", use_container_width=True):
+            try:
+                target_id = inv_id
+                if modo_item == "Crear y comprar":
+                    target_id = _create_inventory_item_for_purchase(
+                        usuario=usuario,
+                        sku_base=nuevo_sku,
+                        nombre=nuevo_nombre,
+                        categoria=nueva_categoria,
+                        unidad=unidad_resuelta,
+                        minimo=float(nuevo_min),
+                        costo_inicial=float(costo_base),
+                        precio_inicial=float(precio_base),
+                    )
+                if target_id is None:
+                    raise ValueError("Debes seleccionar o crear un producto para registrar la compra.")
+
+                with db_transaction() as conn:
+                    proveedor_id = _get_or_create_provider(conn, proveedor_nombre)
+                fin_input = CompraFinancialInput(
+                    tipo_pago=clean_text(tipo_pago).lower(),
+                    monto_pagado_inicial_usd=float(monto_pagado),
+                    fecha_vencimiento=fecha_venc.isoformat() if fecha_venc else None,
+                )
+                registrar_compra(
+                    usuario=usuario,
+                    inventario_id=int(target_id),
+                    cantidad=float(cantidad),
+                    costo_total_usd=float(costo_total),
+                    proveedor_id=proveedor_id,
+                    proveedor_nombre=proveedor_nombre,
+                    impuestos_pct=float(impuesto_pct),
+                    delivery_usd=float(delivery_usd),
+                    tasa_usada=float(tasa_pago if tasa_pago else tasa_delivery),
+                    moneda_pago=str(moneda_pago),
+                    financial_input=fin_input,
+                )
+                st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"No se pudo registrar la compra: {exc}")
+
+    with tabs[2]:
+        st.subheader("📊 Historial de Compras")
+        df_hist = _load_historial_compras_df(limit=2000)
+        if df_hist.empty:
+            st.info("No hay compras registradas.")
+        else:
+            h1, h2 = st.columns([2, 1])
+            buscar_hist = h1.text_input("🔎 Buscar compra", key="inv_hist_buscar")
+            tipo_hist = h2.selectbox("Condición", ["Todos", "contado", "credito"], key="inv_hist_tipo")
+            view_hist = df_hist.copy()
+            if buscar_hist:
+                view_hist = view_hist[
+                    view_hist["item"].astype(str).str.contains(buscar_hist, case=False, na=False)
+                    | view_hist["proveedor"].astype(str).str.contains(buscar_hist, case=False, na=False)
+                    | view_hist["sku"].astype(str).str.contains(buscar_hist, case=False, na=False)
+                ]
+            if tipo_hist != "Todos":
+                view_hist = view_hist[view_hist["tipo_pago"].astype(str).str.lower() == tipo_hist]
+            st.dataframe(
+                view_hist,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
+                    "costo_total_usd": st.column_config.NumberColumn("Total USD", format="%.2f"),
+                    "costo_unit_usd": st.column_config.NumberColumn("Costo unitario", format="%.4f"),
+                    "impuestos": st.column_config.NumberColumn("Impuesto %", format="%.2f"),
+                    "delivery": st.column_config.NumberColumn("Delivery USD", format="%.4f"),
+                    "monto_pagado_inicial_usd": st.column_config.NumberColumn("Pagado inicial", format="%.2f"),
+                    "saldo_pendiente_usd": st.column_config.NumberColumn("Saldo", format="%.2f"),
+                },
+            )
 
     with tabs[3]:
         st.subheader("👤 Directorio de Proveedores")
