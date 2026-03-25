@@ -333,6 +333,35 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
     fecha TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS crm_leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo','inactivo')),
+    cliente_id INTEGER,
+    nombre TEXT NOT NULL,
+    canal TEXT NOT NULL DEFAULT 'Otro',
+    etapa TEXT NOT NULL DEFAULT 'Nuevo' CHECK (etapa IN ('Nuevo','Contactado','Propuesta','Negociación','Ganado','Perdido')),
+    valor_estimado_usd REAL NOT NULL DEFAULT 0,
+    probabilidad_pct INTEGER NOT NULL DEFAULT 0 CHECK (probabilidad_pct >= 0 AND probabilidad_pct <= 100),
+    proximo_contacto TEXT,
+    notas TEXT,
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS crm_interacciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lead_id INTEGER NOT NULL,
+    usuario TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    resultado TEXT NOT NULL DEFAULT 'Pendiente',
+    detalle TEXT,
+    proxima_accion TEXT,
+    FOREIGN KEY (lead_id) REFERENCES crm_leads(id)
+);
+
 CREATE TABLE IF NOT EXISTS parametros_costeo (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     clave TEXT NOT NULL UNIQUE,
@@ -457,6 +486,9 @@ CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_cotizacion ON costeo_ordenes(cotiz
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_venta ON costeo_ordenes(venta_id);
 CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_produccion ON costeo_ordenes(orden_produccion_id);
 CREATE INDEX IF NOT EXISTS idx_costeo_detalle_orden ON costeo_detalle(orden_id);
+CREATE INDEX IF NOT EXISTS idx_crm_leads_estado_etapa ON crm_leads(estado, etapa);
+CREATE INDEX IF NOT EXISTS idx_crm_leads_proximo_contacto ON crm_leads(proximo_contacto);
+CREATE INDEX IF NOT EXISTS idx_crm_interacciones_lead_fecha ON crm_interacciones(lead_id, fecha);
 
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
