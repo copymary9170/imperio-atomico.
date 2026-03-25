@@ -9,6 +9,7 @@ import streamlit as st
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, money, require_text
 from services.contabilidad_service import contabilizar_compra
+from services.conciliacion_service import periodo_esta_cerrado
 from services.cxp_proveedores_service import (
     CompraFinancialInput,
     crear_cuenta_por_pagar_desde_compra,
@@ -95,6 +96,14 @@ def _ensure_inventory_support_tables() -> None:
             conn.execute("ALTER TABLE historial_compras ADD COLUMN saldo_pendiente_usd REAL DEFAULT 0")
         if "fecha_vencimiento" not in compra_cols:
             conn.execute("ALTER TABLE historial_compras ADD COLUMN fecha_vencimiento TEXT")
+        if "fiscal_tipo" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN fiscal_tipo TEXT DEFAULT 'gravada'")
+        if "fiscal_tasa_iva" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN fiscal_tasa_iva REAL DEFAULT 0.16")
+        if "fiscal_iva_credito_usd" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN fiscal_iva_credito_usd REAL DEFAULT 0")
+        if "fiscal_credito_iva_deducible" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN fiscal_credito_iva_deducible INTEGER DEFAULT 1")
         conn.execute(
             """
             UPDATE historial_compras
@@ -104,10 +113,26 @@ def _ensure_inventory_support_tables() -> None:
                         THEN COALESCE(costo_total_usd, 0)
                     ELSE COALESCE(monto_pagado_inicial_usd, 0)
                 END,
-                saldo_pendiente_usd = COALESCE(saldo_pendiente_usd, 0)
+                saldo_pendiente_usd = COALESCE(saldo_pendiente_usd, 0),
+                fiscal_tipo = CASE
+                    WHEN LOWER(COALESCE(fiscal_tipo, '')) IN ('gravada','exenta','no_sujeta') THEN LOWER(fiscal_tipo)
+                    WHEN COALESCE(impuestos, 0) > 0 THEN 'gravada'
+                    ELSE 'exenta'
+                END,
+                fiscal_tasa_iva = CASE
+                    WHEN COALESCE(fiscal_tasa_iva, 0) <= 0 THEN 0.16
+                    ELSE fiscal_tasa_iva
+                END,
+                fiscal_iva_credito_usd = CASE
+                    WHEN COALESCE(fiscal_credito_iva_deducible, 1) = 1 THEN ROUND(COALESCE(costo_total_usd, 0) * (COALESCE(impuestos, 0) / 100.0), 4)
+                    ELSE 0
+                END,
+                fiscal_credito_iva_deducible = CASE
+                    WHEN COALESCE(fiscal_credito_iva_deducible, 1) IN (0,1) THEN COALESCE(fiscal_credito_iva_deducible, 1)
+                    ELSE 1
+                END
             """
         )
-
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cuentas_por_pagar_proveedores (
@@ -354,6 +379,9 @@ def registrar_compra(
     )
 
     with db_transaction() as conn:
+        if periodo_esta_cerrado(conn, fecha_movimiento=date.today().isoformat(), tipo_cierre="mensual"):
+            raise ValueError("Periodo mensual cerrado: no se permiten nuevas compras en esta fecha.")
+
         row = conn.execute(
             "SELECT nombre, unidad, stock_actual, costo_unitario_usd FROM inventario WHERE id=? AND estado='activo'",
             (int(inventario_id),),
@@ -390,8 +418,8 @@ def registrar_compra(
             INSERT INTO historial_compras
             (usuario, inventario_id, proveedor_id, item, cantidad, unidad, costo_total_usd, costo_unit_usd,
              impuestos, delivery, tasa_usada, moneda_pago, tipo_pago, monto_pagado_inicial_usd,
-             saldo_pendiente_usd, fecha_vencimiento, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+             saldo_pendiente_usd, fecha_vencimiento, fiscal_tipo, fiscal_tasa_iva, fiscal_iva_credito_usd, fiscal_credito_iva_deducible, activo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 usuario,
@@ -410,6 +438,10 @@ def registrar_compra(
                 money(monto_pagado_inicial_usd),
                 money(saldo_pendiente_usd),
                 financial_input.fecha_vencimiento,
+                "gravada" if float(impuestos_pct or 0) > 0 else "exenta",
+                0.16,
+                round(float(costo_total_usd) * (float(impuestos_pct or 0) / 100.0), 4),
+                1,
             ),
         )
         compra_id = int(cur_hist.lastrowid)
