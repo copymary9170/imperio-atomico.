@@ -68,12 +68,9 @@ def render_fidelizacion(usuario):
     render_module_blueprint("fidelizacion", usuario)
 
 
-def render_catalogo(usuario):
-    render_module_blueprint("catalogo", usuario)
-
-
 def render_rrhh(usuario):
     render_module_blueprint("rrhh", usuario)
+
 
 
 def render_seguridad_roles(usuario):
