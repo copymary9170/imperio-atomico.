@@ -545,6 +545,56 @@ def _load_inventory_df() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
+def _build_restock_recommendations(df_inv: pd.DataFrame) -> pd.DataFrame:
+    if df_inv is None or df_inv.empty:
+        return pd.DataFrame(
+            columns=[
+                "id",
+                "sku",
+                "nombre",
+                "categoria",
+                "unidad",
+                "stock_actual",
+                "stock_minimo",
+                "faltante",
+                "sugerido_compra",
+                "costo_estimado_usd",
+                "prioridad",
+            ]
+        )
+
+    df = df_inv.copy()
+    df["stock_actual"] = pd.to_numeric(df["stock_actual"], errors="coerce").fillna(0.0)
+    df["stock_minimo"] = pd.to_numeric(df["stock_minimo"], errors="coerce").fillna(0.0)
+    df["costo_unitario_usd"] = pd.to_numeric(df["costo_unitario_usd"], errors="coerce").fillna(0.0)
+
+    críticos = df[df["stock_actual"] <= df["stock_minimo"]].copy()
+    if críticos.empty:
+        return pd.DataFrame(columns=["id", "sku", "nombre", "categoria", "unidad", "stock_actual", "stock_minimo", "faltante", "sugerido_compra", "costo_estimado_usd", "prioridad"])
+
+    críticos["faltante"] = (críticos["stock_minimo"] - críticos["stock_actual"]).clip(lower=0.0)
+    # Sugerencia conservadora: llevar a mínimo + 20% de colchón.
+    críticos["sugerido_compra"] = (críticos["faltante"] + (críticos["stock_minimo"] * 0.2)).clip(lower=0.001).round(3)
+    críticos["costo_estimado_usd"] = (críticos["sugerido_compra"] * críticos["costo_unitario_usd"]).round(2)
+    críticos["prioridad"] = críticos["faltante"].apply(lambda v: "Alta" if float(v) > 0 else "Media")
+
+    return críticos[
+        [
+            "id",
+            "sku",
+            "nombre",
+            "categoria",
+            "unidad",
+            "stock_actual",
+            "stock_minimo",
+            "faltante",
+            "sugerido_compra",
+            "costo_estimado_usd",
+            "prioridad",
+        ]
+    ].sort_values(by=["prioridad", "faltante", "costo_estimado_usd"], ascending=[True, False, False])
+
+
 def _load_movements_df(limit: int = 1000) -> pd.DataFrame:
     cols = [
         "id",
@@ -804,6 +854,29 @@ def render_inventario(usuario: str) -> None:
         if df.empty:
             st.info("No hay productos activos.")
         else:
+            plan_reposicion = _build_restock_recommendations(df)
+            if plan_reposicion.empty:
+                st.success("✅ Sin alertas de reposición. Todos los productos están por encima del mínimo.")
+            else:
+                presupuesto = float(plan_reposicion["costo_estimado_usd"].sum())
+                st.warning(
+                    f"⚠️ Reposición sugerida para {len(plan_reposicion)} ítems críticos. "
+                    f"Presupuesto estimado: ${presupuesto:,.2f}."
+                )
+                with st.expander("🧾 Ver plan sugerido de reposición", expanded=False):
+                    st.dataframe(
+                        plan_reposicion,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
+                            "stock_minimo": st.column_config.NumberColumn("Mínimo", format="%.3f"),
+                            "faltante": st.column_config.NumberColumn("Faltante", format="%.3f"),
+                            "sugerido_compra": st.column_config.NumberColumn("Compra sugerida", format="%.3f"),
+                            "costo_estimado_usd": st.column_config.NumberColumn("Costo estimado USD", format="%.2f"),
+                        },
+                    )
+
             buscar_inv = st.text_input("🔎 Buscar producto", key="inv_existencias_buscar")
             view_inv = df.copy()
             if buscar_inv:
