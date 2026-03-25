@@ -3,6 +3,7 @@ import streamlit as st
 from modules.erp_nuevos_modulos import render_module_blueprint, render_module_portfolio
 from modules.conciliacion_bancaria import render_conciliacion_bancaria as render_conciliacion_bancaria_module
 from modules.impuestos import render_impuestos as render_impuestos_module
+from modules.cuentas_por_pagar import render_cuentas_por_pagar as render_cuentas_por_pagar_module
 from modules.tesoreria import render_tesoreria as render_tesoreria_module
 
 
@@ -16,12 +17,13 @@ def render_compras_proveedores(usuario):
     render_module_blueprint("compras_proveedores", usuario)
 
 
-def render_cuentas_por_pagar(usuario):
-    render_module_blueprint("cuentas_por_pagar", usuario)
+ef render_cuentas_por_pagar(usuario):
+    render_cuentas_por_pagar_module(usuario)
 
 
 def render_tesoreria(usuario):
     render_tesoreria_module(usuario)
+
 
 
 def render_costeo_industrial(usuario):
