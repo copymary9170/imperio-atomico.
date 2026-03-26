@@ -86,9 +86,55 @@ def _health_status(ventas_total: float, utilidad: float, stock_bajo: int) -> tup
     return "🟢 Saludable", "Ventas activas, utilidad positiva y stock bajo control."
 
 
+def _build_executive_alerts(
+    margen_operativo: float,
+    punto_equilibrio_restante: float,
+    stock_bajo: int,
+) -> list[tuple[str, str]]:
+    """Genera alertas ejecutivas breves para lectura rápida."""
+    alerts: list[tuple[str, str]] = []
+
+    if margen_operativo < 0:
+        alerts.append(
+            (
+                "error",
+                "Margen operativo negativo: prioriza ajuste de costos o precios de venta.",
+            )
+        )
+    elif margen_operativo < 12:
+        alerts.append(
+            (
+                "warning",
+                "Margen operativo bajo: revisa mix de productos y comisiones de cobro.",
+            )
+        )
+    else:
+        alerts.append(("success", "Margen operativo saludable para el periodo seleccionado."))
+
+    if punto_equilibrio_restante > 0:
+        alerts.append(
+            (
+                "warning",
+                f"Aún faltan ${punto_equilibrio_restante:,.2f} para cubrir costos del día.",
+            )
+        )
+    else:
+        alerts.append(("success", "Punto de equilibrio diario cubierto."))
+
+    if stock_bajo >= 5:
+        alerts.append(("error", f"Hay {stock_bajo} ítems en nivel mínimo/crítico de inventario."))
+    elif stock_bajo > 0:
+        alerts.append(("warning", f"Hay {stock_bajo} ítems con riesgo de reposición."))
+    else:
+        alerts.append(("success", "Inventario sin alertas críticas de reposición."))
+
+    return alerts
+
+
 # ============================================================
 # DASHBOARD FINANCIERO
 # ============================================================
+
 
 
 def render_dashboard() -> None:
@@ -271,6 +317,14 @@ def render_dashboard() -> None:
     clientes_activos_periodo = int(dfv["cliente"].nunique()) if not dfv.empty else 0
     margen_operativo = ((utilidad / ventas_total) * 100) if ventas_total else 0.0
     estado_salud, detalle_salud = _health_status(ventas_total, utilidad, stock_bajo)
+    dias_periodo = max((hoy - desde).days + 1, 1) if desde is not None else 30
+    run_rate_ventas = (ventas_total / dias_periodo) * 30 if dias_periodo else 0.0
+    run_rate_utilidad = (utilidad / dias_periodo) * 30 if dias_periodo else 0.0
+    alertas_ejecutivas = _build_executive_alerts(
+        margen_operativo,
+        punto_equilibrio_restante,
+        stock_bajo,
+    )
 
     # ============================================================
     # RESUMEN EJECUTIVO
@@ -304,6 +358,19 @@ def render_dashboard() -> None:
     dpe1.metric("Punto de equilibrio pendiente", f"${punto_equilibrio_restante:,.2f}")
     dpe2.metric("Costos cargados hoy", f"${costos_fijos_hoy:,.2f}")
     dpe3.metric("Cobertura promedio stock", f"{cobertura_stock_dias:,.1f} und.")
+
+    rr1, rr2 = st.columns(2)
+    rr1.metric("Run-rate ventas (30 días)", f"${run_rate_ventas:,.2f}")
+    rr2.metric("Run-rate utilidad (30 días)", f"${run_rate_utilidad:,.2f}")
+
+    with st.expander("🚨 Alertas ejecutivas", expanded=True):
+        for nivel, mensaje in alertas_ejecutivas:
+            if nivel == "error":
+                st.error(mensaje)
+            elif nivel == "warning":
+                st.warning(mensaje)
+            else:
+                st.success(mensaje)
 
     if not df_top.empty:
         top3 = df_top.copy()
@@ -408,22 +475,52 @@ def render_dashboard() -> None:
             fig_flujo.update_layout(xaxis_title="Día", yaxis_title="Monto neto ($)")
             st.plotly_chart(fig_flujo, use_container_width=True)
 
+            resumen_dia = flujo.pivot_table(
+                index="dia",
+                columns="tipo",
+                values="monto",
+                aggfunc="sum",
+                fill_value=0,
+            ).reset_index()
+            resumen_dia["acum_ventas"] = resumen_dia.get("Ventas", 0).cumsum()
+            resumen_dia["acum_gastos"] = (resumen_dia.get("Gastos", 0) * -1).cumsum()
+
+            st.subheader("Acumulado del periodo")
+            fig_acum = px.line(
+                resumen_dia,
+                x="dia",
+                y=["acum_ventas", "acum_gastos"],
+                markers=True,
+                title="Acumulado de ventas vs gastos",
+            )
+            fig_acum.update_layout(
+                xaxis_title="Día",
+                yaxis_title="Monto acumulado ($)",
+                legend_title_text="Serie",
+            )
+            st.plotly_chart(fig_acum, use_container_width=True)
+
     with tab2:
         st.subheader("Monitor de insumos")
         if monitor.empty:
             st.info("No hay inventario activo para mostrar.")
         else:
+            mostrar_solo_riesgo = st.toggle("Mostrar solo ítems en riesgo", value=False)
+            monitor_view = monitor.copy()
+            if mostrar_solo_riesgo:
+                monitor_view = monitor_view[monitor_view["estado"] == "Crítico"]
+
             alertas, cobertura = st.columns([1.2, 1])
             with alertas:
                 st.dataframe(
-                    monitor[
+                    monitor_view[
                         ["nombre", "stock_actual", "valor", "estado", "stock_minimo", "nivel"]
                     ].sort_values(["estado", "stock_actual"], ascending=[True, True]).head(20),
                     use_container_width=True,
                     hide_index=True,
                 )
             with cobertura:
-                inv_chart = monitor.copy().sort_values("valor", ascending=False).head(10)
+                inv_chart = monitor_view.copy().sort_values("valor", ascending=False).head(10)
                 fig_inv = px.bar(
                     inv_chart,
                     x="valor",
@@ -449,6 +546,10 @@ def render_dashboard() -> None:
                 )
                 fig_m = px.pie(vm, names="metodo_pago", values="total_usd", hole=0.45)
                 st.plotly_chart(fig_m, use_container_width=True)
+                vm["participacion_%"] = (
+                    (vm["total_usd"] / max(float(vm["total_usd"].sum()), 1e-9)) * 100
+                ).round(2)
+                st.dataframe(vm, use_container_width=True, hide_index=True)
 
         with c_b:
             st.subheader("Top clientes")
@@ -463,7 +564,3 @@ def render_dashboard() -> None:
                 topc.columns = ["cliente", "ventas_usd", "tickets"]
                 topc = topc.sort_values("ventas_usd", ascending=False).head(10)
                 st.dataframe(topc, use_container_width=True, hide_index=True)
-
-
-
-
