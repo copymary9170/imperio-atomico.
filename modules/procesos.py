@@ -177,3 +177,6 @@ def render_otros_procesos(usuario: str):
 
         except Exception:
             st.info("Historial no disponible.")
+
+
+
