@@ -107,6 +107,13 @@ def obtener_resumen_rentabilidad(
     with db_transaction() as conn:
         detalle_cols = {row[1] for row in conn.execute("PRAGMA table_info(costeo_detalle)").fetchall()}
         filtro_tipo_registro = "AND d.tipo_registro = 'real'" if "tipo_registro" in detalle_cols else ""
+        if "subtotal_usd" in detalle_cols:
+            subtotal_real_expr = "COALESCE(d.subtotal_usd, 0)"
+        elif {"cantidad", "costo_unitario"}.issubset(detalle_cols):
+            subtotal_real_expr = "COALESCE(d.cantidad * d.costo_unitario, 0)"
+        else:
+            subtotal_real_expr = "0"
+        categoria_expr = "COALESCE(d.categoria, 'sin_categoria')" if "categoria" in detalle_cols else "'sin_categoria'"
 
         metricas_row = conn.execute(
             f"""
@@ -135,16 +142,14 @@ def obtener_resumen_rentabilidad(
             f"""
             SELECT
                 o.tipo_proceso,
-                COUNT(*) AS trabajos,
-                SUM(COALESCE(o.precio_vendido_usd, 0)) AS ingreso_vendido_usd,
-                SUM(COALESCE(o.costo_real_usd, 0)) AS costo_real_usd,
-                SUM(COALESCE(o.precio_vendido_usd, 0) - COALESCE(o.costo_real_usd, 0)) AS utilidad_bruta_usd,
-                AVG(COALESCE(o.margen_real_pct, 0)) AS margen_real_promedio_pct,
-                AVG(COALESCE(o.diferencia_vs_estimado_usd, 0)) AS desviacion_promedio_usd
+                {categoria_expr} AS categoria,
+                SUM({subtotal_real_expr}) AS subtotal_real_usd,
+                COUNT(*) AS registros
             FROM costeo_ordenes o
+            LEFT JOIN costeo_detalle d ON d.orden_id = o.id {filtro_tipo_registro}
             WHERE {where_clause}
-            GROUP BY o.tipo_proceso
-            ORDER BY utilidad_bruta_usd DESC
+            GROUP BY o.tipo_proceso, {categoria_expr}
+            ORDER BY subtotal_real_usd DESC
             """,
             conn,
             params=params,
