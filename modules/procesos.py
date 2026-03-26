@@ -20,6 +20,21 @@ def _ensure_historial_table(conn) -> None:
     )
 
 
+def _ensure_activos_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS activos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            equipo TEXT NOT NULL,
+            categoria TEXT,
+            unidad TEXT,
+            desgaste REAL NOT NULL DEFAULT 0,
+            activo INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+
+
 def render_otros_procesos(usuario: str):
     st.title("🛠️ Calculadora de Procesos Especiales")
     st.info("Cálculo de costos de procesos que no usan tinta: corte, laminado, planchado, etc.")
@@ -35,6 +50,7 @@ def render_otros_procesos(usuario: str):
     try:
         with db_transaction() as conn:
             _ensure_historial_table(conn)
+            _ensure_activos_table(conn)
             df_act_db = pd.read_sql_query(
                 "SELECT equipo, categoria, unidad, desgaste FROM activos WHERE COALESCE(activo,1)=1",
                 conn,
