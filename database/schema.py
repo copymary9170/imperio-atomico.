@@ -415,16 +415,33 @@ CREATE TABLE IF NOT EXISTS costeo_ordenes (
 CREATE TABLE IF NOT EXISTS costeo_detalle (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     orden_id INTEGER NOT NULL,
-    concepto TEXT NOT NULL,
-    categoria TEXT NOT NULL,
-    cantidad REAL NOT NULL DEFAULT 1,
-    costo_unitario_usd REAL NOT NULL DEFAULT 0,
-    subtotal_usd REAL NOT NULL DEFAULT 0,
-    metadata TEXT,
-    tipo_registro TEXT NOT NULL DEFAULT 'estimado' CHECK (tipo_registro IN ('estimado','real')),
-    FOREIGN KEY (orden_id) REFERENCES costeo_ordenes(id)
+    inventario_id INTEGER NOT NULL,
+    cantidad REAL NOT NULL,
+    costo_unitario REAL NOT NULL,
+    FOREIGN KEY (orden_id) REFERENCES ordenes_produccion(id)
 );
 
+CREATE TABLE IF NOT EXISTS pedidos_negocio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL DEFAULT 'Sistema',
+    sucursal TEXT NOT NULL DEFAULT 'Matriz',
+    tipo_negocio TEXT NOT NULL DEFAULT 'General',
+    cliente TEXT NOT NULL DEFAULT 'Consumidor final',
+    descripcion TEXT NOT NULL,
+    fecha_entrega TEXT,
+    total_usd REAL NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente','en_proceso','entregado','cancelado'))
+);
+
+CREATE TABLE IF NOT EXISTS produccion_auditoria (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    modulo TEXT NOT NULL,
+    accion TEXT NOT NULL,
+    detalle TEXT
+);
 CREATE TABLE IF NOT EXISTS ordenes_produccion (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -489,11 +506,13 @@ CREATE INDEX IF NOT EXISTS idx_costeo_detalle_orden ON costeo_detalle(orden_id);
 CREATE INDEX IF NOT EXISTS idx_crm_leads_estado_etapa ON crm_leads(estado, etapa);
 CREATE INDEX IF NOT EXISTS idx_crm_leads_proximo_contacto ON crm_leads(proximo_contacto);
 CREATE INDEX IF NOT EXISTS idx_crm_interacciones_lead_fecha ON crm_interacciones(lead_id, fecha);
+CREATE INDEX IF NOT EXISTS idx_pedidos_negocio_estado_entrega ON pedidos_negocio(estado, fecha_entrega);
 
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
     valor TEXT
 );
+
 
 CREATE TABLE IF NOT EXISTS catalogo_cuentas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -827,11 +846,44 @@ def _ensure_conciliacion_migration(conn) -> None:
             """
             UPDATE movimientos_bancarios
             SET estado_conciliacion = CASE
-                WHEN LOWER(COALESCE(estado_conciliacion, '')) IN ('pendiente','conciliado','con_diferencia') THEN LOWER(estado_conciliacion)
+                     WHEN LOWER(COALESCE(estado_conciliacion, '')) IN ('pendiente','conciliado','con_diferencia') THEN LOWER(estado_conciliacion)
                 ELSE 'pendiente'
             END
             """
         )
+
+
+def _ensure_gestion_negocio_migration(conn) -> None:
+    tablas_con_dimension = [
+        "ventas",
+        "gastos",
+        "cuentas_por_cobrar",
+        "cuentas_por_pagar_proveedores",
+        "costeo_ordenes",
+    ]
+    for tabla in tablas_con_dimension:
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({tabla})").fetchall()}
+        if not columns:
+            continue
+
+        if "sucursal" not in columns:
+            conn.execute(f"ALTER TABLE {tabla} ADD COLUMN sucursal TEXT NOT NULL DEFAULT 'Matriz'")
+        if "tipo_negocio" not in columns:
+            conn.execute(f"ALTER TABLE {tabla} ADD COLUMN tipo_negocio TEXT NOT NULL DEFAULT 'General'")
+
+        conn.execute(
+            f"""
+            UPDATE {tabla}
+            SET sucursal = COALESCE(NULLIF(sucursal, ''), 'Matriz'),
+                tipo_negocio = COALESCE(NULLIF(tipo_negocio, ''), 'General')
+            """
+        )
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ventas_sucursal_fecha ON ventas(sucursal, fecha)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ventas_tipo_negocio_fecha ON ventas(tipo_negocio, fecha)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cxc_sucursal_fecha ON cuentas_por_cobrar(sucursal, fecha)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cxp_sucursal_fecha ON cuentas_por_pagar_proveedores(sucursal, fecha)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_costeo_sucursal_fecha ON costeo_ordenes(sucursal, fecha)")
 
 
 def init_schema() -> None:
@@ -844,3 +896,4 @@ def init_schema() -> None:
         _ensure_costeo_migration(conn)
         _ensure_contabilidad_migration(conn)
         _ensure_conciliacion_migration(conn)
+        _ensure_gestion_negocio_migration(conn)
