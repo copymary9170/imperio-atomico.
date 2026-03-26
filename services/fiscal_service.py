@@ -22,6 +22,14 @@ def _periodo_a_rango(periodo: str) -> tuple[str, str]:
     return inicio.isoformat(), fin.isoformat()
 
 
+def _table_exists(conn: Any, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
 def obtener_resumen_fiscal_periodo(conn: Any, *, periodo: str) -> dict[str, float | int | str | bool]:
     fecha_desde, fecha_hasta = _periodo_a_rango(periodo)
 
@@ -38,19 +46,21 @@ def obtener_resumen_fiscal_periodo(conn: Any, *, periodo: str) -> dict[str, floa
         (fecha_desde, fecha_hasta),
     ).fetchone()
 
-    compras = conn.execute(
-        """
-        SELECT COUNT(*) AS documentos,
-               COALESCE(SUM(costo_total_usd), 0) AS base,
-               COALESCE(SUM(fiscal_iva_credito_usd), 0) AS iva
-        FROM historial_compras
-        WHERE date(fecha) BETWEEN date(?) AND date(?)
-          AND COALESCE(activo, 1) = 1
-          AND COALESCE(fiscal_tipo, 'gravada') = 'gravada'
-          AND COALESCE(fiscal_credito_iva_deducible, 1) = 1
-        """,
-        (fecha_desde, fecha_hasta),
-    ).fetchone()
+    compras = None
+    if _table_exists(conn, "historial_compras"):
+        compras = conn.execute(
+            """
+            SELECT COUNT(*) AS documentos,
+                   COALESCE(SUM(costo_total_usd), 0) AS base,
+                   COALESCE(SUM(fiscal_iva_credito_usd), 0) AS iva
+            FROM historial_compras
+            WHERE date(fecha) BETWEEN date(?) AND date(?)
+              AND COALESCE(activo, 1) = 1
+              AND COALESCE(fiscal_tipo, 'gravada') = 'gravada'
+              AND COALESCE(fiscal_credito_iva_deducible, 1) = 1
+            """,
+            (fecha_desde, fecha_hasta),
+        ).fetchone()
 
     gastos = conn.execute(
         """
