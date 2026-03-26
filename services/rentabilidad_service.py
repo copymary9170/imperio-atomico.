@@ -228,3 +228,6 @@ def obtener_resumen_rentabilidad(
         "mayores_desviaciones": mayores_desviaciones,
         "composicion_real": composicion_real,
     }
+
+
+
