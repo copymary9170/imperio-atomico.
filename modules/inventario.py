@@ -1028,7 +1028,7 @@ def render_inventario(usuario: str) -> None:
             st.info("No hay compras registradas.")
         else:
             h1, h2 = st.columns([2, 1])
-           buscar_hist = h1.text_input("🔎 Buscar compra", key="inv_hist_buscar")
+            buscar_hist = h1.text_input("🔎 Buscar compra", key="inv_hist_buscar")
             tipo_hist = h2.selectbox("Condición", ["Todos", "contado", "credito"], key="inv_hist_tipo")
             view_hist = _filter_df_by_query(df_hist.copy(), buscar_hist, ["item", "proveedor", "sku"])
             if tipo_hist != "Todos":
@@ -1056,7 +1056,6 @@ def render_inventario(usuario: str) -> None:
             st.info("No hay proveedores registrados todavía.")
         else:
             cfp1, cfp2 = st.columns([2, 1])
-           cfp1, cfp2 = st.columns([2, 1])
             filtro = cfp1.text_input("🔍 Buscar proveedor")
             selected_tags = cfp2.multiselect("Filtrar por especialidad", _extract_supplier_tags(df_prov))
 
@@ -1074,6 +1073,7 @@ def render_inventario(usuario: str) -> None:
 
         st.divider()
         st.subheader("➕ Registrar / Editar proveedor")
+
 
         proveedor_existente = None
         if not df_prov.empty:
