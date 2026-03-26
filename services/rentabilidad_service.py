@@ -191,7 +191,7 @@ def obtener_resumen_rentabilidad(
                 SUM(COALESCE(d.subtotal_usd, 0)) AS subtotal_real_usd,
                 COUNT(*) AS registros
             FROM costeo_ordenes o
-            LEFT JOIN costeo_detalle d ON d.orden_id = o.id AND d.tipo_registro = 'real'
+            LEFT JOIN costeo_detalle d ON d.orden_id = o.id {filtro_tipo_registro}
             WHERE {where_clause}
             GROUP BY o.tipo_proceso, COALESCE(d.categoria, 'sin_categoria')
             ORDER BY subtotal_real_usd DESC
