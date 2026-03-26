@@ -105,6 +105,9 @@ def obtener_resumen_rentabilidad(
     )
 
     with db_transaction() as conn:
+        detalle_cols = {row[1] for row in conn.execute("PRAGMA table_info(costeo_detalle)").fetchall()}
+        filtro_tipo_registro = "AND d.tipo_registro = 'real'" if "tipo_registro" in detalle_cols else ""
+
         metricas_row = conn.execute(
             f"""
             SELECT
