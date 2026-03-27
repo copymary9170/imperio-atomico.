@@ -1005,6 +1005,39 @@ def _ensure_activos_schema(conn) -> None:
     _migrar_valores_legados_activos(conn)
 
 
+
+
+def _prioridad_mantenimiento(row: dict | pd.Series) -> tuple[str, int, str]:
+    """Calcula prioridad de mantenimiento y acción sugerida para plan de trabajo."""
+    vida_restante = _safe_float((row.get("vida_restante_pct") if hasattr(row, "get") else None), default=100.0)
+    clase = _slug_clase_registro(row.get("clase_registro") if hasattr(row, "get") else None)
+    estado = str((row.get("estado_componente") if hasattr(row, "get") else "") or "").strip()
+    riesgo = str((row.get("riesgo") if hasattr(row, "get") else "") or "").strip()
+
+    if clase != "equipo_principal":
+        if estado == "Crítico" or vida_restante <= 20:
+            return "🔴 Prioridad inmediata", 100, "Reemplazar o reacondicionar hoy"
+        if estado == "En seguimiento" or vida_restante <= 50:
+            return "🟠 Alta", 75, "Programar mantenimiento en el próximo ciclo"
+        return "🟢 Preventiva", 45, "Mantener limpieza y control de uso"
+
+    if riesgo == "🔴 Alto":
+        return "🔴 Prioridad inmediata", 95, "Revisar equipo principal y sus componentes críticos"
+    if riesgo == "🟠 Medio":
+        return "🟠 Alta", 70, "Inspección funcional y ajuste preventivo"
+    return "🟢 Preventiva", 40, "Seguimiento rutinario"
+
+
+def _construir_backlog_mantenimiento(df: pd.DataFrame, limite: int = 15) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    base = df.copy()
+    prioridades = base.apply(_prioridad_mantenimiento, axis=1, result_type="expand")
+    prioridades.columns = ["prioridad_mantenimiento", "score_prioridad", "accion_sugerida"]
+    base = pd.concat([base, prioridades], axis=1)
+    base = base.sort_values(["score_prioridad", "desgaste", "id"], ascending=[False, False, True])
+    return base.head(int(max(1, limite))).copy()
 def _load_activos_df() -> pd.DataFrame:
     with db_transaction() as conn:
         _ensure_activos_schema(conn)
@@ -1337,6 +1370,32 @@ def render_activos(usuario: str):
             st.warning(
                 "Hay equipos principales con componentes críticos vinculados. "
                 "Revísalos en su categoría o en el Resumen Global para planificar reposiciones."
+            )
+
+        backlog = _construir_backlog_mantenimiento(df, limite=15)
+        st.markdown("##### 🗓️ Backlog de mantenimiento sugerido")
+        if backlog.empty:
+            st.caption("Aún no hay activos suficientes para priorizar mantenimiento.")
+        else:
+            c_back1, c_back2, c_back3 = st.columns(3)
+            c_back1.metric("Tareas inmediatas", int((backlog["prioridad_mantenimiento"] == "🔴 Prioridad inmediata").sum()))
+            c_back2.metric("Prioridad alta", int((backlog["prioridad_mantenimiento"] == "🟠 Alta").sum()))
+            c_back3.metric("Preventivas", int((backlog["prioridad_mantenimiento"] == "🟢 Preventiva").sum()))
+            st.dataframe(
+                backlog[
+                    [
+                        "equipo",
+                        "unidad",
+                        "clase_registro_label",
+                        "prioridad_mantenimiento",
+                        "accion_sugerida",
+                        "vida_restante_pct",
+                        "desgaste",
+                        "riesgo",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
             )
 
         with st.expander("🔎 Activos con prioridad de mantenimiento", expanded=False):
