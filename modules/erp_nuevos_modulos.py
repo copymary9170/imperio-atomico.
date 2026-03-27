@@ -111,3 +111,7 @@ def render_module_portfolio(usuario: str | None = None) -> None:
 # Alias para mantener compatibilidad con llamadas existentes en vistas antiguas.
 def render_portafolio_modulos(usuario: str | None = None) -> None:
     render_module_portfolio(usuario)
+
+
+
+
