@@ -15,8 +15,11 @@ st.set_page_config(
 # ==================================================
 
 from database.schema import init_schema
+from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 
 init_schema()
+
+restore_session_snapshot()
 
 # ==================================================
 # IMPORTAR VISTAS
@@ -112,6 +115,12 @@ st.markdown(
 st.sidebar.title("⚛️ Imperio Atómico ERP")
 st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral fijo.")
 
+if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
+    st.session_state.pop("usuario", None)
+    st.session_state.pop("rol", None)
+    save_session_snapshot()
+    st.rerun()
+
 # ==================================================
 # MENÚ PRINCIPAL
 # ==================================================
@@ -202,3 +211,4 @@ menu = st.sidebar.radio(
 # ==================================================
 
 MENU_ROUTES[menu]()
+save_session_snapshot()
