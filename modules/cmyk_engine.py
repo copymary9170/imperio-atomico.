@@ -270,62 +270,107 @@ def render_cmyk(usuario):
 
     archivos = st.file_uploader("Archivos (PDF/PNG/JPG)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
     ejecutar = st.button("Analizar lote", type="primary", use_container_width=True)
+    resultado_key = "cmyk_resultado_actual"
 
-    if not ejecutar:
+    if ejecutar:
+        if not archivos:
+            st.error("Carga al menos un archivo para analizar.")
+            return
+
+        paginas = []
+        for archivo in archivos:
+            try:
+                paginas.extend(normalizar_imagenes(archivo))
+            except Exception as exc:
+                st.warning(f"No se pudo procesar {archivo.name}: {exc}")
+
+        if not paginas:
+            st.error("No se pudieron procesar páginas válidas.")
+            return
+
+        base = _config_base_imprenta("A4" if tamano == "Personalizado" else tamano)
+        factor_driver = float(perfiles_driver.get(tipo_papel_driver, 1.0))
+        factor_calidad = float(PERFILES_CALIDAD[calidad]["ink_mult"])
+        ml_base = float(base["ml_base"]) * factor_area
+        if tamano != "Personalizado":
+            ml_base = ajustar_consumo_por_tamano(ml_base, tamano)
+
+        resultados, totales = analizar_lote(
+            paginas,
+            {
+                "ml_base_pagina": ml_base,
+                "factor_general": float(base["factor_general"]),
+                "factor_calidad": factor_calidad,
+                "factor_papel": factor_driver,
+                "factor_k": 1.0,
+                "auto_negro_inteligente": True,
+                "refuerzo_negro": float(refuerzo_negro),
+            },
+        )
+
+        total_paginas = len(resultados)
+        precio_tinta = costo_tinta_ml(filtrar_tintas(df_inv), fallback=0.035)
+        costos = calcular_costo_lote(
+            totales_cmyk=totales,
+            precio_tinta_ml=precio_tinta,
+            paginas=total_paginas,
+            costo_desgaste_pagina=float(base["costo_desgaste"]),
+            desperdicio_factor=float(desperdicio_factor),
+            desgaste_head_ml=0.005,
+            costo_limpieza=0.0,
+        )
+
+        costo_papel_total = total_paginas * costo_material
+        costo_total = float(costos["costo_total"]) + float(costo_papel_total)
+        precio = _precio_sugerido(
+            costo_total=costo_total,
+            paginas=total_paginas,
+            margen_utilidad=float(margen_utilidad),
+            comision_pasarela=float(comision_pasarela),
+            impuesto_venta=float(impuesto_venta),
+            redondeo=float(redondeo_precio),
+        )
+        consumos_ids = mapear_consumo_ids(
+            filtrar_tintas(df_inv),
+            totales,
+            sistema_tinta=sistema_tinta,
+            impresora=impresora_op["nombre"],
+        )
+        alertas = validar_stock(df_inv, consumos_ids)
+
+        st.session_state[resultado_key] = {
+            "impresora_label": impresora_op["label"],
+            "impresora_nombre": impresora_op["nombre"],
+            "total_paginas": total_paginas,
+            "resultados": resultados,
+            "totales": totales,
+            "costos": costos,
+            "costo_total": costo_total,
+            "costo_papel_total": costo_papel_total,
+            "precio": precio,
+            "consumos_ids": consumos_ids,
+            "alertas": alertas,
+            "margen_utilidad": float(margen_utilidad),
+            "comision_pasarela": float(comision_pasarela),
+            "impuesto_venta": float(impuesto_venta),
+            "material_papel": material_papel,
+            "costo_material": float(costo_material),
+        }
+
+    analisis = st.session_state.get(resultado_key)
+    if not analisis:
         st.subheader("Historial reciente")
         st.dataframe(df_hist, use_container_width=True)
         return
 
-
-    if not archivos:
-        st.error("Carga al menos un archivo para analizar.")
-        return
-
-    paginas = []
-    for archivo in archivos:
-        try:
-            paginas.extend(normalizar_imagenes(archivo))
-        except Exception as exc:
-            st.warning(f"No se pudo procesar {archivo.name}: {exc}")
-
-    if not paginas:
-        st.error("No se pudieron procesar páginas válidas.")
-        return
-
-    base = _config_base_imprenta("A4" if tamano == "Personalizado" else tamano)
-    factor_driver = float(perfiles_driver.get(tipo_papel_driver, 1.0))
-    factor_calidad = float(PERFILES_CALIDAD[calidad]["ink_mult"])
-    ml_base = float(base["ml_base"]) * factor_area
-    if tamano != "Personalizado":
-        ml_base = ajustar_consumo_por_tamano(ml_base, tamano)
-
-    resultados, totales = analizar_lote(
-        paginas,
-        {
-            "ml_base_pagina": ml_base,
-            "factor_general": float(base["factor_general"]),
-            "factor_calidad": factor_calidad,
-            "factor_papel": factor_driver,
-            "factor_k": 1.0,
-            "auto_negro_inteligente": True,
-            "refuerzo_negro": float(refuerzo_negro),
-        },
-    )
-
-    total_paginas = len(resultados)
-    precio_tinta = costo_tinta_ml(filtrar_tintas(df_inv), fallback=0.035)
-    costos = calcular_costo_lote(
-        totales_cmyk=totales,
-        precio_tinta_ml=precio_tinta,
-        paginas=total_paginas,
-        costo_desgaste_pagina=float(base["costo_desgaste"]),
-        desperdicio_factor=float(desperdicio_factor),
-        desgaste_head_ml=0.005,
-        costo_limpieza=0.0,
-    )
-
-    costo_papel_total = total_paginas * costo_material
-    costo_total = float(costos["costo_total"]) + float(costo_papel_total)
+    total_paginas = int(analisis["total_paginas"])
+    totales = analisis["totales"]
+    costos = analisis["costos"]
+    costo_total = float(analisis["costo_total"])
+    costo_papel_total = float(analisis["costo_papel_total"])
+    precio = analisis["precio"]
+    alertas = analisis["alertas"]
+    consumos_ids = analisis["consumos_ids"]
 
     st.success(f"Análisis completado para {total_paginas} páginas.")
     m1, m2, m3, m4 = st.columns(4)
@@ -335,15 +380,6 @@ def render_cmyk(usuario):
     m4.metric("K (ml)", f"{totales['K']:.2f}")
 
     st.metric("Costo total estimado", f"$ {costo_total:.2f}")
-
-    precio = _precio_sugerido(
-        costo_total=costo_total,
-        paginas=total_paginas,
-        margen_utilidad=float(margen_utilidad),
-        comision_pasarela=float(comision_pasarela),
-        impuesto_venta=float(impuesto_venta),
-        redondeo=float(redondeo_precio),
-    )
 
     st.subheader("💹 Precio sugerido")
     p1, p2, p3 = st.columns(3)
@@ -356,9 +392,9 @@ def render_cmyk(usuario):
         pd.DataFrame(
             [
                 {"Concepto": "Costo base", "Monto": precio["base"]},
-                {"Concepto": f"Subtotal con margen ({margen_utilidad}%)", "Monto": precio["subtotal"]},
-                {"Concepto": f"Comisión ({comision_pasarela}%)", "Monto": precio["comision"]},
-                {"Concepto": f"Impuesto ({impuesto_venta}%)", "Monto": precio["impuesto"]},
+                {"Concepto": f"Subtotal con margen ({analisis['margen_utilidad']}%)", "Monto": precio["subtotal"]},
+                {"Concepto": f"Comisión ({analisis['comision_pasarela']}%)", "Monto": precio["comision"]},
+                {"Concepto": f"Impuesto ({analisis['impuesto_venta']}%)", "Monto": precio["impuesto"]},
                 {"Concepto": "Precio final", "Monto": precio["precio_final"]},
             ]
         ),
@@ -370,23 +406,20 @@ def render_cmyk(usuario):
     b1.metric("Costo tinta", f"$ {float(costos['costo_tinta']):.2f}")
     b2.metric("Costo desgaste", f"$ {float(costos['costo_desgaste']):.2f}")
     b3.metric("Costo papel", f"$ {float(costo_papel_total):.2f}")
+    st.caption(
+        f"Material usado: {analisis['material_papel']} | "
+        f"$ / hoja: {float(analisis['costo_material']):.4f}"
+    )
 
     if total_paginas > 0:
         st.caption(f"Costo unitario aproximado: $ {(costo_total / total_paginas):.4f} por página")
-    st.dataframe(pd.DataFrame(resultados), use_container_width=True)
+    st.dataframe(pd.DataFrame(analisis["resultados"]), use_container_width=True)
 
-    consumos_ids = mapear_consumo_ids(
-        filtrar_tintas(df_inv),
-        totales,
-        sistema_tinta=sistema_tinta,
-        impresora=impresora_op["nombre"],
-    )
-    alertas = validar_stock(df_inv, consumos_ids)
     for alerta in alertas:
         st.warning(alerta)
 
     if st.button("Guardar historial", use_container_width=True):
-        guardar_historial(impresora=impresora_op["label"], paginas=total_paginas, costo=costo_total, consumos=totales)
+        guardar_historial(impresora=analisis["impresora_label"], paginas=total_paginas, costo=costo_total, consumos=totales)
         st.success("Historial guardado.")
 
     if not alertas and st.button("Descontar inventario", use_container_width=True):
@@ -395,3 +428,7 @@ def render_cmyk(usuario):
             st.success(msg)
         else:
             st.error(msg)
+
+    if st.button("Limpiar análisis actual", use_container_width=True):
+        st.session_state.pop(resultado_key, None)
+        st.info("Análisis limpiado. Puedes cargar nuevos archivos.")
