@@ -8,3 +8,5 @@ from modules.activos import ACTIVOS_UI_VERSION, render_activos as render_activos
 def render_activos(usuario: str):
     st.caption(f"Vista renovada de activos · {ACTIVOS_UI_VERSION}")
     render_activos_modern(usuario)
+
+
