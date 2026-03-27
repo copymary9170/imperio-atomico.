@@ -67,4 +67,3 @@ GROWTH_MODULES: tuple[ModuleBlueprint, ...] = (
         priority="Media",
     ),
 )
-modules/nuevos_modulos/industrial.py
