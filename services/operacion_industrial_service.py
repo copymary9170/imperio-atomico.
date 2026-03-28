@@ -21,6 +21,7 @@ class OperacionIndustrialService:
     ) -> None:
         self.repository = repository or OperacionIndustrialRepository()
         self.priorizacion_service = priorizacion_service or PriorizacionService()
+        self.bootstrap()
 
     def bootstrap(self) -> None:
         """Inicializa esquema del módulo de operación industrial de forma explícita."""
