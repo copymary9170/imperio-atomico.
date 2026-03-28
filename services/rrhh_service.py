@@ -11,18 +11,40 @@ class RRHHService:
         self.repository = repository or RRHHRepository()
         self.repository.ensure_schema()
 
-    def crear_empleado(self, *, nombre: str, puesto: str, fecha_ingreso: date, usuario: str) -> int:
+    def crear_empleado(
+        self,
+        *,
+        nombre: str,
+        documento: str,
+        puesto: str,
+        area: str,
+        fecha_ingreso: date,
+        estado: str,
+        usuario: str,
+    ) -> int:
         nombre_limpio = (nombre or "").strip()
+        documento_limpio = (documento or "").strip()
         puesto_limpio = (puesto or "").strip()
+        area_limpia = (area or "").strip()
+
         if not nombre_limpio:
-            raise ValueError("El nombre del empleado es obligatorio")
+            raise ValueError("El nombre es obligatorio")
+        if not documento_limpio:
+            raise ValueError("El documento es obligatorio")
         if not puesto_limpio:
-            raise ValueError("El puesto del empleado es obligatorio")
+            raise ValueError("El puesto es obligatorio")
+        if not area_limpia:
+            raise ValueError("El área es obligatoria")
+        if estado not in {"activo", "inactivo"}:
+            raise ValueError("El estado debe ser activo o inactivo")
 
         return self.repository.create_employee(
             nombre=nombre_limpio,
+            documento=documento_limpio,
             puesto=puesto_limpio,
+            area=area_limpia,
             fecha_ingreso=fecha_ingreso.isoformat(),
+            estado=estado,
             created_by=usuario,
         )
 
@@ -43,6 +65,8 @@ class RRHHService:
         hora_salida: time | None,
         usuario: str,
     ) -> int:
+        if not hora_entrada and not hora_salida:
+            raise ValueError("Debes registrar al menos hora de entrada o hora de salida")
         if hora_entrada and hora_salida and hora_salida <= hora_entrada:
             raise ValueError("La hora de salida debe ser mayor a la hora de entrada")
 
@@ -54,12 +78,19 @@ class RRHHService:
             usuario=usuario,
         )
 
-    def listar_asistencia(self, *, fecha_desde: date, fecha_hasta: date) -> list[dict[str, Any]]:
+    def listar_asistencia(
+        self,
+        *,
+        fecha_desde: date,
+        fecha_hasta: date,
+        empleado_id: int | None = None,
+    ) -> list[dict[str, Any]]:
         if fecha_hasta < fecha_desde:
             raise ValueError("La fecha final no puede ser menor a la inicial")
         return self.repository.list_attendance(
             fecha_desde=fecha_desde.isoformat(),
             fecha_hasta=fecha_hasta.isoformat(),
+            empleado_id=empleado_id,
         )
 
     def crear_solicitud(
@@ -72,7 +103,7 @@ class RRHHService:
         fecha_fin: date,
         usuario: str,
     ) -> int:
-        if tipo not in {"vacaciones", "permiso"}:
+        if tipo not in {"vacaciones", "permiso", "incapacidad"}:
             raise ValueError("Tipo de solicitud no válido")
         if fecha_fin < fecha_inicio:
             raise ValueError("La fecha fin no puede ser menor a la fecha inicio")
@@ -93,6 +124,8 @@ class RRHHService:
         fecha_desde: date | None = None,
         fecha_hasta: date | None = None,
     ) -> list[dict[str, Any]]:
+        if fecha_desde and fecha_hasta and fecha_hasta < fecha_desde:
+            raise ValueError("La fecha final no puede ser menor a la inicial")
         return self.repository.list_requests(
             estado=estado,
             fecha_desde=fecha_desde.isoformat() if fecha_desde else None,
@@ -106,11 +139,7 @@ class RRHHService:
         accion: str,
         comentario: str,
         admin_usuario: str,
-        rol_usuario: str | None,
     ) -> None:
-        if (rol_usuario or "").lower() not in {"admin", "administration"}:
-            raise PermissionError("Solo un rol administrador puede aprobar/rechazar solicitudes")
-
         estado = {"aprobar": "aprobado", "rechazar": "rechazado"}.get(accion)
         if not estado:
             raise ValueError("Acción de aprobación no válida")
