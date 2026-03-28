@@ -39,6 +39,8 @@ MODULE_DATA_FLOWS: tuple[DataFlow, ...] = (
     DataFlow("control_calidad", "mermas_desperdicio", "Rechazos y reprocesos", "Por lote"),
     DataFlow("crm", "marketing_ventas", "Segmentos y comportamiento", "Semanal"),
     DataFlow("rrhh", "seguridad_roles", "Altas/bajas de personal", "Tiempo real"),
+    DataFlow("rrhh", "contabilidad_general", "Novedades de nómina y provisiones", "Semanal"),
+    DataFlow("produccion", "rrhh", "Horas reales por turno y célula", "Diario"),
 )
 
 
