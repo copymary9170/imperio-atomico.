@@ -138,3 +138,6 @@ class OperacionIndustrialService:
 
     def list_unified_history(self, limit: int = 200) -> list[dict[str, Any]]:
         return self.repository.list_unified_history(limit=limit)
+
+
+
