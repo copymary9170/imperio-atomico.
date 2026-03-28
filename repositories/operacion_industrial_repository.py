@@ -137,15 +137,28 @@ class OperacionIndustrialRepository:
 
     def list_open_maintenance_orders(self) -> list[dict[str, Any]]:
         with db_transaction() as conn:
-            rows = conn.execute(
-                """
-                SELECT mo.*, a.equipo, a.modelo, a.unidad
-                FROM industrial_maintenance_orders mo
-                LEFT JOIN activos a ON a.id = mo.activo_id
-                WHERE mo.estado IN ('pendiente', 'programado', 'en_ejecucion')
-                ORDER BY mo.fecha_programada ASC, mo.id ASC
-                """
-            ).fetchall()
+            if not _table_exists(conn, "industrial_maintenance_orders"):
+                return []
+
+            if _table_exists(conn, "activos"):
+                rows = conn.execute(
+                    """
+                    SELECT mo.*, a.equipo, a.modelo, a.unidad
+                    FROM industrial_maintenance_orders mo
+                    LEFT JOIN activos a ON a.id = mo.activo_id
+                    WHERE mo.estado IN ('pendiente', 'programado', 'en_ejecucion')
+                    ORDER BY mo.fecha_programada ASC, mo.id ASC
+                    """
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT mo.*, NULL AS equipo, NULL AS modelo, NULL AS unidad
+                    FROM industrial_maintenance_orders mo
+                    WHERE mo.estado IN ('pendiente', 'programado', 'en_ejecucion')
+                    ORDER BY mo.fecha_programada ASC, mo.id ASC
+                    """
+                ).fetchall()
             return [dict(row) for row in rows]
 
     def list_recent_diagnostics(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -208,16 +221,26 @@ class OperacionIndustrialRepository:
                 ).fetchone()
             else:
                 backlog = {"pendientes": 0}
-            costs = conn.execute(
-                """
-                SELECT a.id, a.equipo, a.modelo, COALESCE(SUM(mo.costo_estimado), 0) AS costo
-                FROM activos a
-                LEFT JOIN industrial_maintenance_orders mo ON mo.activo_id = a.id
-                GROUP BY a.id
-                ORDER BY costo DESC, a.id ASC
-                LIMIT 5
-                """
-            ).fetchall()
+            if _table_exists(conn, "industrial_maintenance_orders"):
+                costs = conn.execute(
+                    """
+                    SELECT a.id, a.equipo, a.modelo, COALESCE(SUM(mo.costo_estimado), 0) AS costo
+                    FROM activos a
+                    LEFT JOIN industrial_maintenance_orders mo ON mo.activo_id = a.id
+                    GROUP BY a.id
+                    ORDER BY costo DESC, a.id ASC
+                    LIMIT 5
+                    """
+                ).fetchall()
+            else:
+                costs = conn.execute(
+                    """
+                    SELECT a.id, a.equipo, a.modelo, 0 AS costo
+                    FROM activos a
+                    ORDER BY a.id ASC
+                    LIMIT 5
+                    """
+                ).fetchall()
 
         return {
             "total_activos": int(assets["total"] or 0),
