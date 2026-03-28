@@ -8,3 +8,5 @@ def render_operacion_industrial(usuario: str) -> None:
     """Renderiza el dashboard unificado de operación industrial."""
     service = OperacionIndustrialService()
     render_operacion_industrial_dashboard(usuario, service)
+
+
