@@ -52,3 +52,6 @@ ADMIN_MODULES: tuple[ModuleBlueprint, ...] = (
         priority="Media",
     ),
 )
+
+
+
