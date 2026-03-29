@@ -100,6 +100,148 @@ def _resolve_due_date_from_installments(cuotas: list[dict[str, Any]]) -> str | N
     return max(fechas) if fechas else None
 
 
+def add_inventory_movement(
+    usuario: str,
+    inventario_id: int,
+    tipo: str,
+    cantidad: float,
+    costo_unitario_usd: float = 0.0,
+    referencia: str = "",
+) -> int:
+    tipo_normalizado = clean_text(tipo).lower() or "ajuste"
+    if tipo_normalizado not in {"entrada", "salida", "ajuste"}:
+        raise ValueError("Tipo de movimiento inválido. Usa: entrada, salida o ajuste.")
+
+    qty = float(cantidad or 0.0)
+    if tipo_normalizado == "entrada":
+        qty = abs(qty)
+    elif tipo_normalizado == "salida":
+        qty = -abs(qty)
+
+    if qty == 0:
+        raise ValueError("La cantidad del movimiento debe ser distinta de cero.")
+
+    with db_transaction() as conn:
+        row = conn.execute(
+            "SELECT stock_actual FROM inventario WHERE id=?",
+            (int(inventario_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError("El ítem de inventario no existe.")
+
+        stock_actual = float(row[0] or 0.0)
+        nuevo_stock = stock_actual + qty
+        if nuevo_stock < 0:
+            raise ValueError("El ajuste deja el inventario en negativo.")
+
+        conn.execute(
+            """
+            INSERT INTO movimientos_inventario(
+                usuario, inventario_id, tipo, cantidad, costo_unitario_usd, referencia
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                require_text(usuario, "Usuario"),
+                int(inventario_id),
+                tipo_normalizado,
+                float(qty),
+                max(0.0, float(costo_unitario_usd or 0.0)),
+                str(referencia or "").strip(),
+            ),
+        )
+
+        conn.execute(
+            "UPDATE inventario SET stock_actual=?, costo_unitario_usd=? WHERE id=?",
+            (
+                float(nuevo_stock),
+                max(0.0, float(costo_unitario_usd or 0.0)),
+                int(inventario_id),
+            ),
+        )
+
+        mov_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    return int(mov_id)
+
+
+def _load_cuentas_por_pagar_df() -> pd.DataFrame:
+    _ensure_inventory_support_tables()
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                cxp.id,
+                cxp.compra_id,
+                COALESCE(p.nombre, 'Proveedor sin nombre') AS proveedor,
+                COALESCE(hc.item, '') AS item,
+                cxp.estado,
+                cxp.fecha_vencimiento,
+                cxp.monto_original_usd,
+                cxp.monto_pagado_usd,
+                cxp.saldo_usd,
+                cxp.notas
+            FROM cuentas_por_pagar_proveedores cxp
+            LEFT JOIN proveedores p ON p.id = cxp.proveedor_id
+            LEFT JOIN historial_compras hc ON hc.id = cxp.compra_id
+            ORDER BY
+                CASE cxp.estado WHEN 'vencida' THEN 0 WHEN 'pendiente' THEN 1 WHEN 'parcial' THEN 2 ELSE 3 END,
+                cxp.fecha_vencimiento ASC,
+                cxp.id DESC
+            """
+        ).fetchall()
+
+    cols = [
+        "id",
+        "compra_id",
+        "proveedor",
+        "item",
+        "estado",
+        "fecha_vencimiento",
+        "monto_original_usd",
+        "monto_pagado_usd",
+        "saldo_usd",
+        "notas",
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _load_pagos_proveedores_df(cuenta_por_pagar_id: int) -> pd.DataFrame:
+    _ensure_inventory_support_tables()
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                pp.id,
+                pp.fecha,
+                pp.usuario,
+                pp.monto_usd,
+                pp.moneda_pago,
+                pp.monto_moneda_pago,
+                pp.tasa_cambio,
+                pp.referencia,
+                pp.observaciones
+            FROM pagos_proveedores pp
+            WHERE pp.cuenta_por_pagar_id = ?
+            ORDER BY pp.fecha DESC, pp.id DESC
+            """,
+            (int(cuenta_por_pagar_id),),
+        ).fetchall()
+
+    cols = [
+        "id",
+        "fecha",
+        "usuario",
+        "monto_usd",
+        "moneda_pago",
+        "monto_moneda_pago",
+        "tasa_cambio",
+        "referencia",
+        "observaciones",
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
 # ============================================================
 # SCHEMA / CONFIG
 # ============================================================
