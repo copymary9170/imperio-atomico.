@@ -10,138 +10,121 @@ from utils.calculations import calculate_daily_profit
 
 
 # ============================================================
-# FUNCIONES AUXILIARES
+# AUXILIARES
 # ============================================================
 
 
 def _scalar(conn, query: str, params: tuple = ()) -> float:
-    """
-    Ejecuta una consulta SQL que devuelve un único valor numérico.
-    """
     row = conn.execute(query, params).fetchone()
-
     if not row:
         return 0.0
-
     try:
         return float(row[0] or 0.0)
     except Exception:
         return 0.0
 
 
-
 def _read_df(conn, query: str, default_columns: list[str]) -> pd.DataFrame:
-    """
-    Ejecuta una consulta SQL y retorna un DataFrame seguro.
-    """
     try:
         return pd.read_sql_query(query, conn)
     except Exception:
         return pd.DataFrame(columns=default_columns)
 
 
-
 def _config_pct(conn, key: str, fallback: float) -> float:
-    """
-    Lee porcentaje de configuración y devuelve fallback si no existe.
-    """
     row = conn.execute(
         "SELECT valor FROM configuracion WHERE parametro = ? LIMIT 1",
         (key,),
     ).fetchone()
-
     if not row:
         return fallback
-
     try:
         return float(row[0])
     except Exception:
         return fallback
 
 
-
 def _safe_pct_change(actual: float, anterior: float) -> float | None:
-    """Calcula la variación porcentual evitando divisiones inválidas."""
     if abs(anterior) < 1e-9:
         return None
     return ((actual - anterior) / anterior) * 100
 
 
-
-def _fmt_delta(actual: float, anterior: float, prefix: str = "vs. periodo anterior") -> str:
-    """Genera un texto compacto de variación para métricas."""
+def _fmt_delta(actual: float, anterior: float, prefix: str = "vs periodo anterior") -> str:
     delta = _safe_pct_change(actual, anterior)
     if delta is None:
         return f"{prefix}: sin base"
     return f"{delta:+.1f}% {prefix}"
 
 
-
 def _health_status(ventas_total: float, utilidad: float, stock_bajo: int) -> tuple[str, str]:
-    """Resume el estado operativo general del negocio."""
     if ventas_total <= 0:
         return "🔴 Atención", "No hay ventas en el periodo seleccionado."
-    if stock_bajo >= 5 or utilidad < 0:
-        return "🟡 Riesgo controlado", "Hay presión en rentabilidad o insumos críticos."
-    return "🟢 Saludable", "Ventas activas, utilidad positiva y stock bajo control."
+    if utilidad < 0:
+        return "🔴 Riesgo", "La utilidad estimada es negativa."
+    if stock_bajo >= 5:
+        return "🟡 Riesgo controlado", "Hay presión por inventario crítico."
+    return "🟢 Saludable", "Ventas activas, utilidad positiva y operación estable."
 
 
 def _build_executive_alerts(
     margen_operativo: float,
     punto_equilibrio_restante: float,
     stock_bajo: int,
+    utilidad: float,
+    ventas_total: float,
 ) -> list[tuple[str, str]]:
-    """Genera alertas ejecutivas breves para lectura rápida."""
     alerts: list[tuple[str, str]] = []
 
-    if margen_operativo < 0:
-        alerts.append(
-            (
-                "error",
-                "Margen operativo negativo: prioriza ajuste de costos o precios de venta.",
-            )
-        )
+    if ventas_total <= 0:
+        alerts.append(("error", "No hay ventas en el periodo seleccionado."))
+    elif utilidad < 0:
+        alerts.append(("error", "La utilidad del periodo es negativa. Revisa gastos, costos y precios."))
     elif margen_operativo < 12:
-        alerts.append(
-            (
-                "warning",
-                "Margen operativo bajo: revisa mix de productos y comisiones de cobro.",
-            )
-        )
+        alerts.append(("warning", "El margen operativo está bajo. Revisa mix de productos y gastos."))
     else:
-        alerts.append(("success", "Margen operativo saludable para el periodo seleccionado."))
+        alerts.append(("success", "El margen operativo se mantiene en una zona saludable."))
 
     if punto_equilibrio_restante > 0:
-        alerts.append(
-            (
-                "warning",
-                f"Aún faltan ${punto_equilibrio_restante:,.2f} para cubrir costos del día.",
-            )
-        )
+        alerts.append(("warning", f"Aún faltan ${punto_equilibrio_restante:,.2f} para cubrir costos del día."))
     else:
-        alerts.append(("success", "Punto de equilibrio diario cubierto."))
+        alerts.append(("success", "El punto de equilibrio diario está cubierto."))
 
     if stock_bajo >= 5:
-        alerts.append(("error", f"Hay {stock_bajo} ítems en nivel mínimo/crítico de inventario."))
+        alerts.append(("error", f"Hay {stock_bajo} productos/insumos en nivel crítico o mínimo."))
     elif stock_bajo > 0:
-        alerts.append(("warning", f"Hay {stock_bajo} ítems con riesgo de reposición."))
+        alerts.append(("warning", f"Hay {stock_bajo} productos/insumos con riesgo de reposición."))
     else:
-        alerts.append(("success", "Inventario sin alertas críticas de reposición."))
+        alerts.append(("success", "No hay alertas críticas de inventario."))
 
     return alerts
 
 
-# ============================================================
-# DASHBOARD FINANCIERO
-# ============================================================
+def _normalize_dates(df: pd.DataFrame, col: str = "fecha") -> pd.DataFrame:
+    if df.empty or col not in df.columns:
+        return df
+    out = df.copy()
+    out[col] = pd.to_datetime(out[col], errors="coerce")
+    out = out.dropna(subset=[col])
+    return out
 
+
+def _period_bounds(rango: str, now: pd.Timestamp) -> pd.Timestamp | None:
+    hoy = now.normalize()
+    if rango == "Todo":
+        return None
+    dias = {"Hoy": 0, "7 días": 7, "30 días": 30, "90 días": 90}.get(rango, 30)
+    return hoy - pd.Timedelta(days=dias)
+
+
+# ============================================================
+# DASHBOARD EJECUTIVO
+# ============================================================
 
 
 def render_dashboard() -> None:
     st.subheader("📊 Dashboard Ejecutivo")
-    st.caption(
-        "Resumen general del negocio: ventas, gastos, comisiones, clientes e inventario."
-    )
+    st.caption("Vista ejecutiva del negocio: ventas, gastos, utilidad, clientes, pagos e inventario.")
 
     try:
         with db_transaction() as conn:
@@ -151,11 +134,11 @@ def render_dashboard() -> None:
                 SELECT
                     v.fecha,
                     COALESCE(c.nombre, 'Sin cliente') AS cliente,
-                    v.metodo_pago,
-                    v.total_usd
+                    COALESCE(v.metodo_pago, 'Sin método') AS metodo_pago,
+                    COALESCE(v.total_usd, 0) AS total_usd
                 FROM ventas v
                 LEFT JOIN clientes c ON c.id = v.cliente_id
-                WHERE v.estado='registrada'
+                WHERE v.estado = 'registrada'
                 """,
                 ["fecha", "cliente", "metodo_pago", "total_usd"],
             )
@@ -163,30 +146,28 @@ def render_dashboard() -> None:
             df_gastos = _read_df(
                 conn,
                 """
-                SELECT fecha, monto_usd, categoria
+                SELECT
+                    fecha,
+                    COALESCE(monto_usd, 0) AS monto_usd,
+                    COALESCE(categoria, 'Sin categoría') AS categoria
                 FROM gastos
-                WHERE estado='activo'
+                WHERE estado = 'activo'
                 """,
                 ["fecha", "monto_usd", "categoria"],
             )
 
-            total_clientes = int(
-                _scalar(
-                    conn,
-                    "SELECT COUNT(*) FROM clientes WHERE estado='activo'",
-                )
-            )
+            total_clientes = int(_scalar(conn, "SELECT COUNT(*) FROM clientes WHERE estado='activo'"))
 
             df_inv_dash = _read_df(
                 conn,
                 """
                 SELECT
                     nombre,
-                    stock_actual,
-                    precio_venta_usd,
-                    stock_minimo
+                    COALESCE(stock_actual, 0) AS stock_actual,
+                    COALESCE(precio_venta_usd, 0) AS precio_venta_usd,
+                    COALESCE(stock_minimo, 0) AS stock_minimo
                 FROM inventario
-                WHERE estado='activo'
+                WHERE estado = 'activo'
                 """,
                 ["nombre", "stock_actual", "precio_venta_usd", "stock_minimo"],
             )
@@ -195,11 +176,11 @@ def render_dashboard() -> None:
                 conn,
                 """
                 SELECT
-                    vd.descripcion,
-                    SUM(vd.subtotal_usd) AS ventas,
-                    SUM(vd.costo_unitario_usd * vd.cantidad) AS costos
+                    COALESCE(vd.descripcion, 'Sin descripción') AS descripcion,
+                    SUM(COALESCE(vd.subtotal_usd, 0)) AS ventas,
+                    SUM(COALESCE(vd.costo_unitario_usd, 0) * COALESCE(vd.cantidad, 0)) AS costos
                 FROM ventas_detalle vd
-                WHERE vd.estado='activo'
+                WHERE vd.estado = 'activo'
                 GROUP BY vd.descripcion
                 """,
                 ["descripcion", "ventas", "costos"],
@@ -209,34 +190,22 @@ def render_dashboard() -> None:
             kontigo_perc = _config_pct(conn, "kontigo_perc", 5.0)
 
     except Exception as e:
-        st.error("Error cargando dashboard")
+        st.error("Error cargando dashboard.")
         st.exception(e)
         return
 
-    # ------------------------------
-    # Filtro temporal
-    # ------------------------------
-    rango = st.selectbox("Periodo", ["Hoy", "7 días", "30 días", "Todo"], index=2)
-    desde = None
     now = pd.Timestamp.now()
+    rango = st.selectbox("Periodo", ["Hoy", "7 días", "30 días", "90 días", "Todo"], index=2)
+    desde = _period_bounds(rango, now)
     hoy = now.normalize()
-    if rango != "Todo":
-        dias = {"Hoy": 0, "7 días": 7, "30 días": 30}[rango]
-        desde = hoy - pd.Timedelta(days=dias)
 
-    dfv = df_ventas.copy()
-    dfg = df_gastos.copy()
+    dfv = _normalize_dates(df_ventas, "fecha")
+    dfg = _normalize_dates(df_gastos, "fecha")
 
-    if not dfv.empty:
-        dfv["fecha"] = pd.to_datetime(dfv["fecha"], errors="coerce")
-        dfv = dfv.dropna(subset=["fecha"])
-        if desde is not None:
+    if desde is not None:
+        if not dfv.empty:
             dfv = dfv[dfv["fecha"] >= desde]
-
-    if not dfg.empty:
-        dfg["fecha"] = pd.to_datetime(dfg["fecha"], errors="coerce")
-        dfg = dfg.dropna(subset=["fecha"])
-        if desde is not None:
+        if not dfg.empty:
             dfg = dfg[dfg["fecha"] >= desde]
 
     ventas_total = float(dfv["total_usd"].sum()) if not dfv.empty else 0.0
@@ -252,6 +221,7 @@ def render_dashboard() -> None:
             )
         ]
         ventas_kontigo = dfv[dfv["metodo_pago"].str.contains("kontigo", case=False, na=False)]
+
         if not ventas_bancarias.empty:
             comision_est += float(ventas_bancarias["total_usd"].sum() * (banco_perc / 100))
         if not ventas_kontigo.empty:
@@ -262,31 +232,31 @@ def render_dashboard() -> None:
     ini_mes = now.replace(day=1).normalize()
     ventas_mes = 0.0
     gastos_mes = 0.0
+
     if not df_ventas.empty:
-        dvm = df_ventas.copy()
-        dvm["fecha"] = pd.to_datetime(dvm["fecha"], errors="coerce")
-        ventas_mes = float(dvm[dvm["fecha"] >= ini_mes]["total_usd"].sum())
+        dvm = _normalize_dates(df_ventas, "fecha")
+        ventas_mes = float(dvm[dvm["fecha"] >= ini_mes]["total_usd"].sum()) if not dvm.empty else 0.0
+
     if not df_gastos.empty:
-        dgm = df_gastos.copy()
-        dgm["fecha"] = pd.to_datetime(dgm["fecha"], errors="coerce")
-        gastos_mes = float(dgm[dgm["fecha"] >= ini_mes]["monto_usd"].sum())
+        dgm = _normalize_dates(df_gastos, "fecha")
+        gastos_mes = float(dgm[dgm["fecha"] >= ini_mes]["monto_usd"].sum()) if not dgm.empty else 0.0
 
     utilidad_neta_mes = ventas_mes - gastos_mes
 
     capital_inv = 0.0
     stock_bajo = 0
-    cobertura_stock_dias = 0.0
+    cobertura_stock_unidades = 0.0
     if not df_inv_dash.empty:
         capital_inv = float((df_inv_dash["stock_actual"] * df_inv_dash["precio_venta_usd"]).sum())
         stock_bajo = int((df_inv_dash["stock_actual"] <= df_inv_dash["stock_minimo"]).sum())
-        cobertura_stock_dias = float(df_inv_dash["stock_actual"].sum()) / max(len(df_inv_dash), 1)
+        cobertura_stock_unidades = float(df_inv_dash["stock_actual"].sum()) / max(len(df_inv_dash), 1)
 
-    costos_fijos_hoy = (
+    costos_hoy = (
         float(dfg[dfg["fecha"].dt.date == hoy.date()]["monto_usd"].sum())
-        if (not dfg.empty and "fecha" in dfg.columns)
+        if not dfg.empty
         else 0.0
     )
-    punto_equilibrio_restante = max(0.0, costos_fijos_hoy - ventas_total)
+    punto_equilibrio_restante = max(0.0, costos_hoy - ventas_total)
 
     ventas_previas = 0.0
     gastos_previos = 0.0
@@ -295,17 +265,16 @@ def render_dashboard() -> None:
         inicio_periodo_anterior = desde - (hoy - desde + pd.Timedelta(days=1))
 
         if not df_ventas.empty:
-            dprev_v = df_ventas.copy()
-            dprev_v["fecha"] = pd.to_datetime(dprev_v["fecha"], errors="coerce")
+            dprev_v = _normalize_dates(df_ventas, "fecha")
             ventas_previas = float(
                 dprev_v[
                     (dprev_v["fecha"] >= inicio_periodo_anterior)
                     & (dprev_v["fecha"] < fin_periodo_anterior)
                 ]["total_usd"].sum()
             )
+
         if not df_gastos.empty:
-            dprev_g = df_gastos.copy()
-            dprev_g["fecha"] = pd.to_datetime(dprev_g["fecha"], errors="coerce")
+            dprev_g = _normalize_dates(df_gastos, "fecha")
             gastos_previos = float(
                 dprev_g[
                     (dprev_g["fecha"] >= inicio_periodo_anterior)
@@ -317,47 +286,62 @@ def render_dashboard() -> None:
     clientes_activos_periodo = int(dfv["cliente"].nunique()) if not dfv.empty else 0
     margen_operativo = ((utilidad / ventas_total) * 100) if ventas_total else 0.0
     estado_salud, detalle_salud = _health_status(ventas_total, utilidad, stock_bajo)
+
     dias_periodo = max((hoy - desde).days + 1, 1) if desde is not None else 30
     run_rate_ventas = (ventas_total / dias_periodo) * 30 if dias_periodo else 0.0
     run_rate_utilidad = (utilidad / dias_periodo) * 30 if dias_periodo else 0.0
+
     alertas_ejecutivas = _build_executive_alerts(
-        margen_operativo,
-        punto_equilibrio_restante,
-        stock_bajo,
+        margen_operativo=margen_operativo,
+        punto_equilibrio_restante=punto_equilibrio_restante,
+        stock_bajo=stock_bajo,
+        utilidad=utilidad,
+        ventas_total=ventas_total,
+    )
+
+    ingresos_vs_gastos = pd.DataFrame(
+        {
+            "concepto": ["Ventas", "Gastos", "Comisiones", "Utilidad"],
+            "monto_usd": [ventas_total, gastos_total, comision_est, utilidad],
+        }
     )
 
     # ============================================================
-    # RESUMEN EJECUTIVO
+    # CABECERA EJECUTIVA
     # ============================================================
     hero_a, hero_b = st.columns([2, 1])
+
     with hero_a:
         st.info(
-            f"**Corte del tablero:** {now.strftime('%d/%m/%Y %H:%M')}  \\\n**Estado general:** {estado_salud}  \\\n**Lectura rápida:** {detalle_salud}"
+            f"**Corte:** {now.strftime('%d/%m/%Y %H:%M')}  \n"
+            f"**Estado general:** {estado_salud}  \n"
+            f"**Lectura rápida:** {detalle_salud}"
         )
+
     with hero_b:
         st.metric("Margen operativo", f"{margen_operativo:,.1f}%")
         st.metric("Ticket promedio", f"${ticket_promedio:,.2f}")
 
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("💰 Ventas del periodo", f"${ventas_total:,.2f}", _fmt_delta(ventas_total, ventas_previas))
-    kpi2.metric("💸 Gastos del periodo", f"${gastos_total:,.2f}", _fmt_delta(gastos_total, gastos_previos))
-    kpi3.metric("📈 Utilidad estimada", f"${utilidad:,.2f}")
-    kpi4.metric("👥 Clientes activos", clientes_activos_periodo, f"Total base: {total_clientes}")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("💰 Ventas del periodo", f"${ventas_total:,.2f}", _fmt_delta(ventas_total, ventas_previas))
+    k2.metric("💸 Gastos del periodo", f"${gastos_total:,.2f}", _fmt_delta(gastos_total, gastos_previos))
+    k3.metric("📈 Utilidad estimada", f"${utilidad:,.2f}")
+    k4.metric("👥 Clientes del periodo", clientes_activos_periodo, f"Base activa: {total_clientes}")
 
     st.divider()
 
-    resumen1, resumen2, resumen3, resumen4 = st.columns(4)
-    resumen1.metric("Utilidad neta del mes", f"${utilidad_neta_mes:,.2f}")
-    resumen2.metric("Comisiones estimadas", f"${comision_est:,.2f}")
-    resumen3.metric("Capital en inventario", f"${capital_inv:,.2f}")
-    resumen4.metric("Ítems en mínimo", stock_bajo)
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Utilidad neta del mes", f"${utilidad_neta_mes:,.2f}")
+    r2.metric("Comisiones estimadas", f"${comision_est:,.2f}")
+    r3.metric("Capital en inventario", f"${capital_inv:,.2f}")
+    r4.metric("Ítems en mínimo", stock_bajo)
 
     st.divider()
 
-    dpe1, dpe2, dpe3 = st.columns(3)
-    dpe1.metric("Punto de equilibrio pendiente", f"${punto_equilibrio_restante:,.2f}")
-    dpe2.metric("Costos cargados hoy", f"${costos_fijos_hoy:,.2f}")
-    dpe3.metric("Cobertura promedio stock", f"{cobertura_stock_dias:,.1f} und.")
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Punto de equilibrio pendiente", f"${punto_equilibrio_restante:,.2f}")
+    p2.metric("Costos cargados hoy", f"${costos_hoy:,.2f}")
+    p3.metric("Cobertura promedio stock", f"{cobertura_stock_unidades:,.1f} und.")
 
     rr1, rr2 = st.columns(2)
     rr1.metric("Run-rate ventas (30 días)", f"${run_rate_ventas:,.2f}")
@@ -372,52 +356,27 @@ def render_dashboard() -> None:
             else:
                 st.success(mensaje)
 
-    if not df_top.empty:
-        top3 = df_top.copy()
-        top3["costos"] = top3["costos"].fillna(0.0)
-        top3["utilidad_neta"] = top3["ventas"] - top3["costos"]
-        top3 = top3.sort_values("utilidad_neta", ascending=False).head(5)
-        st.subheader("🏆 Ranking de rentabilidad por producto")
-        st.dataframe(top3, use_container_width=True, hide_index=True)
+    # ============================================================
+    # TABS PRINCIPALES
+    # ============================================================
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["📈 Tendencias", "💵 Finanzas", "📦 Inventario", "💳 Clientes y pagos"]
+    )
 
-    if not df_inv_dash.empty:
-        monitor = df_inv_dash.copy()
-        monitor["nivel"] = np.where(
-            monitor["stock_actual"] <= monitor["stock_minimo"],
-            "🔴 Crítico",
-            np.where(
-                monitor["stock_actual"] <= (monitor["stock_minimo"] * 1.5),
-                "🟡 Bajo",
-                "🟢 OK",
-            ),
-        )
-        monitor["valor"] = (
-            pd.to_numeric(monitor["stock_actual"], errors="coerce").fillna(0.0)
-            * pd.to_numeric(monitor["precio_venta_usd"], errors="coerce").fillna(0.0)
-        )
-        monitor["estado"] = np.where(
-            monitor["stock_actual"] <= monitor["stock_minimo"],
-            "Crítico",
-            "Operativo",
-        )
-    else:
-        monitor = pd.DataFrame(
-            columns=["nombre", "stock_actual", "valor", "estado", "stock_minimo", "nivel"]
-        )
-
-    tab1, tab2, tab3 = st.tabs(["📈 Tendencias", "📦 Inventario", "💳 Clientes y pagos"])
-
+    # ------------------------------------------------------------
+    # TENDENCIAS
+    # ------------------------------------------------------------
     with tab1:
-        col_a, col_b = st.columns(2)
+        c_a, c_b = st.columns(2)
 
-        with col_a:
+        with c_a:
             st.subheader("Ventas por día")
             if dfv.empty:
                 st.info("No hay ventas registradas en el periodo.")
             else:
-                d1 = dfv.copy()
-                d1["dia"] = d1["fecha"].dt.date.astype(str)
-                resumen_v = d1.groupby("dia", as_index=False)["total_usd"].sum()
+                ventas_dia = dfv.copy()
+                ventas_dia["dia"] = ventas_dia["fecha"].dt.date.astype(str)
+                resumen_v = ventas_dia.groupby("dia", as_index=False)["total_usd"].sum()
                 fig_v = px.line(
                     resumen_v,
                     x="dia",
@@ -428,14 +387,14 @@ def render_dashboard() -> None:
                 fig_v.update_layout(xaxis_title="Día", yaxis_title="Monto ($)")
                 st.plotly_chart(fig_v, use_container_width=True)
 
-        with col_b:
+        with c_b:
             st.subheader("Gastos por día")
             if dfg.empty:
                 st.info("No hay gastos registrados en el periodo.")
             else:
-                d2 = dfg.copy()
-                d2["dia"] = d2["fecha"].dt.date.astype(str)
-                resumen_g = d2.groupby("dia", as_index=False)["monto_usd"].sum()
+                gastos_dia = dfg.copy()
+                gastos_dia["dia"] = gastos_dia["fecha"].dt.date.astype(str)
+                resumen_g = gastos_dia.groupby("dia", as_index=False)["monto_usd"].sum()
                 fig_g = px.bar(
                     resumen_g,
                     x="dia",
@@ -445,9 +404,9 @@ def render_dashboard() -> None:
                 fig_g.update_layout(xaxis_title="Día", yaxis_title="Monto ($)")
                 st.plotly_chart(fig_g, use_container_width=True)
 
-        st.subheader("Balance del periodo")
+        st.subheader("Flujo neto diario")
         if dfv.empty and dfg.empty:
-            st.info("Todavía no hay movimiento suficiente para construir el balance.")
+            st.info("Todavía no hay movimiento suficiente para construir el flujo.")
         else:
             ventas_balance = (
                 dfv.assign(tipo="Ventas", monto=dfv["total_usd"])[["fecha", "tipo", "monto"]]
@@ -459,10 +418,12 @@ def render_dashboard() -> None:
                 if not dfg.empty
                 else pd.DataFrame(columns=["fecha", "tipo", "monto"])
             )
+
             flujo = pd.concat([ventas_balance, gastos_balance], ignore_index=True)
             flujo["fecha"] = pd.to_datetime(flujo["fecha"], errors="coerce")
             flujo = flujo.dropna(subset=["fecha"])
             flujo["dia"] = flujo["fecha"].dt.date.astype(str)
+
             flujo_resumen = flujo.groupby(["dia", "tipo"], as_index=False)["monto"].sum()
             fig_flujo = px.bar(
                 flujo_resumen,
@@ -475,67 +436,129 @@ def render_dashboard() -> None:
             fig_flujo.update_layout(xaxis_title="Día", yaxis_title="Monto neto ($)")
             st.plotly_chart(fig_flujo, use_container_width=True)
 
-            resumen_dia = flujo.pivot_table(
-                index="dia",
-                columns="tipo",
-                values="monto",
-                aggfunc="sum",
-                fill_value=0,
-            ).reset_index()
-            resumen_dia["acum_ventas"] = resumen_dia.get("Ventas", 0).cumsum()
-            resumen_dia["acum_gastos"] = (resumen_dia.get("Gastos", 0) * -1).cumsum()
-
-            st.subheader("Acumulado del periodo")
-            fig_acum = px.line(
-                resumen_dia,
-                x="dia",
-                y=["acum_ventas", "acum_gastos"],
-                markers=True,
-                title="Acumulado de ventas vs gastos",
-            )
-            fig_acum.update_layout(
-                xaxis_title="Día",
-                yaxis_title="Monto acumulado ($)",
-                legend_title_text="Serie",
-            )
-            st.plotly_chart(fig_acum, use_container_width=True)
-
+    # ------------------------------------------------------------
+    # FINANZAS
+    # ------------------------------------------------------------
     with tab2:
-        st.subheader("Monitor de insumos")
-        if monitor.empty:
+        fa, fb = st.columns(2)
+
+        with fa:
+            st.subheader("Resumen financiero")
+            st.dataframe(ingresos_vs_gastos, use_container_width=True, hide_index=True)
+
+            fig_fin = px.bar(
+                ingresos_vs_gastos,
+                x="concepto",
+                y="monto_usd",
+                color="concepto",
+                title="Ventas vs gastos vs utilidad",
+            )
+            fig_fin.update_layout(xaxis_title="", yaxis_title="Monto ($)")
+            st.plotly_chart(fig_fin, use_container_width=True)
+
+        with fb:
+            st.subheader("Gastos por categoría")
+            if dfg.empty:
+                st.info("No hay gastos para clasificar.")
+            else:
+                gastos_categoria = (
+                    dfg.groupby("categoria", as_index=False)["monto_usd"]
+                    .sum()
+                    .sort_values("monto_usd", ascending=False)
+                )
+                fig_gc = px.pie(
+                    gastos_categoria,
+                    names="categoria",
+                    values="monto_usd",
+                    hole=0.45,
+                    title="Composición de gastos",
+                )
+                st.plotly_chart(fig_gc, use_container_width=True)
+                st.dataframe(gastos_categoria, use_container_width=True, hide_index=True)
+
+        st.subheader("Rentabilidad por producto")
+        if df_top.empty:
+            st.info("No hay detalle suficiente para calcular rentabilidad por producto.")
+        else:
+            top_prod = df_top.copy()
+            top_prod["costos"] = top_prod["costos"].fillna(0.0)
+            top_prod["utilidad_neta"] = top_prod["ventas"] - top_prod["costos"]
+            top_prod["margen_%"] = np.where(
+                top_prod["ventas"] > 0,
+                (top_prod["utilidad_neta"] / top_prod["ventas"]) * 100,
+                0.0,
+            )
+            top_prod = top_prod.sort_values("utilidad_neta", ascending=False)
+
+            st.dataframe(
+                top_prod[["descripcion", "ventas", "costos", "utilidad_neta", "margen_%"]].head(15),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    # ------------------------------------------------------------
+    # INVENTARIO
+    # ------------------------------------------------------------
+    with tab3:
+        st.subheader("Monitor de inventario")
+        if df_inv_dash.empty:
             st.info("No hay inventario activo para mostrar.")
         else:
+            monitor = df_inv_dash.copy()
+            monitor["nivel"] = np.where(
+                monitor["stock_actual"] <= monitor["stock_minimo"],
+                "🔴 Crítico",
+                np.where(
+                    monitor["stock_actual"] <= (monitor["stock_minimo"] * 1.5),
+                    "🟡 Bajo",
+                    "🟢 OK",
+                ),
+            )
+            monitor["valor"] = (
+                pd.to_numeric(monitor["stock_actual"], errors="coerce").fillna(0.0)
+                * pd.to_numeric(monitor["precio_venta_usd"], errors="coerce").fillna(0.0)
+            )
+
             mostrar_solo_riesgo = st.toggle("Mostrar solo ítems en riesgo", value=False)
             monitor_view = monitor.copy()
             if mostrar_solo_riesgo:
-                monitor_view = monitor_view[monitor_view["estado"] == "Crítico"]
+                monitor_view = monitor_view[monitor_view["nivel"] != "🟢 OK"]
 
-            alertas, cobertura = st.columns([1.2, 1])
-            with alertas:
+            ia, ib = st.columns([1.2, 1])
+
+            with ia:
                 st.dataframe(
                     monitor_view[
-                        ["nombre", "stock_actual", "valor", "estado", "stock_minimo", "nivel"]
-                    ].sort_values(["estado", "stock_actual"], ascending=[True, True]).head(20),
+                        ["nombre", "stock_actual", "stock_minimo", "precio_venta_usd", "valor", "nivel"]
+                    ].sort_values(["nivel", "stock_actual"], ascending=[True, True]),
                     use_container_width=True,
                     hide_index=True,
                 )
-            with cobertura:
-                inv_chart = monitor_view.copy().sort_values("valor", ascending=False).head(10)
-                fig_inv = px.bar(
-                    inv_chart,
-                    x="valor",
-                    y="nombre",
-                    color="nivel",
-                    orientation="h",
-                    title="Top inventario por valor",
-                )
-                fig_inv.update_layout(yaxis_title="", xaxis_title="Valor estimado ($)")
-                st.plotly_chart(fig_inv, use_container_width=True)
 
-    with tab3:
-        c_a, c_b = st.columns(2)
-        with c_a:
-            st.subheader("Ventas por método")
+            with ib:
+                inv_chart = monitor_view.copy().sort_values("valor", ascending=False).head(10)
+                if inv_chart.empty:
+                    st.info("No hay ítems para graficar.")
+                else:
+                    fig_inv = px.bar(
+                        inv_chart,
+                        x="valor",
+                        y="nombre",
+                        color="nivel",
+                        orientation="h",
+                        title="Top inventario por valor",
+                    )
+                    fig_inv.update_layout(yaxis_title="", xaxis_title="Valor estimado ($)")
+                    st.plotly_chart(fig_inv, use_container_width=True)
+
+    # ------------------------------------------------------------
+    # CLIENTES Y PAGOS
+    # ------------------------------------------------------------
+    with tab4:
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.subheader("Ventas por método de pago")
             if dfv.empty:
                 st.info("Sin datos para métodos de pago.")
             else:
@@ -551,7 +574,7 @@ def render_dashboard() -> None:
                 ).round(2)
                 st.dataframe(vm, use_container_width=True, hide_index=True)
 
-        with c_b:
+        with c2:
             st.subheader("Top clientes")
             if dfv.empty or "cliente" not in dfv.columns:
                 st.info("Sin datos de clientes en el periodo.")
@@ -562,5 +585,10 @@ def render_dashboard() -> None:
                     .reset_index()
                 )
                 topc.columns = ["cliente", "ventas_usd", "tickets"]
+                topc["ticket_promedio"] = np.where(
+                    topc["tickets"] > 0,
+                    topc["ventas_usd"] / topc["tickets"],
+                    0.0,
+                )
                 topc = topc.sort_values("ventas_usd", ascending=False).head(10)
                 st.dataframe(topc, use_container_width=True, hide_index=True)
