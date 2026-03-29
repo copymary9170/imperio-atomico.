@@ -4,8 +4,8 @@ from .types import ModuleBlueprint
 
 ADMIN_MODULES: tuple[ModuleBlueprint, ...] = (
     ModuleBlueprint(
-        key="rrhh",
-        name="RRHH",
+        key="rrhh_blueprint",
+        name="RRHH Blueprint",
         icon="👨‍💼",
         category="Administración interna",
         summary="Centraliza el ciclo de vida del colaborador: alta, desarrollo, desempeño y compensación variable.",
