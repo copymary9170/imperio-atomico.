@@ -19,6 +19,50 @@ def _placeholder_df(columns):
     return pd.DataFrame(columns=columns)
 
 
+def _safe_float(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _salud_financiera_score(resumen: dict[str, float | str], flujo: pd.DataFrame) -> tuple[int, str, str]:
+    ingresos = _safe_float(resumen.get("ingresos_ejecutados_usd"))
+    egresos = _safe_float(resumen.get("egresos_ejecutados_usd"))
+    desviacion_egresos = _safe_float(resumen.get("desviacion_egresos_usd"))
+
+    if flujo.empty:
+        saldo_proyectado_min = 0.0
+    else:
+        saldo_proyectado_min = _safe_float(flujo["saldo_proyectado_usd"].min())
+
+    score = 100
+    if ingresos > 0:
+        margen = (ingresos - egresos) / ingresos
+        if margen < 0:
+            score -= 35
+        elif margen < 0.1:
+            score -= 15
+    elif egresos > 0:
+        score -= 25
+
+    if desviacion_egresos > 0:
+        score -= 15
+
+    if saldo_proyectado_min < 0:
+        score -= 35
+    elif saldo_proyectado_min < 1000:
+        score -= 10
+
+    score = max(0, min(100, int(round(score))))
+
+    if score >= 80:
+        return score, "Saludable", "✅ Flujo y ejecución bajo control."
+    if score >= 60:
+        return score, "Atención", "⚠️ Hay señales tempranas de presión en caja o margen."
+    return score, "Crítico", "🚨 Prioriza caja, cobranza y ajuste de costos de inmediato."
+
+
 def render_planeacion_financiera(usuario: str) -> None:
     st.title("💰 Planeación Financiera")
     st.caption("Módulo operativo: presupuesto, flujo de caja, ingresos, costos y control financiero.")
@@ -45,7 +89,11 @@ def render_planeacion_financiera(usuario: str) -> None:
     c2.metric("Flujo 30d", f"$ {float(flujo.iloc[-1]['flujo_proyectado_usd']) if not flujo.empty else 0:,.2f}")
     c3.metric("Pagos 30d", f"$ {float(flujo.iloc[-1]['pagos_proximos_usd']) if not flujo.empty else 0:,.2f}")
     c4.metric("Cobros 30d", f"$ {float(flujo.iloc[-1]['cobros_esperados_usd']) if not flujo.empty else 0:,.2f}")
-    c5.metric("Desviación egresos", f"$ {float(resumen.get('desviacion_egresos_usd', 0)):,.2f}")
+    c5.metric("Desviación egresos", f"$ {_safe_float(resumen.get('desviacion_egresos_usd')):,.2f}")
+
+    score, estado_salud, recomendacion_salud = _salud_financiera_score(resumen, flujo)
+    st.progress(score / 100)
+    st.caption(f"**Score financiero:** {score}/100 · **Estado:** {estado_salud}. {recomendacion_salud}")
 
     # =========================
     # NAVEGACIÓN
@@ -56,6 +104,7 @@ def render_planeacion_financiera(usuario: str) -> None:
         "Ingresos",
         "Costos",
         "KPIs",
+        "Escenarios",
         "Alertas"
     ])
 
@@ -179,6 +228,38 @@ def render_planeacion_financiera(usuario: str) -> None:
     # ALERTAS
     # =========================
     with tabs[5]:
+        st.subheader("🧪 Simulador de escenarios")
+        st.caption("Proyecta impacto en caja antes de tomar decisiones de crecimiento, recorte o inversión.")
+
+        escenario_nombre = st.text_input("Nombre del escenario", value="Escenario Base")
+
+        e1, e2, e3 = st.columns(3)
+        var_ingresos = e1.slider("Variación ingresos (%)", min_value=-50, max_value=100, value=10, step=5)
+        var_egresos = e2.slider("Variación egresos (%)", min_value=-50, max_value=100, value=5, step=5)
+        var_cobranza = e3.slider("Mejora cobranza CxC (%)", min_value=0, max_value=100, value=15, step=5)
+
+        ingresos_base = _safe_float(resumen.get("ingresos_ejecutados_usd"))
+        egresos_base = _safe_float(resumen.get("egresos_ejecutados_usd"))
+        cobros_base = _safe_float(flujo.iloc[-1]["cobros_esperados_usd"]) if not flujo.empty else 0.0
+        pagos_base = _safe_float(flujo.iloc[-1]["pagos_proximos_usd"]) if not flujo.empty else 0.0
+        saldo_actual = _safe_float(flujo.iloc[0]["saldo_actual_usd"]) if not flujo.empty else 0.0
+
+        ingresos_esc = ingresos_base * (1 + var_ingresos / 100)
+        egresos_esc = egresos_base * (1 + var_egresos / 100)
+        cobros_esc = cobros_base * (1 + var_cobranza / 100)
+        flujo_esc = cobros_esc + ingresos_esc - pagos_base - egresos_esc
+        saldo_esc = saldo_actual + flujo_esc
+
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Flujo estimado escenario", f"$ {flujo_esc:,.2f}")
+        s2.metric("Saldo proyectado escenario", f"$ {saldo_esc:,.2f}")
+        s3.metric("Variación vs base", f"$ {saldo_esc - (saldo_actual + (cobros_base + ingresos_base - pagos_base - egresos_base)):,.2f}")
+
+        st.info(
+            f"{escenario_nombre}: con estos supuestos, tu caja proyectada a 30 días sería de $ {saldo_esc:,.2f}."
+        )
+
+    with tabs[6]:
         st.subheader("🚨 Alertas financieras")
 
         st.dataframe(alertas, use_container_width=True, hide_index=True)
