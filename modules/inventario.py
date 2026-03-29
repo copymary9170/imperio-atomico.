@@ -848,6 +848,676 @@ def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
 
 
 # ============================================================
+# DASHBOARD / REPORTES
+# ============================================================
+
+def _render_inventario_dashboard(df: pd.DataFrame) -> None:
+    st.subheader("📊 Dashboard de Inventario")
+
+    total_items = int(len(df))
+    capital_total = float(df["valor_stock"].sum()) if not df.empty else 0.0
+    criticos = int((df["stock_actual"] <= df["stock_minimo"]).sum()) if not df.empty else 0
+    agotados = int((df["stock_actual"] <= 0).sum()) if not df.empty else 0
+    salud = ((total_items - criticos) / total_items * 100) if total_items else 0.0
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("💰 Capital inventario", f"${capital_total:,.2f}")
+    c2.metric("📦 Ítems activos", total_items)
+    c3.metric("🚨 Stock bajo", criticos)
+    c4.metric("🟥 Agotados", agotados)
+    c5.metric("🧠 Salud almacén", f"{salud:.0f}%")
+
+    st.progress(min(max(salud / 100.0, 0.0), 1.0))
+
+    if df.empty:
+        st.info("No hay productos activos.")
+        return
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        top_valor = df.sort_values("valor_stock", ascending=False).head(10).copy()
+        if not top_valor.empty:
+            st.markdown("#### Top productos por valor")
+            st.dataframe(
+                top_valor[["sku", "nombre", "categoria", "stock_actual", "valor_stock"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    with col2:
+        riesgo = df.copy()
+        riesgo["estado_stock"] = riesgo.apply(
+            lambda r: "Crítico" if float(r["stock_actual"] or 0) <= float(r["stock_minimo"] or 0) else "Operativo",
+            axis=1,
+        )
+        chart = riesgo.groupby("estado_stock", as_index=False)["id"].count().rename(columns={"id": "cantidad"})
+        if not chart.empty:
+            st.markdown("#### Estado del stock")
+            st.bar_chart(chart.set_index("estado_stock")[["cantidad"]])
+
+
+def _render_existencias(df: pd.DataFrame) -> None:
+    st.subheader("📋 Existencias actuales")
+    if df.empty:
+        st.info("No hay productos activos.")
+        return
+
+    plan_reposicion = _build_restock_recommendations(df)
+    if plan_reposicion.empty:
+        st.success("✅ Sin alertas de reposición. Todos los productos están por encima del mínimo.")
+    else:
+        presupuesto = float(plan_reposicion["costo_estimado_usd"].sum())
+        st.warning(
+            f"⚠️ Reposición sugerida para {len(plan_reposicion)} ítems críticos. "
+            f"Presupuesto estimado: ${presupuesto:,.2f}."
+        )
+        with st.expander("🧾 Ver plan sugerido de reposición", expanded=False):
+            st.dataframe(
+                plan_reposicion,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
+                    "stock_minimo": st.column_config.NumberColumn("Mínimo", format="%.3f"),
+                    "faltante": st.column_config.NumberColumn("Faltante", format="%.3f"),
+                    "sugerido_compra": st.column_config.NumberColumn("Compra sugerida", format="%.3f"),
+                    "costo_estimado_usd": st.column_config.NumberColumn("Costo estimado USD", format="%.2f"),
+                },
+            )
+
+    buscar_inv = st.text_input("🔎 Buscar producto", key="inv_existencias_buscar")
+    view_inv = _filter_df_by_query(df.copy(), buscar_inv, ["sku", "nombre", "categoria", "unidad"])
+
+    st.dataframe(
+        view_inv,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
+            "stock_minimo": st.column_config.NumberColumn("Mínimo", format="%.3f"),
+            "costo_unitario_usd": st.column_config.NumberColumn("Costo USD", format="%.4f"),
+            "precio_venta_usd": st.column_config.NumberColumn("Precio USD", format="%.4f"),
+            "valor_stock": st.column_config.NumberColumn("Valor stock", format="%.2f"),
+        },
+    )
+
+
+def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
+    st.subheader("📥 Registrar compra")
+
+    with db_transaction() as conn:
+        items_rows = conn.execute(
+            """
+            SELECT id, sku, nombre, categoria, unidad, costo_unitario_usd, precio_venta_usd
+            FROM inventario
+            WHERE estado='activo'
+            ORDER BY nombre
+            """
+        ).fetchall()
+    items_map = {int(r["id"]): r for r in items_rows}
+
+    modo_item = st.radio("Ítem", ["Usar existente", "Crear y comprar"], horizontal=True, key="inv_compra_modo_item")
+    inv_id = None
+
+    if modo_item == "Usar existente" and items_map:
+        inv_id = st.selectbox(
+            "Producto",
+            list(items_map.keys()),
+            format_func=lambda i: f"{items_map[i]['nombre']} ({items_map[i]['sku']})",
+            key="inv_compra_item_id",
+        )
+    elif modo_item == "Usar existente":
+        st.warning("No hay productos creados. Usa 'Crear y comprar'.")
+
+    if modo_item == "Crear y comprar":
+        cnew1, cnew2, cnew3, cnew4 = st.columns(4)
+        nuevo_nombre = cnew1.text_input("Nombre", key="inv_compra_new_nombre")
+        nuevo_sku = cnew2.text_input("SKU base", key="inv_compra_new_sku")
+        nueva_categoria = cnew3.text_input("Categoría", value="General", key="inv_compra_new_cat")
+        tipo_unidad = cnew4.selectbox(
+            "Tipo unidad",
+            ["Unidad", "Área (cm²)", "Líquido (ml)", "Peso (gr)"],
+            key="inv_compra_new_tipo_unidad",
+        )
+        cantidad, unidad_resuelta, _ = _calc_stock_by_unit_type(tipo_unidad)
+        nuevo_min = st.number_input("Stock mínimo", min_value=0.0, value=0.0, key="inv_compra_new_min")
+        costo_base = st.number_input("Costo inicial unitario USD", min_value=0.0, value=0.0, format="%.4f", key="inv_compra_new_costo")
+        precio_base = st.number_input("Precio inicial USD", min_value=0.0, value=0.0, format="%.4f", key="inv_compra_new_precio")
+    else:
+        cantidad = st.number_input("Cantidad comprada", min_value=0.001, value=1.0, key="inv_compra_qty_existente")
+        unidad_resuelta = str(items_map[inv_id]["unidad"]) if inv_id in items_map else "unidad"
+
+    d1, d2, d3 = st.columns(3)
+    proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
+    costo_total = d2.number_input("Costo total USD", min_value=0.0001, value=1.0, format="%.4f", key="inv_compra_total")
+    impuesto_pct = d3.number_input("Impuesto (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("inv_impuesto_default", 16.0)), format="%.2f", key="inv_compra_impuesto")
+
+    d4, d5, d6 = st.columns(3)
+    delivery_monto = d4.number_input("Delivery", min_value=0.0, value=float(st.session_state.get("inv_delivery_default", 0.0)), format="%.4f", key="inv_compra_delivery")
+    delivery_moneda = d5.selectbox("Moneda delivery", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_delivery_moneda")
+    delivery_manual = d6.checkbox("Tasa manual delivery", key="inv_compra_delivery_manual")
+    delivery_usd, tasa_delivery = _resolve_delivery_usd(delivery_monto, delivery_moneda, tasa_bcv, tasa_binance, delivery_manual)
+
+    p1, p2, p3, p4 = st.columns(4)
+    tipo_pago = p1.selectbox("Tipo de pago", ["contado", "credito"], key="inv_compra_tipo_pago")
+    monto_pagado = p2.number_input("Pago inicial USD", min_value=0.0, value=float(costo_total if tipo_pago == "contado" else 0.0), format="%.4f", key="inv_compra_pagado")
+    fecha_venc = p3.date_input("Vence", value=None, key="inv_compra_vence")
+    moneda_pago = p4.selectbox("Moneda pago", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_moneda")
+    tasa_pago = _rate_from_label(moneda_pago, tasa_bcv, tasa_binance)
+    if p4.checkbox("Tasa manual pago", key="inv_compra_tasa_manual"):
+        tasa_pago = st.number_input("Tasa usada en pago", min_value=0.0001, value=float(tasa_pago), format="%.4f", key="inv_compra_tasa_pago")
+
+    if st.button("✅ Guardar compra", use_container_width=True):
+        try:
+            target_id = inv_id
+            if modo_item == "Crear y comprar":
+                target_id = _create_inventory_item_for_purchase(
+                    usuario=usuario,
+                    sku_base=nuevo_sku,
+                    nombre=nuevo_nombre,
+                    categoria=nueva_categoria,
+                    unidad=unidad_resuelta,
+                    minimo=float(nuevo_min),
+                    costo_inicial=float(costo_base),
+                    precio_inicial=float(precio_base),
+                )
+            if target_id is None:
+                raise ValueError("Debes seleccionar o crear un producto para registrar la compra.")
+
+            with db_transaction() as conn:
+                proveedor_id = _get_or_create_provider(conn, proveedor_nombre)
+
+            fin_input = CompraFinancialInput(
+                tipo_pago=clean_text(tipo_pago).lower(),
+                monto_pagado_inicial_usd=float(monto_pagado),
+                fecha_vencimiento=fecha_venc.isoformat() if fecha_venc else None,
+            )
+
+            registrar_compra(
+                usuario=usuario,
+                inventario_id=int(target_id),
+                cantidad=float(cantidad),
+                costo_total_usd=float(costo_total),
+                proveedor_id=proveedor_id,
+                proveedor_nombre=proveedor_nombre,
+                impuestos_pct=float(impuesto_pct),
+                delivery_usd=float(delivery_usd),
+                tasa_usada=float(tasa_pago if tasa_pago else tasa_delivery),
+                moneda_pago=str(moneda_pago),
+                financial_input=fin_input,
+            )
+            st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo registrar la compra: {exc}")
+
+
+def _render_historial_compras() -> None:
+    st.subheader("📊 Historial de compras")
+    df_hist = _load_historial_compras_df(limit=2000)
+    if df_hist.empty:
+        st.info("No hay compras registradas.")
+        return
+
+    h1, h2 = st.columns([2, 1])
+    buscar_hist = h1.text_input("🔎 Buscar compra", key="inv_hist_buscar")
+    tipo_hist = h2.selectbox("Condición", ["Todos", "contado", "credito"], key="inv_hist_tipo")
+    view_hist = _filter_df_by_query(df_hist.copy(), buscar_hist, ["item", "proveedor", "sku"])
+    if tipo_hist != "Todos":
+        view_hist = view_hist[view_hist["tipo_pago"].astype(str).str.lower() == tipo_hist]
+
+    st.dataframe(
+        view_hist,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
+            "costo_total_usd": st.column_config.NumberColumn("Total USD", format="%.2f"),
+            "costo_unit_usd": st.column_config.NumberColumn("Costo unitario", format="%.4f"),
+            "impuestos": st.column_config.NumberColumn("Impuesto %", format="%.2f"),
+            "delivery": st.column_config.NumberColumn("Delivery USD", format="%.4f"),
+            "monto_pagado_inicial_usd": st.column_config.NumberColumn("Pagado inicial", format="%.2f"),
+            "saldo_pendiente_usd": st.column_config.NumberColumn("Saldo", format="%.2f"),
+        },
+    )
+
+
+def _render_proveedores() -> None:
+    st.subheader("👤 Directorio de proveedores")
+    df_prov = _load_proveedores_df()
+
+    if df_prov.empty:
+        st.info("No hay proveedores registrados todavía.")
+    else:
+        cfp1, cfp2 = st.columns([2, 1])
+        filtro = cfp1.text_input("🔍 Buscar proveedor")
+        selected_tags = cfp2.multiselect("Filtrar por especialidad", _extract_supplier_tags(df_prov))
+
+        df_view = df_prov.copy()
+        if filtro:
+            searchable_cols = ["nombre", "telefono", "rif", "contacto", "observaciones", "especialidades"]
+            df_view = _filter_df_by_query(df_view, filtro, searchable_cols)
+        if selected_tags:
+            df_view = df_view[
+                df_view["especialidades"].fillna("").astype(str).apply(
+                    lambda txt: all(tag.lower() in txt.lower() for tag in selected_tags)
+                )
+            ]
+        st.dataframe(df_view, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.subheader("➕ Registrar / Editar proveedor")
+
+    proveedor_existente = None
+    if not df_prov.empty:
+        pid_sel = st.selectbox(
+            "Editar proveedor existente (opcional)",
+            options=[None] + df_prov["id"].tolist(),
+            format_func=lambda x: "Nuevo proveedor" if x is None else str(df_prov[df_prov["id"] == x]["nombre"].iloc[0]),
+        )
+        if pid_sel is not None:
+            proveedor_existente = df_prov[df_prov["id"] == pid_sel].iloc[0]
+
+    with st.form("form_proveedor"):
+        nombre = st.text_input("Nombre", value="" if proveedor_existente is None else str(proveedor_existente["nombre"]))
+        telefono = st.text_input("Teléfono", value="" if proveedor_existente is None else str(proveedor_existente["telefono"]))
+        rif = st.text_input("RIF", value="" if proveedor_existente is None else str(proveedor_existente["rif"]))
+        contacto = st.text_input("Contacto", value="" if proveedor_existente is None else str(proveedor_existente["contacto"]))
+        observaciones = st.text_area("Observaciones", value="" if proveedor_existente is None else str(proveedor_existente["observaciones"]))
+        especialidades_txt = st.text_input(
+            "Especialidades / ítems (separados por coma)",
+            placeholder="Impresoras, Tintas, Vinil, Sublimación",
+            value="" if proveedor_existente is None else str(proveedor_existente["especialidades"]),
+        )
+        guardar = st.form_submit_button("💾 Guardar", use_container_width=True)
+
+    if guardar:
+        if not clean_text(nombre):
+            st.error("Nombre obligatorio")
+        else:
+            especialidades_norm = ", ".join([clean_text(x) for x in especialidades_txt.split(",") if clean_text(x)])
+            with db_transaction() as conn:
+                exists = conn.execute("SELECT id FROM proveedores WHERE nombre=?", (clean_text(nombre),)).fetchone()
+                if exists:
+                    conn.execute(
+                        "UPDATE proveedores SET telefono=?, rif=?, contacto=?, observaciones=?, especialidades=?, activo=1 WHERE id=?",
+                        (
+                            clean_text(telefono),
+                            clean_text(rif),
+                            clean_text(contacto),
+                            clean_text(observaciones),
+                            especialidades_norm,
+                            int(exists["id"]),
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO proveedores(nombre, telefono, rif, contacto, observaciones, especialidades, activo) VALUES(?,?,?,?,?,?,1)",
+                        (
+                            clean_text(nombre),
+                            clean_text(telefono),
+                            clean_text(rif),
+                            clean_text(contacto),
+                            clean_text(observaciones),
+                            especialidades_norm,
+                        ),
+                    )
+            st.success("Proveedor guardado")
+            st.rerun()
+
+    if not df_prov.empty:
+        sel = st.selectbox(
+            "Proveedor a eliminar",
+            df_prov["id"].tolist(),
+            format_func=lambda i: str(df_prov[df_prov["id"] == i]["nombre"].iloc[0]),
+        )
+        if st.button("🗑 Eliminar proveedor"):
+            with db_transaction() as conn:
+                compras = conn.execute(
+                    "SELECT COUNT(*) AS c FROM historial_compras WHERE proveedor_id=? AND COALESCE(activo,1)=1",
+                    (int(sel),),
+                ).fetchone()
+                if int(compras["c"] or 0) > 0:
+                    st.error("Tiene compras asociadas")
+                else:
+                    conn.execute("UPDATE proveedores SET activo=0 WHERE id=?", (int(sel),))
+                    st.success("Proveedor eliminado")
+                    st.rerun()
+
+
+def _render_cuentas_por_pagar() -> None:
+    st.subheader("💳 Cuentas por pagar a proveedores")
+    df_cxp = _load_cuentas_por_pagar_df()
+    if df_cxp.empty:
+        st.info("No hay cuentas por pagar registradas.")
+        return
+
+    f1, f2 = st.columns([2, 1])
+    buscar = f1.text_input("🔎 Buscar cuenta por pagar", key="inv_cxp_buscar")
+    estado = f2.selectbox("Estado", ["Todos", "pendiente", "vencida", "pagada"], key="inv_cxp_estado")
+
+    view = _filter_df_by_query(df_cxp.copy(), buscar, ["proveedor", "item", "tipo_pago", "notas"])
+    if estado != "Todos":
+        view = view[view["estado"].astype(str).str.lower() == estado.lower()]
+
+    st.dataframe(
+        view,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "monto_original_usd": st.column_config.NumberColumn("Monto original", format="%.2f"),
+            "monto_pagado_usd": st.column_config.NumberColumn("Pagado", format="%.2f"),
+            "saldo_usd": st.column_config.NumberColumn("Saldo", format="%.2f"),
+        },
+    )
+
+    total_saldo = float(view["saldo_usd"].sum()) if not view.empty else 0.0
+    st.metric("Saldo total visible", f"${total_saldo:,.2f}")
+
+
+def _render_movimientos() -> None:
+    st.subheader("🔄 Movimientos de inventario")
+    df = _load_movements_df(limit=2000)
+
+    if df.empty:
+        st.info("No hay movimientos registrados.")
+        return
+
+    f1, f2 = st.columns([2, 1])
+    buscar = f1.text_input("🔎 Buscar movimiento", placeholder="referencia, producto, usuario...", key="inv_mov_buscar")
+    tipo = f2.selectbox("Tipo", ["Todos", "entrada", "salida", "ajuste"], key="inv_mov_tipo")
+
+    view = df.copy()
+    view = _filter_df_by_query(view, buscar, ["referencia", "nombre", "sku", "usuario"])
+    if tipo != "Todos":
+        view = view[view["tipo"] == tipo]
+
+    st.metric("💵 Valor movimientos visibles", f"$ {float(view['costo_total_usd'].sum() if not view.empty else 0):,.2f}")
+
+    st.dataframe(
+        view,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
+            "costo_unitario_usd": st.column_config.NumberColumn("Costo unitario", format="%.2f"),
+            "costo_total_usd": st.column_config.NumberColumn("Costo total", format="%.2f"),
+        },
+    )
+
+
+def _render_kardex_tab(usuario: str) -> None:
+    st.subheader("🧾 Kardex")
+    render_kardex(usuario)
+
+
+def _render_reposicion(df: pd.DataFrame) -> None:
+    st.subheader("📦 Reposición")
+    plan = _build_restock_recommendations(df)
+    if plan.empty:
+        st.success("No hay productos críticos para reponer.")
+        return
+
+    presupuesto = float(plan["costo_estimado_usd"].sum())
+    c1, c2 = st.columns(2)
+    c1.metric("Ítems a reponer", len(plan))
+    c2.metric("Presupuesto estimado", f"${presupuesto:,.2f}")
+
+    st.dataframe(
+        plan,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
+            "stock_minimo": st.column_config.NumberColumn("Mínimo", format="%.3f"),
+            "faltante": st.column_config.NumberColumn("Faltante", format="%.3f"),
+            "sugerido_compra": st.column_config.NumberColumn("Compra sugerida", format="%.3f"),
+            "costo_estimado_usd": st.column_config.NumberColumn("Costo estimado USD", format="%.2f"),
+        },
+    )
+
+
+def _render_ajustes(usuario: str) -> None:
+    st.subheader("🔧 Ajustes de inventario")
+    df_adj = _load_inventory_df()
+
+    if df_adj.empty:
+        st.info("No hay productos activos para ajustar.")
+        return
+
+    t1, t2, t3, t4 = st.tabs(
+        ["🧮 Stock", "💲 Costos y Precios", "📦 Políticas", "🧹 Mantenimiento"]
+    )
+
+    with t1:
+        st.caption("Ajustes de stock por reconteo individual y por lote.")
+        a1, a2 = st.tabs(["Individual", "Masivo por CSV"])
+
+        with a1:
+            aid = _select_inventory_item(df_adj, "Producto", "inv_adj_stock_item")
+            arow = df_adj[df_adj["id"] == aid].iloc[0]
+            stock_sistema = float(arow["stock_actual"] or 0.0)
+            stock_fisico = st.number_input("Stock físico contado", min_value=0.0, value=stock_sistema, key="inv_adj_stock_fisico")
+            delta = float(stock_fisico) - stock_sistema
+            m1, m2 = st.columns(2)
+            m1.metric("Sistema", f"{stock_sistema:,.3f}")
+            m2.metric("Delta", f"{delta:,.3f}")
+            motivo = st.text_input("Motivo", value="Ajuste por reconteo físico", key="inv_adj_stock_motivo")
+            if st.button("✅ Aplicar ajuste individual"):
+                if abs(delta) < 1e-9:
+                    st.warning("No hay diferencia")
+                else:
+                    add_inventory_movement(
+                        usuario=usuario,
+                        inventario_id=int(aid),
+                        tipo="ajuste",
+                        cantidad=float(delta),
+                        costo_unitario_usd=float(arow["costo_unitario_usd"] or 0.0),
+                        referencia=motivo,
+                    )
+                    st.success("Ajuste aplicado")
+                    st.rerun()
+
+        with a2:
+            st.caption("Carga CSV con columnas: sku, stock_fisico")
+            template = pd.DataFrame({"sku": ["sku-ejemplo"], "stock_fisico": [10.0]})
+            st.download_button(
+                "⬇️ Descargar plantilla CSV",
+                data=template.to_csv(index=False).encode("utf-8"),
+                file_name="plantilla_reconteo.csv",
+                mime="text/csv",
+            )
+            file = st.file_uploader("Subir reconteo CSV", type=["csv"], key="inv_adj_csv")
+            if file is not None:
+                try:
+                    recon = pd.read_csv(file)
+                    required = {"sku", "stock_fisico"}
+                    if not required.issubset(set(recon.columns)):
+                        st.error("CSV inválido. Debe tener columnas sku y stock_fisico")
+                    else:
+                        st.dataframe(recon.head(20), use_container_width=True)
+                        if st.button("⚙️ Aplicar ajustes masivos desde CSV"):
+                            with db_transaction() as conn:
+                                updated = 0
+                                for r in recon.itertuples(index=False):
+                                    sku = clean_text(getattr(r, "sku", ""))
+                                    stock_f = _safe_float(getattr(r, "stock_fisico", 0.0), 0.0)
+                                    row = conn.execute(
+                                        "SELECT id, stock_actual, costo_unitario_usd FROM inventario WHERE sku=? AND estado='activo'",
+                                        (sku,),
+                                    ).fetchone()
+                                    if not row:
+                                        continue
+                                    delta = float(stock_f) - float(row["stock_actual"] or 0.0)
+                                    if abs(delta) < 1e-9:
+                                        continue
+                                    add_inventory_movement(
+                                        usuario=usuario,
+                                        inventario_id=int(row["id"]),
+                                        tipo="ajuste",
+                                        cantidad=float(delta),
+                                        costo_unitario_usd=float(row["costo_unitario_usd"] or 0.0),
+                                        referencia="Ajuste masivo por CSV",
+                                        conn=conn,
+                                    )
+                                    updated += 1
+                            st.success(f"Ajustes aplicados en {updated} productos")
+                            st.rerun()
+                except Exception as exc:
+                    st.error(f"Error procesando CSV: {exc}")
+
+    with t2:
+        rid = _select_inventory_item(df_adj, "Producto a revalorizar", "inv_adj_reval_item")
+        rrow = df_adj[df_adj["id"] == rid].iloc[0]
+        costo_actual = float(rrow["costo_unitario_usd"] or 0.0)
+        precio_actual = float(rrow["precio_venta_usd"] or 0.0)
+        nuevo_costo = st.number_input("Nuevo costo USD", min_value=0.0, value=costo_actual, format="%.4f")
+        modo_precio = st.radio("Modo precio", ["Manual", "Por margen"], horizontal=True)
+        if modo_precio == "Por margen":
+            margen = st.number_input("Margen (%)", min_value=0.0, value=30.0)
+            nuevo_precio = float(nuevo_costo) * (1 + float(margen) / 100.0)
+        else:
+            nuevo_precio = st.number_input("Nuevo precio venta USD", min_value=0.0, value=precio_actual, format="%.4f")
+
+        p1, p2 = st.columns(2)
+        p1.metric("Costo actual", f"${costo_actual:,.4f}")
+        p2.metric("Precio nuevo", f"${nuevo_precio:,.4f}")
+
+        if st.button("💾 Aplicar revalorización"):
+            with db_transaction() as conn:
+                conn.execute(
+                    "UPDATE inventario SET costo_unitario_usd=?, precio_venta_usd=? WHERE id=?",
+                    (money(nuevo_costo), money(nuevo_precio), int(rid)),
+                )
+            st.success("Revalorización aplicada")
+            st.rerun()
+
+    with t3:
+        st.markdown("#### Ajuste masivo de mínimos")
+        metodo = st.radio("Método", ["Incremento porcentual", "Asignar valor fijo"], horizontal=True, key="inv_pol_metodo")
+        if metodo == "Incremento porcentual":
+            pct = st.number_input("% a incrementar/reducir mínimos", value=10.0, format="%.2f", key="inv_pol_pct")
+            fijo = None
+        else:
+            fijo = st.number_input("Nuevo mínimo fijo", min_value=0.0, value=1.0, key="inv_pol_fijo")
+            pct = None
+
+        aplicar_solo_criticos = st.checkbox("Aplicar solo a productos críticos", key="inv_pol_crit")
+        if st.button("⚙️ Ejecutar ajuste masivo de mínimos"):
+            with db_transaction() as conn:
+                rows = conn.execute("SELECT id, stock_actual, stock_minimo FROM inventario WHERE estado='activo'").fetchall()
+                updated = 0
+                for r in rows:
+                    sid = int(r["id"])
+                    stock = float(r["stock_actual"] or 0.0)
+                    minimo = float(r["stock_minimo"] or 0.0)
+                    if aplicar_solo_criticos and stock > minimo:
+                        continue
+                    if metodo == "Incremento porcentual":
+                        nuevo_minimo = max(0.0, minimo * (1 + float(pct) / 100.0))
+                    else:
+                        nuevo_minimo = float(fijo)
+                    conn.execute("UPDATE inventario SET stock_minimo=? WHERE id=?", (nuevo_minimo, sid))
+                    updated += 1
+            st.success(f"Mínimos actualizados en {updated} productos")
+            st.rerun()
+
+    with t4:
+        st.markdown("#### Mantenimiento de estructura")
+        mid = _select_inventory_item(df_adj, "Producto", "inv_maint_item")
+        mrow = df_adj[df_adj["id"] == mid].iloc[0]
+        nuevo_nombre = st.text_input("Nuevo nombre", value=str(mrow["nombre"]), key="inv_maint_nombre")
+        nueva_categoria = st.text_input("Nueva categoría", value=str(mrow["categoria"]), key="inv_maint_cat")
+        nueva_unidad = st.text_input("Nueva unidad", value=str(mrow["unidad"]), key="inv_maint_unidad")
+        activar = st.checkbox("Mantener activo", value=True, key="inv_maint_activo")
+
+        if st.button("💾 Guardar cambios estructurales"):
+            with db_transaction() as conn:
+                conn.execute(
+                    "UPDATE inventario SET nombre=?, categoria=?, unidad=?, estado=? WHERE id=?",
+                    (
+                        clean_text(nuevo_nombre),
+                        clean_text(nueva_categoria),
+                        clean_text(nueva_unidad),
+                        "activo" if activar else "inactivo",
+                        int(mid),
+                    ),
+                )
+            st.success("Cambios estructurales guardados")
+            st.rerun()
+
+    st.divider()
+    st.markdown("### Configuración estratégica")
+    with db_transaction() as conn:
+        cfg = pd.read_sql("SELECT parametro, valor FROM configuracion", conn)
+    cfg_map = {str(r.parametro): _safe_float(r.valor, 0.0) for r in cfg.itertuples() if str(r.valor).strip() != ""}
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("⏱️ Alerta reposición", f"{int(cfg_map.get('inv_alerta_dias', 14))} días")
+    c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
+    c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
+
+    with st.form("form_config_inventario"):
+        alerta = st.number_input("Días alerta reposición", min_value=1, max_value=365, value=int(cfg_map.get("inv_alerta_dias", 14)))
+        impuesto = st.number_input("Impuesto default compras (%)", min_value=0.0, max_value=100.0, value=float(cfg_map.get("inv_impuesto_default", 16.0)), format="%.2f")
+        delivery = st.number_input("Delivery default ($)", min_value=0.0, value=float(cfg_map.get("inv_delivery_default", 0.0)), format="%.2f")
+        guardar = st.form_submit_button("💾 Guardar Configuración", use_container_width=True)
+
+    if guardar:
+        with db_transaction() as conn:
+            conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_alerta_dias'", (str(int(alerta)),))
+            conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_impuesto_default'", (str(float(impuesto)),))
+            conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_delivery_default'", (str(float(delivery)),))
+        st.session_state.inv_alerta_dias = int(alerta)
+        st.session_state.inv_impuesto_default = float(impuesto)
+        st.session_state.inv_delivery_default = float(delivery)
+        st.success("✅ Configuración actualizada correctamente")
+        st.rerun()
+
+
+def _render_reportes(df: pd.DataFrame) -> None:
+    st.subheader("📈 Reportes")
+
+    if df.empty:
+        st.info("No hay inventario activo para reportar.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total productos", len(df))
+    c2.metric("Valor inventario", f"${float(df['valor_stock'].sum()):,.2f}")
+    c3.metric("Productos críticos", int((df["stock_actual"] <= df["stock_minimo"]).sum()))
+
+    top_valor = df.sort_values("valor_stock", ascending=False).head(10)
+    st.markdown("#### Top por valor")
+    st.dataframe(
+        top_valor[["sku", "nombre", "categoria", "stock_actual", "valor_stock"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.download_button(
+        "⬇️ Exportar existencias CSV",
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name=f"inventario_existencias_{date.today().isoformat()}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+    df_mov = _load_movements_df(limit=5000)
+    if not df_mov.empty:
+        st.markdown("#### Exportes operativos")
+        st.download_button(
+            "⬇️ Exportar movimientos CSV",
+            data=df_mov.to_csv(index=False).encode("utf-8"),
+            file_name=f"inventario_movimientos_{date.today().isoformat()}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="inv_export_movs",
+        )
+
+
+# ============================================================
 # UI
 # ============================================================
 
@@ -858,20 +1528,11 @@ def render_inventario(usuario: str) -> None:
     tasa_bcv = float(st.session_state.get("tasa_bcv", 36.5) or 36.5)
     tasa_binance = float(st.session_state.get("tasa_binance", 38.0) or 38.0)
 
-    st.subheader("📦 Centro de Control de Suministros")
+    st.subheader("📦 Centro de Control de Inventario")
+    st.caption("Catálogo, compras, proveedores, cuentas por pagar, movimientos, kardex, reposición, ajustes y reportes.")
+
     df = _load_inventory_df()
 
-    c1, c2, c3, c4 = st.columns(4)
-    total_items = int(len(df))
-    capital_total = float(df["valor_stock"].sum()) if not df.empty else 0.0
-    criticos = int((df["stock_actual"] <= df["stock_minimo"]).sum()) if not df.empty else 0
-    salud = ((total_items - criticos) / total_items * 100) if total_items else 0.0
-    c1.metric("💰 Capital en Inventario", f"${capital_total:,.2f}")
-    c2.metric("📦 Total Ítems", total_items)
-    c3.metric("🚨 Stock Bajo", criticos, delta="Revisar" if criticos else "OK", delta_color="inverse")
-    c4.metric("🧠 Salud del Almacén", f"{salud:.0f}%")
-    st.progress(min(max(salud / 100.0, 0.0), 1.0))
-  
     with st.expander("📨 Solicitudes recibidas desde Diagnóstico IA", expanded=False):
         df_diag_mov = _load_diagnostico_movimientos(limit=25)
         if df_diag_mov.empty:
@@ -879,467 +1540,54 @@ def render_inventario(usuario: str) -> None:
         else:
             st.dataframe(df_diag_mov, use_container_width=True, hide_index=True)
 
-    tabs = st.tabs(["📋 Existencias", "📥 Registrar Compra", "📊 Historial Compras", "👤 Proveedores", "🔧 Ajustes"])
+    tabs = st.tabs(
+        [
+            "📊 Dashboard",
+            "📋 Existencias",
+            "📥 Compras",
+            "👤 Proveedores",
+            "💳 CxP",
+            "🔄 Movimientos",
+            "🧾 Kardex",
+            "📦 Reposición",
+            "🔧 Ajustes",
+            "📈 Reportes",
+        ]
+    )
 
     with tabs[0]:
-        st.subheader("📋 Existencias actuales")
-        if df.empty:
-            st.info("No hay productos activos.")
-        else:
-            plan_reposicion = _build_restock_recommendations(df)
-            if plan_reposicion.empty:
-                st.success("✅ Sin alertas de reposición. Todos los productos están por encima del mínimo.")
-            else:
-                presupuesto = float(plan_reposicion["costo_estimado_usd"].sum())
-                st.warning(
-                    f"⚠️ Reposición sugerida para {len(plan_reposicion)} ítems críticos. "
-                    f"Presupuesto estimado: ${presupuesto:,.2f}."
-                )
-                with st.expander("🧾 Ver plan sugerido de reposición", expanded=False):
-                    st.dataframe(
-                        plan_reposicion,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
-                            "stock_minimo": st.column_config.NumberColumn("Mínimo", format="%.3f"),
-                            "faltante": st.column_config.NumberColumn("Faltante", format="%.3f"),
-                            "sugerido_compra": st.column_config.NumberColumn("Compra sugerida", format="%.3f"),
-                            "costo_estimado_usd": st.column_config.NumberColumn("Costo estimado USD", format="%.2f"),
-                        },
-                    )
-
-            buscar_inv = st.text_input("🔎 Buscar producto", key="inv_existencias_buscar")
-            view_inv = _filter_df_by_query(df.copy(), buscar_inv, ["sku", "nombre", "categoria"])
-            st.dataframe(
-                view_inv,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
-                    "stock_minimo": st.column_config.NumberColumn("Mínimo", format="%.3f"),
-                    "costo_unitario_usd": st.column_config.NumberColumn("Costo USD", format="%.4f"),
-                    "precio_venta_usd": st.column_config.NumberColumn("Precio USD", format="%.4f"),
-                    "valor_stock": st.column_config.NumberColumn("Valor stock", format="%.2f"),
-                },
-            )
+        _render_inventario_dashboard(df)
 
     with tabs[1]:
-        st.subheader("📥 Registrar Compra")
-
-        with db_transaction() as conn:
-            items_rows = conn.execute(
-                "SELECT id, sku, nombre, categoria, unidad, costo_unitario_usd, precio_venta_usd FROM inventario WHERE estado='activo' ORDER BY nombre"
-            ).fetchall()
-        items_map = {int(r["id"]): r for r in items_rows}
-
-        modo_item = st.radio("Ítem", ["Usar existente", "Crear y comprar"], horizontal=True, key="inv_compra_modo_item")
-        inv_id = None
-        if modo_item == "Usar existente" and items_map:
-            inv_id = st.selectbox(
-                "Producto",
-                list(items_map.keys()),
-                format_func=lambda i: f"{items_map[i]['nombre']} ({items_map[i]['sku']})",
-                key="inv_compra_item_id",
-            )
-        elif modo_item == "Usar existente":
-            st.warning("No hay productos creados. Usa 'Crear y comprar'.")
-
-        if modo_item == "Crear y comprar":
-            cnew1, cnew2, cnew3, cnew4 = st.columns(4)
-            nuevo_nombre = cnew1.text_input("Nombre", key="inv_compra_new_nombre")
-            nuevo_sku = cnew2.text_input("SKU base", key="inv_compra_new_sku")
-            nueva_categoria = cnew3.text_input("Categoría", value="General", key="inv_compra_new_cat")
-            tipo_unidad = cnew4.selectbox("Tipo unidad", ["Unidad", "Área (cm²)", "Líquido (ml)", "Peso (gr)"], key="inv_compra_new_tipo_unidad")
-            cantidad, unidad_resuelta, _ = _calc_stock_by_unit_type(tipo_unidad)
-            nuevo_min = st.number_input("Stock mínimo", min_value=0.0, value=0.0, key="inv_compra_new_min")
-            costo_base = st.number_input("Costo inicial unitario USD", min_value=0.0, value=0.0, format="%.4f", key="inv_compra_new_costo")
-            precio_base = st.number_input("Precio inicial USD", min_value=0.0, value=0.0, format="%.4f", key="inv_compra_new_precio")
-        else:
-            cantidad = st.number_input("Cantidad comprada", min_value=0.001, value=1.0, key="inv_compra_qty_existente")
-            unidad_resuelta = str(items_map[inv_id]["unidad"]) if inv_id in items_map else "unidad"
-
-        d1, d2, d3 = st.columns(3)
-        proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
-        costo_total = d2.number_input("Costo total USD", min_value=0.0001, value=1.0, format="%.4f", key="inv_compra_total")
-        impuesto_pct = d3.number_input("Impuesto (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("inv_impuesto_default", 16.0)), format="%.2f", key="inv_compra_impuesto")
-
-        d4, d5, d6 = st.columns(3)
-        delivery_monto = d4.number_input("Delivery", min_value=0.0, value=float(st.session_state.get("inv_delivery_default", 0.0)), format="%.4f", key="inv_compra_delivery")
-        delivery_moneda = d5.selectbox("Moneda delivery", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_delivery_moneda")
-        delivery_manual = d6.checkbox("Tasa manual delivery", key="inv_compra_delivery_manual")
-        delivery_usd, tasa_delivery = _resolve_delivery_usd(delivery_monto, delivery_moneda, tasa_bcv, tasa_binance, delivery_manual)
-
-        p1, p2, p3, p4 = st.columns(4)
-        tipo_pago = p1.selectbox("Tipo de pago", ["contado", "credito"], key="inv_compra_tipo_pago")
-        monto_pagado = p2.number_input("Pago inicial USD", min_value=0.0, value=float(costo_total if tipo_pago == "contado" else 0.0), format="%.4f", key="inv_compra_pagado")
-        fecha_venc = p3.date_input("Vence", value=None, key="inv_compra_vence")
-        moneda_pago = p4.selectbox("Moneda pago", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_moneda")
-        tasa_pago = _rate_from_label(moneda_pago, tasa_bcv, tasa_binance)
-        if p4.checkbox("Tasa manual pago", key="inv_compra_tasa_manual"):
-            tasa_pago = st.number_input("Tasa usada en pago", min_value=0.0001, value=float(tasa_pago), format="%.4f", key="inv_compra_tasa_pago")
-
-        if st.button("✅ Guardar compra", use_container_width=True):
-            try:
-                target_id = inv_id
-                if modo_item == "Crear y comprar":
-                    target_id = _create_inventory_item_for_purchase(
-                        usuario=usuario,
-                        sku_base=nuevo_sku,
-                        nombre=nuevo_nombre,
-                        categoria=nueva_categoria,
-                        unidad=unidad_resuelta,
-                        minimo=float(nuevo_min),
-                        costo_inicial=float(costo_base),
-                        precio_inicial=float(precio_base),
-                    )
-                if target_id is None:
-                    raise ValueError("Debes seleccionar o crear un producto para registrar la compra.")
-
-                with db_transaction() as conn:
-                    proveedor_id = _get_or_create_provider(conn, proveedor_nombre)
-                fin_input = CompraFinancialInput(
-                    tipo_pago=clean_text(tipo_pago).lower(),
-                    monto_pagado_inicial_usd=float(monto_pagado),
-                    fecha_vencimiento=fecha_venc.isoformat() if fecha_venc else None,
-                )
-                registrar_compra(
-                    usuario=usuario,
-                    inventario_id=int(target_id),
-                    cantidad=float(cantidad),
-                    costo_total_usd=float(costo_total),
-                    proveedor_id=proveedor_id,
-                    proveedor_nombre=proveedor_nombre,
-                    impuestos_pct=float(impuesto_pct),
-                    delivery_usd=float(delivery_usd),
-                    tasa_usada=float(tasa_pago if tasa_pago else tasa_delivery),
-                    moneda_pago=str(moneda_pago),
-                    financial_input=fin_input,
-                )
-                st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}.")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"No se pudo registrar la compra: {exc}")
+        _render_existencias(df)
 
     with tabs[2]:
-        st.subheader("📊 Historial de Compras")
-        df_hist = _load_historial_compras_df(limit=2000)
-        if df_hist.empty:
-            st.info("No hay compras registradas.")
-        else:
-            h1, h2 = st.columns([2, 1])
-            buscar_hist = h1.text_input("🔎 Buscar compra", key="inv_hist_buscar")
-            tipo_hist = h2.selectbox("Condición", ["Todos", "contado", "credito"], key="inv_hist_tipo")
-            view_hist = _filter_df_by_query(df_hist.copy(), buscar_hist, ["item", "proveedor", "sku"])
-            if tipo_hist != "Todos":
-                view_hist = view_hist[view_hist["tipo_pago"].astype(str).str.lower() == tipo_hist]
-            st.dataframe(
-                view_hist,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
-                    "costo_total_usd": st.column_config.NumberColumn("Total USD", format="%.2f"),
-                    "costo_unit_usd": st.column_config.NumberColumn("Costo unitario", format="%.4f"),
-                    "impuestos": st.column_config.NumberColumn("Impuesto %", format="%.2f"),
-                    "delivery": st.column_config.NumberColumn("Delivery USD", format="%.4f"),
-                    "monto_pagado_inicial_usd": st.column_config.NumberColumn("Pagado inicial", format="%.2f"),
-                    "saldo_pendiente_usd": st.column_config.NumberColumn("Saldo", format="%.2f"),
-                },
-            )
+        compras_tabs = st.tabs(["Registrar compra", "Historial compras"])
+        with compras_tabs[0]:
+            _render_compras(usuario, tasa_bcv, tasa_binance)
+        with compras_tabs[1]:
+            _render_historial_compras()
 
     with tabs[3]:
-        st.subheader("👤 Directorio de Proveedores")
-        df_prov = _load_proveedores_df()
-
-        if df_prov.empty:
-            st.info("No hay proveedores registrados todavía.")
-        else:
-            cfp1, cfp2 = st.columns([2, 1])
-            filtro = cfp1.text_input("🔍 Buscar proveedor")
-            selected_tags = cfp2.multiselect("Filtrar por especialidad", _extract_supplier_tags(df_prov))
-
-            df_view = df_prov.copy()
-            if filtro:
-                searchable_cols = ["nombre", "telefono", "rif", "contacto", "observaciones", "especialidades"]
-                df_view = _filter_df_by_query(df_view, filtro, searchable_cols)
-            if selected_tags:
-                df_view = df_view[
-                    df_view["especialidades"].fillna("").astype(str).apply(
-                        lambda txt: all(tag.lower() in txt.lower() for tag in selected_tags)
-                    )
-                ]
-            st.dataframe(df_view, use_container_width=True, hide_index=True)
-
-        st.divider()
-        st.subheader("➕ Registrar / Editar proveedor")
-
-
-        proveedor_existente = None
-        if not df_prov.empty:
-            pid_sel = st.selectbox(
-                "Editar proveedor existente (opcional)",
-                options=[None] + df_prov["id"].tolist(),
-                format_func=lambda x: "Nuevo proveedor" if x is None else str(df_prov[df_prov["id"] == x]["nombre"].iloc[0]),
-            )
-            if pid_sel is not None:
-                proveedor_existente = df_prov[df_prov["id"] == pid_sel].iloc[0]
-
-        with st.form("form_proveedor"):
-            nombre = st.text_input("Nombre", value="" if proveedor_existente is None else str(proveedor_existente["nombre"]))
-            telefono = st.text_input("Teléfono", value="" if proveedor_existente is None else str(proveedor_existente["telefono"]))
-            rif = st.text_input("RIF", value="" if proveedor_existente is None else str(proveedor_existente["rif"]))
-            contacto = st.text_input("Contacto", value="" if proveedor_existente is None else str(proveedor_existente["contacto"]))
-            observaciones = st.text_area("Observaciones", value="" if proveedor_existente is None else str(proveedor_existente["observaciones"]))
-            especialidades_txt = st.text_input(
-                "Especialidades / ítems (separados por coma)",
-                placeholder="Impresoras, Tintas, Vinil, Sublimación",
-                value="" if proveedor_existente is None else str(proveedor_existente["especialidades"]),
-            )
-            guardar = st.form_submit_button("💾 Guardar", use_container_width=True)
-
-        if guardar:
-            if not clean_text(nombre):
-                st.error("Nombre obligatorio")
-            else:
-                especialidades_norm = ", ".join([clean_text(x) for x in especialidades_txt.split(",") if clean_text(x)])
-                with db_transaction() as conn:
-                    exists = conn.execute("SELECT id FROM proveedores WHERE nombre=?", (clean_text(nombre),)).fetchone()
-                    if exists:
-                        conn.execute(
-                            "UPDATE proveedores SET telefono=?, rif=?, contacto=?, observaciones=?, especialidades=?, activo=1 WHERE id=?",
-                            (
-                                clean_text(telefono),
-                                clean_text(rif),
-                                clean_text(contacto),
-                                clean_text(observaciones),
-                                especialidades_norm,
-                                int(exists["id"]),
-                            ),
-                        )
-                    else:
-                        conn.execute(
-                            "INSERT INTO proveedores(nombre, telefono, rif, contacto, observaciones, especialidades, activo) VALUES(?,?,?,?,?,?,1)",
-                            (
-                                clean_text(nombre),
-                                clean_text(telefono),
-                                clean_text(rif),
-                                clean_text(contacto),
-                                clean_text(observaciones),
-                                especialidades_norm,
-                            ),
-                        )
-                st.success("Proveedor guardado")
-                st.rerun()
-
-        if not df_prov.empty:
-            sel = st.selectbox("Proveedor a eliminar", df_prov["id"].tolist(), format_func=lambda i: str(df_prov[df_prov["id"] == i]["nombre"].iloc[0]))
-            if st.button("🗑 Eliminar proveedor"):
-                with db_transaction() as conn:
-                    compras = conn.execute("SELECT COUNT(*) AS c FROM historial_compras WHERE proveedor_id=? AND COALESCE(activo,1)=1", (int(sel),)).fetchone()
-                    if int(compras["c"] or 0) > 0:
-                        st.error("Tiene compras asociadas")
-                    else:
-                        conn.execute("UPDATE proveedores SET activo=0 WHERE id=?", (int(sel),))
-                        st.success("Proveedor eliminado")
-                        st.rerun()
+        _render_proveedores()
 
     with tabs[4]:
-        st.subheader("🔧 Ajustes de Inventario 360°")
+        _render_cuentas_por_pagar()
 
-        df_adj = _load_inventory_df()
-        if df_adj.empty:
-            st.info("No hay productos activos para ajustar.")
-        else:
-            t1, t2, t3, t4 = st.tabs([
-                "🧮 Stock",
-                "💲 Costos y Precios",
-                "📦 Políticas",
-                "🧹 Mantenimiento",
-            ])
+    with tabs[5]:
+        _render_movimientos()
 
-            with t1:
-                st.caption("Ajustes de stock por reconteo individual y por lote.")
-                a1, a2 = st.tabs(["Individual", "Masivo por CSV"])
+    with tabs[6]:
+        _render_kardex_tab(usuario)
 
-                with a1:
-                    aid = _select_inventory_item(df_adj, "Producto", "inv_adj_stock_item")
-                    arow = df_adj[df_adj["id"] == aid].iloc[0]
-                    stock_sistema = float(arow["stock_actual"] or 0.0)
-                    stock_fisico = st.number_input("Stock físico contado", min_value=0.0, value=stock_sistema, key="inv_adj_stock_fisico")
-                    delta = float(stock_fisico) - stock_sistema
-                    m1, m2 = st.columns(2)
-                    m1.metric("Sistema", f"{stock_sistema:,.3f}")
-                    m2.metric("Delta", f"{delta:,.3f}")
-                    motivo = st.text_input("Motivo", value="Ajuste por reconteo físico", key="inv_adj_stock_motivo")
-                    if st.button("✅ Aplicar ajuste individual"):
-                        if abs(delta) < 1e-9:
-                            st.warning("No hay diferencia")
-                        else:
-                            add_inventory_movement(
-                                usuario=usuario,
-                                inventario_id=int(aid),
-                                tipo="ajuste",
-                                cantidad=float(delta),
-                                costo_unitario_usd=float(arow["costo_unitario_usd"] or 0.0),
-                                referencia=motivo,
-                            )
-                            st.success("Ajuste aplicado")
-                            st.rerun()
+    with tabs[7]:
+        _render_reposicion(df)
 
-                with a2:
-                    st.caption("Carga CSV con columnas: sku, stock_fisico")
-                    template = pd.DataFrame({"sku": ["sku-ejemplo"], "stock_fisico": [10.0]})
-                    st.download_button(
-                        "⬇️ Descargar plantilla CSV",
-                        data=template.to_csv(index=False).encode("utf-8"),
-                        file_name="plantilla_reconteo.csv",
-                        mime="text/csv",
-                    )
-                    file = st.file_uploader("Subir reconteo CSV", type=["csv"], key="inv_adj_csv")
-                    if file is not None:
-                        try:
-                            recon = pd.read_csv(file)
-                            required = {"sku", "stock_fisico"}
-                            if not required.issubset(set(recon.columns)):
-                                st.error("CSV inválido. Debe tener columnas sku y stock_fisico")
-                            else:
-                                preview = recon.copy()
-                                st.dataframe(preview.head(20), use_container_width=True)
-                                if st.button("⚙️ Aplicar ajustes masivos desde CSV"):
-                                    with db_transaction() as conn:
-                                        updated = 0
-                                        for r in recon.itertuples(index=False):
-                                            sku = clean_text(getattr(r, "sku", ""))
-                                            stock_f = _safe_float(getattr(r, "stock_fisico", 0.0), 0.0)
-                                            row = conn.execute("SELECT id, stock_actual, costo_unitario_usd FROM inventario WHERE sku=? AND estado='activo'", (sku,)).fetchone()
-                                            if not row:
-                                                continue
-                                            delta = float(stock_f) - float(row["stock_actual"] or 0.0)
-                                            if abs(delta) < 1e-9:
-                                                continue
-                                            add_inventory_movement(
-                                                usuario=usuario,
-                                                inventario_id=int(row["id"]),
-                                                tipo="ajuste",
-                                                cantidad=float(delta),
-                                                costo_unitario_usd=float(row["costo_unitario_usd"] or 0.0),
-                                                referencia="Ajuste masivo por CSV",
-                                                conn=conn,
-                                            )
-                                            updated += 1
-                                    st.success(f"Ajustes aplicados en {updated} productos")
-                                    st.rerun()
-                        except Exception as exc:
-                            st.error(f"Error procesando CSV: {exc}")
+    with tabs[8]:
+        _render_ajustes(usuario)
 
-            with t2:
-                rid = _select_inventory_item(df_adj, "Producto a revalorizar", "inv_adj_reval_item")
-                rrow = df_adj[df_adj["id"] == rid].iloc[0]
-                costo_actual = float(rrow["costo_unitario_usd"] or 0.0)
-                precio_actual = float(rrow["precio_venta_usd"] or 0.0)
-                nuevo_costo = st.number_input("Nuevo costo USD", min_value=0.0, value=costo_actual, format="%.4f")
-                modo_precio = st.radio("Modo precio", ["Manual", "Por margen"], horizontal=True)
-                if modo_precio == "Por margen":
-                    margen = st.number_input("Margen (%)", min_value=0.0, value=30.0)
-                    nuevo_precio = float(nuevo_costo) * (1 + float(margen) / 100.0)
-                else:
-                    nuevo_precio = st.number_input("Nuevo precio venta USD", min_value=0.0, value=precio_actual, format="%.4f")
-
-                p1, p2 = st.columns(2)
-                p1.metric("Costo actual", f"${costo_actual:,.4f}")
-                p2.metric("Precio nuevo", f"${nuevo_precio:,.4f}")
-
-                if st.button("💾 Aplicar revalorización"):
-                    with db_transaction() as conn:
-                        conn.execute(
-                            "UPDATE inventario SET costo_unitario_usd=?, precio_venta_usd=? WHERE id=?",
-                            (money(nuevo_costo), money(nuevo_precio), int(rid)),
-                        )
-                    st.success("Revalorización aplicada")
-                    st.rerun()
-
-            with t3:
-                st.markdown("#### Ajuste masivo de mínimos")
-                metodo = st.radio("Método", ["Incremento porcentual", "Asignar valor fijo"], horizontal=True, key="inv_pol_metodo")
-                if metodo == "Incremento porcentual":
-                    pct = st.number_input("% a incrementar/reducir mínimos", value=10.0, format="%.2f", key="inv_pol_pct")
-                    fijo = None
-                else:
-                    fijo = st.number_input("Nuevo mínimo fijo", min_value=0.0, value=1.0, key="inv_pol_fijo")
-                    pct = None
-
-                aplicar_solo_criticos = st.checkbox("Aplicar solo a productos críticos", key="inv_pol_crit")
-                if st.button("⚙️ Ejecutar ajuste masivo de mínimos"):
-                    with db_transaction() as conn:
-                        rows = conn.execute("SELECT id, stock_actual, stock_minimo FROM inventario WHERE estado='activo'").fetchall()
-                        updated = 0
-                        for r in rows:
-                            sid = int(r["id"])
-                            stock = float(r["stock_actual"] or 0.0)
-                            minimo = float(r["stock_minimo"] or 0.0)
-                            if aplicar_solo_criticos and stock > minimo:
-                                continue
-                            if metodo == "Incremento porcentual":
-                                nuevo_minimo = max(0.0, minimo * (1 + float(pct) / 100.0))
-                            else:
-                                nuevo_minimo = float(fijo)
-                            conn.execute("UPDATE inventario SET stock_minimo=? WHERE id=?", (nuevo_minimo, sid))
-                            updated += 1
-                    st.success(f"Mínimos actualizados en {updated} productos")
-                    st.rerun()
-
-            with t4:
-                st.markdown("#### Mantenimiento de estructura")
-                mid = _select_inventory_item(df_adj, "Producto", "inv_maint_item")
-                mrow = df_adj[df_adj["id"] == mid].iloc[0]
-                nuevo_nombre = st.text_input("Nuevo nombre", value=str(mrow["nombre"]), key="inv_maint_nombre")
-                nueva_categoria = st.text_input("Nueva categoría", value=str(mrow["categoria"]), key="inv_maint_cat")
-                nueva_unidad = st.text_input("Nueva unidad", value=str(mrow["unidad"]), key="inv_maint_unidad")
-                activar = st.checkbox("Mantener activo", value=True, key="inv_maint_activo")
-
-                if st.button("💾 Guardar cambios estructurales"):
-                    with db_transaction() as conn:
-                        conn.execute(
-                            "UPDATE inventario SET nombre=?, categoria=?, unidad=?, estado=? WHERE id=?",
-                            (
-                                clean_text(nuevo_nombre),
-                                clean_text(nueva_categoria),
-                                clean_text(nueva_unidad),
-                                "activo" if activar else "inactivo",
-                                int(mid),
-                            ),
-                        )
-                    st.success("Cambios estructurales guardados")
-                    st.rerun()
-
-        st.divider()
-        st.markdown("### Configuración estratégica")
-        with db_transaction() as conn:
-            cfg = pd.read_sql("SELECT parametro, valor FROM configuracion", conn)
-        cfg_map = {str(r.parametro): _safe_float(r.valor, 0.0) for r in cfg.itertuples() if str(r.valor).strip() != ""}
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("⏱️ Alerta reposición", f"{int(cfg_map.get('inv_alerta_dias', 14))} días")
-        c2.metric("🛡️ Impuesto sugerido", f"{cfg_map.get('inv_impuesto_default', 16.0):.2f}%")
-        c3.metric("🚚 Delivery sugerido", f"${cfg_map.get('inv_delivery_default', 0.0):.2f}")
-
-        with st.form("form_config_inventario"):
-            alerta = st.number_input("Días alerta reposición", min_value=1, max_value=365, value=int(cfg_map.get("inv_alerta_dias", 14)))
-            impuesto = st.number_input("Impuesto default compras (%)", min_value=0.0, max_value=100.0, value=float(cfg_map.get("inv_impuesto_default", 16.0)), format="%.2f")
-            delivery = st.number_input("Delivery default ($)", min_value=0.0, value=float(cfg_map.get("inv_delivery_default", 0.0)), format="%.2f")
-            guardar = st.form_submit_button("💾 Guardar Configuración", use_container_width=True)
-
-        if guardar:
-            with db_transaction() as conn:
-                conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_alerta_dias'", (str(int(alerta)),))
-                conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_impuesto_default'", (str(float(impuesto)),))
-                conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_delivery_default'", (str(float(delivery)),))
-            st.session_state.inv_alerta_dias = int(alerta)
-            st.session_state.inv_impuesto_default = float(impuesto)
-            st.session_state.inv_delivery_default = float(delivery)
-            st.success("✅ Configuración actualizada correctamente")
-            st.rerun()
+    with tabs[9]:
+        _render_reportes(df)
 
 
 # ============================================================
@@ -1382,11 +1630,3 @@ def render_kardex(usuario: str) -> None:
             "referencia": "Referencia",
         },
     )
-
-
-
-
-
-
-
-
