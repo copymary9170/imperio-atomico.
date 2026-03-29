@@ -882,7 +882,7 @@ def render_dashboard() -> None:
     ticket_promedio = float(dfv["total_usd"].mean()) if not dfv.empty else 0.0
     clientes_activos_periodo = int(dfv["cliente"].nunique()) if not dfv.empty else 0
     margen_operativo = ((utilidad / ventas_total) * 100) if ventas_total else 0.0
-    estado_salud, detalle_salud = _health_status(ventas_total, utilidad, stock_bajo)
+    estado_salud, detalle_salud = _health_status(ventas_total, utilidad, stock_bajo, 0.0)
 
     dias_periodo = max((hoy - desde).days + 1, 1) if desde is not None else 30
     run_rate_ventas = (ventas_total / dias_periodo) * 30 if dias_periodo else 0.0
