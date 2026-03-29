@@ -658,4 +658,9 @@ def render_dashboard() -> None:
                     0.0,
                 )
                 topc = topc.sort_values("ventas_usd", ascending=False).head(10)
-                st.dataframe(topc, use_container_width=True, hide_index=True)
+                 st.dataframe(topc, use_container_width=True, hide_index=True)
+
+
+def render_planeacion_financiera(_usuario: str | None = None) -> None:
+    """Compatibilidad con la vista legacy que espera este entrypoint."""
+    render_dashboard()
