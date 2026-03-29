@@ -988,11 +988,39 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
         cantidad = st.number_input("Cantidad comprada", min_value=0.001, value=1.0, key="inv_compra_qty_existente")
         unidad_resuelta = str(items_map[inv_id]["unidad"]) if inv_id in items_map else "unidad"
 
-    d1, d2, d3 = st.columns(3)
-    proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
-    costo_total = d2.number_input("Costo total USD", min_value=0.0001, value=1.0, format="%.4f", key="inv_compra_total")
-    impuesto_pct = d3.number_input("Impuesto (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("inv_impuesto_default", 16.0)), format="%.2f", key="inv_compra_impuesto")
+df_prov = _load_proveedores_df()
 
+d1, d2, d3 = st.columns(3)
+
+if not df_prov.empty:
+    opciones_prov = ["-- Seleccionar proveedor --"] + df_prov["nombre"].astype(str).tolist() + ["Otro / escribir manual"]
+    proveedor_sel = d1.selectbox("Proveedor", opciones_prov, key="inv_compra_proveedor_sel")
+
+    if proveedor_sel == "Otro / escribir manual":
+        proveedor_nombre = d1.text_input("Nombre proveedor", key="inv_compra_proveedor_manual")
+    elif proveedor_sel == "-- Seleccionar proveedor --":
+        proveedor_nombre = ""
+    else:
+        proveedor_nombre = proveedor_sel
+else:
+    proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
+
+costo_total = d2.number_input(
+    "Costo total USD",
+    min_value=0.0001,
+    value=1.0,
+    format="%.4f",
+    key="inv_compra_total",
+)
+
+impuesto_pct = d3.number_input(
+    "Impuesto (%)",
+    min_value=0.0,
+    max_value=100.0,
+    value=float(st.session_state.get("inv_impuesto_default", 16.0)),
+    format="%.2f",
+    key="inv_compra_impuesto",
+)
     d4, d5, d6 = st.columns(3)
     delivery_monto = d4.number_input("Delivery", min_value=0.0, value=float(st.session_state.get("inv_delivery_default", 0.0)), format="%.4f", key="inv_compra_delivery")
     delivery_moneda = d5.selectbox("Moneda delivery", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_delivery_moneda")
