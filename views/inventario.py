@@ -15,3 +15,5 @@ def render_inventario(usuario: str) -> None:
         return
 
     inventario_module(usuario)
+
+
