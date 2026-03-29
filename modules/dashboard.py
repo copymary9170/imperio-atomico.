@@ -66,7 +66,7 @@ def _health_status(
     ventas_total: float,
     utilidad: float,
     stock_bajo: int,
-    flujo_30d: float,
+    flujo_30d: float = 0.0,
 ) -> tuple[str, str]:
     if ventas_total <= 0:
         return "🔴 Atención", "No hay ventas en el periodo seleccionado."
