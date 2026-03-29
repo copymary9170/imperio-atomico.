@@ -660,9 +660,7 @@ def render_dashboard() -> None:
                     0.0,
                 )
                 topc = topc.sort_values("ventas_usd", ascending=False).head(10)
-                st.dataframe(topc, use_container_width=True, hide_index=True)    if stock_bajo >= 5:
-        return "🟡 Riesgo controlado", "Hay presión por inventario crítico."
-    return "🟢 Saludable", "Ventas activas, utilidad positiva y operación estable."
+                st.dataframe(topc, use_container_width=True, hide_index=True)
 
 
 def _build_executive_alerts(
@@ -673,6 +671,7 @@ def _build_executive_alerts(
     ventas_total: float,
 ) -> list[tuple[str, str]]:
     alerts: list[tuple[str, str]] = []
+
 
     if ventas_total <= 0:
         alerts.append(("error", "No hay ventas en el periodo seleccionado."))
