@@ -280,16 +280,226 @@ def _build_unique_sku(conn, desired: str) -> str:
     return sku
 
 
-def _get_or_create_provider(conn, proveedor_nombre: str) -> int | None:
-    name = clean_text(proveedor_nombre)
-    if not name:
-        return None
-    row = conn.execute("SELECT id FROM proveedores WHERE nombre=?", (name,)).fetchone()
-    if row:
-        return int(row["id"])
-    conn.execute("INSERT INTO proveedores(nombre, activo) VALUES(?,1)", (name,))
-    new_row = conn.execute("SELECT id FROM proveedores WHERE nombre=?", (name,)).fetchone()
-    return int(new_row["id"]) if new_row else None
+def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
+    st.subheader("📥 Registrar compra")
+
+    with db_transaction() as conn:
+        items_rows = conn.execute(
+            """
+            SELECT id, sku, nombre, categoria, unidad, costo_unitario_usd, precio_venta_usd
+            FROM inventario
+            WHERE estado='activo'
+            ORDER BY nombre
+            """
+        ).fetchall()
+
+    items_map = {int(r["id"]): r for r in items_rows}
+
+    modo_item = st.radio(
+        "Ítem",
+        ["Usar existente", "Crear y comprar"],
+        horizontal=True,
+        key="inv_compra_modo_item",
+    )
+    inv_id = None
+
+    if modo_item == "Usar existente" and items_map:
+        inv_id = st.selectbox(
+            "Producto",
+            list(items_map.keys()),
+            format_func=lambda i: f"{items_map[i]['nombre']} ({items_map[i]['sku']})",
+            key="inv_compra_item_id",
+        )
+    elif modo_item == "Usar existente":
+        st.warning("No hay productos creados. Usa 'Crear y comprar'.")
+
+    if modo_item == "Crear y comprar":
+        cnew1, cnew2, cnew3, cnew4 = st.columns(4)
+        nuevo_nombre = cnew1.text_input("Nombre", key="inv_compra_new_nombre")
+        nuevo_sku = cnew2.text_input("SKU base", key="inv_compra_new_sku")
+        nueva_categoria = cnew3.text_input("Categoría", value="General", key="inv_compra_new_cat")
+        tipo_unidad = cnew4.selectbox(
+            "Tipo unidad",
+            ["Unidad", "Área (cm²)", "Líquido (ml)", "Peso (gr)"],
+            key="inv_compra_new_tipo_unidad",
+        )
+        cantidad, unidad_resuelta, _ = _calc_stock_by_unit_type(tipo_unidad)
+        nuevo_min = st.number_input(
+            "Stock mínimo",
+            min_value=0.0,
+            value=0.0,
+            key="inv_compra_new_min",
+        )
+        costo_base = st.number_input(
+            "Costo inicial unitario USD",
+            min_value=0.0,
+            value=0.0,
+            format="%.4f",
+            key="inv_compra_new_costo",
+        )
+        precio_base = st.number_input(
+            "Precio inicial USD",
+            min_value=0.0,
+            value=0.0,
+            format="%.4f",
+            key="inv_compra_new_precio",
+        )
+    else:
+        cantidad = st.number_input(
+            "Cantidad comprada",
+            min_value=0.001,
+            value=1.0,
+            key="inv_compra_qty_existente",
+        )
+        unidad_resuelta = str(items_map[inv_id]["unidad"]) if inv_id in items_map else "unidad"
+        nuevo_nombre = ""
+        nuevo_sku = ""
+        nueva_categoria = ""
+        nuevo_min = 0.0
+        costo_base = 0.0
+        precio_base = 0.0
+
+    # Proveedores registrados
+    df_prov = _load_proveedores_df()
+
+    d1, d2, d3 = st.columns(3)
+
+    if not df_prov.empty:
+        opciones_prov = ["-- Seleccionar proveedor --"] + df_prov["nombre"].astype(str).tolist() + ["Otro / escribir manual"]
+        proveedor_sel = d1.selectbox(
+            "Proveedor",
+            opciones_prov,
+            key="inv_compra_proveedor_sel",
+        )
+
+        if proveedor_sel == "Otro / escribir manual":
+            proveedor_nombre = d1.text_input(
+                "Nombre proveedor",
+                key="inv_compra_proveedor_manual",
+            )
+        elif proveedor_sel == "-- Seleccionar proveedor --":
+            proveedor_nombre = ""
+        else:
+            proveedor_nombre = proveedor_sel
+    else:
+        proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
+
+    costo_total = d2.number_input(
+        "Costo total USD",
+        min_value=0.0001,
+        value=1.0,
+        format="%.4f",
+        key="inv_compra_total",
+    )
+
+    impuesto_pct = d3.number_input(
+        "Impuesto (%)",
+        min_value=0.0,
+        max_value=100.0,
+        value=float(st.session_state.get("inv_impuesto_default", 16.0)),
+        format="%.2f",
+        key="inv_compra_impuesto",
+    )
+
+    d4, d5, d6 = st.columns(3)
+    delivery_monto = d4.number_input(
+        "Delivery",
+        min_value=0.0,
+        value=float(st.session_state.get("inv_delivery_default", 0.0)),
+        format="%.4f",
+        key="inv_compra_delivery",
+    )
+    delivery_moneda = d5.selectbox(
+        "Moneda delivery",
+        ["USD", "VES (BCV)", "VES (Binance)"],
+        key="inv_compra_delivery_moneda",
+    )
+    delivery_manual = d6.checkbox("Tasa manual delivery", key="inv_compra_delivery_manual")
+    delivery_usd, tasa_delivery = _resolve_delivery_usd(
+        delivery_monto,
+        delivery_moneda,
+        tasa_bcv,
+        tasa_binance,
+        delivery_manual,
+    )
+
+    p1, p2, p3, p4 = st.columns(4)
+    tipo_pago = p1.selectbox(
+        "Tipo de pago",
+        ["contado", "credito"],
+        key="inv_compra_tipo_pago",
+    )
+    monto_pagado = p2.number_input(
+        "Pago inicial USD",
+        min_value=0.0,
+        value=float(costo_total if tipo_pago == "contado" else 0.0),
+        format="%.4f",
+        key="inv_compra_pagado",
+    )
+    fecha_venc = p3.date_input("Vence", value=None, key="inv_compra_vence")
+    moneda_pago = p4.selectbox(
+        "Moneda pago",
+        ["USD", "VES (BCV)", "VES (Binance)"],
+        key="inv_compra_moneda",
+    )
+
+    tasa_pago = _rate_from_label(moneda_pago, tasa_bcv, tasa_binance)
+    if p4.checkbox("Tasa manual pago", key="inv_compra_tasa_manual"):
+        tasa_pago = st.number_input(
+            "Tasa usada en pago",
+            min_value=0.0001,
+            value=float(tasa_pago),
+            format="%.4f",
+            key="inv_compra_tasa_pago",
+        )
+
+    if st.button("✅ Guardar compra", use_container_width=True):
+        try:
+            target_id = inv_id
+
+            if modo_item == "Crear y comprar":
+                target_id = _create_inventory_item_for_purchase(
+                    usuario=usuario,
+                    sku_base=nuevo_sku,
+                    nombre=nuevo_nombre,
+                    categoria=nueva_categoria,
+                    unidad=unidad_resuelta,
+                    minimo=float(nuevo_min),
+                    costo_inicial=float(costo_base),
+                    precio_inicial=float(precio_base),
+                )
+
+            if target_id is None:
+                raise ValueError("Debes seleccionar o crear un producto para registrar la compra.")
+
+            with db_transaction() as conn:
+                proveedor_id = _get_or_create_provider(conn, proveedor_nombre)
+
+            fin_input = CompraFinancialInput(
+                tipo_pago=clean_text(tipo_pago).lower(),
+                monto_pagado_inicial_usd=float(monto_pagado),
+                fecha_vencimiento=fecha_venc.isoformat() if fecha_venc else None,
+            )
+
+            registrar_compra(
+                usuario=usuario,
+                inventario_id=int(target_id),
+                cantidad=float(cantidad),
+                costo_total_usd=float(costo_total),
+                proveedor_id=proveedor_id,
+                proveedor_nombre=proveedor_nombre,
+                impuestos_pct=float(impuesto_pct),
+                delivery_usd=float(delivery_usd),
+                tasa_usada=float(tasa_pago if tasa_pago else tasa_delivery),
+                moneda_pago=str(moneda_pago),
+                financial_input=fin_input,
+            )
+
+            st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}.")
+            st.rerun()
+
+        except Exception as exc:
+            st.error(f"No se pudo registrar la compra: {exc}")
 
 
 # ============================================================
