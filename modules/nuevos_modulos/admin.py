@@ -1,4 +1,4 @@
-from __future__ import annotations
+ffrom __future__ import annotations
 
 from datetime import date, datetime
 from typing import Optional
@@ -6,7 +6,60 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
+from .types import ModuleBlueprint
+
 DB_PATH = "rrhh.db"
+
+ADMIN_MODULES: tuple[ModuleBlueprint, ...] = (
+    ModuleBlueprint(
+        key="rrhh",
+        name="Gestión de RRHH",
+        icon="👥",
+        category="Administración interna",
+        summary="Centraliza ciclo de vida del personal, asistencia y solicitudes internas en un solo módulo.",
+        capabilities=(
+            "Alta/baja de colaboradores",
+            "Control de asistencia",
+            "Solicitudes de permisos e incapacidades",
+            "Panel de indicadores de talento",
+        ),
+        integrations=("Producción", "Contabilidad", "Seguridad/Roles"),
+        business_value="Mejora el control operativo del talento y reduce tiempos administrativos en procesos internos.",
+        priority="Alta",
+    ),
+    ModuleBlueprint(
+        key="seguridad_roles",
+        name="Seguridad y roles",
+        icon="🔐",
+        category="Administración interna",
+        summary="Define perfiles y permisos por área para proteger datos y asegurar trazabilidad de accesos.",
+        capabilities=(
+            "Roles por área",
+            "Permisos por módulo",
+            "Bitácora de accesos",
+            "Gestión de usuarios activos/inactivos",
+        ),
+        integrations=("RRHH", "Auditoría", "Todos los módulos ERP"),
+        business_value="Reduce riesgo operativo y fortalece gobernanza del ERP con control granular de acceso.",
+        priority="Alta",
+    ),
+    ModuleBlueprint(
+        key="auditoria",
+        name="Auditoría operativa",
+        icon="🕵️",
+        category="Administración interna",
+        summary="Registra eventos críticos para seguimiento de cambios, validación de procesos y cumplimiento interno.",
+        capabilities=(
+            "Bitácora de transacciones",
+            "Trazabilidad de cambios",
+            "Seguimiento de incidencias",
+            "Reportes de control interno",
+        ),
+        integrations=("Seguridad/Roles", "Finanzas", "Producción", "Contabilidad"),
+        business_value="Facilita investigaciones internas y control de cumplimiento con evidencia centralizada.",
+        priority="Media-Alta",
+    ),
+)
 
 # =========================
 # DB LAYER
