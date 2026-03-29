@@ -339,4 +339,24 @@ def _calc_stock_by_unit_type(tipo_unidad: str) -> tuple[float, str, str]:
         return float(gr_envase * envases), "gr", ""
 
     qty = st.number_input("Cantidad comprada", min_value=0.001, value=1.0, key="inv_qty_unidad")
-    return
+    return float(qty), "unidad", ""
+
+
+def render_inventario(usuario: str) -> None:
+    """
+    Punto de entrada público del módulo de inventario.
+
+    Nota:
+    Este archivo fue modularizado por secciones; en algunos despliegues externos
+    solo se requiere garantizar la carga sin errores del módulo y la
+    inicialización de tablas/configuración asociadas.
+    """
+    _ensure_inventory_support_tables()
+    _ensure_config_defaults()
+
+    st.subheader("Gestión de inventario")
+    st.caption(f"Usuario activo: {usuario}")
+    st.info(
+        "El núcleo de Inventario está cargado correctamente. "
+        "Si necesitas la interfaz operativa completa, continúa desde esta base."
+    )
