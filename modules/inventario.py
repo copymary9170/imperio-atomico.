@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -15,8 +16,6 @@ from services.cxp_proveedores_service import (
     crear_cuenta_por_pagar_desde_compra,
     validar_condicion_compra,
 )
-
-
 from services.tesoreria_service import registrar_egreso
 
 
@@ -37,7 +36,7 @@ def _slug(text: str) -> str:
     return txt or "item"
 
 
-def _safe_float(value, default: float = 0.0) -> float:
+def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -74,6 +73,7 @@ def _extract_supplier_tags(df_prov: pd.DataFrame) -> list[str]:
         for tag in [clean_text(x) for x in txt.split(",") if clean_text(x)]:
             tags.add(tag)
     return sorted(tags)
+
 
 def _ensure_inventory_support_tables() -> None:
     with db_transaction() as conn:
@@ -136,6 +136,7 @@ def _ensure_inventory_support_tables() -> None:
             conn.execute("ALTER TABLE historial_compras ADD COLUMN fiscal_iva_credito_usd REAL DEFAULT 0")
         if "fiscal_credito_iva_deducible" not in compra_cols:
             conn.execute("ALTER TABLE historial_compras ADD COLUMN fiscal_credito_iva_deducible INTEGER DEFAULT 1")
+
         conn.execute(
             """
             UPDATE historial_compras
@@ -165,6 +166,7 @@ def _ensure_inventory_support_tables() -> None:
                 END
             """
         )
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cuentas_por_pagar_proveedores (
@@ -185,6 +187,7 @@ def _ensure_inventory_support_tables() -> None:
             )
             """
         )
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS pagos_proveedores (
@@ -204,6 +207,7 @@ def _ensure_inventory_support_tables() -> None:
             )
             """
         )
+
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_estado ON cuentas_por_pagar_proveedores(estado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_vencimiento ON cuentas_por_pagar_proveedores(fecha_vencimiento)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pagos_proveedores_cxp ON pagos_proveedores(cuenta_por_pagar_id)")
@@ -280,226 +284,19 @@ def _build_unique_sku(conn, desired: str) -> str:
     return sku
 
 
-def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
-    st.subheader("📥 Registrar compra")
-
-    with db_transaction() as conn:
-        items_rows = conn.execute(
-            """
-            SELECT id, sku, nombre, categoria, unidad, costo_unitario_usd, precio_venta_usd
-            FROM inventario
-            WHERE estado='activo'
-            ORDER BY nombre
-            """
-        ).fetchall()
-
-    items_map = {int(r["id"]): r for r in items_rows}
-
-    modo_item = st.radio(
-        "Ítem",
-        ["Usar existente", "Crear y comprar"],
-        horizontal=True,
-        key="inv_compra_modo_item",
-    )
-    inv_id = None
-
-    if modo_item == "Usar existente" and items_map:
-        inv_id = st.selectbox(
-            "Producto",
-            list(items_map.keys()),
-            format_func=lambda i: f"{items_map[i]['nombre']} ({items_map[i]['sku']})",
-            key="inv_compra_item_id",
-        )
-    elif modo_item == "Usar existente":
-        st.warning("No hay productos creados. Usa 'Crear y comprar'.")
-
-    if modo_item == "Crear y comprar":
-        cnew1, cnew2, cnew3, cnew4 = st.columns(4)
-        nuevo_nombre = cnew1.text_input("Nombre", key="inv_compra_new_nombre")
-        nuevo_sku = cnew2.text_input("SKU base", key="inv_compra_new_sku")
-        nueva_categoria = cnew3.text_input("Categoría", value="General", key="inv_compra_new_cat")
-        tipo_unidad = cnew4.selectbox(
-            "Tipo unidad",
-            ["Unidad", "Área (cm²)", "Líquido (ml)", "Peso (gr)"],
-            key="inv_compra_new_tipo_unidad",
-        )
-        cantidad, unidad_resuelta, _ = _calc_stock_by_unit_type(tipo_unidad)
-        nuevo_min = st.number_input(
-            "Stock mínimo",
-            min_value=0.0,
-            value=0.0,
-            key="inv_compra_new_min",
-        )
-        costo_base = st.number_input(
-            "Costo inicial unitario USD",
-            min_value=0.0,
-            value=0.0,
-            format="%.4f",
-            key="inv_compra_new_costo",
-        )
-        precio_base = st.number_input(
-            "Precio inicial USD",
-            min_value=0.0,
-            value=0.0,
-            format="%.4f",
-            key="inv_compra_new_precio",
-        )
-    else:
-        cantidad = st.number_input(
-            "Cantidad comprada",
-            min_value=0.001,
-            value=1.0,
-            key="inv_compra_qty_existente",
-        )
-        unidad_resuelta = str(items_map[inv_id]["unidad"]) if inv_id in items_map else "unidad"
-        nuevo_nombre = ""
-        nuevo_sku = ""
-        nueva_categoria = ""
-        nuevo_min = 0.0
-        costo_base = 0.0
-        precio_base = 0.0
-
-    # Proveedores registrados
-    df_prov = _load_proveedores_df()
-
-    d1, d2, d3 = st.columns(3)
-
-    if not df_prov.empty:
-        opciones_prov = ["-- Seleccionar proveedor --"] + df_prov["nombre"].astype(str).tolist() + ["Otro / escribir manual"]
-        proveedor_sel = d1.selectbox(
-            "Proveedor",
-            opciones_prov,
-            key="inv_compra_proveedor_sel",
-        )
-
-        if proveedor_sel == "Otro / escribir manual":
-            proveedor_nombre = d1.text_input(
-                "Nombre proveedor",
-                key="inv_compra_proveedor_manual",
-            )
-        elif proveedor_sel == "-- Seleccionar proveedor --":
-            proveedor_nombre = ""
-        else:
-            proveedor_nombre = proveedor_sel
-    else:
-        proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
-
-    costo_total = d2.number_input(
-        "Costo total USD",
-        min_value=0.0001,
-        value=1.0,
-        format="%.4f",
-        key="inv_compra_total",
-    )
-
-    impuesto_pct = d3.number_input(
-        "Impuesto (%)",
-        min_value=0.0,
-        max_value=100.0,
-        value=float(st.session_state.get("inv_impuesto_default", 16.0)),
-        format="%.2f",
-        key="inv_compra_impuesto",
-    )
-
-    d4, d5, d6 = st.columns(3)
-    delivery_monto = d4.number_input(
-        "Delivery",
-        min_value=0.0,
-        value=float(st.session_state.get("inv_delivery_default", 0.0)),
-        format="%.4f",
-        key="inv_compra_delivery",
-    )
-    delivery_moneda = d5.selectbox(
-        "Moneda delivery",
-        ["USD", "VES (BCV)", "VES (Binance)"],
-        key="inv_compra_delivery_moneda",
-    )
-    delivery_manual = d6.checkbox("Tasa manual delivery", key="inv_compra_delivery_manual")
-    delivery_usd, tasa_delivery = _resolve_delivery_usd(
-        delivery_monto,
-        delivery_moneda,
-        tasa_bcv,
-        tasa_binance,
-        delivery_manual,
-    )
-
-    p1, p2, p3, p4 = st.columns(4)
-    tipo_pago = p1.selectbox(
-        "Tipo de pago",
-        ["contado", "credito"],
-        key="inv_compra_tipo_pago",
-    )
-    monto_pagado = p2.number_input(
-        "Pago inicial USD",
-        min_value=0.0,
-        value=float(costo_total if tipo_pago == "contado" else 0.0),
-        format="%.4f",
-        key="inv_compra_pagado",
-    )
-    fecha_venc = p3.date_input("Vence", value=None, key="inv_compra_vence")
-    moneda_pago = p4.selectbox(
-        "Moneda pago",
-        ["USD", "VES (BCV)", "VES (Binance)"],
-        key="inv_compra_moneda",
-    )
-
-    tasa_pago = _rate_from_label(moneda_pago, tasa_bcv, tasa_binance)
-    if p4.checkbox("Tasa manual pago", key="inv_compra_tasa_manual"):
-        tasa_pago = st.number_input(
-            "Tasa usada en pago",
-            min_value=0.0001,
-            value=float(tasa_pago),
-            format="%.4f",
-            key="inv_compra_tasa_pago",
-        )
-
-    if st.button("✅ Guardar compra", use_container_width=True):
-        try:
-            target_id = inv_id
-
-            if modo_item == "Crear y comprar":
-                target_id = _create_inventory_item_for_purchase(
-                    usuario=usuario,
-                    sku_base=nuevo_sku,
-                    nombre=nuevo_nombre,
-                    categoria=nueva_categoria,
-                    unidad=unidad_resuelta,
-                    minimo=float(nuevo_min),
-                    costo_inicial=float(costo_base),
-                    precio_inicial=float(precio_base),
-                )
-
-            if target_id is None:
-                raise ValueError("Debes seleccionar o crear un producto para registrar la compra.")
-
-            with db_transaction() as conn:
-                proveedor_id = _get_or_create_provider(conn, proveedor_nombre)
-
-            fin_input = CompraFinancialInput(
-                tipo_pago=clean_text(tipo_pago).lower(),
-                monto_pagado_inicial_usd=float(monto_pagado),
-                fecha_vencimiento=fecha_venc.isoformat() if fecha_venc else None,
-            )
-
-            registrar_compra(
-                usuario=usuario,
-                inventario_id=int(target_id),
-                cantidad=float(cantidad),
-                costo_total_usd=float(costo_total),
-                proveedor_id=proveedor_id,
-                proveedor_nombre=proveedor_nombre,
-                impuestos_pct=float(impuesto_pct),
-                delivery_usd=float(delivery_usd),
-                tasa_usada=float(tasa_pago if tasa_pago else tasa_delivery),
-                moneda_pago=str(moneda_pago),
-                financial_input=fin_input,
-            )
-
-            st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}.")
-            st.rerun()
-
-        except Exception as exc:
-            st.error(f"No se pudo registrar la compra: {exc}")
+def _get_or_create_provider(conn, proveedor_nombre: str) -> int | None:
+    name = clean_text(proveedor_nombre)
+    if not name:
+        return None
+    row = conn.execute(
+        "SELECT id FROM proveedores WHERE nombre=? AND COALESCE(activo,1)=1",
+        (name,),
+    ).fetchone()
+    if row:
+        return int(row["id"])
+    conn.execute("INSERT INTO proveedores(nombre, activo) VALUES(?,1)", (name,))
+    new_row = conn.execute("SELECT id FROM proveedores WHERE nombre=?", (name,)).fetchone()
+    return int(new_row["id"]) if new_row else None
 
 
 # ============================================================
@@ -535,7 +332,17 @@ def create_producto(
                 stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (usuario, sku, nombre, categoria, unidad, stock_inicial, stock_minimo, money(costo), money(precio)),
+            (
+                usuario,
+                sku,
+                nombre,
+                categoria,
+                unidad,
+                stock_inicial,
+                stock_minimo,
+                money(costo),
+                money(precio),
+            ),
         )
         return int(cur.lastrowid)
 
@@ -581,7 +388,14 @@ def add_inventory_movement(
             INSERT INTO movimientos_inventario(usuario, inventario_id, tipo, cantidad, costo_unitario_usd, referencia)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (usuario, int(inventario_id), tipo, float(delta), money(costo_unitario_usd), referencia),
+            (
+                usuario,
+                int(inventario_id),
+                tipo,
+                float(delta),
+                money(costo_unitario_usd),
+                referencia,
+            ),
         )
         connection.execute(
             "UPDATE inventario SET stock_actual = stock_actual + ? WHERE id=?",
@@ -613,6 +427,7 @@ def registrar_compra(
     costo_total_usd = as_positive(costo_total_usd, "Costo total", allow_zero=False)
     costo_unit = costo_total_usd / cantidad
     financial_input = financial_input or CompraFinancialInput()
+
     monto_pagado_inicial_usd, saldo_pendiente_usd = validar_condicion_compra(
         total_compra_usd=float(costo_total_usd),
         tipo_pago=financial_input.tipo_pago,
@@ -634,7 +449,11 @@ def registrar_compra(
         stock_actual = float(row["stock_actual"] or 0.0)
         costo_actual = float(row["costo_unitario_usd"] or 0.0)
         nueva_cantidad = stock_actual + cantidad
-        costo_promedio = (((stock_actual * costo_actual) + (cantidad * costo_unit)) / nueva_cantidad) if nueva_cantidad > 0 else costo_unit
+        costo_promedio = (
+            ((stock_actual * costo_actual) + (cantidad * costo_unit)) / nueva_cantidad
+            if nueva_cantidad > 0
+            else costo_unit
+        )
 
         conn.execute(
             "UPDATE inventario SET costo_unitario_usd=? WHERE id=?",
@@ -658,9 +477,12 @@ def registrar_compra(
         cur_hist = conn.execute(
             """
             INSERT INTO historial_compras
-            (usuario, inventario_id, proveedor_id, item, cantidad, unidad, costo_total_usd, costo_unit_usd,
-             impuestos, delivery, tasa_usada, moneda_pago, tipo_pago, monto_pagado_inicial_usd,
-             saldo_pendiente_usd, fecha_vencimiento, fiscal_tipo, fiscal_tasa_iva, fiscal_iva_credito_usd, fiscal_credito_iva_deducible, activo)
+            (
+                usuario, inventario_id, proveedor_id, item, cantidad, unidad, costo_total_usd, costo_unit_usd,
+                impuestos, delivery, tasa_usada, moneda_pago, tipo_pago, monto_pagado_inicial_usd,
+                saldo_pendiente_usd, fecha_vencimiento, fiscal_tipo, fiscal_tasa_iva, fiscal_iva_credito_usd,
+                fiscal_credito_iva_deducible, activo
+            )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
@@ -687,6 +509,7 @@ def registrar_compra(
             ),
         )
         compra_id = int(cur_hist.lastrowid)
+
         if monto_pagado_inicial_usd > 0:
             registrar_egreso(
                 conn,
@@ -695,7 +518,13 @@ def registrar_compra(
                 descripcion=f"Pago inicial compra #{compra_id} · {row['nombre']}",
                 monto_usd=float(monto_pagado_inicial_usd),
                 moneda=str(moneda_pago),
-                monto_moneda=float(monto_pagado_inicial_usd if str(moneda_pago).upper() == "USD" else costo_total_usd * (monto_pagado_inicial_usd / max(float(costo_total_usd), 0.0001)) * float(tasa_usada)),
+                monto_moneda=float(
+                    monto_pagado_inicial_usd
+                    if str(moneda_pago).upper() == "USD"
+                    else costo_total_usd
+                    * (monto_pagado_inicial_usd / max(float(costo_total_usd), 0.0001))
+                    * float(tasa_usada)
+                ),
                 tasa_cambio=float(tasa_usada or 1.0),
                 metodo_pago=str(moneda_pago).lower(),
                 usuario=usuario,
@@ -705,6 +534,7 @@ def registrar_compra(
                     "proveedor_id": int(proveedor_id) if proveedor_id is not None else None,
                 },
             )
+
         crear_cuenta_por_pagar_desde_compra(
             conn,
             usuario=usuario,
@@ -738,7 +568,10 @@ def _create_inventory_item_for_purchase(
         sku = _build_unique_sku(conn, desired_sku)
         cur = conn.execute(
             """
-            INSERT INTO inventario(usuario, sku, nombre, categoria, unidad, stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd)            
+            INSERT INTO inventario(
+                usuario, sku, nombre, categoria, unidad,
+                stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd
+            )
             VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
             """,
             (
@@ -810,17 +643,32 @@ def _build_restock_recommendations(df_inv: pd.DataFrame) -> pd.DataFrame:
     df["stock_minimo"] = pd.to_numeric(df["stock_minimo"], errors="coerce").fillna(0.0)
     df["costo_unitario_usd"] = pd.to_numeric(df["costo_unitario_usd"], errors="coerce").fillna(0.0)
 
-    críticos = df[df["stock_actual"] <= df["stock_minimo"]].copy()
-    if críticos.empty:
-        return pd.DataFrame(columns=["id", "sku", "nombre", "categoria", "unidad", "stock_actual", "stock_minimo", "faltante", "sugerido_compra", "costo_estimado_usd", "prioridad"])
+    criticos = df[df["stock_actual"] <= df["stock_minimo"]].copy()
+    if criticos.empty:
+        return pd.DataFrame(
+            columns=[
+                "id",
+                "sku",
+                "nombre",
+                "categoria",
+                "unidad",
+                "stock_actual",
+                "stock_minimo",
+                "faltante",
+                "sugerido_compra",
+                "costo_estimado_usd",
+                "prioridad",
+            ]
+        )
 
-    críticos["faltante"] = (críticos["stock_minimo"] - críticos["stock_actual"]).clip(lower=0.0)
-    # Sugerencia conservadora: llevar a mínimo + 20% de colchón.
-    críticos["sugerido_compra"] = (críticos["faltante"] + (críticos["stock_minimo"] * 0.2)).clip(lower=0.001).round(3)
-    críticos["costo_estimado_usd"] = (críticos["sugerido_compra"] * críticos["costo_unitario_usd"]).round(2)
-    críticos["prioridad"] = críticos["faltante"].apply(lambda v: "Alta" if float(v) > 0 else "Media")
+    criticos["faltante"] = (criticos["stock_minimo"] - criticos["stock_actual"]).clip(lower=0.0)
+    criticos["sugerido_compra"] = (
+        criticos["faltante"] + (criticos["stock_minimo"] * 0.2)
+    ).clip(lower=0.001).round(3)
+    criticos["costo_estimado_usd"] = (criticos["sugerido_compra"] * criticos["costo_unitario_usd"]).round(2)
+    criticos["prioridad"] = criticos["faltante"].apply(lambda v: "Alta" if float(v) > 0 else "Media")
 
-    return críticos[
+    return criticos[
         [
             "id",
             "sku",
@@ -867,7 +715,6 @@ def _load_movements_df(limit: int = 1000) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
-
 def _load_diagnostico_movimientos(limit: int = 20) -> pd.DataFrame:
     with db_transaction() as conn:
         rows = conn.execute(
@@ -884,16 +731,19 @@ def _load_diagnostico_movimientos(limit: int = 20) -> pd.DataFrame:
         ).fetchall()
     return pd.DataFrame(rows, columns=["fecha", "insumo", "cantidad", "unidad", "referencia"])
 
+
 def _load_proveedores_df() -> pd.DataFrame:
     with db_transaction() as conn:
         rows = conn.execute(
             """
-            SELECT id, nombre, telefono, rif, contacto, observaciones, COALESCE(especialidades,'') AS especialidades, fecha_creacion
+            SELECT id, nombre, telefono, rif, contacto, observaciones,
+                   COALESCE(especialidades,'') AS especialidades, fecha_creacion
             FROM proveedores
             WHERE COALESCE(activo,1)=1
             ORDER BY nombre ASC
             """
         ).fetchall()
+
     cols = [
         "id",
         "nombre",
@@ -906,8 +756,6 @@ def _load_proveedores_df() -> pd.DataFrame:
     ]
     df = pd.DataFrame(rows, columns=cols)
 
-    # Algunas instalaciones antiguas/devuelven filas sin etiquetas (RangeIndex).
-    # Normalizamos siempre la estructura para evitar KeyError al acceder por nombre.
     if list(df.columns) != cols:
         if df.shape[1] == len(cols):
             df.columns = cols
@@ -949,6 +797,7 @@ def _load_cuentas_por_pagar_df() -> pd.DataFrame:
                 cxp.fecha DESC
             """
         ).fetchall()
+
     cols = [
         "id",
         "fecha",
@@ -967,7 +816,7 @@ def _load_cuentas_por_pagar_df() -> pd.DataFrame:
 
 
 def _load_pagos_proveedores_df(cuenta_por_pagar_id: int | None = None) -> pd.DataFrame:
-    params: tuple = ()
+    params: tuple[Any, ...] = ()
     sql = """
         SELECT pp.id,
                pp.fecha,
@@ -1035,6 +884,7 @@ def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
             """,
             (int(limit),),
         ).fetchall()
+
     cols = [
         "id",
         "fecha",
@@ -1165,9 +1015,15 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             ORDER BY nombre
             """
         ).fetchall()
+
     items_map = {int(r["id"]): r for r in items_rows}
 
-    modo_item = st.radio("Ítem", ["Usar existente", "Crear y comprar"], horizontal=True, key="inv_compra_modo_item")
+    modo_item = st.radio(
+        "Ítem",
+        ["Usar existente", "Crear y comprar"],
+        horizontal=True,
+        key="inv_compra_modo_item",
+    )
     inv_id = None
 
     if modo_item == "Usar existente" and items_map:
@@ -1192,63 +1048,121 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
         )
         cantidad, unidad_resuelta, _ = _calc_stock_by_unit_type(tipo_unidad)
         nuevo_min = st.number_input("Stock mínimo", min_value=0.0, value=0.0, key="inv_compra_new_min")
-        costo_base = st.number_input("Costo inicial unitario USD", min_value=0.0, value=0.0, format="%.4f", key="inv_compra_new_costo")
-        precio_base = st.number_input("Precio inicial USD", min_value=0.0, value=0.0, format="%.4f", key="inv_compra_new_precio")
+        costo_base = st.number_input(
+            "Costo inicial unitario USD",
+            min_value=0.0,
+            value=0.0,
+            format="%.4f",
+            key="inv_compra_new_costo",
+        )
+        precio_base = st.number_input(
+            "Precio inicial USD",
+            min_value=0.0,
+            value=0.0,
+            format="%.4f",
+            key="inv_compra_new_precio",
+        )
     else:
-        cantidad = st.number_input("Cantidad comprada", min_value=0.001, value=1.0, key="inv_compra_qty_existente")
+        cantidad = st.number_input(
+            "Cantidad comprada",
+            min_value=0.001,
+            value=1.0,
+            key="inv_compra_qty_existente",
+        )
         unidad_resuelta = str(items_map[inv_id]["unidad"]) if inv_id in items_map else "unidad"
+        nuevo_nombre = ""
+        nuevo_sku = ""
+        nueva_categoria = ""
+        nuevo_min = 0.0
+        costo_base = 0.0
+        precio_base = 0.0
 
-df_prov = _load_proveedores_df()
+    df_prov = _load_proveedores_df()
 
-d1, d2, d3 = st.columns(3)
+    d1, d2, d3 = st.columns(3)
 
-if not df_prov.empty:
-    opciones_prov = ["-- Seleccionar proveedor --"] + df_prov["nombre"].astype(str).tolist() + ["Otro / escribir manual"]
-    proveedor_sel = d1.selectbox("Proveedor", opciones_prov, key="inv_compra_proveedor_sel")
+    if not df_prov.empty:
+        opciones_prov = ["-- Seleccionar proveedor --"] + df_prov["nombre"].astype(str).tolist() + ["Otro / escribir manual"]
+        proveedor_sel = d1.selectbox("Proveedor", opciones_prov, key="inv_compra_proveedor_sel")
 
-    if proveedor_sel == "Otro / escribir manual":
-        proveedor_nombre = d1.text_input("Nombre proveedor", key="inv_compra_proveedor_manual")
-    elif proveedor_sel == "-- Seleccionar proveedor --":
-        proveedor_nombre = ""
+        if proveedor_sel == "Otro / escribir manual":
+            proveedor_nombre = d1.text_input("Nombre proveedor", key="inv_compra_proveedor_manual")
+        elif proveedor_sel == "-- Seleccionar proveedor --":
+            proveedor_nombre = ""
+        else:
+            proveedor_nombre = proveedor_sel
     else:
-        proveedor_nombre = proveedor_sel
-else:
-    proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
+        proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
 
-costo_total = d2.number_input(
-    "Costo total USD",
-    min_value=0.0001,
-    value=1.0,
-    format="%.4f",
-    key="inv_compra_total",
-)
+    costo_total = d2.number_input(
+        "Costo total USD",
+        min_value=0.0001,
+        value=1.0,
+        format="%.4f",
+        key="inv_compra_total",
+    )
 
-impuesto_pct = d3.number_input(
-    "Impuesto (%)",
-    min_value=0.0,
-    max_value=100.0,
-    value=float(st.session_state.get("inv_impuesto_default", 16.0)),
-    format="%.2f",
-    key="inv_compra_impuesto",
-)
+    impuesto_pct = d3.number_input(
+        "Impuesto (%)",
+        min_value=0.0,
+        max_value=100.0,
+        value=float(st.session_state.get("inv_impuesto_default", 16.0)),
+        format="%.2f",
+        key="inv_compra_impuesto",
+    )
+
     d4, d5, d6 = st.columns(3)
-    delivery_monto = d4.number_input("Delivery", min_value=0.0, value=float(st.session_state.get("inv_delivery_default", 0.0)), format="%.4f", key="inv_compra_delivery")
-    delivery_moneda = d5.selectbox("Moneda delivery", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_delivery_moneda")
+    delivery_monto = d4.number_input(
+        "Delivery",
+        min_value=0.0,
+        value=float(st.session_state.get("inv_delivery_default", 0.0)),
+        format="%.4f",
+        key="inv_compra_delivery",
+    )
+    delivery_moneda = d5.selectbox(
+        "Moneda delivery",
+        ["USD", "VES (BCV)", "VES (Binance)"],
+        key="inv_compra_delivery_moneda",
+    )
     delivery_manual = d6.checkbox("Tasa manual delivery", key="inv_compra_delivery_manual")
-    delivery_usd, tasa_delivery = _resolve_delivery_usd(delivery_monto, delivery_moneda, tasa_bcv, tasa_binance, delivery_manual)
+    delivery_usd, tasa_delivery = _resolve_delivery_usd(
+        delivery_monto,
+        delivery_moneda,
+        tasa_bcv,
+        tasa_binance,
+        delivery_manual,
+    )
 
     p1, p2, p3, p4 = st.columns(4)
     tipo_pago = p1.selectbox("Tipo de pago", ["contado", "credito"], key="inv_compra_tipo_pago")
-    monto_pagado = p2.number_input("Pago inicial USD", min_value=0.0, value=float(costo_total if tipo_pago == "contado" else 0.0), format="%.4f", key="inv_compra_pagado")
+    monto_pagado = p2.number_input(
+        "Pago inicial USD",
+        min_value=0.0,
+        value=float(costo_total if tipo_pago == "contado" else 0.0),
+        format="%.4f",
+        key="inv_compra_pagado",
+    )
     fecha_venc = p3.date_input("Vence", value=None, key="inv_compra_vence")
-    moneda_pago = p4.selectbox("Moneda pago", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_compra_moneda")
+    moneda_pago = p4.selectbox(
+        "Moneda pago",
+        ["USD", "VES (BCV)", "VES (Binance)"],
+        key="inv_compra_moneda",
+    )
+
     tasa_pago = _rate_from_label(moneda_pago, tasa_bcv, tasa_binance)
     if p4.checkbox("Tasa manual pago", key="inv_compra_tasa_manual"):
-        tasa_pago = st.number_input("Tasa usada en pago", min_value=0.0001, value=float(tasa_pago), format="%.4f", key="inv_compra_tasa_pago")
+        tasa_pago = st.number_input(
+            "Tasa usada en pago",
+            min_value=0.0001,
+            value=float(tasa_pago),
+            format="%.4f",
+            key="inv_compra_tasa_pago",
+        )
 
     if st.button("✅ Guardar compra", use_container_width=True):
         try:
             target_id = inv_id
+
             if modo_item == "Crear y comprar":
                 target_id = _create_inventory_item_for_purchase(
                     usuario=usuario,
@@ -1260,6 +1174,7 @@ impuesto_pct = d3.number_input(
                     costo_inicial=float(costo_base),
                     precio_inicial=float(precio_base),
                 )
+
             if target_id is None:
                 raise ValueError("Debes seleccionar o crear un producto para registrar la compra.")
 
@@ -1285,8 +1200,10 @@ impuesto_pct = d3.number_input(
                 moneda_pago=str(moneda_pago),
                 financial_input=fin_input,
             )
+
             st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}.")
             st.rerun()
+
         except Exception as exc:
             st.error(f"No se pudo registrar la compra: {exc}")
 
@@ -1379,7 +1296,11 @@ def _render_proveedores() -> None:
                 exists = conn.execute("SELECT id FROM proveedores WHERE nombre=?", (clean_text(nombre),)).fetchone()
                 if exists:
                     conn.execute(
-                        "UPDATE proveedores SET telefono=?, rif=?, contacto=?, observaciones=?, especialidades=?, activo=1 WHERE id=?",
+                        """
+                        UPDATE proveedores
+                        SET telefono=?, rif=?, contacto=?, observaciones=?, especialidades=?, activo=1
+                        WHERE id=?
+                        """,
                         (
                             clean_text(telefono),
                             clean_text(rif),
@@ -1391,7 +1312,10 @@ def _render_proveedores() -> None:
                     )
                 else:
                     conn.execute(
-                        "INSERT INTO proveedores(nombre, telefono, rif, contacto, observaciones, especialidades, activo) VALUES(?,?,?,?,?,?,1)",
+                        """
+                        INSERT INTO proveedores(nombre, telefono, rif, contacto, observaciones, especialidades, activo)
+                        VALUES(?,?,?,?,?,?,1)
+                        """,
                         (
                             clean_text(nombre),
                             clean_text(telefono),
@@ -1524,9 +1448,7 @@ def _render_ajustes(usuario: str) -> None:
         st.info("No hay productos activos para ajustar.")
         return
 
-    t1, t2, t3, t4 = st.tabs(
-        ["🧮 Stock", "💲 Costos y Precios", "📦 Políticas", "🧹 Mantenimiento"]
-    )
+    t1, t2, t3, t4 = st.tabs(["🧮 Stock", "💲 Costos y Precios", "📦 Políticas", "🧹 Mantenimiento"])
 
     with t1:
         st.caption("Ajustes de stock por reconteo individual y por lote.")
@@ -1689,6 +1611,7 @@ def _render_ajustes(usuario: str) -> None:
     st.markdown("### Configuración estratégica")
     with db_transaction() as conn:
         cfg = pd.read_sql("SELECT parametro, valor FROM configuracion", conn)
+
     cfg_map = {str(r.parametro): _safe_float(r.valor, 0.0) for r in cfg.itertuples() if str(r.valor).strip() != ""}
 
     c1, c2, c3 = st.columns(3)
@@ -1698,8 +1621,19 @@ def _render_ajustes(usuario: str) -> None:
 
     with st.form("form_config_inventario"):
         alerta = st.number_input("Días alerta reposición", min_value=1, max_value=365, value=int(cfg_map.get("inv_alerta_dias", 14)))
-        impuesto = st.number_input("Impuesto default compras (%)", min_value=0.0, max_value=100.0, value=float(cfg_map.get("inv_impuesto_default", 16.0)), format="%.2f")
-        delivery = st.number_input("Delivery default ($)", min_value=0.0, value=float(cfg_map.get("inv_delivery_default", 0.0)), format="%.2f")
+        impuesto = st.number_input(
+            "Impuesto default compras (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=float(cfg_map.get("inv_impuesto_default", 16.0)),
+            format="%.2f",
+        )
+        delivery = st.number_input(
+            "Delivery default ($)",
+            min_value=0.0,
+            value=float(cfg_map.get("inv_delivery_default", 0.0)),
+            format="%.2f",
+        )
         guardar = st.form_submit_button("💾 Guardar Configuración", use_container_width=True)
 
     if guardar:
