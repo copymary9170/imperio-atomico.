@@ -67,7 +67,11 @@ def render_planeacion_financiera(usuario: str) -> None:
         st.dataframe(flujo, use_container_width=True, hide_index=True)
 
         if not flujo.empty:
-            st.line_chart(flujo.set_index("fecha")[["flujo_proyectado_usd"]])
+            col_fecha = "fecha" if "fecha" in flujo.columns else "fecha_corte" if "fecha_corte" in flujo.columns else None
+            if col_fecha:
+                st.line_chart(flujo.set_index(col_fecha)[["flujo_proyectado_usd"]])
+            else:
+                st.line_chart(flujo[["flujo_proyectado_usd"]])
 
         st.download_button(
             "Exportar CSV",
