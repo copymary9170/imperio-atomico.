@@ -340,7 +340,3 @@ def _calc_stock_by_unit_type(tipo_unidad: str) -> tuple[float, str, str]:
 
     qty = st.number_input("Cantidad comprada", min_value=0.001, value=1.0, key="inv_qty_unidad")
     return
-
-
-
-
