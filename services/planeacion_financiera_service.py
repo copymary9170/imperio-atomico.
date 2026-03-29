@@ -1,75 +1,275 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
 
 
-VENTANAS_PROYECCION = (7, 15, 30)
+# ============================================================
+# ESQUEMA
+# ============================================================
 
 
-def _periodo_actual() -> str:
-    hoy = date.today()
-    return f"{hoy.year:04d}-{hoy.month:02d}"
+def _table_exists(conn, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1",
+        (table_name,),
+    ).fetchone()
+    return bool(row)
+
+
+def _ensure_planeacion_schema(conn) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS presupuesto_operativo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            periodo TEXT NOT NULL,
+            categoria TEXT NOT NULL,
+            tipo TEXT NOT NULL CHECK (tipo IN ('ingreso', 'egreso')),
+            monto_presupuestado_usd REAL NOT NULL DEFAULT 0,
+            meta_kpi_usd REAL NOT NULL DEFAULT 0,
+            notas TEXT,
+            usuario TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_presupuesto_operativo_periodo
+            ON presupuesto_operativo(periodo);
+
+        CREATE INDEX IF NOT EXISTS idx_presupuesto_operativo_tipo
+            ON presupuesto_operativo(tipo);
+        """
+    )
+
+
+# ============================================================
+# AUXILIARES
+# ============================================================
+
+
+def _safe_scalar(conn, query: str, params: tuple[Any, ...] = ()) -> float:
+    try:
+        row = conn.execute(query, params).fetchone()
+        if not row:
+            return 0.0
+        return float(row[0] or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _safe_df(conn, query: str, params: tuple[Any, ...], columns: list[str]) -> pd.DataFrame:
+    try:
+        return pd.read_sql_query(query, conn, params=params)
+    except Exception:
+        return pd.DataFrame(columns=columns)
+
+
+def _period_bounds(periodo: str) -> tuple[str, str]:
+    try:
+        year, month = periodo.split("-")
+        year_i = int(year)
+        month_i = int(month)
+        start = date(year_i, month_i, 1)
+        if month_i == 12:
+            end = date(year_i + 1, 1, 1) - timedelta(days=1)
+        else:
+            end = date(year_i, month_i + 1, 1) - timedelta(days=1)
+        return start.isoformat(), end.isoformat()
+    except Exception:
+        today = date.today()
+        start = today.replace(day=1)
+        if today.month == 12:
+            end = date(today.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+        return start.isoformat(), end.isoformat()
+
+
+def _ventas_reales_periodo(conn, fecha_desde: str, fecha_hasta: str) -> float:
+    if not _table_exists(conn, "ventas"):
+        return 0.0
+    return _safe_scalar(
+        conn,
+        """
+        SELECT COALESCE(SUM(total_usd), 0)
+        FROM ventas
+        WHERE estado = 'registrada'
+          AND DATE(fecha) BETWEEN DATE(?) AND DATE(?)
+        """,
+        (fecha_desde, fecha_hasta),
+    )
+
+
+def _gastos_reales_periodo(conn, fecha_desde: str, fecha_hasta: str) -> float:
+    if not _table_exists(conn, "gastos"):
+        return 0.0
+    return _safe_scalar(
+        conn,
+        """
+        SELECT COALESCE(SUM(monto_usd), 0)
+        FROM gastos
+        WHERE estado = 'activo'
+          AND DATE(fecha) BETWEEN DATE(?) AND DATE(?)
+        """,
+        (fecha_desde, fecha_hasta),
+    )
+
+
+def _cuentas_por_cobrar_en_horizonte(conn, horizonte_dias: int) -> float:
+    if _table_exists(conn, "cuentas_por_cobrar"):
+        return _safe_scalar(
+            conn,
+            """
+            SELECT COALESCE(SUM(monto_usd), 0)
+            FROM cuentas_por_cobrar
+            WHERE estado IN ('pendiente', 'parcial')
+              AND DATE(fecha_vencimiento) <= DATE('now', ?)
+            """,
+            (f"+{int(horizonte_dias)} day",),
+        )
+
+    if _table_exists(conn, "ventas"):
+        # Fallback: proyecta cobros según promedio diario reciente
+        base = _safe_scalar(
+            conn,
+            """
+            SELECT COALESCE(SUM(total_usd), 0)
+            FROM ventas
+            WHERE estado = 'registrada'
+              AND DATE(fecha) >= DATE('now', '-30 day')
+            """,
+        )
+        promedio_diario = base / 30.0
+        return promedio_diario * horizonte_dias
+
+    return 0.0
+
+
+def _cuentas_por_pagar_en_horizonte(conn, horizonte_dias: int) -> float:
+    if _table_exists(conn, "cuentas_por_pagar"):
+        return _safe_scalar(
+            conn,
+            """
+            SELECT COALESCE(SUM(monto_usd), 0)
+            FROM cuentas_por_pagar
+            WHERE estado IN ('pendiente', 'parcial')
+              AND DATE(fecha_vencimiento) <= DATE('now', ?)
+            """,
+            (f"+{int(horizonte_dias)} day",),
+        )
+
+    if _table_exists(conn, "gastos"):
+        # Fallback: proyecta pagos según promedio diario reciente
+        base = _safe_scalar(
+            conn,
+            """
+            SELECT COALESCE(SUM(monto_usd), 0)
+            FROM gastos
+            WHERE estado = 'activo'
+              AND DATE(fecha) >= DATE('now', '-30 day')
+            """,
+        )
+        promedio_diario = base / 30.0
+        return promedio_diario * horizonte_dias
+
+    return 0.0
+
+
+def _saldo_actual_estimado(conn) -> float:
+    # Prioridad 1: caja/bancos
+    if _table_exists(conn, "movimientos_financieros"):
+        return _safe_scalar(
+            conn,
+            """
+            SELECT COALESCE(
+                SUM(
+                    CASE
+                        WHEN LOWER(tipo) IN ('ingreso', 'entrada', 'credito') THEN monto_usd
+                        WHEN LOWER(tipo) IN ('egreso', 'salida', 'debito') THEN -monto_usd
+                        ELSE 0
+                    END
+                ),
+                0
+            )
+            FROM movimientos_financieros
+            """,
+        )
+
+    # Prioridad 2: si hay ventas/gastos, saldo simplificado
+    ventas_total = 0.0
+    gastos_total = 0.0
+
+    if _table_exists(conn, "ventas"):
+        ventas_total = _safe_scalar(
+            conn,
+            "SELECT COALESCE(SUM(total_usd), 0) FROM ventas WHERE estado = 'registrada'",
+        )
+    if _table_exists(conn, "gastos"):
+        gastos_total = _safe_scalar(
+            conn,
+            "SELECT COALESCE(SUM(monto_usd), 0) FROM gastos WHERE estado = 'activo'",
+        )
+
+    return ventas_total - gastos_total
+
+
+# ============================================================
+# PRESUPUESTO OPERATIVO
+# ============================================================
 
 
 def guardar_presupuesto_operativo(
-    conn: Any,
+    conn,
     *,
     periodo: str,
     categoria: str,
     tipo: str,
     monto_presupuestado_usd: float,
+    meta_kpi_usd: float,
     usuario: str,
-    meta_kpi_usd: float = 0.0,
-    notas: str | None = None,
+    notas: str = "",
 ) -> int:
-    tipo_norm = (tipo or "").strip().lower()
-    if tipo_norm not in {"ingreso", "egreso"}:
-        raise ValueError("Tipo de presupuesto inválido")
+    _ensure_planeacion_schema(conn)
 
-    periodo_norm = (periodo or "").strip() or _periodo_actual()
-    if len(periodo_norm) != 7 or "-" not in periodo_norm:
-        raise ValueError("El período debe usar formato YYYY-MM")
+    if tipo not in {"ingreso", "egreso"}:
+        raise ValueError("El tipo debe ser 'ingreso' o 'egreso'.")
 
-    conn.execute(
+    categoria_limpia = str(categoria or "").strip()
+    if not categoria_limpia:
+        raise ValueError("La categoría es obligatoria.")
+
+    cur = conn.execute(
         """
-        INSERT INTO presupuesto_operativo
-        (periodo, categoria, tipo, monto_presupuestado_usd, meta_kpi_usd, usuario, notas)
+        INSERT INTO presupuesto_operativo (
+            periodo,
+            categoria,
+            tipo,
+            monto_presupuestado_usd,
+            meta_kpi_usd,
+            notas,
+            usuario
+        )
         VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(periodo, categoria, tipo) DO UPDATE SET
-            monto_presupuestado_usd = excluded.monto_presupuestado_usd,
-            meta_kpi_usd = excluded.meta_kpi_usd,
-            usuario = excluded.usuario,
-            notas = excluded.notas,
-            actualizado_en = CURRENT_TIMESTAMP
         """,
         (
-            periodo_norm,
-            (categoria or "").strip() or "general",
-            tipo_norm,
-            float(monto_presupuestado_usd or 0),
-            float(meta_kpi_usd or 0),
-            str(usuario or "Sistema"),
-            (notas or "").strip() or None,
+            str(periodo).strip(),
+            categoria_limpia,
+            tipo,
+            float(monto_presupuestado_usd or 0.0),
+            float(meta_kpi_usd or 0.0),
+            str(notas or "").strip(),
+            str(usuario or "").strip(),
         ),
     )
-    row = conn.execute(
-        """
-        SELECT id
-        FROM presupuesto_operativo
-        WHERE periodo=? AND categoria=? AND tipo=?
-        LIMIT 1
-        """,
-        (periodo_norm, (categoria or "").strip() or "general", tipo_norm),
-    ).fetchone()
-    return int(row["id"]) if row else 0
+    return int(cur.lastrowid)
 
 
-def listar_presupuesto_operativo(conn: Any, *, periodo: str | None = None) -> pd.DataFrame:
-    periodo_norm = (periodo or "").strip() or _periodo_actual()
-    return pd.read_sql_query(
+def listar_presupuesto_operativo(conn, *, periodo: str) -> pd.DataFrame:
+    _ensure_planeacion_schema(conn)
+    return _safe_df(
+        conn,
         """
         SELECT
             id,
@@ -78,221 +278,250 @@ def listar_presupuesto_operativo(conn: Any, *, periodo: str | None = None) -> pd
             tipo,
             monto_presupuestado_usd,
             meta_kpi_usd,
-            usuario,
             notas,
-            actualizado_en
+            usuario,
+            created_at
         FROM presupuesto_operativo
         WHERE periodo = ?
-        ORDER BY tipo, categoria
+        ORDER BY tipo ASC, categoria ASC, id DESC
         """,
-        conn,
-        params=[periodo_norm],
+        (periodo,),
+        [
+            "id",
+            "periodo",
+            "categoria",
+            "tipo",
+            "monto_presupuestado_usd",
+            "meta_kpi_usd",
+            "notas",
+            "usuario",
+            "created_at",
+        ],
     )
 
 
-def _saldo_actual_tesoreria(conn: Any) -> float:
-    row = conn.execute(
+def resumen_presupuesto_operativo(conn, *, periodo: str) -> dict[str, float]:
+    _ensure_planeacion_schema(conn)
+    fecha_desde, fecha_hasta = _period_bounds(periodo)
+
+    ingresos_presupuestados = _safe_scalar(
+        conn,
         """
-        SELECT
-            ROUND(
-                COALESCE(SUM(CASE WHEN tipo='ingreso' AND estado='confirmado' THEN monto_usd END), 0)
-                -
-                COALESCE(SUM(CASE WHEN tipo='egreso' AND estado='confirmado' THEN monto_usd END), 0),
-                2
-            ) AS saldo_actual
-        FROM movimientos_tesoreria
-        """
-    ).fetchone()
-    return float(row["saldo_actual"] if row and row["saldo_actual"] is not None else 0.0)
-
-
-def _sumatoria_cxc_hasta(conn: Any, fecha_hasta: str) -> float:
-    row = conn.execute(
-        """
-        SELECT ROUND(COALESCE(SUM(saldo_usd), 0), 2) AS total
-        FROM cuentas_por_cobrar
-        WHERE estado IN ('pendiente', 'parcial', 'vencida')
-          AND COALESCE(saldo_usd, 0) > 0
-          AND fecha_vencimiento IS NOT NULL
-          AND date(fecha_vencimiento) BETWEEN date('now') AND date(?)
-        """,
-        (fecha_hasta,),
-    ).fetchone()
-    return float(row["total"] if row and row["total"] is not None else 0.0)
-
-
-def _sumatoria_cxp_hasta(conn: Any, fecha_hasta: str) -> float:
-    row = conn.execute(
-        """
-        SELECT ROUND(COALESCE(SUM(saldo_usd), 0), 2) AS total
-        FROM cuentas_por_pagar_proveedores
-        WHERE estado IN ('pendiente', 'parcial', 'vencida')
-          AND COALESCE(saldo_usd, 0) > 0
-          AND fecha_vencimiento IS NOT NULL
-          AND date(fecha_vencimiento) BETWEEN date('now') AND date(?)
-        """,
-        (fecha_hasta,),
-    ).fetchone()
-    return float(row["total"] if row and row["total"] is not None else 0.0)
-
-
-def _sumatoria_gastos_esperados(conn: Any, dias: int) -> float:
-    row = conn.execute(
-        """
-        SELECT ROUND(COALESCE(SUM(monto_usd), 0), 2) AS total
-        FROM gastos
-        WHERE estado='activo'
-          AND date(fecha) >= date('now', '-30 day')
-        """
-    ).fetchone()
-    gastos_30 = float(row["total"] if row and row["total"] is not None else 0.0)
-    if gastos_30 <= 0:
-        return 0.0
-    return round((gastos_30 / 30.0) * float(dias), 2)
-
-
-def calcular_flujo_caja_proyectado(conn: Any, *, ventanas: tuple[int, ...] = VENTANAS_PROYECCION) -> pd.DataFrame:
-    saldo_actual = _saldo_actual_tesoreria(conn)
-    filas: list[dict[str, float | int | str]] = []
-
-    for dias in ventanas:
-        fecha_hasta = (date.today() + timedelta(days=int(dias))).isoformat()
-        cobros = _sumatoria_cxc_hasta(conn, fecha_hasta)
-        pagos = _sumatoria_cxp_hasta(conn, fecha_hasta)
-        gastos = _sumatoria_gastos_esperados(conn, dias)
-
-        flujo = round(cobros - pagos - gastos, 2)
-        saldo_proyectado = round(saldo_actual + flujo, 2)
-
-        filas.append(
-            {
-                "horizonte_dias": int(dias),
-                "fecha_corte": fecha_hasta,
-                "saldo_actual_usd": saldo_actual,
-                "cobros_esperados_usd": cobros,
-                "pagos_proximos_usd": pagos,
-                "gastos_estimados_usd": gastos,
-                "flujo_proyectado_usd": flujo,
-                "saldo_proyectado_usd": saldo_proyectado,
-            }
-        )
-
-    return pd.DataFrame(filas)
-
-
-def resumen_presupuesto_operativo(conn: Any, *, periodo: str | None = None) -> dict[str, float | str]:
-    periodo_norm = (periodo or "").strip() or _periodo_actual()
-    fecha_desde = f"{periodo_norm}-01"
-    fecha_hasta = f"{periodo_norm}-31"
-
-    presupuesto = conn.execute(
-        """
-        SELECT
-            ROUND(COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto_presupuestado_usd END), 0), 2) AS ingresos_pres,
-            ROUND(COALESCE(SUM(CASE WHEN tipo='egreso' THEN monto_presupuestado_usd END), 0), 2) AS egresos_pres
+        SELECT COALESCE(SUM(monto_presupuestado_usd), 0)
         FROM presupuesto_operativo
-        WHERE periodo=?
+        WHERE periodo = ? AND tipo = 'ingreso'
         """,
-        (periodo_norm,),
-    ).fetchone()
+        (periodo,),
+    )
 
-    ejecutado = conn.execute(
+    egresos_presupuestados = _safe_scalar(
+        conn,
         """
-        SELECT
-            ROUND(COALESCE((SELECT SUM(total_usd) FROM ventas WHERE date(fecha) BETWEEN date(?) AND date(?) AND estado='registrada'), 0), 2) AS ingresos_real,
-            ROUND(COALESCE((SELECT SUM(monto_usd) FROM gastos WHERE date(fecha) BETWEEN date(?) AND date(?) AND estado='activo'), 0), 2) AS egresos_real
+        SELECT COALESCE(SUM(monto_presupuestado_usd), 0)
+        FROM presupuesto_operativo
+        WHERE periodo = ? AND tipo = 'egreso'
         """,
-        (fecha_desde, fecha_hasta, fecha_desde, fecha_hasta),
-    ).fetchone()
+        (periodo,),
+    )
 
-    ingresos_pres = float(presupuesto["ingresos_pres"] if presupuesto else 0.0)
-    egresos_pres = float(presupuesto["egresos_pres"] if presupuesto else 0.0)
-    ingresos_real = float(ejecutado["ingresos_real"] if ejecutado else 0.0)
-    egresos_real = float(ejecutado["egresos_real"] if ejecutado else 0.0)
+    meta_kpi_ingresos = _safe_scalar(
+        conn,
+        """
+        SELECT COALESCE(SUM(meta_kpi_usd), 0)
+        FROM presupuesto_operativo
+        WHERE periodo = ? AND tipo = 'ingreso'
+        """,
+        (periodo,),
+    )
+
+    meta_kpi_egresos = _safe_scalar(
+        conn,
+        """
+        SELECT COALESCE(SUM(meta_kpi_usd), 0)
+        FROM presupuesto_operativo
+        WHERE periodo = ? AND tipo = 'egreso'
+        """,
+        (periodo,),
+    )
+
+    ingresos_reales = _ventas_reales_periodo(conn, fecha_desde, fecha_hasta)
+    egresos_reales = _gastos_reales_periodo(conn, fecha_desde, fecha_hasta)
+
+    desviacion_ingresos = ingresos_reales - ingresos_presupuestados
+    desviacion_egresos = egresos_reales - egresos_presupuestados
+
+    utilidad_presupuestada = ingresos_presupuestados - egresos_presupuestados
+    utilidad_real = ingresos_reales - egresos_reales
+
+    cumplimiento_ingresos_pct = (
+        (ingresos_reales / ingresos_presupuestados) * 100.0
+        if ingresos_presupuestados > 0
+        else 0.0
+    )
+    ejecucion_egresos_pct = (
+        (egresos_reales / egresos_presupuestados) * 100.0
+        if egresos_presupuestados > 0
+        else 0.0
+    )
 
     return {
-        "periodo": periodo_norm,
-        "ingresos_presupuestados_usd": ingresos_pres,
-        "egresos_presupuestados_usd": egresos_pres,
-        "ingresos_ejecutados_usd": ingresos_real,
-        "egresos_ejecutados_usd": egresos_real,
-        "desviacion_ingresos_usd": round(ingresos_real - ingresos_pres, 2),
-        "desviacion_egresos_usd": round(egresos_real - egresos_pres, 2),
+        "ingresos_presupuestados_usd": float(ingresos_presupuestados),
+        "egresos_presupuestados_usd": float(egresos_presupuestados),
+        "meta_kpi_ingresos_usd": float(meta_kpi_ingresos),
+        "meta_kpi_egresos_usd": float(meta_kpi_egresos),
+        "ingresos_reales_usd": float(ingresos_reales),
+        "egresos_reales_usd": float(egresos_reales),
+        "desviacion_ingresos_usd": float(desviacion_ingresos),
+        "desviacion_egresos_usd": float(desviacion_egresos),
+        "utilidad_presupuestada_usd": float(utilidad_presupuestada),
+        "utilidad_real_usd": float(utilidad_real),
+        "cumplimiento_ingresos_pct": float(cumplimiento_ingresos_pct),
+        "ejecucion_egresos_pct": float(ejecucion_egresos_pct),
     }
 
 
-def generar_alertas_gerenciales(conn: Any, *, periodo: str | None = None) -> pd.DataFrame:
-    periodo_norm = (periodo or "").strip() or _periodo_actual()
+# ============================================================
+# FLUJO DE CAJA PROYECTADO
+# ============================================================
+
+
+def calcular_flujo_caja_proyectado(conn) -> pd.DataFrame:
+    _ensure_planeacion_schema(conn)
+
+    saldo_actual = _saldo_actual_estimado(conn)
+    rows: list[dict[str, float | int | str]] = []
+
+    for horizonte in (7, 15, 30):
+        cobros = _cuentas_por_cobrar_en_horizonte(conn, horizonte)
+        pagos = _cuentas_por_pagar_en_horizonte(conn, horizonte)
+        flujo = saldo_actual + cobros - pagos
+
+        rows.append(
+            {
+                "fecha_corte": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "horizonte_dias": int(horizonte),
+                "saldo_actual_usd": float(saldo_actual),
+                "cobros_esperados_usd": float(cobros),
+                "pagos_proximos_usd": float(pagos),
+                "flujo_proyectado_usd": float(flujo),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+# ============================================================
+# ALERTAS GERENCIALES
+# ============================================================
+
+
+def generar_alertas_gerenciales(conn, *, periodo: str) -> pd.DataFrame:
+    _ensure_planeacion_schema(conn)
+
+    resumen = resumen_presupuesto_operativo(conn, periodo=periodo)
     flujo = calcular_flujo_caja_proyectado(conn)
-    resumen = resumen_presupuesto_operativo(conn, periodo=periodo_norm)
 
-    alertas: list[dict[str, str | float | int]] = []
+    rows: list[dict[str, Any]] = []
 
-    for row in flujo.itertuples():
-        if float(row.saldo_proyectado_usd) < 0:
-            alertas.append(
-                {
-                    "tipo_alerta": "faltante_caja",
-                    "prioridad": "alta",
-                    "horizonte_dias": int(row.horizonte_dias),
-                    "mensaje": f"Saldo proyectado negativo en {int(row.horizonte_dias)} días.",
-                    "valor_usd": float(row.saldo_proyectado_usd),
-                }
-            )
+    flujo_30 = 0.0
+    if not flujo.empty:
+        f30 = flujo[flujo["horizonte_dias"] == 30]
+        if not f30.empty:
+            flujo_30 = float(f30.iloc[-1]["flujo_proyectado_usd"])
+        else:
+            flujo_30 = float(flujo.iloc[-1]["flujo_proyectado_usd"])
 
-    if resumen["egresos_presupuestados_usd"] > 0 and resumen["egresos_ejecutados_usd"] > resumen["egresos_presupuestados_usd"] * 1.05:
-        alertas.append(
+    desviacion_egresos = float(resumen.get("desviacion_egresos_usd", 0.0))
+    desviacion_ingresos = float(resumen.get("desviacion_ingresos_usd", 0.0))
+    cumplimiento_ingresos = float(resumen.get("cumplimiento_ingresos_pct", 0.0))
+    ejecucion_egresos = float(resumen.get("ejecucion_egresos_pct", 0.0))
+    utilidad_real = float(resumen.get("utilidad_real_usd", 0.0))
+
+    if flujo_30 < 0:
+        rows.append(
             {
-                "tipo_alerta": "exceso_gasto",
-                "prioridad": "media",
-                "horizonte_dias": 30,
-                "mensaje": "Egresos del período superan presupuesto en más de 5%.",
-                "valor_usd": float(resumen["desviacion_egresos_usd"]),
+                "tipo": "flujo_caja",
+                "severidad": "alta",
+                "indicador": "Flujo proyectado 30 días",
+                "valor_usd": flujo_30,
+                "mensaje": "El flujo proyectado a 30 días es negativo. Requiere acción inmediata.",
+            }
+        )
+    else:
+        rows.append(
+            {
+                "tipo": "flujo_caja",
+                "severidad": "info",
+                "indicador": "Flujo proyectado 30 días",
+                "valor_usd": flujo_30,
+                "mensaje": "El flujo proyectado a 30 días se mantiene positivo.",
             }
         )
 
-    if resumen["ingresos_presupuestados_usd"] > 0 and resumen["ingresos_ejecutados_usd"] < resumen["ingresos_presupuestados_usd"] * 0.8:
-        alertas.append(
+    if desviacion_egresos > 0:
+        rows.append(
             {
-                "tipo_alerta": "baja_cobranza",
-                "prioridad": "media",
-                "horizonte_dias": 30,
-                "mensaje": "Ingresos ejecutados por debajo del 80% del presupuesto.",
-                "valor_usd": float(resumen["desviacion_ingresos_usd"]),
+                "tipo": "presupuesto",
+                "severidad": "media",
+                "indicador": "Desviación de egresos",
+                "valor_usd": desviacion_egresos,
+                "mensaje": "Los egresos reales están por encima del presupuesto.",
             }
         )
 
-    vencidos = conn.execute(
-        """
-        SELECT ROUND(COALESCE(SUM(saldo_usd), 0), 2) AS total
-        FROM cuentas_por_pagar_proveedores
-        WHERE estado IN ('pendiente', 'parcial', 'vencida')
-          AND COALESCE(saldo_usd, 0) > 0
-          AND fecha_vencimiento IS NOT NULL
-          AND date(fecha_vencimiento) < date('now')
-        """
-    ).fetchone()
-    total_vencido = float(vencidos["total"] if vencidos and vencidos["total"] is not None else 0.0)
-    if total_vencido > 0:
-        alertas.append(
+    if desviacion_ingresos < 0:
+        rows.append(
             {
-                "tipo_alerta": "vencimientos_criticos",
-                "prioridad": "alta",
-                "horizonte_dias": 0,
-                "mensaje": "Existen cuentas por pagar vencidas.",
-                "valor_usd": total_vencido,
+                "tipo": "presupuesto",
+                "severidad": "media",
+                "indicador": "Desviación de ingresos",
+                "valor_usd": desviacion_ingresos,
+                "mensaje": "Los ingresos reales están por debajo del presupuesto.",
             }
         )
 
-    if not alertas:
-        alertas.append(
+    if cumplimiento_ingresos < 80 and resumen.get("ingresos_presupuestados_usd", 0.0) > 0:
+        rows.append(
             {
-                "tipo_alerta": "sin_alertas",
-                "prioridad": "baja",
-                "horizonte_dias": 30,
-                "mensaje": "Sin alertas críticas con la información actual.",
+                "tipo": "ingresos",
+                "severidad": "media",
+                "indicador": "Cumplimiento de ingresos",
+                "valor_usd": cumplimiento_ingresos,
+                "mensaje": "El cumplimiento de ingresos está por debajo del 80% de la meta.",
+            }
+        )
+
+    if ejecucion_egresos > 110 and resumen.get("egresos_presupuestados_usd", 0.0) > 0:
+        rows.append(
+            {
+                "tipo": "egresos",
+                "severidad": "alta",
+                "indicador": "Ejecución de egresos",
+                "valor_usd": ejecucion_egresos,
+                "mensaje": "La ejecución de egresos supera el 110% del presupuesto.",
+            }
+        )
+
+    if utilidad_real < 0:
+        rows.append(
+            {
+                "tipo": "rentabilidad",
+                "severidad": "alta",
+                "indicador": "Utilidad real",
+                "valor_usd": utilidad_real,
+                "mensaje": "La utilidad real del periodo es negativa.",
+            }
+        )
+
+    if not rows:
+        rows.append(
+            {
+                "tipo": "control",
+                "severidad": "info",
+                "indicador": "Estado general",
                 "valor_usd": 0.0,
+                "mensaje": "No se detectaron alertas financieras críticas para el periodo.",
             }
         )
 
-    return pd.DataFrame(alertas).sort_values(["prioridad", "horizonte_dias"], ascending=[True, True]).reset_index(drop=True)
+    return pd.DataFrame(rows)
