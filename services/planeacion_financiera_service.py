@@ -40,6 +40,9 @@ def _ensure_planeacion_schema(conn) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_presupuesto_operativo_tipo
             ON presupuesto_operativo(tipo);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_presupuesto_operativo_periodo_categoria_tipo
+            ON presupuesto_operativo(periodo, categoria, tipo);
         """
     )
 
@@ -66,25 +69,32 @@ def _safe_df(conn, query: str, params: tuple[Any, ...], columns: list[str]) -> p
         return pd.DataFrame(columns=columns)
 
 
-def _period_bounds(periodo: str) -> tuple[str, str]:
+def _normalize_periodo(periodo: str) -> str:
+    valor = str(periodo or "").strip()
     try:
-        year, month = periodo.split("-")
+        year, month = valor.split("-")
         year_i = int(year)
         month_i = int(month)
-        start = date(year_i, month_i, 1)
-        if month_i == 12:
-            end = date(year_i + 1, 1, 1) - timedelta(days=1)
-        else:
-            end = date(year_i, month_i + 1, 1) - timedelta(days=1)
-        return start.isoformat(), end.isoformat()
-    except Exception:
-        today = date.today()
-        start = today.replace(day=1)
-        if today.month == 12:
-            end = date(today.year + 1, 1, 1) - timedelta(days=1)
-        else:
-            end = date(today.year, today.month + 1, 1) - timedelta(days=1)
-        return start.isoformat(), end.isoformat()
+        if year_i < 2000 or month_i < 1 or month_i > 12:
+            raise ValueError
+        return f"{year_i:04d}-{month_i:02d}"
+    except Exception as exc:
+        raise ValueError("El período debe tener formato YYYY-MM.") from exc
+
+
+def _period_bounds(periodo: str) -> tuple[str, str]:
+    periodo_norm = _normalize_periodo(periodo)
+    year, month = periodo_norm.split("-")
+    year_i = int(year)
+    month_i = int(month)
+
+    start = date(year_i, month_i, 1)
+    if month_i == 12:
+        end = date(year_i + 1, 1, 1) - timedelta(days=1)
+    else:
+        end = date(year_i, month_i + 1, 1) - timedelta(days=1)
+
+    return start.isoformat(), end.isoformat()
 
 
 def _ventas_reales_periodo(conn, fecha_desde: str, fecha_hasta: str) -> float:
@@ -131,7 +141,6 @@ def _cuentas_por_cobrar_en_horizonte(conn, horizonte_dias: int) -> float:
         )
 
     if _table_exists(conn, "ventas"):
-        # Fallback: proyecta cobros según promedio diario reciente
         base = _safe_scalar(
             conn,
             """
@@ -161,7 +170,6 @@ def _cuentas_por_pagar_en_horizonte(conn, horizonte_dias: int) -> float:
         )
 
     if _table_exists(conn, "gastos"):
-        # Fallback: proyecta pagos según promedio diario reciente
         base = _safe_scalar(
             conn,
             """
@@ -178,7 +186,6 @@ def _cuentas_por_pagar_en_horizonte(conn, horizonte_dias: int) -> float:
 
 
 def _saldo_actual_estimado(conn) -> float:
-    # Prioridad 1: caja/bancos
     if _table_exists(conn, "movimientos_financieros"):
         return _safe_scalar(
             conn,
@@ -197,7 +204,6 @@ def _saldo_actual_estimado(conn) -> float:
             """,
         )
 
-    # Prioridad 2: si hay ventas/gastos, saldo simplificado
     ventas_total = 0.0
     gastos_total = 0.0
 
@@ -233,12 +239,53 @@ def guardar_presupuesto_operativo(
 ) -> int:
     _ensure_planeacion_schema(conn)
 
+    periodo_norm = _normalize_periodo(periodo)
+
     if tipo not in {"ingreso", "egreso"}:
         raise ValueError("El tipo debe ser 'ingreso' o 'egreso'.")
 
-    categoria_limpia = str(categoria or "").strip()
+    categoria_limpia = str(categoria or "").strip().lower()
     if not categoria_limpia:
         raise ValueError("La categoría es obligatoria.")
+
+    monto_val = float(monto_presupuestado_usd or 0.0)
+    meta_val = float(meta_kpi_usd or 0.0)
+
+    if monto_val < 0:
+        raise ValueError("El monto presupuestado no puede ser negativo.")
+    if meta_val < 0:
+        raise ValueError("La meta KPI no puede ser negativa.")
+
+    existente = conn.execute(
+        """
+        SELECT id
+        FROM presupuesto_operativo
+        WHERE periodo = ? AND categoria = ? AND tipo = ?
+        LIMIT 1
+        """,
+        (periodo_norm, categoria_limpia, tipo),
+    ).fetchone()
+
+    if existente:
+        conn.execute(
+            """
+            UPDATE presupuesto_operativo
+            SET monto_presupuestado_usd = ?,
+                meta_kpi_usd = ?,
+                notas = ?,
+                usuario = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                monto_val,
+                meta_val,
+                str(notas or "").strip(),
+                str(usuario or "").strip(),
+                int(existente["id"]),
+            ),
+        )
+        return int(existente["id"])
 
     cur = conn.execute(
         """
@@ -254,11 +301,11 @@ def guardar_presupuesto_operativo(
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            str(periodo).strip(),
+            periodo_norm,
             categoria_limpia,
             tipo,
-            float(monto_presupuestado_usd or 0.0),
-            float(meta_kpi_usd or 0.0),
+            monto_val,
+            meta_val,
             str(notas or "").strip(),
             str(usuario or "").strip(),
         ),
@@ -268,6 +315,8 @@ def guardar_presupuesto_operativo(
 
 def listar_presupuesto_operativo(conn, *, periodo: str) -> pd.DataFrame:
     _ensure_planeacion_schema(conn)
+    periodo_norm = _normalize_periodo(periodo)
+
     return _safe_df(
         conn,
         """
@@ -280,12 +329,13 @@ def listar_presupuesto_operativo(conn, *, periodo: str) -> pd.DataFrame:
             meta_kpi_usd,
             notas,
             usuario,
-            created_at
+            created_at,
+            updated_at
         FROM presupuesto_operativo
         WHERE periodo = ?
         ORDER BY tipo ASC, categoria ASC, id DESC
         """,
-        (periodo,),
+        (periodo_norm,),
         [
             "id",
             "periodo",
@@ -296,13 +346,15 @@ def listar_presupuesto_operativo(conn, *, periodo: str) -> pd.DataFrame:
             "notas",
             "usuario",
             "created_at",
+            "updated_at",
         ],
     )
 
 
 def resumen_presupuesto_operativo(conn, *, periodo: str) -> dict[str, float]:
     _ensure_planeacion_schema(conn)
-    fecha_desde, fecha_hasta = _period_bounds(periodo)
+    periodo_norm = _normalize_periodo(periodo)
+    fecha_desde, fecha_hasta = _period_bounds(periodo_norm)
 
     ingresos_presupuestados = _safe_scalar(
         conn,
@@ -311,7 +363,7 @@ def resumen_presupuesto_operativo(conn, *, periodo: str) -> dict[str, float]:
         FROM presupuesto_operativo
         WHERE periodo = ? AND tipo = 'ingreso'
         """,
-        (periodo,),
+        (periodo_norm,),
     )
 
     egresos_presupuestados = _safe_scalar(
@@ -321,7 +373,7 @@ def resumen_presupuesto_operativo(conn, *, periodo: str) -> dict[str, float]:
         FROM presupuesto_operativo
         WHERE periodo = ? AND tipo = 'egreso'
         """,
-        (periodo,),
+        (periodo_norm,),
     )
 
     meta_kpi_ingresos = _safe_scalar(
@@ -331,7 +383,7 @@ def resumen_presupuesto_operativo(conn, *, periodo: str) -> dict[str, float]:
         FROM presupuesto_operativo
         WHERE periodo = ? AND tipo = 'ingreso'
         """,
-        (periodo,),
+        (periodo_norm,),
     )
 
     meta_kpi_egresos = _safe_scalar(
@@ -341,7 +393,7 @@ def resumen_presupuesto_operativo(conn, *, periodo: str) -> dict[str, float]:
         FROM presupuesto_operativo
         WHERE periodo = ? AND tipo = 'egreso'
         """,
-        (periodo,),
+        (periodo_norm,),
     )
 
     ingresos_reales = _ventas_reales_periodo(conn, fecha_desde, fecha_hasta)
@@ -431,6 +483,8 @@ def generar_alertas_gerenciales(conn, *, periodo: str) -> pd.DataFrame:
         else:
             flujo_30 = float(flujo.iloc[-1]["flujo_proyectado_usd"])
 
+    ingresos_pres = float(resumen.get("ingresos_presupuestados_usd", 0.0))
+    egresos_pres = float(resumen.get("egresos_presupuestados_usd", 0.0))
     desviacion_egresos = float(resumen.get("desviacion_egresos_usd", 0.0))
     desviacion_ingresos = float(resumen.get("desviacion_ingresos_usd", 0.0))
     cumplimiento_ingresos = float(resumen.get("cumplimiento_ingresos_pct", 0.0))
@@ -458,7 +512,7 @@ def generar_alertas_gerenciales(conn, *, periodo: str) -> pd.DataFrame:
             }
         )
 
-    if desviacion_egresos > 0:
+    if egresos_pres > 0 and desviacion_egresos > 0:
         rows.append(
             {
                 "tipo": "presupuesto",
@@ -469,7 +523,7 @@ def generar_alertas_gerenciales(conn, *, periodo: str) -> pd.DataFrame:
             }
         )
 
-    if desviacion_ingresos < 0:
+    if ingresos_pres > 0 and desviacion_ingresos < 0:
         rows.append(
             {
                 "tipo": "presupuesto",
@@ -480,7 +534,7 @@ def generar_alertas_gerenciales(conn, *, periodo: str) -> pd.DataFrame:
             }
         )
 
-    if cumplimiento_ingresos < 80 and resumen.get("ingresos_presupuestados_usd", 0.0) > 0:
+    if ingresos_pres > 0 and cumplimiento_ingresos < 80:
         rows.append(
             {
                 "tipo": "ingresos",
@@ -491,7 +545,7 @@ def generar_alertas_gerenciales(conn, *, periodo: str) -> pd.DataFrame:
             }
         )
 
-    if ejecucion_egresos > 110 and resumen.get("egresos_presupuestados_usd", 0.0) > 0:
+    if egresos_pres > 0 and ejecucion_egresos > 110:
         rows.append(
             {
                 "tipo": "egresos",
