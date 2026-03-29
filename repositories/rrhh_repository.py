@@ -7,9 +7,6 @@ from database.connection import db_transaction
 
 
 class RRHHRepository:
-    # =========================
-    # SCHEMA
-    # =========================
     def ensure_schema(self) -> None:
         with db_transaction() as conn:
             conn.executescript(
@@ -21,10 +18,10 @@ class RRHHRepository:
                     puesto TEXT NOT NULL,
                     area TEXT NOT NULL,
                     fecha_ingreso TEXT NOT NULL,
-                    estado TEXT NOT NULL CHECK (estado IN ('activo', 'inactivo')),
+                    estado TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo', 'inactivo')),
                     created_by TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS asistencias (
@@ -34,9 +31,9 @@ class RRHHRepository:
                     hora_entrada TEXT,
                     hora_salida TEXT,
                     usuario TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(empleado_id, fecha),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (empleado_id, fecha),
                     FOREIGN KEY (empleado_id) REFERENCES empleados(id)
                 );
 
@@ -47,25 +44,84 @@ class RRHHRepository:
                     motivo TEXT,
                     fecha_inicio TEXT NOT NULL,
                     fecha_fin TEXT NOT NULL,
-                    estado TEXT NOT NULL DEFAULT 'pendiente'
-                        CHECK (estado IN ('pendiente', 'aprobado', 'rechazado')),
+                    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'aprobado', 'rechazado')),
                     comentario_admin TEXT,
                     created_by TEXT,
                     resuelto_por TEXT,
                     resuelto_at TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (empleado_id) REFERENCES empleados(id)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_asistencias_fecha ON asistencias(fecha);
                 CREATE INDEX IF NOT EXISTS idx_solicitudes_estado ON solicitudes(estado);
+                CREATE INDEX IF NOT EXISTS idx_solicitudes_fechas ON solicitudes(fecha_inicio, fecha_fin);
                 """
             )
 
-    # =========================
-    # EMPLEADOS
-    # =========================
+            self._migrate_legacy_tables(conn)
+
+    def _migrate_legacy_tables(self, conn) -> None:
+        tables = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+
+        if "rrhh_empleados" in tables:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO empleados (id, nombre, documento, puesto, area, fecha_ingreso, estado, created_by, created_at, updated_at)
+                SELECT id,
+                       nombre,
+                       COALESCE(documento, 'LEGACY-' || id),
+                       puesto,
+                       COALESCE(area, 'General'),
+                       fecha_ingreso,
+                       estado,
+                       created_by,
+                       created_at,
+                       updated_at
+                FROM rrhh_empleados
+                """
+            )
+
+        if "rrhh_asistencias" in tables:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO asistencias (id, empleado_id, fecha, hora_entrada, hora_salida, usuario, created_at, updated_at)
+                SELECT id, empleado_id, fecha, hora_entrada, hora_salida, usuario, created_at, updated_at
+                FROM rrhh_asistencias
+                """
+            )
+
+        if "rrhh_solicitudes" in tables:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO solicitudes (
+                    id, empleado_id, tipo, motivo, fecha_inicio, fecha_fin, estado,
+                    comentario_admin, created_by, resuelto_por, resuelto_at, created_at, updated_at
+                )
+                SELECT id,
+                       empleado_id,
+                       CASE WHEN tipo = 'permiso' THEN 'permiso'
+                            WHEN tipo = 'incapacidad' THEN 'incapacidad'
+                            ELSE 'vacaciones'
+                       END,
+                       motivo,
+                       fecha_inicio,
+                       fecha_fin,
+                       estado,
+                       comentario_admin,
+                       created_by,
+                       resuelto_por,
+                       resuelto_at,
+                       created_at,
+                       updated_at
+                FROM rrhh_solicitudes
+                """
+            )
+
     def create_employee(
         self,
         *,
@@ -89,19 +145,17 @@ class RRHHRepository:
 
     def list_employees(self, estado: str | None = None) -> list[dict[str, Any]]:
         query = """
-            SELECT id, nombre, documento, puesto, area, fecha_ingreso, estado
+            SELECT id, nombre, documento, puesto, area, fecha_ingreso, estado, created_at, updated_at
             FROM empleados
         """
-        params: list[Any] = []
-
+        params: tuple[Any, ...] = ()
         if estado in {"activo", "inactivo"}:
             query += " WHERE estado = ?"
-            params.append(estado)
-
-        query += " ORDER BY nombre ASC"
+            params = (estado,)
+        query += " ORDER BY nombre ASC, id DESC"
 
         with db_transaction() as conn:
-            rows = conn.execute(query, tuple(params)).fetchall()
+            rows = conn.execute(query, params).fetchall()
             return [dict(row) for row in rows]
 
     def update_employee_status(self, empleado_id: int, estado: str) -> None:
@@ -112,12 +166,9 @@ class RRHHRepository:
                 SET estado = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (estado, empleado_id),
+                (estado, int(empleado_id)),
             )
 
-    # =========================
-    # ASISTENCIA
-    # =========================
     def upsert_attendance(
         self,
         *,
@@ -130,9 +181,8 @@ class RRHHRepository:
         with db_transaction() as conn:
             existing = conn.execute(
                 "SELECT id FROM asistencias WHERE empleado_id = ? AND fecha = ?",
-                (empleado_id, fecha),
+                (int(empleado_id), fecha),
             ).fetchone()
-
             if existing:
                 conn.execute(
                     """
@@ -143,7 +193,7 @@ class RRHHRepository:
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (hora_entrada, hora_salida, usuario, existing["id"]),
+                    (hora_entrada, hora_salida, usuario, int(existing["id"])),
                 )
                 return int(existing["id"])
 
@@ -152,7 +202,7 @@ class RRHHRepository:
                 INSERT INTO asistencias (empleado_id, fecha, hora_entrada, hora_salida, usuario)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (empleado_id, fecha, hora_entrada, hora_salida, usuario),
+                (int(empleado_id), fecha, hora_entrada, hora_salida, usuario),
             )
             return int(cur.lastrowid)
 
@@ -169,26 +219,24 @@ class RRHHRepository:
                 a.fecha,
                 a.hora_entrada,
                 a.hora_salida,
-                e.nombre AS empleado
+                e.id AS empleado_id,
+                e.nombre AS empleado,
+                e.documento,
+                e.estado AS empleado_estado
             FROM asistencias a
-            JOIN empleados e ON e.id = a.empleado_id
+            INNER JOIN empleados e ON e.id = a.empleado_id
             WHERE a.fecha BETWEEN ? AND ?
         """
         params: list[Any] = [fecha_desde, fecha_hasta]
-
         if empleado_id:
             query += " AND e.id = ?"
-            params.append(empleado_id)
-
-        query += " ORDER BY a.fecha DESC"
+            params.append(int(empleado_id))
+        query += " ORDER BY a.fecha DESC, e.nombre ASC"
 
         with db_transaction() as conn:
             rows = conn.execute(query, tuple(params)).fetchall()
             return [dict(row) for row in rows]
 
-    # =========================
-    # SOLICITUDES
-    # =========================
     def create_request(
         self,
         *,
@@ -207,7 +255,7 @@ class RRHHRepository:
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (empleado_id, tipo, motivo, fecha_inicio, fecha_fin, created_by),
+                (int(empleado_id), tipo, motivo, fecha_inicio, fecha_fin, created_by),
             )
             return int(cur.lastrowid)
 
@@ -227,39 +275,34 @@ class RRHHRepository:
                 s.fecha_fin,
                 s.estado,
                 s.comentario_admin,
-                e.nombre AS empleado
+                s.created_by,
+                s.resuelto_por,
+                s.resuelto_at,
+                s.created_at,
+                e.id AS empleado_id,
+                e.nombre AS empleado,
+                e.documento
             FROM solicitudes s
-            JOIN empleados e ON e.id = s.empleado_id
+            INNER JOIN empleados e ON e.id = s.empleado_id
             WHERE 1=1
         """
         params: list[Any] = []
-
         if estado in {"pendiente", "aprobado", "rechazado"}:
             query += " AND s.estado = ?"
             params.append(estado)
-
         if fecha_desde:
             query += " AND s.fecha_inicio >= ?"
             params.append(fecha_desde)
-
         if fecha_hasta:
             query += " AND s.fecha_fin <= ?"
             params.append(fecha_hasta)
-
-        query += " ORDER BY s.created_at DESC"
+        query += " ORDER BY s.created_at DESC, s.id DESC"
 
         with db_transaction() as conn:
             rows = conn.execute(query, tuple(params)).fetchall()
             return [dict(row) for row in rows]
 
-    def resolve_request(
-        self,
-        *,
-        solicitud_id: int,
-        estado: str,
-        comentario: str,
-        admin_usuario: str,
-    ) -> None:
+    def resolve_request(self, *, solicitud_id: int, estado: str, comentario: str, admin_usuario: str) -> None:
         with db_transaction() as conn:
             conn.execute(
                 """
@@ -271,40 +314,32 @@ class RRHHRepository:
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (estado, comentario, admin_usuario, solicitud_id),
+                (estado, comentario, admin_usuario, int(solicitud_id)),
             )
 
-    # =========================
-    # DASHBOARD
-    # =========================
     def get_dashboard_metrics(self) -> dict[str, int]:
         today = date.today().isoformat()
-
         with db_transaction() as conn:
             activos = conn.execute(
-                "SELECT COUNT(*) FROM empleados WHERE estado='activo'"
-            ).fetchone()[0]
-
-            asistencias = conn.execute(
-                "SELECT COUNT(*) FROM asistencias WHERE fecha=?",
+                "SELECT COUNT(*) AS total FROM empleados WHERE estado = 'activo'"
+            ).fetchone()["total"]
+            asistencias_hoy = conn.execute(
+                "SELECT COUNT(*) AS total FROM asistencias WHERE fecha = ?",
                 (today,),
-            ).fetchone()[0]
-
+            ).fetchone()["total"]
             pendientes = conn.execute(
-                "SELECT COUNT(*) FROM solicitudes WHERE estado='pendiente'"
-            ).fetchone()[0]
-
+                "SELECT COUNT(*) AS total FROM solicitudes WHERE estado = 'pendiente'"
+            ).fetchone()["total"]
             aprobadas = conn.execute(
-                "SELECT COUNT(*) FROM solicitudes WHERE estado='aprobado'"
-            ).fetchone()[0]
-
+                "SELECT COUNT(*) AS total FROM solicitudes WHERE estado = 'aprobado'"
+            ).fetchone()["total"]
             rechazadas = conn.execute(
-                "SELECT COUNT(*) FROM solicitudes WHERE estado='rechazado'"
-            ).fetchone()[0]
+                "SELECT COUNT(*) AS total FROM solicitudes WHERE estado = 'rechazado'"
+            ).fetchone()["total"]
 
         return {
             "empleados_activos": int(activos or 0),
-            "asistencias_hoy": int(asistencias or 0),
+            "asistencias_hoy": int(asistencias_hoy or 0),
             "solicitudes_pendientes": int(pendientes or 0),
             "solicitudes_aprobadas": int(aprobadas or 0),
             "solicitudes_rechazadas": int(rechazadas or 0),
