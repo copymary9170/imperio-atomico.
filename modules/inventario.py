@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import pandas as pd
@@ -75,6 +75,21 @@ def _extract_supplier_tags(df_prov: pd.DataFrame) -> list[str]:
     return sorted(tags)
 
 
+def _resolve_due_date_from_installments(cuotas: list[dict[str, Any]]) -> str | None:
+    if not cuotas:
+        return None
+    fechas = []
+    for cuota in cuotas:
+        fecha = str(cuota.get("fecha_vencimiento") or "").strip()
+        if fecha:
+            fechas.append(fecha)
+    return max(fechas) if fechas else None
+
+
+# ============================================================
+# SCHEMA / CONFIG
+# ============================================================
+
 def _ensure_inventory_support_tables() -> None:
     with db_transaction() as conn:
         conn.execute(
@@ -136,6 +151,8 @@ def _ensure_inventory_support_tables() -> None:
             conn.execute("ALTER TABLE historial_compras ADD COLUMN fiscal_iva_credito_usd REAL DEFAULT 0")
         if "fiscal_credito_iva_deducible" not in compra_cols:
             conn.execute("ALTER TABLE historial_compras ADD COLUMN fiscal_credito_iva_deducible INTEGER DEFAULT 1")
+        if "metodo_pago" not in compra_cols:
+            conn.execute("ALTER TABLE historial_compras ADD COLUMN metodo_pago TEXT DEFAULT 'efectivo'")
 
         conn.execute(
             """
@@ -163,7 +180,8 @@ def _ensure_inventory_support_tables() -> None:
                 fiscal_credito_iva_deducible = CASE
                     WHEN COALESCE(fiscal_credito_iva_deducible, 1) IN (0,1) THEN COALESCE(fiscal_credito_iva_deducible, 1)
                     ELSE 1
-                END
+                END,
+                metodo_pago = COALESCE(NULLIF(metodo_pago, ''), 'efectivo')
             """
         )
 
@@ -208,9 +226,36 @@ def _ensure_inventory_support_tables() -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cuotas_compra_proveedor (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                compra_id INTEGER NOT NULL,
+                proveedor_id INTEGER,
+                numero_cuota INTEGER NOT NULL,
+                fecha_vencimiento TEXT NOT NULL,
+                monto_base_usd REAL NOT NULL,
+                impuesto_pct REAL NOT NULL DEFAULT 0,
+                impuesto_usd REAL NOT NULL DEFAULT 0,
+                monto_total_usd REAL NOT NULL,
+                metodo_pago TEXT,
+                moneda_pago TEXT NOT NULL DEFAULT 'USD',
+                tasa_cambio REAL NOT NULL DEFAULT 1,
+                estado TEXT NOT NULL DEFAULT 'pendiente',
+                fecha_pago TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (compra_id) REFERENCES historial_compras(id),
+                FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
+            )
+            """
+        )
+
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_estado ON cuentas_por_pagar_proveedores(estado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_vencimiento ON cuentas_por_pagar_proveedores(fecha_vencimiento)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pagos_proveedores_cxp ON pagos_proveedores(cuenta_por_pagar_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cuotas_compra_proveedor_compra ON cuotas_compra_proveedor(compra_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cuotas_compra_proveedor_fecha ON cuotas_compra_proveedor(fecha_vencimiento)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cuotas_compra_proveedor_estado ON cuotas_compra_proveedor(estado)")
 
 
 def _ensure_config_defaults() -> None:
@@ -225,6 +270,10 @@ def _ensure_config_defaults() -> None:
             if not found:
                 conn.execute("INSERT INTO configuracion(parametro, valor) VALUES(?,?)", (k, str(v)))
 
+
+# ============================================================
+# INPUT HELPERS
+# ============================================================
 
 def _calc_stock_by_unit_type(tipo_unidad: str) -> tuple[float, str, str]:
     if tipo_unidad == "Área (cm²)":
@@ -420,9 +469,10 @@ def registrar_compra(
     delivery_usd: float,
     tasa_usada: float,
     moneda_pago: str,
+    metodo_pago: str,
     referencia_extra: str = "",
     financial_input: CompraFinancialInput | None = None,
-) -> None:
+) -> int:
     cantidad = as_positive(cantidad, "Cantidad", allow_zero=False)
     costo_total_usd = as_positive(costo_total_usd, "Costo total", allow_zero=False)
     costo_unit = costo_total_usd / cantidad
@@ -481,9 +531,9 @@ def registrar_compra(
                 usuario, inventario_id, proveedor_id, item, cantidad, unidad, costo_total_usd, costo_unit_usd,
                 impuestos, delivery, tasa_usada, moneda_pago, tipo_pago, monto_pagado_inicial_usd,
                 saldo_pendiente_usd, fecha_vencimiento, fiscal_tipo, fiscal_tasa_iva, fiscal_iva_credito_usd,
-                fiscal_credito_iva_deducible, activo
+                fiscal_credito_iva_deducible, metodo_pago, activo
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 usuario,
@@ -506,6 +556,7 @@ def registrar_compra(
                 0.16,
                 round(float(costo_total_usd) * (float(impuestos_pct or 0) / 100.0), 4),
                 1,
+                clean_text(metodo_pago).lower() or "efectivo",
             ),
         )
         compra_id = int(cur_hist.lastrowid)
@@ -526,7 +577,7 @@ def registrar_compra(
                     * float(tasa_usada)
                 ),
                 tasa_cambio=float(tasa_usada or 1.0),
-                metodo_pago=str(moneda_pago).lower(),
+                metodo_pago=clean_text(metodo_pago).lower() or str(moneda_pago).lower(),
                 usuario=usuario,
                 metadata={
                     "modulo": "inventario",
@@ -544,6 +595,42 @@ def registrar_compra(
             financial_input=financial_input,
         )
         contabilizar_compra(conn, compra_id=compra_id, usuario=usuario)
+        return compra_id
+
+
+def _save_installments(
+    compra_id: int,
+    proveedor_id: int | None,
+    cuotas: list[dict[str, Any]],
+) -> None:
+    if not cuotas:
+        return
+
+    with db_transaction() as conn:
+        for cuota in cuotas:
+            conn.execute(
+                """
+                INSERT INTO cuotas_compra_proveedor (
+                    compra_id, proveedor_id, numero_cuota, fecha_vencimiento,
+                    monto_base_usd, impuesto_pct, impuesto_usd, monto_total_usd,
+                    metodo_pago, moneda_pago, tasa_cambio, estado
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')
+                """,
+                (
+                    int(compra_id),
+                    int(proveedor_id) if proveedor_id is not None else None,
+                    int(cuota["numero_cuota"]),
+                    str(cuota["fecha_vencimiento"]),
+                    float(cuota["monto_base_usd"]),
+                    float(cuota["impuesto_pct"]),
+                    float(cuota["impuesto_usd"]),
+                    float(cuota["monto_total_usd"]),
+                    str(cuota["metodo_pago"]),
+                    str(cuota["moneda_pago"]),
+                    float(cuota["tasa_cambio"]),
+                ),
+            )
 
 
 def _create_inventory_item_for_purchase(
@@ -872,6 +959,7 @@ def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
                    hc.delivery,
                    hc.moneda_pago,
                    COALESCE(hc.tipo_pago, 'contado') AS tipo_pago,
+                   COALESCE(hc.metodo_pago, 'efectivo') AS metodo_pago,
                    COALESCE(hc.monto_pagado_inicial_usd, 0) AS monto_pagado_inicial_usd,
                    COALESCE(hc.saldo_pendiente_usd, 0) AS saldo_pendiente_usd,
                    hc.fecha_vencimiento
@@ -900,9 +988,57 @@ def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
         "delivery",
         "moneda_pago",
         "tipo_pago",
+        "metodo_pago",
         "monto_pagado_inicial_usd",
         "saldo_pendiente_usd",
         "fecha_vencimiento",
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _load_cuotas_compra_df(compra_id: int | None = None) -> pd.DataFrame:
+    params: tuple[Any, ...] = ()
+    sql = """
+        SELECT c.id,
+               c.compra_id,
+               COALESCE(p.nombre, 'SIN PROVEEDOR') AS proveedor,
+               c.numero_cuota,
+               c.fecha_vencimiento,
+               c.monto_base_usd,
+               c.impuesto_pct,
+               c.impuesto_usd,
+               c.monto_total_usd,
+               c.metodo_pago,
+               c.moneda_pago,
+               c.tasa_cambio,
+               c.estado,
+               c.fecha_pago
+        FROM cuotas_compra_proveedor c
+        LEFT JOIN proveedores p ON p.id = c.proveedor_id
+    """
+    if compra_id is not None:
+        sql += " WHERE c.compra_id=?"
+        params = (int(compra_id),)
+    sql += " ORDER BY c.fecha_vencimiento ASC, c.numero_cuota ASC"
+
+    with db_transaction() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    cols = [
+        "id",
+        "compra_id",
+        "proveedor",
+        "numero_cuota",
+        "fecha_vencimiento",
+        "monto_base_usd",
+        "impuesto_pct",
+        "impuesto_usd",
+        "monto_total_usd",
+        "metodo_pago",
+        "moneda_pago",
+        "tasa_cambio",
+        "estado",
+        "fecha_pago",
     ]
     return pd.DataFrame(rows, columns=cols)
 
@@ -1080,7 +1216,6 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
     df_prov = _load_proveedores_df()
 
     d1, d2, d3 = st.columns(3)
-
     if not df_prov.empty:
         opciones_prov = ["-- Seleccionar proveedor --"] + df_prov["nombre"].astype(str).tolist() + ["Otro / escribir manual"]
         proveedor_sel = d1.selectbox("Proveedor", opciones_prov, key="inv_compra_proveedor_sel")
@@ -1101,9 +1236,8 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
         format="%.4f",
         key="inv_compra_total",
     )
-
     impuesto_pct = d3.number_input(
-        "Impuesto (%)",
+        "Impuesto general compra (%)",
         min_value=0.0,
         max_value=100.0,
         value=float(st.session_state.get("inv_impuesto_default", 16.0)),
@@ -1133,22 +1267,21 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
         delivery_manual,
     )
 
+    st.divider()
+    st.markdown("### 💳 Condición de pago")
+
     p1, p2, p3, p4 = st.columns(4)
     tipo_pago = p1.selectbox("Tipo de pago", ["contado", "credito"], key="inv_compra_tipo_pago")
-    monto_pagado = p2.number_input(
-        "Pago inicial USD",
-        min_value=0.0,
-        value=float(costo_total if tipo_pago == "contado" else 0.0),
-        format="%.4f",
-        key="inv_compra_pagado",
-    )
-    fecha_venc = p3.date_input("Vence", value=None, key="inv_compra_vence")
-    moneda_pago = p4.selectbox(
+    moneda_pago = p2.selectbox(
         "Moneda pago",
         ["USD", "VES (BCV)", "VES (Binance)"],
         key="inv_compra_moneda",
     )
-
+    metodo_pago_general = p3.selectbox(
+        "Método de pago",
+        ["efectivo", "pago_movil", "transferencia", "zelle", "binance", "tarjeta", "otro"],
+        key="inv_compra_metodo_pago",
+    )
     tasa_pago = _rate_from_label(moneda_pago, tasa_bcv, tasa_binance)
     if p4.checkbox("Tasa manual pago", key="inv_compra_tasa_manual"):
         tasa_pago = st.number_input(
@@ -1158,6 +1291,110 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             format="%.4f",
             key="inv_compra_tasa_pago",
         )
+
+    monto_pagado = 0.0
+    fecha_venc: date | None = None
+    cuotas_generadas: list[dict[str, Any]] = []
+
+    if tipo_pago == "contado":
+        monto_pagado = float(costo_total)
+        st.success("Compra de contado: se toma el costo total como pago completo.")
+        st.metric("Monto pagado", f"${monto_pagado:,.2f}")
+    else:
+        c1, c2, c3 = st.columns(3)
+        monto_pagado = c1.number_input(
+            "Inicial USD",
+            min_value=0.0,
+            max_value=float(costo_total),
+            value=0.0,
+            format="%.4f",
+            key="inv_compra_pagado",
+        )
+        cantidad_cuotas = int(
+            c2.number_input(
+                "Número de cuotas",
+                min_value=1,
+                max_value=36,
+                value=1,
+                step=1,
+                key="inv_compra_num_cuotas",
+            )
+        )
+        frecuencia = c3.selectbox(
+            "Frecuencia cuotas",
+            ["mensual", "quincenal", "semanal"],
+            key="inv_compra_freq_cuotas",
+        )
+
+        saldo_financiar = max(float(costo_total) - float(monto_pagado), 0.0)
+        if saldo_financiar <= 0:
+            st.warning("No hay saldo para financiar. Revisa el monto inicial.")
+        else:
+            inicio = st.date_input("Fecha primera cuota", value=date.today(), key="inv_compra_primera_cuota")
+            cuota_base = round(saldo_financiar / max(cantidad_cuotas, 1), 2)
+
+            st.caption(f"Saldo a financiar: ${saldo_financiar:,.2f}")
+            st.caption(f"Cuota base sugerida: ${cuota_base:,.2f}")
+
+            delta_dias = 30 if frecuencia == "mensual" else 15 if frecuencia == "quincenal" else 7
+
+            for i in range(cantidad_cuotas):
+                fecha_default = inicio + timedelta(days=(delta_dias * i))
+                st.markdown(f"#### Cuota {i + 1}")
+                q1, q2, q3, q4 = st.columns(4)
+                monto_cuota = q1.number_input(
+                    f"Monto cuota {i + 1}",
+                    min_value=0.0,
+                    value=float(cuota_base),
+                    format="%.4f",
+                    key=f"inv_compra_cuota_monto_{i}",
+                )
+                fecha_cuota = q2.date_input(
+                    f"Fecha cuota {i + 1}",
+                    value=fecha_default,
+                    key=f"inv_compra_cuota_fecha_{i}",
+                )
+                impuesto_cuota = q3.number_input(
+                    f"Impuesto cuota {i + 1} (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=0.0,
+                    format="%.2f",
+                    key=f"inv_compra_cuota_impuesto_{i}",
+                )
+                metodo_cuota = q4.selectbox(
+                    f"Método cuota {i + 1}",
+                    ["efectivo", "pago_movil", "transferencia", "zelle", "binance", "tarjeta", "otro"],
+                    key=f"inv_compra_cuota_metodo_{i}",
+                )
+
+                impuesto_usd = round(float(monto_cuota) * float(impuesto_cuota) / 100.0, 2)
+                total_cuota = round(float(monto_cuota) + impuesto_usd, 2)
+
+                cuotas_generadas.append(
+                    {
+                        "numero_cuota": i + 1,
+                        "fecha_vencimiento": fecha_cuota.isoformat(),
+                        "monto_base_usd": float(monto_cuota),
+                        "impuesto_pct": float(impuesto_cuota),
+                        "impuesto_usd": float(impuesto_usd),
+                        "monto_total_usd": float(total_cuota),
+                        "metodo_pago": metodo_cuota,
+                        "moneda_pago": str(moneda_pago),
+                        "tasa_cambio": float(tasa_pago or 1.0),
+                    }
+                )
+
+            if cuotas_generadas:
+                fecha_venc = pd.to_datetime([x["fecha_vencimiento"] for x in cuotas_generadas]).max().date()
+                cronograma_df = pd.DataFrame(cuotas_generadas)
+                st.markdown("### 📅 Cronograma de cuotas")
+                st.dataframe(cronograma_df, use_container_width=True, hide_index=True)
+
+                total_cuotas = float(cronograma_df["monto_total_usd"].sum())
+                csum1, csum2 = st.columns(2)
+                csum1.metric("Total cuotas", f"${total_cuotas:,.2f}")
+                csum2.metric("Último vencimiento", str(fecha_venc))
 
     if st.button("✅ Guardar compra", use_container_width=True):
         try:
@@ -1178,6 +1415,9 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             if target_id is None:
                 raise ValueError("Debes seleccionar o crear un producto para registrar la compra.")
 
+            if not clean_text(proveedor_nombre):
+                raise ValueError("Debes seleccionar o escribir un proveedor.")
+
             with db_transaction() as conn:
                 proveedor_id = _get_or_create_provider(conn, proveedor_nombre)
 
@@ -1187,7 +1427,7 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
                 fecha_vencimiento=fecha_venc.isoformat() if fecha_venc else None,
             )
 
-            registrar_compra(
+            compra_id = registrar_compra(
                 usuario=usuario,
                 inventario_id=int(target_id),
                 cantidad=float(cantidad),
@@ -1198,10 +1438,14 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
                 delivery_usd=float(delivery_usd),
                 tasa_usada=float(tasa_pago if tasa_pago else tasa_delivery),
                 moneda_pago=str(moneda_pago),
+                metodo_pago=str(metodo_pago_general),
                 financial_input=fin_input,
             )
 
-            st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}.")
+            if tipo_pago == "credito" and cuotas_generadas:
+                _save_installments(compra_id=compra_id, proveedor_id=proveedor_id, cuotas=cuotas_generadas)
+
+            st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}. ID compra #{compra_id}")
             st.rerun()
 
         except Exception as exc:
@@ -1350,32 +1594,66 @@ def _render_proveedores() -> None:
 
 def _render_cuentas_por_pagar() -> None:
     st.subheader("💳 Cuentas por pagar a proveedores")
-    df_cxp = _load_cuentas_por_pagar_df()
-    if df_cxp.empty:
-        st.info("No hay cuentas por pagar registradas.")
-        return
+    subtabs = st.tabs(["Resumen CxP", "Calendario de cuotas"])
 
-    f1, f2 = st.columns([2, 1])
-    buscar = f1.text_input("🔎 Buscar cuenta por pagar", key="inv_cxp_buscar")
-    estado = f2.selectbox("Estado", ["Todos", "pendiente", "vencida", "pagada"], key="inv_cxp_estado")
+    with subtabs[0]:
+        df_cxp = _load_cuentas_por_pagar_df()
+        if df_cxp.empty:
+            st.info("No hay cuentas por pagar registradas.")
+        else:
+            f1, f2 = st.columns([2, 1])
+            buscar = f1.text_input("🔎 Buscar cuenta por pagar", key="inv_cxp_buscar")
+            estado = f2.selectbox("Estado", ["Todos", "pendiente", "vencida", "pagada"], key="inv_cxp_estado")
 
-    view = _filter_df_by_query(df_cxp.copy(), buscar, ["proveedor", "item", "tipo_pago", "notas"])
-    if estado != "Todos":
-        view = view[view["estado"].astype(str).str.lower() == estado.lower()]
+            view = _filter_df_by_query(df_cxp.copy(), buscar, ["proveedor", "item", "tipo_pago", "notas"])
+            if estado != "Todos":
+                view = view[view["estado"].astype(str).str.lower() == estado.lower()]
 
-    st.dataframe(
-        view,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "monto_original_usd": st.column_config.NumberColumn("Monto original", format="%.2f"),
-            "monto_pagado_usd": st.column_config.NumberColumn("Pagado", format="%.2f"),
-            "saldo_usd": st.column_config.NumberColumn("Saldo", format="%.2f"),
-        },
-    )
+            st.dataframe(
+                view,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "monto_original_usd": st.column_config.NumberColumn("Monto original", format="%.2f"),
+                    "monto_pagado_usd": st.column_config.NumberColumn("Pagado", format="%.2f"),
+                    "saldo_usd": st.column_config.NumberColumn("Saldo", format="%.2f"),
+                },
+            )
 
-    total_saldo = float(view["saldo_usd"].sum()) if not view.empty else 0.0
-    st.metric("Saldo total visible", f"${total_saldo:,.2f}")
+            total_saldo = float(view["saldo_usd"].sum()) if not view.empty else 0.0
+            st.metric("Saldo total visible", f"${total_saldo:,.2f}")
+
+    with subtabs[1]:
+        df_cuotas = _load_cuotas_compra_df()
+        if df_cuotas.empty:
+            st.info("No hay cuotas registradas.")
+        else:
+            h1, h2 = st.columns([2, 1])
+            buscar_cuota = h1.text_input("🔎 Buscar cuota", key="inv_cuota_buscar")
+            estado_cuota = h2.selectbox("Estado cuota", ["Todos", "pendiente", "pagada"], key="inv_cuota_estado")
+
+            view_cuotas = _filter_df_by_query(df_cuotas.copy(), buscar_cuota, ["proveedor", "metodo_pago"])
+            if estado_cuota != "Todos":
+                view_cuotas = view_cuotas[view_cuotas["estado"].astype(str).str.lower() == estado_cuota]
+
+            st.dataframe(
+                view_cuotas,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "monto_base_usd": st.column_config.NumberColumn("Base", format="%.2f"),
+                    "impuesto_pct": st.column_config.NumberColumn("Impuesto %", format="%.2f"),
+                    "impuesto_usd": st.column_config.NumberColumn("Impuesto USD", format="%.2f"),
+                    "monto_total_usd": st.column_config.NumberColumn("Total cuota", format="%.2f"),
+                },
+            )
+
+            proximas = view_cuotas.copy()
+            if not proximas.empty:
+                proximas["fecha_vencimiento"] = pd.to_datetime(proximas["fecha_vencimiento"], errors="coerce")
+                proximas = proximas.dropna(subset=["fecha_vencimiento"]).sort_values("fecha_vencimiento")
+                st.markdown("### 📅 Próximas cuotas")
+                st.dataframe(proximas.head(20), use_container_width=True, hide_index=True)
 
 
 def _render_movimientos() -> None:
