@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import calendar
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -41,6 +42,19 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _safe_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
 
 
 def _filter_df_by_query(df: pd.DataFrame, query: str, columns: list[str]) -> pd.DataFrame:
@@ -159,7 +173,8 @@ def _ensure_inventory_support_tables() -> None:
             UPDATE historial_compras
             SET tipo_pago = COALESCE(NULLIF(tipo_pago, ''), 'contado'),
                 monto_pagado_inicial_usd = CASE
-                    WHEN COALESCE(tipo_pago, 'contado') = 'contado' AND COALESCE(monto_pagado_inicial_usd, 0) = 0
+                    WHEN COALESCE(tipo_pago, 'contado') = 'contado'
+                         AND COALESCE(monto_pagado_inicial_usd, 0) = 0
                         THEN COALESCE(costo_total_usd, 0)
                     ELSE COALESCE(monto_pagado_inicial_usd, 0)
                 END,
@@ -174,11 +189,13 @@ def _ensure_inventory_support_tables() -> None:
                     ELSE fiscal_tasa_iva
                 END,
                 fiscal_iva_credito_usd = CASE
-                    WHEN COALESCE(fiscal_credito_iva_deducible, 1) = 1 THEN ROUND(COALESCE(costo_total_usd, 0) * (COALESCE(impuestos, 0) / 100.0), 4)
+                    WHEN COALESCE(fiscal_credito_iva_deducible, 1) = 1
+                        THEN ROUND(COALESCE(costo_total_usd, 0) * (COALESCE(impuestos, 0) / 100.0), 4)
                     ELSE 0
                 END,
                 fiscal_credito_iva_deducible = CASE
-                    WHEN COALESCE(fiscal_credito_iva_deducible, 1) IN (0,1) THEN COALESCE(fiscal_credito_iva_deducible, 1)
+                    WHEN COALESCE(fiscal_credito_iva_deducible, 1) IN (0,1)
+                        THEN COALESCE(fiscal_credito_iva_deducible, 1)
                     ELSE 1
                 END,
                 metodo_pago = COALESCE(NULLIF(metodo_pago, ''), 'efectivo')
@@ -1139,6 +1156,139 @@ def _render_existencias(df: pd.DataFrame) -> None:
     )
 
 
+def _render_calendario_cuotas(df_cuotas: pd.DataFrame) -> None:
+    st.subheader("📅 Calendario de cuotas")
+
+    if df_cuotas.empty:
+        st.info("No hay cuotas registradas.")
+        return
+
+    df = df_cuotas.copy()
+    df["fecha_vencimiento_date"] = df["fecha_vencimiento"].apply(_safe_date)
+    df = df.dropna(subset=["fecha_vencimiento_date"])
+
+    if df.empty:
+        st.info("No hay cuotas con fecha válida.")
+        return
+
+    hoy = date.today()
+    anios_disponibles = sorted(df["fecha_vencimiento_date"].apply(lambda x: x.year).unique().tolist())
+    anio_default = hoy.year if hoy.year in anios_disponibles else anios_disponibles[0]
+
+    c1, c2 = st.columns(2)
+    anio = c1.selectbox("Año", anios_disponibles, index=anios_disponibles.index(anio_default), key="inv_cal_anio")
+    mes = c2.selectbox(
+        "Mes",
+        options=list(range(1, 13)),
+        index=hoy.month - 1,
+        format_func=lambda m: calendar.month_name[m],
+        key="inv_cal_mes",
+    )
+
+    df_mes = df[
+        (df["fecha_vencimiento_date"].apply(lambda x: x.year) == anio)
+        & (df["fecha_vencimiento_date"].apply(lambda x: x.month) == mes)
+    ].copy()
+
+    cal = calendar.monthcalendar(anio, mes)
+    dias_semana = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+
+    hdr = st.columns(7)
+    for i, d in enumerate(dias_semana):
+        hdr[i].markdown(f"**{d}**")
+
+    eventos_por_dia: dict[int, list[dict[str, Any]]] = {}
+    for _, row in df_mes.iterrows():
+        fecha = row["fecha_vencimiento_date"]
+        eventos_por_dia.setdefault(fecha.day, []).append(dict(row))
+
+    for semana in cal:
+        cols = st.columns(7)
+        for idx, dia in enumerate(semana):
+            with cols[idx]:
+                if dia == 0:
+                    st.markdown(" ")
+                    continue
+
+                eventos = eventos_por_dia.get(dia, [])
+                fecha_actual = date(anio, mes, dia)
+
+                if fecha_actual < hoy:
+                    color = "#fde2e2"
+                elif fecha_actual == hoy:
+                    color = "#fff3cd"
+                else:
+                    color = "#e8f5e9"
+
+                html = f"""
+                <div style="
+                    border:1px solid #ddd;
+                    border-radius:10px;
+                    padding:8px;
+                    min-height:120px;
+                    background:{color};
+                    margin-bottom:8px;
+                ">
+                    <div style="font-weight:700; margin-bottom:6px;">{dia}</div>
+                """
+
+                if not eventos:
+                    html += '<div style="font-size:12px; color:#777;">Sin cuotas</div>'
+                else:
+                    for ev in eventos[:3]:
+                        estado = str(ev.get("estado", "pendiente")).lower()
+                        proveedor = str(ev.get("proveedor", "Proveedor"))
+                        total = _safe_float(ev.get("monto_total_usd"))
+                        badge = "🟢" if estado == "pagada" else "🔴"
+                        html += f"""
+                        <div style="font-size:12px; margin-bottom:6px; padding:4px; border-radius:6px; background:white;">
+                            {badge} <b>{proveedor}</b><br>
+                            Cuota #{int(_safe_float(ev.get("numero_cuota"), 0))}<br>
+                            Total: ${total:,.2f}
+                        </div>
+                        """
+
+                    if len(eventos) > 3:
+                        html += f'<div style="font-size:11px; color:#555;">+{len(eventos)-3} más</div>'
+
+                html += "</div>"
+                st.markdown(html, unsafe_allow_html=True)
+
+    st.markdown("### 🗓️ Próximas cuotas")
+    proximas = df[
+        (df["estado"].astype(str).str.lower() != "pagada")
+        & (df["fecha_vencimiento_date"] >= hoy)
+    ].sort_values("fecha_vencimiento_date")
+
+    if proximas.empty:
+        st.success("No hay cuotas pendientes próximas.")
+    else:
+        st.dataframe(
+            proximas[
+                [
+                    "proveedor",
+                    "compra_id",
+                    "numero_cuota",
+                    "fecha_vencimiento",
+                    "monto_base_usd",
+                    "impuesto_pct",
+                    "impuesto_usd",
+                    "monto_total_usd",
+                    "metodo_pago",
+                    "estado",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "monto_base_usd": st.column_config.NumberColumn("Base USD", format="%.2f"),
+                "impuesto_pct": st.column_config.NumberColumn("Impuesto %", format="%.2f"),
+                "impuesto_usd": st.column_config.NumberColumn("Impuesto USD", format="%.2f"),
+                "monto_total_usd": st.column_config.NumberColumn("Total USD", format="%.2f"),
+            },
+        )
+
+
 def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
     st.subheader("📥 Registrar compra")
 
@@ -1648,12 +1798,7 @@ def _render_cuentas_por_pagar() -> None:
                 },
             )
 
-            proximas = view_cuotas.copy()
-            if not proximas.empty:
-                proximas["fecha_vencimiento"] = pd.to_datetime(proximas["fecha_vencimiento"], errors="coerce")
-                proximas = proximas.dropna(subset=["fecha_vencimiento"]).sort_values("fecha_vencimiento")
-                st.markdown("### 📅 Próximas cuotas")
-                st.dataframe(proximas.head(20), use_container_width=True, hide_index=True)
+            _render_calendario_cuotas(view_cuotas)
 
 
 def _render_movimientos() -> None:
@@ -2080,10 +2225,3 @@ def render_kardex(usuario: str) -> None:
             "referencia": "Referencia",
         },
     )
-
-
-
-
-
-
-
