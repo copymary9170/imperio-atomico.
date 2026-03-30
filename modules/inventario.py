@@ -100,6 +100,33 @@ def _resolve_due_date_from_installments(cuotas: list[dict[str, Any]]) -> str | N
     return max(fechas) if fechas else None
 
 
+def _calc_stock_by_unit_type(tipo_unidad: str) -> tuple[float, str, str]:
+    if tipo_unidad == "Área (cm²)":
+        c1, c2, c3 = st.columns(3)
+        ancho = c1.number_input("Ancho (cm)", min_value=0.1, value=1.0, key="inv_area_ancho")
+        alto = c2.number_input("Alto (cm)", min_value=0.1, value=1.0, key="inv_area_alto")
+        pliegos = c3.number_input("Cantidad de pliegos", min_value=0.001, value=1.0, key="inv_area_pliegos")
+        area_por_pliego = ancho * alto
+        area_total = area_por_pliego * pliegos
+        st.caption(f"Referencia: {area_por_pliego:,.2f} cm²/pliego | Área total: {area_total:,.2f} cm²")
+        return float(pliegos), "pliegos", f"area_ref={area_por_pliego:.2f}cm2_por_pliego"
+
+    if tipo_unidad == "Líquido (ml)":
+        c1, c2 = st.columns(2)
+        ml_envase = c1.number_input("ml por envase", min_value=1.0, value=100.0, key="inv_ml_envase")
+        envases = c2.number_input("Cantidad de envases", min_value=0.001, value=1.0, key="inv_ml_envases")
+        return float(ml_envase * envases), "ml", ""
+
+    if tipo_unidad == "Peso (gr)":
+        c1, c2 = st.columns(2)
+        gr_envase = c1.number_input("gr por envase", min_value=1.0, value=100.0, key="inv_gr_envase")
+        envases = c2.number_input("Cantidad de envases", min_value=0.001, value=1.0, key="inv_gr_envases")
+        return float(gr_envase * envases), "gr", ""
+
+    qty = st.number_input("Cantidad comprada", min_value=0.001, value=1.0, key="inv_qty_unidad")
+    return float(qty), "unidad", ""
+
+
 def _resolve_delivery_usd(
     delivery_monto: float,
     delivery_moneda: str,
@@ -2033,11 +2060,6 @@ def _render_movimientos() -> None:
     )
 
 
-def _render_kardex_tab(usuario: str) -> None:
-    st.subheader("🧾 Kardex")
-    render_kardex(usuario)
-
-
 def _render_reposicion(df: pd.DataFrame) -> None:
     st.subheader("📦 Reposición")
     plan = _build_restock_recommendations(df)
@@ -2347,7 +2369,7 @@ def render_inventario(usuario: str) -> None:
     st.subheader("📦 Centro de Control de Inventario")
     st.caption(
         "Catálogo, compras, variantes por color, proveedores, cuentas por pagar, "
-        "movimientos, kardex, reposición, ajustes y reportes."
+        "movimientos, reposición, ajustes y reportes."
     )
 
     df = _load_inventory_df()
@@ -2368,7 +2390,6 @@ def render_inventario(usuario: str) -> None:
             "👤 Proveedores",
             "💳 CxP",
             "🔄 Movimientos",
-            "🧾 Kardex",
             "📦 Reposición",
             "🔧 Ajustes",
             "📈 Reportes",
@@ -2401,62 +2422,10 @@ def render_inventario(usuario: str) -> None:
         _render_movimientos()
 
     with tabs[7]:
-        _render_kardex_tab(usuario)
-
-    with tabs[8]:
         _render_reposicion(df)
 
-    with tabs[9]:
+    with tabs[8]:
         _render_ajustes(usuario)
 
-    with tabs[10]:
+    with tabs[9]:
         _render_reportes(df)
-
-
-# ============================================================
-# KARDEX INVENTARIO
-# ============================================================
-
-def render_kardex(usuario: str) -> None:
-    _ = usuario
-    df = _load_movements_df(limit=1000)
-
-    if df.empty:
-        st.info("No hay movimientos registrados.")
-        return
-
-    f1, f2 = st.columns([2, 1])
-    buscar = f1.text_input("🔎 Buscar movimiento", placeholder="referencia, producto, usuario...")
-    tipo = f2.selectbox("Tipo", ["Todos", "entrada", "salida", "ajuste"])
-
-    view = df.copy()
-    view = _filter_df_by_query(view, buscar, ["referencia", "nombre", "sku", "usuario"])
-    if tipo != "Todos":
-        view = view[view["tipo"] == tipo]
-
-    st.metric("💵 Valor movimientos visibles", f"$ {float(view['costo_total_usd'].sum() if not view.empty else 0):,.2f}")
-
-    st.dataframe(
-        view,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "id": "ID",
-            "fecha": "Fecha",
-            "usuario": "Usuario",
-            "sku": "SKU",
-            "nombre": "Producto",
-            "tipo": "Tipo",
-            "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
-            "costo_unitario_usd": st.column_config.NumberColumn("Costo unitario", format="%.2f"),
-            "costo_total_usd": st.column_config.NumberColumn("Costo total", format="%.2f"),
-            "referencia": "Referencia",
-        },
-    )
-
-
-
-
-
-
-
