@@ -105,11 +105,22 @@ def _ensure_crm_tables() -> None:
 # CARGADORES
 # ============================================================
 
+def _table_exists(conn, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
 def _load_pipeline() -> pd.DataFrame:
     _ensure_crm_tables()
     with db_transaction() as conn:
+        clientes_table_exists = _table_exists(conn, "clientes")
+        cliente_projection = "COALESCE(c.nombre, '') AS cliente" if clientes_table_exists else "'' AS cliente"
+        cliente_join = "LEFT JOIN clientes c ON c.id = l.cliente_id" if clientes_table_exists else ""
         df = pd.read_sql_query(
-            """
+            f"""
             SELECT
                 l.id,
                 l.fecha,
@@ -122,9 +133,9 @@ def _load_pipeline() -> pd.DataFrame:
                 l.proximo_contacto,
                 l.notas,
                 l.motivo_perdida,
-                COALESCE(c.nombre, '') AS cliente
+                {cliente_projection}
             FROM crm_leads l
-            LEFT JOIN clientes c ON c.id = l.cliente_id
+            {cliente_join}
             WHERE COALESCE(l.estado, 'activo') = 'activo'
             ORDER BY l.fecha DESC, l.id DESC
             """,
