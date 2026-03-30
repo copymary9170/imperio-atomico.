@@ -22,18 +22,18 @@ ETAPAS_CRM = (
 CANALES_CRM = (
     "WhatsApp",
     "Instagram",
-    "Web",
+    "Sitio web",
     "Referido",
     "Llamada",
     "Facebook",
-    "Email",
+    "Correo",
     "Otro",
 )
 
 TIPOS_INTERACCION = (
     "Llamada",
     "WhatsApp",
-    "Email",
+    "Correo",
     "Reunión",
     "Cotización",
     "Seguimiento",
@@ -51,7 +51,7 @@ RESULTADOS_INTERACCION = (
 
 
 # ============================================================
-# SCHEMA
+# TABLAS / SCHEMA
 # ============================================================
 
 def _ensure_crm_tables() -> None:
@@ -102,7 +102,7 @@ def _ensure_crm_tables() -> None:
 
 
 # ============================================================
-# LOADERS
+# CARGADORES
 # ============================================================
 
 def _load_pipeline() -> pd.DataFrame:
@@ -223,7 +223,7 @@ def _load_commercial_overview() -> dict[str, float]:
 
 
 # ============================================================
-# HELPERS
+# AYUDANTES
 # ============================================================
 
 def _safe_date_text(value: str) -> str:
@@ -262,41 +262,41 @@ def _filter_pipeline(df: pd.DataFrame, search: str, etapa: str, canal: str) -> p
 
 
 # ============================================================
-# METRICAS
+# MÉTRICAS
 # ============================================================
 
 def _render_header_metrics(df: pd.DataFrame) -> None:
     activos = df[~df["etapa"].isin(["Ganado", "Perdido"])] if not df.empty else df
     valor_pipeline = float(activos["valor_estimado_usd"].fillna(0).sum()) if not activos.empty else 0.0
-    weighted_pipeline = float(
+    pipeline_ponderado = float(
         (activos["valor_estimado_usd"].fillna(0) * activos["probabilidad_pct"].fillna(0) / 100).sum()
     ) if not activos.empty else 0.0
     ganados = int((df["etapa"] == "Ganado").sum()) if not df.empty else 0
     perdidos = int((df["etapa"] == "Perdido").sum()) if not df.empty else 0
-    win_rate = (ganados / (ganados + perdidos) * 100) if (ganados + perdidos) else 0.0
+    tasa_cierre = (ganados / (ganados + perdidos) * 100) if (ganados + perdidos) else 0.0
 
     hoy = date.today().isoformat()
-    pendientes_hoy = int(
+    seguimientos_vencidos = int(
         ((df["proximo_contacto"].fillna("").astype(str) != "") & (df["proximo_contacto"].astype(str) <= hoy)).sum()
     ) if not df.empty else 0
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Leads activos", int(len(activos)))
-    m2.metric("Pipeline estimado", f"$ {valor_pipeline:,.2f}")
-    m3.metric("Pipeline ponderado", f"$ {weighted_pipeline:,.2f}")
-    m4.metric("Win rate", f"{win_rate:.1f}%")
-    m5.metric("Seguimientos vencidos", pendientes_hoy)
+    m2.metric("Valor estimado", f"$ {valor_pipeline:,.2f}")
+    m3.metric("Valor ponderado", f"$ {pipeline_ponderado:,.2f}")
+    m4.metric("Tasa de cierre", f"{tasa_cierre:.1f}%")
+    m5.metric("Seguimientos vencidos", seguimientos_vencidos)
 
 
 # ============================================================
-# PIPELINE
+# TAB: EMBUDO
 # ============================================================
 
 def _render_pipeline_tab(df: pd.DataFrame) -> None:
     st.markdown("### Embudo comercial")
 
     if df.empty:
-        st.info("Aún no hay leads. Registra el primero en la pestaña **Leads**.")
+        st.info("Aún no hay oportunidades. Registra la primera en la pestaña **Leads**.")
         return
 
     f1, f2, f3 = st.columns([2, 1, 1])
@@ -310,7 +310,7 @@ def _render_pipeline_tab(df: pd.DataFrame) -> None:
     stage_df = (
         view.assign(etapa_orden=ordered)
         .groupby("etapa", as_index=False)
-        .agg(leads=("id", "count"), valor=("valor_estimado_usd", "sum"))
+        .agg(cantidad=("id", "count"), valor=("valor_estimado_usd", "sum"))
     )
     stage_df["etapa"] = pd.Categorical(stage_df["etapa"], categories=ETAPAS_CRM, ordered=True)
     stage_df = stage_df.sort_values("etapa")
@@ -318,11 +318,14 @@ def _render_pipeline_tab(df: pd.DataFrame) -> None:
     c1, c2 = st.columns(2)
     with c1:
         if not stage_df.empty:
-            fig = px.funnel(stage_df, y="etapa", x="leads", title="Leads por etapa")
+            fig = px.funnel(stage_df, y="etapa", x="cantidad", title="Oportunidades por etapa")
+            fig.update_layout(xaxis_title="Cantidad", yaxis_title="Etapa")
             st.plotly_chart(fig, use_container_width=True)
+
     with c2:
         if not stage_df.empty:
             fig_valor = px.bar(stage_df, x="etapa", y="valor", color="etapa", title="Valor estimado por etapa")
+            fig_valor.update_layout(xaxis_title="Etapa", yaxis_title="Valor estimado USD")
             st.plotly_chart(fig_valor, use_container_width=True)
 
     st.dataframe(
@@ -341,14 +344,20 @@ def _render_pipeline_tab(df: pd.DataFrame) -> None:
         use_container_width=True,
         hide_index=True,
         column_config={
+            "fecha": "Fecha",
+            "nombre": "Lead",
+            "canal": "Canal",
+            "cliente": "Cliente",
+            "etapa": "Etapa",
             "valor_estimado_usd": st.column_config.NumberColumn("Valor estimado", format="%.2f"),
             "probabilidad_pct": st.column_config.NumberColumn("Probabilidad %", format="%d"),
+            "proximo_contacto": "Próximo contacto",
         },
     )
 
 
 # ============================================================
-# LEADS
+# TAB: LEADS
 # ============================================================
 
 def _render_leads_tab(usuario: str, df: pd.DataFrame) -> None:
@@ -356,13 +365,13 @@ def _render_leads_tab(usuario: str, df: pd.DataFrame) -> None:
 
     with st.form("crm_new_lead"):
         c1, c2, c3 = st.columns(3)
-        nombre = c1.text_input("Lead / empresa")
-        canal = c2.selectbox("Canal", CANALES_CRM)
+        nombre = c1.text_input("Nombre del lead / empresa")
+        canal = c2.selectbox("Canal de entrada", CANALES_CRM)
         etapa = c3.selectbox("Etapa inicial", ETAPAS_CRM)
 
         c4, c5, c6 = st.columns(3)
         valor_estimado = c4.number_input("Valor estimado (USD)", min_value=0.0, step=10.0, value=0.0)
-        probabilidad = c5.slider("Probabilidad (%)", min_value=0, max_value=100, value=20)
+        probabilidad = c5.slider("Probabilidad de cierre (%)", min_value=0, max_value=100, value=20)
         proximo_contacto = c6.text_input("Próximo contacto (YYYY-MM-DD)")
 
         notas = st.text_area("Notas")
@@ -392,24 +401,24 @@ def _render_leads_tab(usuario: str, df: pd.DataFrame) -> None:
                     ),
                 )
 
-            st.success("Lead registrado")
+            st.success("Lead registrado correctamente.")
             st.rerun()
 
         except ValueError as exc:
             st.error(str(exc))
         except Exception as exc:
-            st.error("No se pudo guardar el lead")
+            st.error("No se pudo guardar el lead.")
             st.exception(exc)
 
     if df.empty:
         return
 
     st.divider()
-    st.markdown("### Actualización rápida")
+    st.markdown("### Edición rápida")
 
     ids = df[["id", "nombre"]]
     lead_id = st.selectbox(
-        "Lead",
+        "Selecciona un lead",
         ids["id"],
         format_func=lambda x: ids.loc[ids["id"] == x, "nombre"].iloc[0],
         key="crm_select_update",
@@ -417,9 +426,24 @@ def _render_leads_tab(usuario: str, df: pd.DataFrame) -> None:
     row = df[df["id"] == lead_id].iloc[0]
 
     c1, c2, c3 = st.columns(3)
-    new_etapa = c1.selectbox("Mover a etapa", ETAPAS_CRM, index=ETAPAS_CRM.index(str(row["etapa"])), key="crm_new_etapa")
-    new_prob = c2.slider("Probabilidad", 0, 100, int(row.get("probabilidad_pct") or 0), key="crm_prob_update")
-    new_next = c3.text_input("Próximo contacto", str(row.get("proximo_contacto") or ""), key="crm_next_update")
+    new_etapa = c1.selectbox(
+        "Mover a etapa",
+        ETAPAS_CRM,
+        index=ETAPAS_CRM.index(str(row["etapa"])),
+        key="crm_new_etapa",
+    )
+    new_prob = c2.slider(
+        "Probabilidad de cierre",
+        0,
+        100,
+        int(row.get("probabilidad_pct") or 0),
+        key="crm_prob_update",
+    )
+    new_next = c3.text_input(
+        "Próximo contacto",
+        str(row.get("proximo_contacto") or ""),
+        key="crm_next_update",
+    )
 
     c4, c5 = st.columns(2)
     new_valor = c4.number_input(
@@ -430,7 +454,7 @@ def _render_leads_tab(usuario: str, df: pd.DataFrame) -> None:
         key="crm_valor_update",
     )
     motivo_perdida = c5.text_input(
-        "Motivo pérdida",
+        "Motivo de pérdida",
         value=str(row.get("motivo_perdida") or ""),
         key="crm_motivo_perdida",
     )
@@ -465,24 +489,36 @@ def _render_leads_tab(usuario: str, df: pd.DataFrame) -> None:
                     int(lead_id),
                 ),
             )
-        st.success("Lead actualizado")
+        st.success("Lead actualizado correctamente.")
         st.rerun()
 
     st.divider()
     st.markdown("### Historial del lead seleccionado")
     df_hist = _load_interactions_by_lead(int(lead_id))
     if df_hist.empty:
-        st.caption("Este lead aún no tiene interacciones.")
+        st.caption("Este lead aún no tiene interacciones registradas.")
     else:
-        st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_hist,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "fecha": "Fecha",
+                "tipo": "Tipo",
+                "resultado": "Resultado",
+                "detalle": "Detalle",
+                "proxima_accion": "Próxima acción",
+                "usuario": "Usuario",
+            },
+        )
 
 
 # ============================================================
-# ACTIVIDAD
+# TAB: ACTIVIDAD
 # ============================================================
 
 def _render_activity_tab(usuario: str, df: pd.DataFrame) -> None:
-    st.markdown("### Seguimiento y próxima acción")
+    st.markdown("### Seguimiento y próximas acciones")
 
     if df.empty:
         st.info("Primero crea un lead para registrar actividad.")
@@ -499,7 +535,7 @@ def _render_activity_tab(usuario: str, df: pd.DataFrame) -> None:
         )
 
         c1, c2 = st.columns(2)
-        tipo = c1.selectbox("Tipo", TIPOS_INTERACCION)
+        tipo = c1.selectbox("Tipo de interacción", TIPOS_INTERACCION)
         resultado = c2.selectbox("Resultado", RESULTADOS_INTERACCION)
 
         detalle = st.text_area("Detalle")
@@ -551,23 +587,36 @@ def _render_activity_tab(usuario: str, df: pd.DataFrame) -> None:
                     (_safe_date_text(proxima_accion), int(lead_id)),
                 )
 
-        st.success("Interacción registrada")
+        st.success("Interacción registrada correctamente.")
         st.rerun()
 
     interactions = _load_recent_interactions()
     if interactions.empty:
-        st.caption("Sin interacciones aún.")
+        st.caption("Aún no hay interacciones registradas.")
         return
 
-    st.dataframe(interactions, use_container_width=True, hide_index=True)
+    st.dataframe(
+        interactions,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "fecha": "Fecha",
+            "lead": "Lead",
+            "tipo": "Tipo",
+            "resultado": "Resultado",
+            "detalle": "Detalle",
+            "proxima_accion": "Próxima acción",
+            "usuario": "Usuario",
+        },
+    )
 
 
 # ============================================================
-# DASHBOARD EXTRA
+# TAB: SEGUIMIENTOS
 # ============================================================
 
 def _render_followup_alerts(df: pd.DataFrame) -> None:
-    st.markdown("### Próximos seguimientos")
+    st.markdown("### Agenda de seguimientos")
 
     if df.empty:
         st.info("No hay leads cargados.")
@@ -592,37 +641,46 @@ def _render_followup_alerts(df: pd.DataFrame) -> None:
         use_container_width=True,
         hide_index=True,
         column_config={
+            "nombre": "Lead",
+            "canal": "Canal",
+            "etapa": "Etapa",
             "valor_estimado_usd": st.column_config.NumberColumn("Valor estimado", format="%.2f"),
+            "proximo_contacto": "Próximo contacto",
+            "estado_seguimiento": "Estado",
         },
     )
 
 
 # ============================================================
-# UI
+# UI PRINCIPAL
 # ============================================================
 
 def render_crm(usuario: str) -> None:
     _ensure_crm_tables()
 
     st.subheader("🤝 CRM")
-    st.caption(f"Pipeline comercial independiente · Usuario: {usuario}")
+    st.caption(f"Gestión comercial y seguimiento de oportunidades · Usuario: {usuario}")
 
     df = _load_pipeline()
     _render_header_metrics(df)
 
     overview = _load_commercial_overview()
     c1, c2, c3 = st.columns(3)
-    c1.metric("Cotizaciones", int(overview["total_cotizaciones"]))
-    c2.metric("Aprobación cotizaciones", f"{overview['ratio_aprobacion']:.1f}%")
+    c1.metric("Cotizaciones registradas", int(overview["total_cotizaciones"]))
+    c2.metric("Tasa de aprobación", f"{overview['ratio_aprobacion']:.1f}%")
     c3.metric("Ventas históricas", f"$ {overview['total_ventas']:,.2f}")
 
-    tabs = st.tabs(["📈 Pipeline", "🧲 Leads", "🗂️ Actividad", "⏰ Seguimientos"])
+    tabs = st.tabs(["📈 Embudo", "🧲 Leads", "🗂️ Actividad", "⏰ Seguimientos"])
+
     with tabs[0]:
         _render_pipeline_tab(df)
+
     with tabs[1]:
         _render_leads_tab(usuario, df)
+
     with tabs[2]:
         _render_activity_tab(usuario, df)
+
     with tabs[3]:
         _render_followup_alerts(df)
 
