@@ -105,7 +105,7 @@ def _ensure_crm_tables() -> None:
 # LOADERS
 # ============================================================
 
-def _load_Embudo de ventas() -> pd.DataFrame:
+def _load_pipeline() -> pd.DataFrame:
     _ensure_crm_tables()
     with db_transaction() as conn:
         df = pd.read_sql_query(
@@ -236,7 +236,7 @@ def _safe_date_text(value: str) -> str:
         return ""
 
 
-def _filter_Embudo de ventas(df: pd.DataFrame, search: str, etapa: str, canal: str) -> pd.DataFrame:
+def _filter_pipeline(df: pd.DataFrame, search: str, etapa: str, canal: str) -> pd.DataFrame:
     if df.empty:
         return df
 
@@ -267,8 +267,8 @@ def _filter_Embudo de ventas(df: pd.DataFrame, search: str, etapa: str, canal: s
 
 def _render_header_metrics(df: pd.DataFrame) -> None:
     activos = df[~df["etapa"].isin(["Ganado", "Perdido"])] if not df.empty else df
-    valor_Embudo de ventas = float(activos["valor_estimado_usd"].fillna(0).sum()) if not activos.empty else 0.0
-    weighted_Embudo de ventas = float(
+    valor_pipeline = float(activos["valor_estimado_usd"].fillna(0).sum()) if not activos.empty else 0.0
+    weighted_pipeline = float(
         (activos["valor_estimado_usd"].fillna(0) * activos["probabilidad_pct"].fillna(0) / 100).sum()
     ) if not activos.empty else 0.0
     ganados = int((df["etapa"] == "Ganado").sum()) if not df.empty else 0
@@ -282,17 +282,17 @@ def _render_header_metrics(df: pd.DataFrame) -> None:
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Leads activos", int(len(activos)))
-    m2.metric("Embudo de ventas estimado", f"$ {valor_Embudo de ventas:,.2f}")
-    m3.metric("Embudo de ventas ponderado", f"$ {weighted_Embudo de ventas:,.2f}")
+    m2.metric("Pipeline estimado", f"$ {valor_pipeline:,.2f}")
+    m3.metric("Pipeline ponderado", f"$ {weighted_pipeline:,.2f}")
     m4.metric("Win rate", f"{win_rate:.1f}%")
     m5.metric("Seguimientos vencidos", pendientes_hoy)
 
 
 # ============================================================
-# Embudo de ventas
+# PIPELINE
 # ============================================================
 
-def _render_Embudo de ventas_tab(df: pd.DataFrame) -> None:
+def _render_pipeline_tab(df: pd.DataFrame) -> None:
     st.markdown("### Embudo comercial")
 
     if df.empty:
@@ -300,11 +300,11 @@ def _render_Embudo de ventas_tab(df: pd.DataFrame) -> None:
         return
 
     f1, f2, f3 = st.columns([2, 1, 1])
-    buscar = f1.text_input("Buscar lead / cliente / notas", key="crm_buscar_Embudo de ventas")
-    etapa = f2.selectbox("Etapa", ["Todas"] + list(ETAPAS_CRM), key="crm_etapa_Embudo de ventas")
-    canal = f3.selectbox("Canal", ["Todos"] + list(CANALES_CRM), key="crm_canal_Embudo de ventas")
+    buscar = f1.text_input("Buscar lead / cliente / notas", key="crm_buscar_pipeline")
+    etapa = f2.selectbox("Etapa", ["Todas"] + list(ETAPAS_CRM), key="crm_etapa_pipeline")
+    canal = f3.selectbox("Canal", ["Todos"] + list(CANALES_CRM), key="crm_canal_pipeline")
 
-    view = _filter_Embudo de ventas(df, buscar, etapa, canal)
+    view = _filter_pipeline(df, buscar, etapa, canal)
 
     ordered = pd.Categorical(view["etapa"], categories=ETAPAS_CRM, ordered=True)
     stage_df = (
@@ -605,9 +605,9 @@ def render_crm(usuario: str) -> None:
     _ensure_crm_tables()
 
     st.subheader("🤝 CRM")
-    st.caption(f"Embudo de ventas comercial independiente · Usuario: {usuario}")
+    st.caption(f"Pipeline comercial independiente · Usuario: {usuario}")
 
-    df = _load_Embudo de ventas()
+    df = _load_pipeline()
     _render_header_metrics(df)
 
     overview = _load_commercial_overview()
@@ -616,9 +616,9 @@ def render_crm(usuario: str) -> None:
     c2.metric("Aprobación cotizaciones", f"{overview['ratio_aprobacion']:.1f}%")
     c3.metric("Ventas históricas", f"$ {overview['total_ventas']:,.2f}")
 
-    tabs = st.tabs(["📈 Embudo de ventas", "🧲 Leads", "🗂️ Actividad", "⏰ Seguimientos"])
+    tabs = st.tabs(["📈 Pipeline", "🧲 Leads", "🗂️ Actividad", "⏰ Seguimientos"])
     with tabs[0]:
-        _render_Embudo de ventas_tab(df)
+        _render_pipeline_tab(df)
     with tabs[1]:
         _render_leads_tab(usuario, df)
     with tabs[2]:
