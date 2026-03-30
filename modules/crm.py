@@ -685,3 +685,6 @@ def render_crm(usuario: str) -> None:
         _render_followup_alerts(df)
 
     st.caption(f"Última actualización: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+
+
+
