@@ -190,6 +190,14 @@ def _get_or_create_provider(conn, proveedor_nombre: str) -> int | None:
     return int(new_row["id"]) if new_row else None
 
 
+def _calc_purchase_totals(costo_base_usd: float, impuestos_pct: float, delivery_usd: float) -> tuple[float, float, float]:
+    base = float(costo_base_usd or 0.0)
+    impuesto = base * (float(impuestos_pct or 0.0) / 100.0)
+    delivery = float(delivery_usd or 0.0)
+    total = base + impuesto + delivery
+    return float(base), float(impuesto), float(total)
+
+
 # ============================================================
 # SCHEMA / CONFIG
 # ============================================================
@@ -277,11 +285,6 @@ def _ensure_inventory_support_tables() -> None:
                 fiscal_tasa_iva = CASE
                     WHEN COALESCE(fiscal_tasa_iva, 0) <= 0 THEN 0.16
                     ELSE fiscal_tasa_iva
-                END,
-                fiscal_iva_credito_usd = CASE
-                    WHEN COALESCE(fiscal_credito_iva_deducible, 1) = 1
-                        THEN ROUND(COALESCE(costo_total_usd, 0) * (COALESCE(impuestos, 0) / 100.0), 4)
-                    ELSE 0
                 END,
                 fiscal_credito_iva_deducible = CASE
                     WHEN COALESCE(fiscal_credito_iva_deducible, 1) IN (0,1)
@@ -524,7 +527,7 @@ def registrar_compra(
     usuario: str,
     inventario_id: int,
     cantidad: float,
-    costo_total_usd: float,
+    costo_base_usd: float,
     proveedor_id: int | None,
     proveedor_nombre: str,
     impuestos_pct: float,
@@ -536,12 +539,20 @@ def registrar_compra(
     financial_input: CompraFinancialInput | None = None,
 ) -> int:
     cantidad = as_positive(cantidad, "Cantidad", allow_zero=False)
-    costo_total_usd = as_positive(costo_total_usd, "Costo total", allow_zero=False)
-    costo_unit = costo_total_usd / cantidad
+    costo_base_usd = as_positive(costo_base_usd, "Costo base", allow_zero=False)
+    impuestos_pct = max(0.0, float(impuestos_pct or 0.0))
+    delivery_usd = max(0.0, float(delivery_usd or 0.0))
+
+    base_usd, impuesto_usd, total_compra_usd = _calc_purchase_totals(
+        costo_base_usd=float(costo_base_usd),
+        impuestos_pct=float(impuestos_pct),
+        delivery_usd=float(delivery_usd),
+    )
+    costo_unit = total_compra_usd / cantidad
     financial_input = financial_input or CompraFinancialInput()
 
     monto_pagado_inicial_usd, saldo_pendiente_usd = validar_condicion_compra(
-        total_compra_usd=float(costo_total_usd),
+        total_compra_usd=float(total_compra_usd),
         tipo_pago=financial_input.tipo_pago,
         monto_pagado_inicial_usd=financial_input.monto_pagado_inicial_usd,
         fecha_vencimiento=financial_input.fecha_vencimiento,
@@ -572,7 +583,10 @@ def registrar_compra(
             (money(costo_promedio), int(inventario_id)),
         )
 
-        ref = f"Compra proveedor: {proveedor_nombre or 'N/A'}"
+        ref = (
+            f"Compra proveedor: {proveedor_nombre or 'N/A'} | "
+            f"Base: ${base_usd:,.2f} | IVA: ${impuesto_usd:,.2f} | Delivery: ${delivery_usd:,.2f}"
+        )
         if referencia_extra:
             ref = f"{ref} | {referencia_extra}"
 
@@ -613,7 +627,7 @@ def registrar_compra(
                 str(row["nombre"]),
                 float(cantidad),
                 str(row["unidad"]),
-                money(costo_total_usd),
+                money(total_compra_usd),
                 money(costo_unit),
                 float(impuestos_pct),
                 money(delivery_usd),
@@ -625,7 +639,7 @@ def registrar_compra(
                 financial_input.fecha_vencimiento,
                 "gravada" if float(impuestos_pct or 0) > 0 else "exenta",
                 0.16,
-                round(float(costo_total_usd) * (float(impuestos_pct or 0) / 100.0), 4),
+                round(float(impuesto_usd), 4),
                 1,
                 clean_text(metodo_pago).lower() or "efectivo",
             ),
@@ -643,8 +657,8 @@ def registrar_compra(
                 monto_moneda=float(
                     monto_pagado_inicial_usd
                     if str(moneda_pago).upper() == "USD"
-                    else costo_total_usd
-                    * (monto_pagado_inicial_usd / max(float(costo_total_usd), 0.0001))
+                    else total_compra_usd
+                    * (monto_pagado_inicial_usd / max(float(total_compra_usd), 0.0001))
                     * float(tasa_usada)
                 ),
                 tasa_cambio=float(tasa_usada or 1.0),
@@ -654,6 +668,10 @@ def registrar_compra(
                     "modulo": "inventario",
                     "tipo_pago_compra": clean_text(financial_input.tipo_pago).lower(),
                     "proveedor_id": int(proveedor_id) if proveedor_id is not None else None,
+                    "costo_base_usd": float(base_usd),
+                    "impuesto_usd": float(impuesto_usd),
+                    "delivery_usd": float(delivery_usd),
+                    "total_compra_usd": float(total_compra_usd),
                 },
             )
 
@@ -662,7 +680,7 @@ def registrar_compra(
             usuario=usuario,
             compra_id=compra_id,
             proveedor_id=proveedor_id,
-            total_compra_usd=float(costo_total_usd),
+            total_compra_usd=float(total_compra_usd),
             financial_input=financial_input,
         )
         contabilizar_compra(conn, compra_id=compra_id, usuario=usuario)
@@ -1508,6 +1526,7 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             value=0.0,
             format="%.4f",
             key="inv_compra_new_costo",
+            help="Solo para dejar una referencia inicial si estás creando el producto ahora.",
         )
         precio_base = st.number_input(
             "Precio inicial USD",
@@ -1515,6 +1534,7 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             value=0.0,
             format="%.4f",
             key="inv_compra_new_precio",
+            help="Déjalo en 0 si ese producto no se vende.",
         )
     else:
         cantidad = st.number_input(
@@ -1547,8 +1567,8 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
     else:
         proveedor_nombre = d1.text_input("Proveedor", key="inv_compra_proveedor")
 
-    costo_total = d2.number_input(
-        "Costo total USD",
+    costo_base_compra = d2.number_input(
+        "Costo base USD (sin IVA ni delivery)",
         min_value=0.0001,
         value=1.0,
         format="%.4f",
@@ -1585,6 +1605,21 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
         delivery_manual,
     )
 
+    base_usd, impuesto_usd, total_compra_usd = _calc_purchase_totals(
+        costo_base_usd=float(costo_base_compra),
+        impuestos_pct=float(impuesto_pct),
+        delivery_usd=float(delivery_usd),
+    )
+    costo_unit_estimado = total_compra_usd / max(float(cantidad), 0.0001)
+
+    st.markdown("### 🧮 Resumen del costo real")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Base", f"${base_usd:,.2f}")
+    r2.metric("IVA / impuesto", f"${impuesto_usd:,.2f}")
+    r3.metric("Delivery", f"${delivery_usd:,.2f}")
+    r4.metric("Total final", f"${total_compra_usd:,.2f}")
+    st.caption(f"Costo unitario real estimado: ${costo_unit_estimado:,.4f} por {unidad_resuelta}")
+
     st.divider()
     st.markdown("### 💳 Condición de pago")
 
@@ -1615,15 +1650,15 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
     cuotas_generadas: list[dict[str, Any]] = []
 
     if tipo_pago == "contado":
-        monto_pagado = float(costo_total)
-        st.success("Compra de contado: se toma el costo total como pago completo.")
+        monto_pagado = float(total_compra_usd)
+        st.success("Compra de contado: se toma el total final como pago completo.")
         st.metric("Monto pagado", f"${monto_pagado:,.2f}")
     else:
         c1, c2, c3 = st.columns(3)
         monto_pagado = c1.number_input(
             "Inicial USD",
             min_value=0.0,
-            max_value=float(costo_total),
+            max_value=float(total_compra_usd),
             value=0.0,
             format="%.4f",
             key="inv_compra_pagado",
@@ -1644,7 +1679,7 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             key="inv_compra_freq_cuotas",
         )
 
-        saldo_financiar = max(float(costo_total) - float(monto_pagado), 0.0)
+        saldo_financiar = max(float(total_compra_usd) - float(monto_pagado), 0.0)
         if saldo_financiar <= 0:
             st.warning("No hay saldo para financiar. Revisa el monto inicial.")
         else:
@@ -1686,8 +1721,8 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
                     key=f"inv_compra_cuota_metodo_{i}",
                 )
 
-                impuesto_usd = round(float(monto_cuota) * float(impuesto_cuota) / 100.0, 2)
-                total_cuota = round(float(monto_cuota) + impuesto_usd, 2)
+                impuesto_usd_cuota = round(float(monto_cuota) * float(impuesto_cuota) / 100.0, 2)
+                total_cuota = round(float(monto_cuota) + impuesto_usd_cuota, 2)
 
                 cuotas_generadas.append(
                     {
@@ -1695,7 +1730,7 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
                         "fecha_vencimiento": fecha_cuota.isoformat(),
                         "monto_base_usd": float(monto_cuota),
                         "impuesto_pct": float(impuesto_cuota),
-                        "impuesto_usd": float(impuesto_usd),
+                        "impuesto_usd": float(impuesto_usd_cuota),
                         "monto_total_usd": float(total_cuota),
                         "metodo_pago": metodo_cuota,
                         "moneda_pago": str(moneda_pago),
@@ -1749,7 +1784,7 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
                 usuario=usuario,
                 inventario_id=int(target_id),
                 cantidad=float(cantidad),
-                costo_total_usd=float(costo_total),
+                costo_base_usd=float(costo_base_compra),
                 proveedor_id=proveedor_id,
                 proveedor_nombre=proveedor_nombre,
                 impuestos_pct=float(impuesto_pct),
@@ -1763,7 +1798,10 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             if tipo_pago == "credito" and cuotas_generadas:
                 _save_installments(compra_id=compra_id, proveedor_id=proveedor_id, cuotas=cuotas_generadas)
 
-            st.success(f"Compra registrada en {money(cantidad)} {unidad_resuelta}. ID compra #{compra_id}")
+            st.success(
+                f"Compra registrada en {money(cantidad)} {unidad_resuelta}. "
+                f"Total real: ${total_compra_usd:,.2f}. ID compra #{compra_id}"
+            )
             st.rerun()
 
         except Exception as exc:
@@ -1790,8 +1828,8 @@ def _render_historial_compras() -> None:
         hide_index=True,
         column_config={
             "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
-            "costo_total_usd": st.column_config.NumberColumn("Total USD", format="%.2f"),
-            "costo_unit_usd": st.column_config.NumberColumn("Costo unitario", format="%.4f"),
+            "costo_total_usd": st.column_config.NumberColumn("Total final USD", format="%.2f"),
+            "costo_unit_usd": st.column_config.NumberColumn("Costo unitario real", format="%.4f"),
             "impuestos": st.column_config.NumberColumn("Impuesto %", format="%.2f"),
             "delivery": st.column_config.NumberColumn("Delivery USD", format="%.4f"),
             "monto_pagado_inicial_usd": st.column_config.NumberColumn("Pagado inicial", format="%.2f"),
@@ -2429,8 +2467,3 @@ def render_inventario(usuario: str) -> None:
 
     with tabs[9]:
         _render_reportes(df)
-
-
-
-
-
