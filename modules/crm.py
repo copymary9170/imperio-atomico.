@@ -54,6 +54,17 @@ RESULTADOS_INTERACCION = (
 # TABLAS / SCHEMA
 # ============================================================
 
+def _ensure_columns(conn, table_name: str, columns: dict[str, str]) -> None:
+    current_columns = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    for column_name, column_ddl in columns.items():
+        if column_name in current_columns:
+            continue
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_ddl}")
+
+
 def _ensure_crm_tables() -> None:
     with db_transaction() as conn:
         conn.execute(
@@ -78,6 +89,24 @@ def _ensure_crm_tables() -> None:
             """
         )
 
+        _ensure_columns(
+            conn,
+            "crm_leads",
+            {
+                "actualizado_en": "actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP",
+                "usuario": "usuario TEXT",
+                "cliente_id": "cliente_id INTEGER",
+                "canal": "canal TEXT",
+                "etapa": "etapa TEXT NOT NULL DEFAULT 'Nuevo'",
+                "valor_estimado_usd": "valor_estimado_usd REAL DEFAULT 0",
+                "probabilidad_pct": "probabilidad_pct INTEGER DEFAULT 0",
+                "proximo_contacto": "proximo_contacto TEXT",
+                "notas": "notas TEXT",
+                "motivo_perdida": "motivo_perdida TEXT",
+                "estado": "estado TEXT NOT NULL DEFAULT 'activo'",
+            },
+        )
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS crm_interacciones (
@@ -92,6 +121,18 @@ def _ensure_crm_tables() -> None:
                 FOREIGN KEY (lead_id) REFERENCES crm_leads(id)
             )
             """
+        )
+
+        _ensure_columns(
+            conn,
+            "crm_interacciones",
+            {
+                "usuario": "usuario TEXT",
+                "tipo": "tipo TEXT",
+                "resultado": "resultado TEXT",
+                "detalle": "detalle TEXT",
+                "proxima_accion": "proxima_accion TEXT",
+            },
         )
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_leads_estado ON crm_leads(estado)")
@@ -113,10 +154,17 @@ def _table_exists(conn, table_name: str) -> bool:
     return row is not None
 
 
+def _table_has_column(conn, table_name: str, column_name: str) -> bool:
+    return any(
+        row["name"] == column_name
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    )
+
+
 def _load_pipeline() -> pd.DataFrame:
     _ensure_crm_tables()
     with db_transaction() as conn:
-        clientes_table_exists = _table_exists(conn, "clientes")
+        clientes_table_exists = _table_exists(conn, "clientes") and _table_has_column(conn, "clientes", "nombre")
         cliente_projection = "COALESCE(c.nombre, '') AS cliente" if clientes_table_exists else "'' AS cliente"
         cliente_join = "LEFT JOIN clientes c ON c.id = l.cliente_id" if clientes_table_exists else ""
         df = pd.read_sql_query(
