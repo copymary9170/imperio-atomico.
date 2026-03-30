@@ -2472,3 +2472,7 @@ def render_inventario(usuario: str) -> None:
 
 
 
+
+
+
+
