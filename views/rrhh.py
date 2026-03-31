@@ -15,7 +15,7 @@ def _format_empleado_option(emp: dict) -> str:
 
 
 def _render_dashboard(service: RRHHService) -> None:
-    st.subheader("Dashboard RRHH")
+    st.subheader("Panel de control RRHH")
     indicadores = service.indicadores()
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Empleados activos", indicadores["empleados_activos"])
@@ -224,7 +224,7 @@ def render_rrhh(usuario: str) -> None:
     st.title("👨‍💼 RRHH")
 
     tabs = st.tabs([
-        "Dashboard RRHH",
+        "Panel de control RRHH",
         "Empleados",
         "Asistencia",
         "Solicitudes",
