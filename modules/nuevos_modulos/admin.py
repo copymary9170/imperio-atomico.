@@ -253,7 +253,7 @@ def render_rrhh(usuario: str):
     st.title("👨‍💼 RRHH")
 
     tabs = st.tabs([
-        "Dashboard",
+        "Panel de control",
         "Empleados",
         "Asistencia",
         "Solicitudes",
@@ -261,7 +261,7 @@ def render_rrhh(usuario: str):
     ])
 
     # =========================
-    # DASHBOARD
+    # PANEL DE CONTROL
     # =========================
     with tabs[0]:
         a, b, c, d, e = indicadores()
