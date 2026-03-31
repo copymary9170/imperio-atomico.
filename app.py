@@ -26,7 +26,6 @@ restore_session_snapshot()
 # ==================================================
 
 from views.dashboard import render_dashboard
-from views.venta_directa import render_venta_directa
 from views.inventario import render_inventario
 from views.kardex import render_kardex
 from views.clientes import render_clientes
@@ -128,8 +127,6 @@ if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
 MENU_ROUTES = {
 
     "📊 Dashboard": lambda: render_dashboard(),
-
-    "🛒 Venta Directa": lambda: render_venta_directa(usuario),
 
     "📦 Inventario": lambda: render_inventario(usuario),
 
