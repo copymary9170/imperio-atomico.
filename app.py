@@ -185,7 +185,7 @@ MENU_ROUTES = {
     "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
     "🧾 Impuestos": lambda: render_impuestos(usuario),
     "🏛️ Conciliación bancaria": lambda: render_conciliacion_bancaria(usuario),
-    "📣 Marketing / Ventas": lambda: render_marketing_ventas(usuario),
+    "📣 Mercadeo / Ventas": lambda: render_marketing_ventas(usuario),
     "⭐ Fidelización": lambda: render_fidelizacion(usuario),
     "🛍️ Catálogo": lambda: render_catalogo(usuario),
     "👨‍💼 RRHH": lambda: render_rrhh(usuario),
