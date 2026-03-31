@@ -1189,3 +1189,7 @@ def render_dashboard() -> None:
                 )
                 topc = topc.sort_values("ventas_usd", ascending=False).head(10)
                 st.dataframe(topc, use_container_width=True, hide_index=True)
+
+
+
+
