@@ -1359,7 +1359,7 @@ def _render_calendario_cuotas(df_cuotas: pd.DataFrame) -> None:
 # ============================================================
 
 def _render_inventario_dashboard(df: pd.DataFrame) -> None:
-    st.subheader("📊 Dashboard de Inventario")
+    st.subheader("📊 Panel de control de inventario")subheader("📊 Dashboard de Inventario")
 
     total_items = int(len(df))
     capital_total = float(df["valor_stock"].sum()) if not df.empty else 0.0
@@ -2421,7 +2421,7 @@ def render_inventario(usuario: str) -> None:
 
     tabs = st.tabs(
         [
-            "📊 Dashboard",
+            "📊 Panel de control",
             "📋 Existencias",
             "📥 Compras",
             "🎨 Variantes",
