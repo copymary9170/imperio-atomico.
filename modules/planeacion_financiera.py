@@ -166,7 +166,7 @@ def _expense_breakdown(df_presupuesto: pd.DataFrame, egresos_reales: float) -> p
 
 def render_planeacion_financiera(usuario: str) -> None:
     st.title("💰 Planeación Financiera")
-    st.caption("Dashboard financiero integral: presupuesto, flujo, rentabilidad, alertas, comparativos y acciones rápidas.")
+    st.caption("Panel de control financiero integral: presupuesto, flujo, rentabilidad, alertas, comparativos y acciones rápidas.")
 
     periodo_default = date.today().strftime("%Y-%m")
     periodo = st.text_input("Período (YYYY-MM)", value=periodo_default)
