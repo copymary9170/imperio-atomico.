@@ -6,3 +6,7 @@ def render_dashboard():
     st.title("📊  Panel de control")
 
     dashboard_module()
+
+
+
+
