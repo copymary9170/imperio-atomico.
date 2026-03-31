@@ -759,3 +759,10 @@ def render_ventas(usuario: str) -> None:
 
     with tab3:
         _render_tab_resumen()
+
+
+
+
+
+
+
