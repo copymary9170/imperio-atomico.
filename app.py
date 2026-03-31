@@ -126,7 +126,7 @@ if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
 
 MENU_ROUTES = {
 
-    "📊 Dashboard": lambda: render_dashboard(),
+    "📊  Panel de control": lambda: render_dashboard(),
 
     "📦 Inventario": lambda: render_inventario(usuario),
 
