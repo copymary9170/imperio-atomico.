@@ -3,6 +3,6 @@ from modules.dashboard import render_dashboard as dashboard_module
 
 
 def render_dashboard():
-    st.title("📊 Dashboard")
+    st.title("📊  Panel de control")
 
     dashboard_module()
