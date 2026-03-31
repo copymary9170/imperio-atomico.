@@ -227,7 +227,7 @@ def render_dashboard() -> None:
             alertas_fin = generar_alertas_gerenciales(conn, periodo=periodo)
 
     except Exception as e:
-        st.error("Error cargando dashboard.")
+        st.error("Error cargando panel de control.")
         st.exception(e)
         return
 
@@ -720,7 +720,7 @@ def _period_bounds(rango: str, now: pd.Timestamp) -> pd.Timestamp | None:
 
 
 def render_dashboard() -> None:
-    st.subheader("📊 Dashboard Ejecutivo")
+    st.subheader("📊 Panel de control ejecutivo")
     st.caption("Vista ejecutiva del negocio: ventas, gastos, utilidad, clientes, pagos e inventario.")
 
     try:
@@ -787,7 +787,7 @@ def render_dashboard() -> None:
             kontigo_perc = _config_pct(conn, "kontigo_perc", 5.0)
 
     except Exception as e:
-        st.error("Error cargando dashboard.")
+        st.error("Error cargando panel de control.")
         st.exception(e)
         return
 
