@@ -145,7 +145,7 @@ def _period_bounds(rango: str, now: pd.Timestamp) -> pd.Timestamp | None:
 
 
 def render_dashboard() -> None:
-    st.subheader("📊 Dashboard Ejecutivo")
+    st.subheader("📊  Panel de control")
     st.caption("Vista ejecutiva del negocio: ventas, gastos, utilidad, presupuesto, flujo, clientes y stock.")
 
     now = pd.Timestamp.now()
