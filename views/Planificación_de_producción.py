@@ -11,6 +11,3 @@ def render_planificacion_produccion(usuario: str) -> None:
 def render_produccion(usuario: str) -> None:
     """Compatibilidad con importaciones antiguas."""
     render_planificacion_produccion(usuario)
-
-
-
