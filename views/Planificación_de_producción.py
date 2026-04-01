@@ -1,5 +1,5 @@
 import streamlit as st
-from modules.produccion import render_produccion as produccion_module
+from modules.Planificación_de_producción import render_produccion as produccion_module
 
 
 def render_produccion(usuario):
