@@ -1696,3 +1696,8 @@ def render_produccion(usuario: str) -> None:
 
     with tabs[7]:
         _render_resumen_costos(df_ordenes)
+
+
+
+
+
