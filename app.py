@@ -47,6 +47,7 @@ from views.costeo import render_costeo
 from views.configuracion import render_configuracion
 from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
+from views.Planificación de producción import render_Planificación de producción
 from views.planeacion_financiera import render_planeacion_financiera
 from views.erp_nuevos_modulos import (
     render_portafolio_modulos,
@@ -171,6 +172,8 @@ MENU_ROUTES = {
     "📈 Rentabilidad analítica": lambda: render_rentabilidad(usuario),
     
     "🔮 Planeación financiera": lambda: render_planeacion_financiera(usuario),
+    
+    "🗓️ Planificación de producción": lambda: render_planificacion_produccion(usuario),
 
     # NUEVA HERRAMIENTA DEL MOTOR
     "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
@@ -180,7 +183,6 @@ MENU_ROUTES = {
     "🧮 Costos / Costeo industrial": lambda: render_costeo_industrial(usuario),
     "♻️ Mermas y desperdicio": lambda: render_mermas_desperdicio(usuario),
     "🛠️ Mantenimiento de activos": lambda: render_mantenimiento_activos(usuario),
-    "🗓️ Planificación de producción": lambda: render_planificacion_produccion(usuario),
     "✅ Control de calidad": lambda: render_control_calidad(usuario),
     "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
     "🧾 Impuestos": lambda: render_impuestos(usuario),
