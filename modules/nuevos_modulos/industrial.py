@@ -19,22 +19,7 @@ INDUSTRIAL_MODULES: tuple[ModuleBlueprint, ...] = (
         business_value="Reduce paradas no planificadas y extiende la vida útil de equipos críticos de imprenta.",
         priority="Alta",
     ),
-    ModuleBlueprint(
-        key="planificacion_produccion",
-        name="Planificación de producción",
-        icon="🗓️",
-        category="Operación industrial",
-        summary="Organiza trabajos por prioridad, capacidad y tiempos para evitar cuellos de botella.",
-        capabilities=(
-            "Ordenar trabajos por prioridad",
-            "Asignar tiempos",
-            "Evitar cuellos de botella",
-            "Calendarizar producción",
-        ),
-        integrations=("Producción", "Activos", "Rutas", "Cotizaciones"),
-        business_value="Mejora promesas de entrega, uso de capacidad y secuenciación de órdenes.",
-        priority="Alta",
-    ),
+
     ModuleBlueprint(
         key="control_calidad",
         name="Control de calidad",
