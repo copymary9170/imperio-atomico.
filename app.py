@@ -210,3 +210,6 @@ menu = st.sidebar.radio(
 
 MENU_ROUTES[menu]()
 save_session_snapshot()
+
+
+
