@@ -67,6 +67,9 @@ def render_auditoria(usuario: str):
             .any(axis=1)
         ]
 
+
+
+    
     st.dataframe(
         df,
         use_container_width=True,
