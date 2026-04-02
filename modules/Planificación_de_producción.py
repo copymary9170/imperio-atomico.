@@ -1698,10 +1698,3 @@ def render_produccion(usuario: str) -> None:
         _render_resumen_costos(df_ordenes)
 
 
-
-
-
-
-
-
-
