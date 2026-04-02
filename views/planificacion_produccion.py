@@ -1,8 +1,38 @@
-ModuleNotFoundError: This app has encountered an error. The original error message is redacted to prevent data leaks. Full error details have been recorded in the logs (if you're on Streamlit Cloud, click on 'Manage app' in the lower right of your app).
-Traceback:
-File "/mount/src/imperio-atomico./app.py", line 51, in <module>
-    from views.erp_nuevos_modulos import (
-    ...<17 lines>...
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+import streamlit as st
+
+
+def _load_planificacion_module():
+    """Load the production planning module stored with a non-ASCII filename."""
+    module_path = (
+        Path(__file__).resolve().parents[1]
+        / "modules"
+        / "Planificación_de_producción.py"
     )
-File "/mount/src/imperio-atomico./views/erp_nuevos_modulos.py", line 8, in <module>
-    from views.planificacion_produccion import render_planificacion_produccion
+    spec = importlib.util.spec_from_file_location(
+        "modules.planificacion_de_produccion", module_path
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"No se pudo cargar el módulo desde: {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def render_planificacion_produccion(usuario: str) -> None:
+    st.title("🗓️ Planificación de producción")
+    st.caption(
+        "Organiza, programa y controla tu producción: órdenes, tiempos, costos y ejecución."
+    )
+
+    try:
+        module = _load_planificacion_module()
+        module.render_produccion(usuario)
+    except Exception as exc:
+        st.error("Error cargando el módulo de planificación de producción")
+        st.exception(exc)
