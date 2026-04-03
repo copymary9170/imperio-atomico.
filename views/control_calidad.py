@@ -1,8 +1,8 @@
 import streamlit as st
 
-from modules.erp_nuevos_modulos import render_module_blueprint
+from modules.control_calidad import render_control_calidad as control_calidad_module
 
 
-def render_control_calidad(usuario):
+def render_control_calidad(usuario: str) -> None:
     st.title("✅ Control de calidad")
-    render_module_blueprint("control_calidad", usuario)
+    control_calidad_module(usuario)
