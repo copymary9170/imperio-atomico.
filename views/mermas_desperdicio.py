@@ -1,8 +1,7 @@
 import streamlit as st
+from modules.mermas import render_mermas as mermas_module
 
-from modules.erp_nuevos_modulos import render_module_blueprint
 
-
-def render_mermas_desperdicio(usuario):
+def render_mermas(usuario):
     st.title("♻️ Mermas y desperdicio")
-    render_module_blueprint("mermas_desperdicio", usuario)
+    mermas_module(usuario)
