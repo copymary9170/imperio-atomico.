@@ -21,21 +21,6 @@ INDUSTRIAL_MODULES: tuple[ModuleBlueprint, ...] = (
     ),
 
     ModuleBlueprint(
-        key="control_calidad",
-        name="Control de calidad",
-        icon="✅",
-        category="Operación industrial",
-        summary="Registra calidad, no conformidades y reprocesos antes de entregar al cliente.",
-        capabilities=(
-            "Productos defectuosos",
-            "Reprocesos",
-            "Validaciones antes de entrega",
-        ),
-        integrations=("Producción", "Clientes", "Mermas", "Auditoría"),
-        business_value="Protege reputación, reduce devoluciones y cuantifica el costo de la mala calidad.",
-        priority="Media-Alta",
-    ),
-    ModuleBlueprint(
         key="rutas_produccion",
         name="Rutas de producción",
         icon="🧭",
