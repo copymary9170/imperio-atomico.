@@ -866,3 +866,6 @@ def render_mermas(usuario: str) -> None:
 
     with tabs[2]:
         _render_tab_resumen()
+
+
+
