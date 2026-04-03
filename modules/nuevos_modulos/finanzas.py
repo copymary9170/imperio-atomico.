@@ -69,20 +69,5 @@ FINANZAS_MODULES: tuple[ModuleBlueprint, ...] = (
         business_value="Conecta todos los procesos del ERP en una sola lógica de costo y protege la rentabilidad.",
         priority="Crítica",
     ),
-    ModuleBlueprint(
-        key="mermas_desperdicio",
-        name="Mermas y desperdicio",
-        icon="♻️",
-        category="Finanzas operativas",
-        summary="Registra pérdidas operativas para medir el impacto real de errores y fallas de producción.",
-        capabilities=(
-            "Errores de impresión",
-            "Materiales dañados",
-            "Fallas de producción",
-            "Desperdicio CMYK",
-        ),
-        integrations=("Producción", "Inventario", "Costeo industrial", "Auditoría"),
-        business_value="Hace visible la utilidad perdida por desperdicio y mejora el control operacional.",
-        priority="Alta",
-    ),
+
 )
