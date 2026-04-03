@@ -1100,3 +1100,8 @@ def render_control_calidad(usuario: str) -> None:
 
     with tabs[5]:
         _render_reportes_tab(df, df_def)
+
+
+
+
+
