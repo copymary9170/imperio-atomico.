@@ -18,7 +18,6 @@ from database.schema import init_schema
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 
 init_schema()
-
 restore_session_snapshot()
 
 # ==================================================
@@ -48,6 +47,8 @@ from views.configuracion import render_configuracion
 from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
+
+# ERP EXPANDIDO
 from views.erp_nuevos_modulos import (
     render_portafolio_modulos,
     render_compras_proveedores,
@@ -67,12 +68,9 @@ from views.erp_nuevos_modulos import (
     render_seguridad_roles,
     render_manuales_sop,
 )
+
 from views.catalogo import render_catalogo
 from modules.configuracion import render_sidebar_config_snapshot
-
-# NUEVA VISTA DEL MOTOR INDUSTRIAL
-from views.engine_demo import render_engine_demo
-
 
 # ==================================================
 # USUARIO
@@ -80,9 +78,8 @@ from views.engine_demo import render_engine_demo
 
 usuario = st.session_state.get("usuario", "Sistema")
 
-
 # ==================================================
-# SIDEBAR
+# ESTILOS SIDEBAR PRO
 # ==================================================
 
 st.markdown(
@@ -111,8 +108,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ==================================================
+# SIDEBAR
+# ==================================================
+
 st.sidebar.title("⚛️ Imperio Atómico ERP")
-st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral fijo.")
+st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral.")
 
 if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
     st.session_state.pop("usuario", None)
@@ -120,82 +121,82 @@ if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
     save_session_snapshot()
     st.rerun()
 
+render_sidebar_config_snapshot()
+
 # ==================================================
-# MENÚ PRINCIPAL
+# MENÚ PRINCIPAL (ORDEN EMPRESARIAL)
 # ==================================================
 
 MENU_ROUTES = {
 
-    "📊  Panel de control": lambda: render_dashboard(),
+    # CORE
+    "📊 Panel de control": lambda: render_dashboard(),
 
+    # OPERACIONES
     "📦 Inventario": lambda: render_inventario(usuario),
-
     "📊 Kardex": lambda: render_kardex(usuario),
-
-    "👥 Clientes": lambda: render_clientes(usuario),
-
-    "🤝 CRM": lambda: render_crm(usuario),
-
-    "🎨 Análisis CMYK": lambda: render_cmyk(usuario),
-    
     "🏗️ Activos": lambda: render_activos(usuario),
 
-    "🧠 Diagnóstico IA": lambda: render_diagnostico(usuario),
-
-    "🛠️ Otros Procesos": lambda: render_otros_procesos(usuario),
-
-    "✂️ Corte Industrial": lambda: render_corte(usuario),
-
-    "🔥 Sublimación Industrial": lambda: render_sublimacion(usuario),
-
-    "🎨 Producción Manual": lambda: render_produccion_manual(usuario),
-
+    # CLIENTES Y VENTAS
+    "👥 Clientes": lambda: render_clientes(usuario),
+    "🤝 CRM": lambda: render_crm(usuario),
     "💰 Ventas": lambda: render_ventas(usuario),
-
-    "📉 Gastos": lambda: render_gastos(usuario),
-
-    "🏁 Cierre de Caja": lambda: render_caja(usuario),
-
-    "📊 Auditoría y Métricas": lambda: render_auditoria(usuario),
-
     "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
-   
-    "🧮 Costeo": lambda: render_costeo(usuario),
+    "📣 Marketing / Ventas": lambda: render_marketing_ventas(usuario),
+    "⭐ Fidelización": lambda: render_fidelizacion(usuario),
 
+    # PRODUCCIÓN
+    "✂️ Corte Industrial": lambda: render_corte(usuario),
+    "🔥 Sublimación": lambda: render_sublimacion(usuario),
+    "🎨 Producción Manual": lambda: render_produccion_manual(usuario),
+    "🗓️ Planificación de producción": lambda: render_planificacion_produccion(usuario),
+    "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
+    "✅ Control de calidad": lambda: render_control_calidad(usuario),
+    "♻️ Mermas y desperdicio": lambda: render_mermas_desperdicio(usuario),
+
+    # FINANZAS
+    "📉 Gastos": lambda: render_gastos(usuario),
+    "🏦 Caja empresarial": lambda: render_caja(usuario),
+    "🏦 Tesorería": lambda: render_tesoreria(usuario),
+    "💸 Cuentas por pagar": lambda: render_cuentas_por_pagar(usuario),
+    "📚 Contabilidad": lambda: render_contabilidad(usuario),
+    "🏛️ Conciliación bancaria": lambda: render_conciliacion_bancaria(usuario),
+    "🧾 Impuestos": lambda: render_impuestos(usuario),
+
+    # ANALÍTICA
+    "📈 Rentabilidad": lambda: render_rentabilidad(usuario),
+    "🔮 Planeación financiera": lambda: render_planeacion_financiera(usuario),
+    "📊 Auditoría": lambda: render_auditoria(usuario),
+
+    # COSTOS
+    "🧮 Costeo": lambda: render_costeo(usuario),
+    "🧮 Costeo industrial": lambda: render_costeo_industrial(usuario),
     "🧮 Calculadora": lambda: render_calculadora(usuario),
 
-    "⚙️ Configuración": lambda: render_configuracion(usuario),
-
-    "📚 Contabilidad": lambda: render_contabilidad(usuario),
-
-    "📈 Rentabilidad analítica": lambda: render_rentabilidad(usuario),
-    
-    "🔮 Planeación financiera": lambda: render_planeacion_financiera(usuario),
-    
-    "🗓️ Planificación de producción": lambda: render_planificacion_produccion(usuario),
-
-    # NUEVA HERRAMIENTA DEL MOTOR
-    "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
-    "🚚 Compras / Proveedores": lambda: render_compras_proveedores(usuario),
-    "💸 Cuentas por pagar": lambda: render_cuentas_por_pagar(usuario),
-    "🏦 Tesorería / Flujo de caja": lambda: render_tesoreria(usuario),
-    "🧮 Costos / Costeo industrial": lambda: render_costeo_industrial(usuario),
-    "♻️ Mermas y desperdicio": lambda: render_mermas_desperdicio(usuario),
-    "🛠️ Mantenimiento de activos": lambda: render_mantenimiento_activos(usuario),
-    "✅ Control de calidad": lambda: render_control_calidad(usuario),
-    "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
-    "🧾 Impuestos": lambda: render_impuestos(usuario),
-    "🏛️ Conciliación bancaria": lambda: render_conciliacion_bancaria(usuario),
-    "📣 Mercadeo / Ventas": lambda: render_marketing_ventas(usuario),
-    "⭐ Fidelización": lambda: render_fidelizacion(usuario),
-    "🛍️ Catálogo": lambda: render_catalogo(usuario),
+    # RRHH
     "👨‍💼 RRHH": lambda: render_rrhh(usuario),
+
+    # SISTEMA
+    "⚙️ Configuración": lambda: render_configuracion(usuario),
     "🔐 Seguridad / Roles": lambda: render_seguridad_roles(usuario),
     "📘 Manuales / SOP": lambda: render_manuales_sop(usuario),
 
+    # OTROS
+    "🎨 CMYK": lambda: render_cmyk(usuario),
+    "🧠 Diagnóstico IA": lambda: render_diagnostico(usuario),
+    "🛠️ Otros procesos": lambda: render_otros_procesos(usuario),
+    "🛍️ Catálogo": lambda: render_catalogo(usuario),
+
+    # EXPANSIÓN ERP
+    "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
+    "🚚 Compras / Proveedores": lambda: render_compras_proveedores(usuario),
+    "🛠️ Mantenimiento": lambda: render_mantenimiento_activos(usuario),
+
 }
 
-render_sidebar_config_snapshot()
+# ==================================================
+# SELECTOR
+# ==================================================
 
 menu = st.sidebar.radio(
     "Menú principal",
@@ -203,16 +204,9 @@ menu = st.sidebar.radio(
     label_visibility="collapsed",
 )
 
-
 # ==================================================
-# EJECUTAR VISTA
+# EJECUCIÓN
 # ==================================================
 
 MENU_ROUTES[menu]()
 save_session_snapshot()
-
-
-
-
-
-
