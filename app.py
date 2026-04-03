@@ -77,6 +77,7 @@ from modules.configuracion import render_sidebar_config_snapshot
 # ==================================================
 
 usuario = st.session_state.get("usuario", "Sistema")
+user_role = st.session_state.get("rol", "Admin")
 
 # ==================================================
 # ESTILOS SIDEBAR PRO
@@ -156,7 +157,7 @@ MENU_ROUTES = {
 
     # FINANZAS
     "📉 Gastos": lambda: render_gastos(usuario),
-    "🏦 Caja empresarial": lambda: render_caja(usuario),
+    "🏦 Caja empresarial": lambda: render_caja(usuario, user_role),
     "🏦 Tesorería": lambda: render_tesoreria(usuario),
     "💸 Cuentas por pagar": lambda: render_cuentas_por_pagar(usuario),
     "📚 Contabilidad": lambda: render_contabilidad(usuario),
