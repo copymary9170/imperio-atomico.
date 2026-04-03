@@ -192,7 +192,6 @@ MENU_ROUTES = {
     "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
     "🚚 Compras / Proveedores": lambda: render_compras_proveedores(usuario),
     "🛠️ Mantenimiento": lambda: render_mantenimiento_activos(usuario),
-
 }
 
 # ==================================================
