@@ -2467,3 +2467,6 @@ def render_inventario(usuario: str) -> None:
 
     with tabs[9]:
         _render_reportes(df)
+
+
+
