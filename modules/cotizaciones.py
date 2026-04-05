@@ -15,7 +15,6 @@ from services.costeo_service import (
     obtener_parametros_costeo,
 )
 
-
 ESTADOS_COTIZACION = [
     "Cotización",
     "En revisión",
