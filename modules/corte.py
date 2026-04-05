@@ -1261,3 +1261,6 @@ def render_corte(usuario: str) -> None:
                             "costo_real_usd": st.column_config.NumberColumn("Costo real", format="%.2f"),
                         },
                     )
+
+
+
