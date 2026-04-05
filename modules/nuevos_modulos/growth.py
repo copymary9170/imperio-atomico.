@@ -50,3 +50,5 @@ GROWTH_MODULES: tuple[ModuleBlueprint, ...] = (
         business_value="Incrementa recompra y fortalece relaciones con clientes de alto valor.",
         priority="Media",
     ),
+
+    
