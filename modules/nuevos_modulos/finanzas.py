@@ -4,24 +4,6 @@ from .types import ModuleBlueprint
 
 FINANZAS_MODULES: tuple[ModuleBlueprint, ...] = (
     ModuleBlueprint(
-        key="compras_proveedores",
-        name="Compras / Proveedores",
-        icon="🚚",
-        category="Finanzas operativas",
-        summary="Formaliza abastecimiento, negociación y control de compras para alimentar inventario y costos reales.",
-        capabilities=(
-            "Registro de proveedores",
-            "Órdenes de compra",
-            "Recepción de mercancía",
-            "Precios por proveedor",
-            "Historial de compras",
-            "Cuentas por pagar a proveedores",
-        ),
-        integrations=("Inventario", "Gastos", "Costos reales", "Tesorería"),
-        business_value="Da trazabilidad al abastecimiento y permite comprar mejor, comparar proveedores y alimentar el costo real del ERP.",
-        priority="Alta",
-    ),
-    ModuleBlueprint(
         key="cuentas_por_pagar",
         name="Cuentas por pagar",
         icon="💸",
