@@ -1295,12 +1295,13 @@ def render_catalogo_hub(usuario: str | None = None) -> None:
         st.caption(f"Gestión de catálogo para {usuario} · versión maestra conectada")
 
     # bandeja opcional por si luego decides enviarle datos a catálogo
+    def _apply_catalogo_inbox(inbox: dict[str, Any]) -> None:
+        st.session_state["catalogo_prefill"] = inbox.get("payload_data", {})
+
     render_module_inbox(
-        module_name="catalogo",
-        title="Datos recibidos en Catálogo",
-        use_button_label="Usar datos",
-        clear_button_label="Limpiar datos recibidos",
-        session_prefill_key="catalogo_prefill",
+        "catalogo",
+        apply_callback=_apply_catalogo_inbox,
+        clear_after_apply=False,
     )
 
     df = _load_catalogo_df()
