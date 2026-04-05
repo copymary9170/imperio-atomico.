@@ -7,6 +7,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import money
+from modules.integration_hub import render_module_inbox
 from modules.inventario import (
     _ensure_inventory_support_tables,
     _load_cuentas_por_pagar_df,
@@ -16,6 +17,7 @@ from services.cxp_proveedores_service import registrar_pago_cuenta_por_pagar
 
 
 _ESTADOS_ABIERTOS = ["pendiente", "parcial", "vencida"]
+
 
 
 def _enhance_cxp(df_cxp: pd.DataFrame) -> pd.DataFrame:
@@ -53,13 +55,19 @@ def render_cuentas_por_pagar(usuario: str) -> None:
 
     tasa_bcv = float(st.session_state.get("tasa_bcv", 36.5) or 36.5)
 
+    def _apply_inbox(inbox: dict) -> None:
+        data = inbox.get("payload_data", {})
+        if data.get("proveedor"):
+            st.session_state["cxp_mod_filtro_proveedor"] = str(data.get("proveedor"))
+
+    render_module_inbox("cuentas por pagar", apply_callback=_apply_inbox, clear_after_apply=False)
+
     raw = _load_cuentas_por_pagar_df()
     df_cxp = _enhance_cxp(raw)
 
     if df_cxp.empty:
         st.info("No hay cuentas por pagar registradas.")
         return
-
     abiertas = df_cxp[df_cxp["estado"].isin(_ESTADOS_ABIERTOS)].copy()
     deuda_total = float(abiertas["saldo_usd"].sum()) if not abiertas.empty else 0.0
     vencidas = abiertas[abiertas["dias_para_vencer"] < 0].copy() if not abiertas.empty else abiertas
