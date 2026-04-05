@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import streamlit as st
 
 from database.connection import db_transaction
+from modules.integration_hub import render_module_inbox
 from services.tesoreria_service import (
     ORIGENES_TESORERIA,
     registrar_movimiento_tesoreria,
@@ -25,23 +26,35 @@ def _render_metricas(resumen: dict[str, float]) -> None:
 
 def _render_form_ajuste_manual(usuario: str) -> None:
     st.write("### Registrar ajuste manual")
+    prefill = st.session_state.get("tesoreria_prefill", {})
+    default_tipo = "ingreso" if float(prefill.get("total", 0.0) or 0.0) > 0 else "egreso"
+    default_monto = float(prefill.get("total", 0.01) or 0.01)
+    default_metodo = str(prefill.get("metodo_pago", "transferencia") or "transferencia")
+
     with st.form("tesoreria_ajuste_manual", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
-        tipo = c1.selectbox("Tipo", ["ingreso", "egreso"])
-        monto_usd = c2.number_input("Monto USD", min_value=0.01, value=0.01, format="%.2f")
+        tipo = c1.selectbox("Tipo", ["ingreso", "egreso"], index=0 if default_tipo == "ingreso" else 1)
+        monto_usd = c2.number_input("Monto USD", min_value=0.01, value=max(default_monto, 0.01), format="%.2f")
         fecha_mov = c3.date_input("Fecha", value=date.today())
 
         c4, c5, c6 = st.columns(3)
         moneda = c4.selectbox("Moneda", ["USD", "BS", "USDT", "KONTIGO"])
         tasa = c5.number_input("Tasa", min_value=0.0001, value=1.0, format="%.4f")
-        metodo_pago = c6.selectbox("Método", ["efectivo", "transferencia", "zelle", "binance", "pago móvil", "kontigo"])
+        metodos = ["efectivo", "transferencia", "zelle", "binance", "pago móvil", "kontigo"]
+        metodo_idx = metodos.index(default_metodo) if default_metodo in metodos else 1
+        metodo_pago = c6.selectbox("Método", metodos, index=metodo_idx)
 
-        descripcion = st.text_input("Descripción", placeholder="Ajuste de caja, aporte de socios, retiro, etc.")
-        referencia_id = st.number_input("Referencia opcional", min_value=0, value=0, step=1)
+        descripcion = st.text_input(
+            "Descripción",
+            value=str(prefill.get("referencia") or ""),
+            placeholder="Ajuste de caja, aporte de socios, retiro, etc.",
+        )
+        referencia_id = st.number_input("Referencia opcional", min_value=0, value=int(prefill.get("venta_id") or 0), step=1)
         submit = st.form_submit_button("Guardar ajuste")
 
     if not submit:
         return
+
 
     with db_transaction() as conn:
         registrar_movimiento_tesoreria(
@@ -65,6 +78,11 @@ def _render_form_ajuste_manual(usuario: str) -> None:
 def render_tesoreria(usuario: str) -> None:
     st.title("🏦 Tesorería / Flujo de caja")
     st.caption("Libro operativo de caja para movimientos reales, trazabilidad por origen y vencimientos.")
+
+    def _apply_inbox(inbox: dict) -> None:
+        st.session_state["tesoreria_prefill"] = dict(inbox.get("payload_data", {}))
+
+    render_module_inbox("tesorería", apply_callback=_apply_inbox, clear_after_apply=False)
 
     filtro1, filtro2, filtro3, filtro4 = st.columns(4)
     fecha_desde = filtro1.date_input("Desde", value=date.today() - timedelta(days=30))
