@@ -50,20 +50,3 @@ GROWTH_MODULES: tuple[ModuleBlueprint, ...] = (
         business_value="Incrementa recompra y fortalece relaciones con clientes de alto valor.",
         priority="Media",
     ),
-    ModuleBlueprint(
-        key="catalogo",
-        name="Catálogo",
-        icon="🛍️",
-        category="Negocio y crecimiento",
-        summary="Publica productos, servicios y paquetes para canales digitales como WhatsApp e Instagram.",
-        capabilities=(
-            "Productos",
-            "Precios",
-            "Servicios",
-            "Paquetes",
-        ),
-        integrations=("Ventas", "CRM", "Marketing", "Cotizaciones"),
-        business_value="Simplifica la venta digital y la presentación comercial del portafolio.",
-        priority="Media",
-    ),
-)
