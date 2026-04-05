@@ -1332,3 +1332,6 @@ def render_catalogo_hub(usuario: str | None = None) -> None:
 
     with tab_copy:
         _render_copy_catalogo(filado if False else filtrado)
+
+
+
