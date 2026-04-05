@@ -51,7 +51,6 @@ from views.planeacion_financiera import render_planeacion_financiera
 # ERP EXPANDIDO
 from views.erp_nuevos_modulos import (
     render_portafolio_modulos,
-    render_compras_proveedores,
     render_cuentas_por_pagar,
     render_tesoreria,
     render_costeo_industrial,
@@ -190,7 +189,6 @@ MENU_ROUTES = {
 
     # EXPANSIÓN ERP
     "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
-    "🚚 Compras / Proveedores": lambda: render_compras_proveedores(usuario),
     "🛠️ Mantenimiento": lambda: render_mantenimiento_activos(usuario),
 }
 
