@@ -11,6 +11,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, money, require_text
+from modules.integration_hub import dispatch_to_module, render_send_buttons
 from services.contabilidad_service import contabilizar_compra
 from services.conciliacion_service import periodo_esta_cerrado
 from services.cxp_proveedores_service import (
@@ -2633,6 +2634,42 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
     r3.metric("Delivery", f"${delivery_usd:,.2f}")
     r4.metric("Total final", f"${total_compra_usd:,.2f}")
     st.caption(f"Costo unitario real estimado: ${costo_unit_estimado:,.4f} por {unidad_resuelta}")
+    st.markdown("### 🔗 Enviar referencia a otros módulos")
+
+    def _build_to_costeo():
+        nombre_item = nuevo_nombre if modo_item == "Crear y comprar" else (
+            str(items_map[inv_id]["nombre"]) if inv_id in items_map else ""
+        )
+        sku_item = nuevo_sku if modo_item == "Crear y comprar" else (str(items_map[inv_id]["sku"]) if inv_id in items_map else "")
+        return (
+            "costo_material_referencial",
+            {
+                "item": nombre_item,
+                "sku": sku_item,
+                "costo_unitario": round(float(costo_unit_estimado), 4),
+                "unidad": unidad_resuelta,
+                "stock": float(cantidad),
+                "referencia": f"COMPRA-{sku_item or 'N/A'}",
+            },
+        )
+
+    def _build_to_cxp():
+        return (
+            "compra_por_pagar",
+            {
+                "compra_id": None,
+                "proveedor": clean_text(proveedor_nombre),
+                "monto": round(float(total_compra_usd), 2),
+                "saldo": round(max(float(total_compra_usd) - float(monto_pagado), 0.0), 2),
+                "vencimiento": fecha_venc.isoformat() if fecha_venc else "",
+                "referencia": f"PROV-{clean_text(proveedor_nombre) or 'N/A'}",
+            },
+        )
+
+    render_send_buttons(
+        source_module="inventario",
+        payload_builders={"costeo": _build_to_costeo, "cuentas por pagar": _build_to_cxp},
+    )
 
     st.divider()
     st.markdown("### 💳 Condición de pago")
@@ -2813,10 +2850,28 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
 
             st.success(
                 f"Compra registrada en {money(cantidad)} {unidad_resuelta}. "
-                f"Total real: ${total_compra_usd:,.2f}. ID compra #{compra_id}"
+               f"Total real: ${total_compra_usd:,.2f}. ID compra #{compra_id}"
+            )
+            dispatch_to_module(
+                source_module="inventario",
+                target_module="cuentas por pagar",
+                payload={
+                    "source_module": "inventario",
+                    "source_action": "compra_registrada",
+                    "record_id": compra_id,
+                    "referencia": clean_text(proveedor_nombre),
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "usuario": usuario,
+                    "payload_data": {
+                        "compra_id": compra_id,
+                        "proveedor": clean_text(proveedor_nombre),
+                        "monto": round(float(total_compra_usd), 2),
+                        "saldo": round(max(float(total_compra_usd) - float(monto_pagado), 0.0), 2),
+                        "vencimiento": fecha_venc.isoformat() if fecha_venc else "",
+                    },
+                },
             )
             st.rerun()
-
         except Exception as exc:
             st.error(f"No se pudo registrar la compra: {exc}")
 
