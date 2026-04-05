@@ -7,7 +7,7 @@ from modules.cmyk.cost_engine import PERFILES_CALIDAD, calcular_costo_lote, cost
 from modules.cmyk.history import guardar_historial
 from modules.cmyk.inventory_engine import descontar_inventario, filtrar_tintas, mapear_consumo_ids, validar_stock
 from modules.cmyk.page_size import ajustar_consumo_por_tamano
-
+from modules.integration_hub import render_send_buttons
 
 def _config_base_imprenta(tamano_pagina: str):
     base_por_tamano = {
@@ -429,6 +429,42 @@ def render_cmyk(usuario):
         else:
             st.error(msg)
 
-    if st.button("Limpiar análisis actual", use_container_width=True):
+if st.button("Limpiar análisis actual", use_container_width=True):
         st.session_state.pop(resultado_key, None)
         st.info("Análisis limpiado. Puedes cargar nuevos archivos.")
+
+    st.markdown("### 🔗 Enviar a otros módulos")
+
+    def _build_cmyk_to_corte():
+        return (
+            "analisis_cmyk",
+            {
+                "archivo": ", ".join([getattr(a, "name", "") for a in (archivos or []) if getattr(a, "name", "")]),
+                "trabajo": f"Impresión {total_paginas} páginas",
+                "cantidad": total_paginas,
+                "costo_base": round(float(costo_total), 2),
+                "material": analisis.get("material_papel", ""),
+                "observaciones": f"Impresora: {analisis.get('impresora_nombre', 'N/D')}",
+                "referencia": f"CMYK-{analisis.get('impresora_nombre', 'N/D')}",
+            },
+        )
+
+    def _build_cmyk_to_cotizaciones():
+        return (
+            "cotizacion_preliminar",
+            {
+                "costo_base": round(float(costo_total), 2),
+                "tiempo_estimado": round(float(total_paginas) * 0.15, 2),
+                "tipo_produccion": "cmyk",
+                "archivo": ", ".join([getattr(a, "name", "") for a in (archivos or []) if getattr(a, "name", "")]),
+                "referencia": f"CMYK-{analisis.get('impresora_nombre', 'N/D')}",
+            },
+        )
+
+    render_send_buttons(
+        source_module="cmyk",
+        payload_builders={
+            "corte industrial": _build_cmyk_to_corte,
+            "cotizaciones": _build_cmyk_to_cotizaciones,
+        },
+    )
