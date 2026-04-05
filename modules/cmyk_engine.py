@@ -429,7 +429,7 @@ def render_cmyk(usuario):
         else:
             st.error(msg)
 
-if st.button("Limpiar análisis actual", use_container_width=True):
+    if st.button("Limpiar análisis actual", use_container_width=True):
         st.session_state.pop(resultado_key, None)
         st.info("Análisis limpiado. Puedes cargar nuevos archivos.")
 
@@ -448,7 +448,7 @@ if st.button("Limpiar análisis actual", use_container_width=True):
                 "referencia": f"CMYK-{analisis.get('impresora_nombre', 'N/D')}",
             },
         )
-
+        
     def _build_cmyk_to_cotizaciones():
         return (
             "cotizacion_preliminar",
