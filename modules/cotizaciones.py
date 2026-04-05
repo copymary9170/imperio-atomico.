@@ -7,12 +7,14 @@ import plotly.express as px
 import streamlit as st
 
 from database.connection import db_transaction
+from modules.integration_hub import render_module_inbox
 from services.costeo_service import (
     calcular_costo_servicio,
     calcular_margen_estimado,
     guardar_costeo,
     obtener_parametros_costeo,
 )
+
 
 ESTADOS_COTIZACION = [
     "Cotización",
@@ -87,6 +89,11 @@ def _actualizar_estado(cotizacion_id: int, estado: str) -> None:
 
 def render_cotizaciones(usuario: str):
     st.subheader("📝 Gestión de Cotizaciones")
+
+    def _apply_inbox(inbox: dict) -> None:
+        st.session_state["datos_pre_cotizacion"] = dict(inbox.get("payload_data", {}))
+
+    render_module_inbox("cotizaciones", apply_callback=_apply_inbox, clear_after_apply=False)
 
     datos_pre = st.session_state.get("datos_pre_cotizacion", {})
     descripcion_pre, costo_base_pre = _normalizar_payload(datos_pre) if datos_pre else ("", 0.0)
