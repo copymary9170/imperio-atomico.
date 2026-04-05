@@ -1,7 +1,4 @@
-from __future__ import annotations
-
-import io
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -9,6 +6,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, money, require_text
+from modules.integration_hub import dispatch_to_module, render_send_buttons
 from services.contabilidad_service import contabilizar_venta
 from services.conciliacion_service import periodo_esta_cerrado
 from services.costeo_service import actualizar_vinculos_costeo
@@ -787,6 +785,32 @@ def _render_tab_registro(usuario: str) -> None:
     s1.metric("Total en Bs", f"{float(total_bs):,.2f}")
     s2.metric("Utilidad estimada", f"$ {float(totales['utilidad_estimada_usd']):,.2f}")
 
+    st.markdown("### 🔗 Enviar referencia a otros módulos")
+
+    def _build_to_tesoreria():
+        total_usd = float(totales["total_usd"])
+        monto_pagado = total_usd if metodo_pago != "credito" else 0.0
+        return (
+            "venta_preparada",
+            {
+                "venta_id": None,
+                "cliente": cliente_nombre,
+                "total": round(total_usd, 2),
+                "monto_pagado": round(monto_pagado, 2),
+                "saldo": round(max(total_usd - monto_pagado, 0.0), 2),
+                "metodo_pago": metodo_pago,
+                "referencia": f"VENTA-{cliente_nombre}",
+            },
+        )
+
+    render_send_buttons(
+        source_module="ventas",
+        payload_builders={
+            "tesorería": _build_to_tesoreria,
+            "caja empresarial": _build_to_tesoreria,
+        },
+    )
+
     if metodo_pago == "credito" and cliente_map[cliente_nombre] is None:
         st.warning("Para registrar una venta a crédito debes seleccionar un cliente.")
 
@@ -806,6 +830,28 @@ def _render_tab_registro(usuario: str) -> None:
                 iva_pct=float(iva_pct),
                 dias_credito=int(dias_credito),
                 observacion=observacion,
+            )
+            total_usd = float(totales["total_usd"])
+            monto_pagado = total_usd if metodo_pago != "credito" else 0.0
+            dispatch_to_module(
+                source_module="ventas",
+                target_module="tesorería",
+                payload={
+                    "source_module": "ventas",
+                    "source_action": "venta_registrada",
+                    "record_id": venta_id,
+                    "referencia": f"VENTA-{venta_id}",
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "usuario": usuario,
+                    "payload_data": {
+                        "venta_id": int(venta_id),
+                        "cliente": cliente_nombre,
+                        "total": round(total_usd, 2),
+                        "monto_pagado": round(monto_pagado, 2),
+                        "saldo": round(max(total_usd - monto_pagado, 0.0), 2),
+                        "metodo_pago": metodo_pago,
+                    },
+                },
             )
 
             _clear_sales_state()
