@@ -576,7 +576,7 @@ def _descontar_inventario_material(
         f"SELECT {name_col} AS nombre, COALESCE({stock_col},0) AS stock, {unidad_expr} AS unidad "
         "FROM inventario WHERE id=?",
         (int(inventario_id),),
-    ).fetchone()st.title("✂️ Corte Industrial – Cameo")
+    ).fetchone()
 
     if not row:
         raise ValueError("Material no encontrado en inventario.")
