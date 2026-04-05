@@ -9,6 +9,7 @@ import pytesseract
 import streamlit as st
 from pdf2image import convert_from_bytes
 
+from modules.integration_hub import render_send_buttons
 from services.diagnostics_service import (
     DiagnosticsService,
     analizar_hoja_diagnostico,
@@ -619,6 +620,26 @@ def render_diagnostico(usuario: str) -> None:
     s2.write({k: round(float(v), 2) for k, v in datos.get("porcentajes_software", {}).items()})
     s3.markdown("**Porcentajes visuales:**")
     s3.write({k: round(float(v), 2) for k, v in datos.get("porcentajes_visual", {}).items()})
+
+    st.markdown("### 🔗 Enviar a otros módulos")
+
+    def _build_to_mantenimiento():
+        return (
+            "diagnostico_activo",
+            {
+                "equipo_id": datos.get("activo_id"),
+                "equipo": datos.get("impresora"),
+                "desgaste": round(100.0 - float(datos.get("vida_cabezal_pct", 100.0)), 2),
+                "incidencia": datos.get("resumen", {}).get("estado_cabezal", "Diagnóstico operativo"),
+                "prioridad": "alta" if float(datos.get("vida_cabezal_pct", 100.0)) < 45 else "media",
+                "referencia": f"DIAG-{datos.get('activo_id') or 'N/A'}",
+            },
+        )
+
+    render_send_buttons(
+        source_module="diagnóstico ia",
+        payload_builders={"mantenimiento": _build_to_mantenimiento},
+    )
 
     if not datos.get("activo_id"):
         st.warning("Este análisis no está vinculado a un activo; Inventario puede actualizarse, pero Activos no recibirá cambios.")
