@@ -51,4 +51,4 @@ GROWTH_MODULES: tuple[ModuleBlueprint, ...] = (
         priority="Media",
     ),
 
-    
+)
