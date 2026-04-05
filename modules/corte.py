@@ -1264,3 +1264,12 @@ def render_corte(usuario: str) -> None:
 
 
 
+
+
+
+
+
+
+
+
+
