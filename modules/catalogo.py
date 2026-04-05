@@ -1336,3 +1336,5 @@ def render_catalogo_hub(usuario: str | None = None) -> None:
 
 
 
+
+
