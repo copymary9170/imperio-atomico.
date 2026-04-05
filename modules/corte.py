@@ -1110,7 +1110,183 @@ def render_corte(usuario: str) -> None:
                 view,
                 use_container_width=True,
                 hide_index=True,
-@@ -1248,28 +1290,25 @@ def render_corte(usuario: str) -> None:
+                column_config={
+                    "area_cm2_estimada": st.column_config.NumberColumn("Área", format="%.2f"),
+                    "cm_corte_estimado": st.column_config.NumberColumn("CM corte", format="%.2f"),
+                    "tiempo_estimado_min": st.column_config.NumberColumn("Tiempo min", format="%.2f"),
+                    "costo_estimado_usd": st.column_config.NumberColumn("Costo estimado", format="%.2f"),
+                    "cantidad_material_estimada": st.column_config.NumberColumn("Consumo estimado", format="%.3f"),
+                },
+            )
+
+            d1, d2 = st.columns(2)
+            orden_sel = d1.selectbox(
+                "Orden",
+                options=df_ordenes["id"].tolist(),
+                format_func=lambda i: f"{df_ordenes[df_ordenes['id'] == i]['codigo'].iloc[0]} · {df_ordenes[df_ordenes['id'] == i]['referencia'].iloc[0]}",
+                key="corte_sel_orden_estado",
+            )
+            nuevo_estado = d2.selectbox(
+                "Actualizar estado",
+                ["analizado", "aprobado", "en_proceso", "terminado", "cancelado"],
+                key="corte_nuevo_estado",
+            )
+            if st.button("💾 Guardar estado", use_container_width=True):
+                try:
+                    _actualizar_estado_orden_corte(int(orden_sel), str(nuevo_estado))
+                    st.success("Estado actualizado.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo actualizar el estado: {exc}")
+
+    with tab_ejecucion:
+        st.subheader("Ejecutar corte")
+        if df_ordenes.empty:
+            st.info("No hay órdenes para ejecutar.")
+        else:
+            ejecutables = df_ordenes[df_ordenes["estado"].astype(str).str.lower().isin(["analizado", "aprobado", "en_proceso"])].copy()
+            if ejecutables.empty:
+                st.success("No hay órdenes pendientes de ejecución.")
+            else:
+                orden_id = st.selectbox(
+                    "Orden a ejecutar",
+                    options=ejecutables["id"].tolist(),
+                    format_func=lambda i: f"{ejecutables[ejecutables['id'] == i]['codigo'].iloc[0]} · {ejecutables[ejecutables['id'] == i]['material_nombre'].iloc[0]}",
+                    key="corte_ejec_orden_id",
+                )
+                row = ejecutables[ejecutables["id"] == orden_id].iloc[0]
+
+                p1, p2, p3 = st.columns(3)
+                p1.metric("Consumo estimado", f"{float(row['cantidad_material_estimada'] or 0):,.3f}")
+                p2.metric("Tiempo estimado", f"{float(row['tiempo_estimado_min'] or 0):,.2f} min")
+                p3.metric("Costo estimado", f"$ {float(row['costo_estimado_usd'] or 0):,.2f}")
+
+                e1, e2, e3 = st.columns(3)
+                cm_corte_real = e1.number_input(
+                    "CM corte real",
+                    min_value=0.0,
+                    value=float(row["cm_corte_estimado"] or 0.0),
+                    format="%.2f",
+                    key="corte_real_cm",
+                )
+                tiempo_real_min = e2.number_input(
+                    "Tiempo real (min)",
+                    min_value=0.0,
+                    value=float(row["tiempo_estimado_min"] or 0.0),
+                    format="%.2f",
+                    key="corte_real_time",
+                )
+                material_real_usado = e3.number_input(
+                    "Material real usado",
+                    min_value=0.0,
+                    value=float(row["cantidad_material_estimada"] or 0.0),
+                    format="%.3f",
+                    key="corte_real_material",
+                )
+
+                e4, e5 = st.columns(2)
+                merma = e4.number_input("Merma", min_value=0.0, value=0.0, format="%.3f", key="corte_real_merma")
+                retazo_reutilizable = e5.number_input(
+                    "Retazo reutilizable",
+                    min_value=0.0,
+                    value=0.0,
+                    format="%.3f",
+                    key="corte_real_retazo",
+                )
+
+                incidencias = st.text_area("Incidencias", key="corte_real_incidencias")
+
+                if st.button("⚙️ Ejecutar y cerrar orden", use_container_width=True):
+                    try:
+                        ejec_id = _ejecutar_corte(
+                            usuario=usuario,
+                            orden_corte_id=int(orden_id),
+                            cm_corte_real=float(cm_corte_real),
+                            tiempo_real_min=float(tiempo_real_min),
+                            material_real_usado=float(material_real_usado),
+                            merma=float(merma),
+                            retazo_reutilizable=float(retazo_reutilizable),
+                            incidencias=incidencias,
+                        )
+                        st.success(f"Ejecución registrada correctamente. ID #{ejec_id}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"No se pudo ejecutar el corte: {exc}")
+
+    with tab_material:
+        st.subheader("Material / merma / retazos")
+
+        mt1, mt2 = st.tabs(["Movimientos de material", "Retazos"])
+
+        with mt1:
+            if df_movs.empty:
+                st.info("No hay movimientos de material registrados.")
+            else:
+                st.dataframe(
+                    df_movs,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
+                    },
+                )
+
+        with mt2:
+            if df_retazos.empty:
+                st.info("No hay retazos registrados.")
+            else:
+                st.dataframe(
+                    df_retazos,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
+                    },
+                )
+
+    with tab_historial:
+        st.subheader("Historial de corte")
+
+        ht1, ht2 = st.tabs(["Ejecuciones", "Resumen"])
+
+        with ht1:
+            if df_ejec.empty:
+                st.info("No hay ejecuciones registradas.")
+            else:
+                st.dataframe(
+                    df_ejec,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "cm_corte_real": st.column_config.NumberColumn("CM reales", format="%.2f"),
+                        "tiempo_real_min": st.column_config.NumberColumn("Tiempo real", format="%.2f"),
+                        "material_real_usado": st.column_config.NumberColumn("Material real", format="%.3f"),
+                        "merma": st.column_config.NumberColumn("Merma", format="%.3f"),
+                        "retazo_reutilizable": st.column_config.NumberColumn("Retazo", format="%.3f"),
+                        "costo_real_usd": st.column_config.NumberColumn("Costo real", format="%.2f"),
+                        "desgaste_registrado": st.column_config.NumberColumn("Desgaste", format="%.6f"),
+                    },
+                )
+
+        with ht2:
+            if df_ordenes.empty:
+                st.info("Sin datos aún.")
+            else:
+                eficiencia = 0.0
+                if not df_ejec.empty:
+                    total_material = float(df_ejec["material_real_usado"].sum() or 0.0)
+                    total_merma = float(df_ejec["merma"].sum() or 0.0)
+                    if total_material > 0:
+                        eficiencia = ((total_material - total_merma) / total_material) * 100.0
+
+                s1, s2, s3, s4 = st.columns(4)
+                s1.metric("Órdenes totales", len(df_ordenes))
+                s2.metric("Material usado", f"{float(df_ejec['material_real_usado'].sum()) if not df_ejec.empty else 0:,.3f}")
+                s3.metric("Merma acumulada", f"{float(df_ejec['merma'].sum()) if not df_ejec.empty else 0:,.3f}")
+                s4.metric("Eficiencia estimada", f"{eficiencia:.1f}%")
+
+                if not df_ejec.empty:
+                    resumen = (
                         df_ejec.groupby("material_nombre", as_index=False)[["material_real_usado", "merma", "retazo_reutilizable", "costo_real_usd"]]
                         .sum()
                         .sort_values("costo_real_usd", ascending=False)
@@ -1127,14 +1303,3 @@ def render_corte(usuario: str) -> None:
                             "costo_real_usd": st.column_config.NumberColumn("Costo real", format="%.2f"),
                         },
                     )
-
-
-
-
-
-
-
-
-
-
-
