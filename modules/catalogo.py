@@ -453,6 +453,7 @@ def _ensure_catalogo_tables() -> None:
                         float(item.merma_pct_estimada),
                         item.ruta_base,
                         item.notas_tecnicas,
+                        1,
                     ),
                 )
 
