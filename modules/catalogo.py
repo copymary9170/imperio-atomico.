@@ -1,4 +1,4 @@
-from __future__ import annotations
+om __future__ import annotations
 
 import io
 from dataclasses import dataclass
