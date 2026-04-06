@@ -1,4 +1,4 @@
-rom __future__ import annotations
+from __future__ import annotations
 
 import calendar
 import re
@@ -3460,5 +3460,8 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
     with tab7:
         df_cuotas = _load_cuotas_compras_df()
         _render_calendario_cuotas(df_cuotas)
+
+
+
 
 
