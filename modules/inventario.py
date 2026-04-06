@@ -1,4 +1,4 @@
-from _future__ import annotations
+from __future__ import annotations
 
 import calendar
 import re
@@ -801,19 +801,21 @@ def registrar_compra(
     usuario: str,
     inventario_id: int,
     cantidad: float,
-    costo_base_usd: float,
-    proveedor_id: int | None,
-    proveedor_nombre: str,
-    impuestos_pct: float,
-    delivery_usd: float,
-    tasa_usada: float,
-    moneda_pago: str,
-    metodo_pago: str,
+    costo_base_usd: float | None = None,
+    proveedor_id: int | None = None,
+    proveedor_nombre: str = "",
+    impuestos_pct: float = 0.0,
+    delivery_usd: float = 0.0,
+    tasa_usada: float = 1.0,
+    moneda_pago: str = "USD",
+    metodo_pago: str = "transferencia",
     referencia_extra: str = "",
     financial_input: CompraFinancialInput | None = None,
+    costo_total_usd: float | None = None,
 ) -> int:
     cantidad = as_positive(cantidad, "Cantidad", allow_zero=False)
-    costo_base_usd = as_positive(costo_base_usd, "Costo base", allow_zero=False)
+    costo_compra_ref = costo_base_usd if costo_base_usd is not None else costo_total_usd
+    costo_base_usd = as_positive(costo_compra_ref, "Costo base", allow_zero=False)
     impuestos_pct = max(0.0, float(impuestos_pct or 0.0))
     delivery_usd = max(0.0, float(delivery_usd or 0.0))
 
@@ -1473,13 +1475,6 @@ def save_evaluacion(usuario: str, proveedor_id: int, payload: dict[str, Any]) ->
         )
         return int(cur.lastrowid)
 
-Perfecto. Aquí van la **PARTE 2** y la **PARTE 3** para continuar **después de tu parte 1**.
-
----
-
-# PARTE 2
-
-```python
 def registrar_pago_proveedor_ui(
     usuario: str,
     cuenta_por_pagar_id: int,
@@ -2208,7 +2203,6 @@ def _load_cuotas_compra_df(compra_id: int | None = None) -> pd.DataFrame:
         "fecha_pago",
     ]
     return pd.DataFrame(rows, columns=cols)
-```
 
 # ============================================================
 # REPORTES / CÁLCULOS
@@ -2847,9 +2841,7 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
                 total_cuotas = float(cronograma_df["monto_total_usd"].sum())
                 csum1, csum2 = st.columns(2)
                 csum1.metric("Total cuotas", f"${total_cuotas:,.2f}")
-                csum2.metric("
-
-Último vencimiento", str(fecha_venc))
+                csum2.metric("Último vencimiento", str(fecha_venc))
 
     if st.button("✅ Guardar compra", use_container_width=True):
         try:
@@ -2987,7 +2979,7 @@ def _render_proveedores() -> None:
                 "tipo_proveedor",
                 "estatus_comercial",
             ]
-            df_view = _filter_df_by_query(df_view, filtro,
+            df_view = _filter_df_by_query(df_view, filtro, searchable_cols)
 
         if selected_tags:
             df_view = df_view[
@@ -3106,10 +3098,6 @@ def _render_proveedores() -> None:
                 else "aprobado"
             ),
         )
-
-        observaciones = st.text_area(
-            "Observaciones",
-            value="" if proveedor_existente is None else str(proveedor_existente["]()
 
         observaciones = st.text_area(
             "Observaciones",
