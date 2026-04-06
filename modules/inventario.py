@@ -3168,6 +3168,297 @@ def _render_proveedores() -> None:
                     st.rerun()
 
 
+def _render_productos(usuario: str) -> None:
+    st.subheader("📦 Productos")
 
+    df = _load_inventory_df(include_inactive=True)
+
+    if df.empty:
+        st.info("No hay productos registrados todavía.")
+    else:
+        b1, b2 = st.columns([2, 1])
+        buscar = b1.text_input("🔎 Buscar producto", key="inv_productos_buscar")
+        estado = b2.selectbox("Estado", ["Todos", "activo", "inactivo"], key="inv_productos_estado")
+
+        view = df.copy()
+        if buscar:
+            view = _filter_df_by_query(view, buscar, ["sku", "nombre", "categoria", "unidad"])
+
+        if estado != "Todos":
+            view = view[view["estado"].astype(str).str.lower() == estado]
+
+        st.dataframe(
+            view,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "stock_actual": st.column_config.NumberColumn("Stock", format="%.3f"),
+                "stock_minimo": st.column_config.NumberColumn("Mínimo", format="%.3f"),
+                "costo_unitario_usd": st.column_config.NumberColumn("Costo USD", format="%.4f"),
+                "precio_venta_usd": st.column_config.NumberColumn("Precio USD", format="%.4f"),
+                "valor_stock": st.column_config.NumberColumn("Valor stock", format="%.2f"),
+            },
+        )
+
+    st.divider()
+    st.subheader("➕ Registrar / Editar producto")
+
+    producto_existente = None
+    if not df.empty:
+        pid_sel = st.selectbox(
+            "Editar producto existente (opcional)",
+            options=[None] + df["id"].tolist(),
+            format_func=lambda x: "Nuevo producto" if x is None else str(df[df["id"] == x]["nombre"].iloc[0]),
+            key="inv_producto_edit_sel",
+        )
+        if pid_sel is not None:
+            producto_existente = df[df["id"] == pid_sel].iloc[0]
+
+    with st.form("form_producto"):
+        c1, c2, c3, c4 = st.columns(4)
+        sku = c1.text_input("SKU", value="" if producto_existente is None else str(producto_existente["sku"]))
+        nombre = c2.text_input("Nombre", value="" if producto_existente is None else str(producto_existente["nombre"]))
+        categoria = c3.text_input(
+            "Categoría",
+            value="General" if producto_existente is None else str(producto_existente["categoria"]),
+        )
+        unidad = c4.text_input(
+            "Unidad",
+            value="unidad" if producto_existente is None else str(producto_existente["unidad"]),
+        )
+
+        c5, c6, c7, c8 = st.columns(4)
+        stock_actual = c5.number_input(
+            "Stock actual",
+            min_value=0.0,
+            value=0.0 if producto_existente is None else _safe_float(producto_existente["stock_actual"], 0.0),
+            format="%.3f",
+        )
+        stock_minimo = c6.number_input(
+            "Stock mínimo",
+            min_value=0.0,
+            value=0.0 if producto_existente is None else _safe_float(producto_existente["stock_minimo"], 0.0),
+            format="%.3f",
+        )
+        costo_unitario_usd = c7.number_input(
+            "Costo unitario USD",
+            min_value=0.0,
+            value=0.0 if producto_existente is None else _safe_float(producto_existente["costo_unitario_usd"], 0.0),
+            format="%.4f",
+        )
+        precio_venta_usd = c8.number_input(
+            "Precio venta USD",
+            min_value=0.0,
+            value=0.0 if producto_existente is None else _safe_float(producto_existente["precio_venta_usd"], 0.0),
+            format="%.4f",
+        )
+
+        estado_producto = st.selectbox(
+            "Estado",
+            ["activo", "inactivo"],
+            index=["activo", "inactivo"].index(
+                str(producto_existente["estado"]).lower()
+                if producto_existente is not None and str(producto_existente["estado"]).lower() in ["activo", "inactivo"]
+                else "activo"
+            ),
+        )
+
+        guardar_producto = st.form_submit_button("💾 Guardar producto", use_container_width=True)
+
+    if guardar_producto:
+        try:
+            if not clean_text(sku):
+                raise ValueError("El SKU es obligatorio.")
+            if not clean_text(nombre):
+                raise ValueError("El nombre es obligatorio.")
+
+            with db_transaction() as conn:
+                if producto_existente is None:
+                    conn.execute(
+                        """
+                        INSERT INTO inventario (
+                            sku, nombre, categoria, unidad,
+                            stock_actual, stock_minimo,
+                            costo_unitario_usd, precio_venta_usd,
+                            estado, creado_por, creado_en
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            clean_text(sku),
+                            clean_text(nombre),
+                            clean_text(categoria),
+                            clean_text(unidad),
+                            float(stock_actual),
+                            float(stock_minimo),
+                            float(costo_unitario_usd),
+                            float(precio_venta_usd),
+                            clean_text(estado_producto).lower(),
+                            usuario,
+                            datetime.now().isoformat(timespec="seconds"),
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE inventario
+                        SET sku=?,
+                            nombre=?,
+                            categoria=?,
+                            unidad=?,
+                            stock_actual=?,
+                            stock_minimo=?,
+                            costo_unitario_usd=?,
+                            precio_venta_usd=?,
+                            estado=?,
+                            actualizado_en=?,
+                            actualizado_por=?
+                        WHERE id=?
+                        """,
+                        (
+                            clean_text(sku),
+                            clean_text(nombre),
+                            clean_text(categoria),
+                            clean_text(unidad),
+                            float(stock_actual),
+                            float(stock_minimo),
+                            float(costo_unitario_usd),
+                            float(precio_venta_usd),
+                            clean_text(estado_producto).lower(),
+                            datetime.now().isoformat(timespec="seconds"),
+                            usuario,
+                            int(producto_existente["id"]),
+                        ),
+                    )
+
+            st.success("Producto guardado correctamente.")
+            st.rerun()
+
+        except Exception as exc:
+            st.error(f"No se pudo guardar el producto: {exc}")
+
+    if not df.empty:
+        st.divider()
+        st.subheader("🗑 Desactivar producto")
+
+        activos = df[df["estado"].astype(str).str.lower() == "activo"].copy()
+        if activos.empty:
+            st.caption("No hay productos activos para desactivar.")
+        else:
+            prod_del = st.selectbox(
+                "Producto a desactivar",
+                activos["id"].tolist(),
+                format_func=lambda i: f"{activos[activos['id'] == i]['nombre'].iloc[0]} ({activos[activos['id'] == i]['sku'].iloc[0]})",
+                key="inv_producto_delete_sel",
+            )
+
+            if st.button("🗑 Desactivar producto", key="inv_delete_producto_btn"):
+                try:
+                    with db_transaction() as conn:
+                        conn.execute(
+                            """
+                            UPDATE inventario
+                            SET estado='inactivo',
+                                actualizado_en=?,
+                                actualizado_por=?
+                            WHERE id=?
+                            """,
+                            (
+                                datetime.now().isoformat(timespec="seconds"),
+                                usuario,
+                                int(prod_del),
+                            ),
+                        )
+                    st.success("Producto desactivado.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo desactivar el producto: {exc}")
+
+
+def _render_resumen_financiero() -> None:
+    st.subheader("💵 Resumen financiero de compras")
+
+    df_hist = _load_historial_compras_df(limit=5000)
+    if df_hist.empty:
+        st.info("No hay información financiera de compras todavía.")
+        return
+
+    df = df_hist.copy()
+
+    total_comprado = _safe_float(df["costo_total_usd"].sum(), 0.0)
+    total_pagado = _safe_float(df["monto_pagado_inicial_usd"].sum(), 0.0)
+    total_saldo = _safe_float(df["saldo_pendiente_usd"].sum(), 0.0)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total comprado", f"${total_comprado:,.2f}")
+    c2.metric("Pagado inicial", f"${total_pagado:,.2f}")
+    c3.metric("Saldo pendiente", f"${total_saldo:,.2f}")
+
+    st.markdown("### 📈 Compras por proveedor")
+    if "proveedor" in df.columns:
+        prov = (
+            df.groupby("proveedor", as_index=False)["costo_total_usd"]
+            .sum()
+            .sort_values("costo_total_usd", ascending=False)
+            .head(15)
+        )
+        if not prov.empty:
+            st.bar_chart(prov.set_index("proveedor")[["costo_total_usd"]])
+
+    st.markdown("### 📄 Detalle")
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
+            "costo_total_usd": st.column_config.NumberColumn("Total final USD", format="%.2f"),
+            "costo_unit_usd": st.column_config.NumberColumn("Costo unitario", format="%.4f"),
+            "monto_pagado_inicial_usd": st.column_config.NumberColumn("Pagado inicial", format="%.2f"),
+            "saldo_pendiente_usd": st.column_config.NumberColumn("Saldo", format="%.2f"),
+        },
+    )
+
+
+def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
+    st.title("📦 Módulo de Inventario")
+
+    df_inv = _load_inventory_df()
+
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        [
+            "Dashboard",
+            "Existencias",
+            "Productos",
+            "Compras",
+            "Historial",
+            "Proveedores",
+            "Cuotas",
+        ]
+    )
+
+    with tab1:
+        _render_inventario_dashboard(df_inv)
+        st.divider()
+        _render_resumen_financiero()
+
+    with tab2:
+        _render_existencias(df_inv)
+
+    with tab3:
+        _render_productos(usuario)
+
+    with tab4:
+        _render_compras(usuario=usuario, tasa_bcv=tasa_bcv, tasa_binance=tasa_binance)
+
+    with tab5:
+        _render_historial_compras()
+
+    with tab6:
+        _render_proveedores()
+
+    with tab7:
+        df_cuotas = _load_cuotas_compras_df()
+        _render_calendario_cuotas(df_cuotas)
 
 
