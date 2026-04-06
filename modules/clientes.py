@@ -511,3 +511,8 @@ def render_clientes(usuario: str) -> None:
     st.dataframe(reporte["historial_abonos"], use_container_width=True, hide_index=True)
 
 
+
+
+
+
+
