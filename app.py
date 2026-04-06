@@ -1,1 +1,211 @@
+import streamlit as st
+
+# ==================================================
+# CONFIGURACIÓN DE LA APP
+# ==================================================
+
+st.set_page_config(
+    page_title="Imperio Atómico ERP",
+    layout="wide",
+    page_icon="⚛️"
+)
+
+# ==================================================
+# INICIALIZAR BASE DE DATOS
+# ==================================================
+
+from database.schema import init_schema
+from ui.session_persistence import restore_session_snapshot, save_session_snapshot
+
+init_schema()
+restore_session_snapshot()
+
+# ==================================================
+# IMPORTAR VISTAS
+# ==================================================
+
+from views.dashboard import render_dashboard
+from views.inventario import render_inventario
+from views.kardex import render_kardex
+from views.clientes import render_clientes
+from views.crm import render_crm
+from views.cmyk import render_cmyk
+from views.activos import render_activos
+from views.diagnostico import render_diagnostico
+from views.otros_procesos import render_otros_procesos
+from views.corte import render_corte
+from views.sublimacion import render_sublimacion
+from views.produccion_manual import render_produccion_manual
+from views.ventas import render_ventas
+from views.gastos import render_gastos
+from views.caja import render_caja
+from views.auditoria import render_auditoria
+from views.cotizaciones import render_cotizaciones
+from views.calculadora import render_calculadora
+from views.costeo import render_costeo
+from views.configuracion import render_configuracion
+from views.contabilidad import render_contabilidad
+from views.rentabilidad import render_rentabilidad
+from views.planeacion_financiera import render_planeacion_financiera
+
+# ERP EXPANDIDO
+from views.erp_nuevos_modulos import (
+    render_portafolio_modulos,
+    render_cuentas_por_pagar,
+    render_tesoreria,
+    render_costeo_industrial,
+    render_mermas_desperdicio,
+    render_mantenimiento_activos,
+    render_planificacion_produccion,
+    render_control_calidad,
+    render_rutas_produccion,
+    render_impuestos,
+    render_conciliacion_bancaria,
+    render_marketing_ventas,
+    render_fidelizacion,
+    render_rrhh,
+    render_seguridad_roles,
+    render_manuales_sop,
+)
+
+from views.catalogo import render_catalogo
+from modules.configuracion import render_sidebar_config_snapshot
+
+# ==================================================
+# USUARIO
+# ==================================================
+
+usuario = st.session_state.get("usuario", "Sistema")
+user_role = st.session_state.get("rol", "Admin")
+
+# ==================================================
+# ESTILOS SIDEBAR PRO
+# ==================================================
+
+st.markdown(
+    """
+    <style>
+        section[data-testid="stSidebar"] {
+            min-width: 320px;
+            max-width: 320px;
+        }
+        section[data-testid="stSidebar"] [role="radiogroup"] {
+            gap: 0.35rem;
+        }
+        section[data-testid="stSidebar"] [role="radiogroup"] label {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 0.75rem;
+            padding: 0.35rem 0.75rem;
+            transition: all 0.2s ease;
+        }
+        section[data-testid="stSidebar"] [role="radiogroup"] label:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ==================================================
+# SIDEBAR
+# ==================================================
+
+st.sidebar.title("⚛️ Imperio Atómico ERP")
+st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral.")
+
+if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
+    st.session_state.pop("usuario", None)
+    st.session_state.pop("rol", None)
+    save_session_snapshot()
+    st.rerun()
+
+render_sidebar_config_snapshot()
+
+# ==================================================
+# MENÚ PRINCIPAL (ORDEN EMPRESARIAL)
+# ==================================================
+
+MENU_ROUTES = {
+
+    # CORE
+    "📊 Panel de control": lambda: render_dashboard(),
+
+    # OPERACIONES
+    "📦 Inventario": lambda: render_inventario(usuario),
+    "📊 Kardex": lambda: render_kardex(usuario),
+    "🏗️ Activos": lambda: render_activos(usuario),
+
+    # CLIENTES Y VENTAS
+    "👥 Clientes": lambda: render_clientes(usuario),
+    "🤝 CRM": lambda: render_crm(usuario),
+    "💰 Ventas": lambda: render_ventas(usuario),
+    "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
+    "📣 Marketing / Ventas": lambda: render_marketing_ventas(usuario),
+    "⭐ Fidelización": lambda: render_fidelizacion(usuario),
+
+    # PRODUCCIÓN
+    "✂️ Corte Industrial": lambda: render_corte(usuario),
+    "🔥 Sublimación": lambda: render_sublimacion(usuario),
+    "🎨 Producción Manual": lambda: render_produccion_manual(usuario),
+    "🗓️ Planificación de producción": lambda: render_planificacion_produccion(usuario),
+    "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
+    "✅ Control de calidad": lambda: render_control_calidad(usuario),
+    "♻️ Mermas y desperdicio": lambda: render_mermas_desperdicio(usuario),
+
+    # FINANZAS
+    "📉 Gastos": lambda: render_gastos(usuario),
+    "🏦 Caja empresarial": lambda: render_caja(usuario, user_role),
+    "🏦 Tesorería": lambda: render_tesoreria(usuario),
+    "💸 Cuentas por pagar": lambda: render_cuentas_por_pagar(usuario),
+    "📚 Contabilidad": lambda: render_contabilidad(usuario),
+    "🏛️ Conciliación bancaria": lambda: render_conciliacion_bancaria(usuario),
+    "🧾 Impuestos": lambda: render_impuestos(usuario),
+
+    # ANALÍTICA
+    "📈 Rentabilidad": lambda: render_rentabilidad(usuario),
+    "🔮 Planeación financiera": lambda: render_planeacion_financiera(usuario),
+    "📊 Auditoría": lambda: render_auditoria(usuario),
+
+    # COSTOS
+    "🧮 Costeo": lambda: render_costeo(usuario),
+    "🧮 Costeo industrial": lambda: render_costeo_industrial(usuario),
+    "🧮 Calculadora": lambda: render_calculadora(usuario),
+
+    # RRHH
+    "👨‍💼 RRHH": lambda: render_rrhh(usuario),
+
+    # SISTEMA
+    "⚙️ Configuración": lambda: render_configuracion(usuario),
+    "🔐 Seguridad / Roles": lambda: render_seguridad_roles(usuario),
+    "📘 Manuales / SOP": lambda: render_manuales_sop(usuario),
+
+    # OTROS
+    "🎨 CMYK": lambda: render_cmyk(usuario),
+    "🧠 Diagnóstico IA": lambda: render_diagnostico(usuario),
+    "🛠️ Otros procesos": lambda: render_otros_procesos(usuario),
+    "🛍️ Catálogo": lambda: render_catalogo(usuario),
+
+    # EXPANSIÓN ERP
+    "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
+    "🛠️ Mantenimiento": lambda: render_mantenimiento_activos(usuario),
+}
+
+# ==================================================
+# SELECTOR
+# ==================================================
+
+menu = st.sidebar.radio(
+    "Menú principal",
+    list(MENU_ROUTES.keys()),
+    label_visibility="collapsed",
+)
+
+# ==================================================
+# EJECUCIÓN
+# ==================================================
+
+MENU_ROUTES[menu]()
+save_session_snapshot()
 
