@@ -1,4 +1,27 @@
 
+from _future__ import annotations
+
+import calendar
+import re
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import streamlit as st
+
+from database.connection import db_transaction
+from modules.common import as_positive, clean_text, money, require_text
+from services.contabilidad_service import contabilizar_compra
+from services.conciliacion_service import periodo_esta_cerrado
+from services.cxp_proveedores_service import (
+    CompraFinancialInput,
+    crear_cuenta_por_pagar_desde_compra,
+    validar_condicion_compra,
+)
+from services.tesoreria_service import registrar_egreso
+
+
 # ============================================================
 # INTEGRACION ENTRE MODULOS (FALLBACK SEGURO)
 # ============================================================
