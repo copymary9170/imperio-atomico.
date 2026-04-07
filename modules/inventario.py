@@ -21,6 +21,61 @@ from services.cxp_proveedores_service import (
 )
 from services.tesoreria_service import registrar_egreso
 
+# ============================================================
+# INTEGRACION ENTRE MODULOS (FALLBACK SEGURO)
+# ============================================================
+
+try:
+    from modules.integration_hub import dispatch_to_module, render_send_buttons
+except Exception:
+    def dispatch_to_module(
+        source_module: str,
+        target_module: str,
+        payload: dict[str, Any],
+        success_message: str | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        if "module_inbox" not in st.session_state:
+            st.session_state["module_inbox"] = {}
+        st.session_state["module_inbox"][target_module] = payload
+        if success_message:
+            st.success(success_message)
+
+    def render_send_buttons(
+        source_module: str,
+        payload_builders: dict[str, Any],
+        layout: str = "horizontal",
+    ) -> None:
+        if not payload_builders:
+            return
+
+        items = list(payload_builders.items())
+        cols = st.columns(len(items)) if layout == "horizontal" else [st] * len(items)
+
+        for idx, (label, builder) in enumerate(items):
+            btn_label = f"Enviar a {label}"
+            container = cols[idx] if layout == "horizontal" else st
+            if container.button(btn_label, key=f"{source_module}_send_{idx}"):
+                try:
+                    target_module, payload_data = builder()
+                    payload = {
+                        "source_module": source_module,
+                        "source_action": f"send_to_{str(target_module).replace(' ', '_')}",
+                        "record_id": None,
+                        "referencia": "",
+                        "timestamp": datetime.now().isoformat(timespec="seconds"),
+                        "usuario": st.session_state.get("usuario", "Sistema"),
+                        "payload_data": payload_data,
+                    }
+                    dispatch_to_module(
+                        source_module=source_module,
+                        target_module=target_module,
+                        payload=payload,
+                        success_message=f"Datos enviados a {label}.",
+                    )
+                except Exception as exc:
+                    st.error(f"No se pudo enviar a {label}: {exc}")
+
 
 # ============================================================
 # CONFIG EXTRA
@@ -33,6 +88,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================
 # AUXILIARES
 # ============================================================
+
 
 def _rate_from_label(label: str, tasa_bcv: float, tasa_binance: float) -> float:
     if "BCV" in str(label):
