@@ -3466,7 +3466,7 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
         _render_proveedores()
 
     with tab7:
-        df_cuotas = _load_cuotas_compras_df()
+        df_cuotas = _load_cuotas_compra_df()
         _render_calendario_cuotas(df_cuotas)
 
 
