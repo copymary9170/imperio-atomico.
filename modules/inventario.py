@@ -1577,7 +1577,9 @@ def registrar_pago_proveedor_ui(
 # DATA LOADERS
 # ============================================================
 
-def _load_inventory_df() -> pd.DataFrame:
+# ============================================================
+
+def _load_inventory_df(include_inactive: bool = False) -> pd.DataFrame:
     cols = [
         "id",
         "fecha",
@@ -1585,20 +1587,25 @@ def _load_inventory_df() -> pd.DataFrame:
         "nombre",
         "categoria",
         "unidad",
+        "estado",
         "stock_actual",
         "stock_minimo",
         "costo_unitario_usd",
         "precio_venta_usd",
         "valor_stock",
     ]
+    where_estado = ""
+    if not include_inactive:
+        where_estado = "WHERE COALESCE(estado,'activo')='activo'"
     with db_transaction() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT id, fecha, sku, nombre, categoria, unidad, stock_actual, stock_minimo,
+                   COALESCE(estado,'activo') AS estado,
                    costo_unitario_usd, precio_venta_usd,
                    (stock_actual * costo_unitario_usd) AS valor_stock
             FROM inventario
-            WHERE COALESCE(estado,'activo')='activo'
+            {where_estado}
             ORDER BY nombre ASC
             """
         ).fetchall()
