@@ -523,8 +523,17 @@ def _ensure_inventory_support_tables() -> None:
         )
 
         cols_var = {r[1] for r in conn.execute("PRAGMA table_info(inventario_variantes)").fetchall()}
-        if "sku_variante" not in cols_var:
-            conn.execute("ALTER TABLE inventario_variantes ADD COLUMN sku_variante TEXT")
+        variantes_base_columns = {
+            "sku_variante": "TEXT",
+            "stock_actual": "REAL DEFAULT 0",
+            "stock_minimo": "REAL DEFAULT 0",
+            "activo": "INTEGER DEFAULT 1",
+            "fecha_creacion": "TEXT DEFAULT CURRENT_TIMESTAMP",
+        }
+        for name, ddl in variantes_base_columns.items():
+            if name not in cols_var:
+                conn.execute(f"ALTER TABLE inventario_variantes ADD COLUMN {name} {ddl}")
+                cols_var.add(name)
 
         conn.execute(
             """
