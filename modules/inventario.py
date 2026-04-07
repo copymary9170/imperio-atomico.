@@ -326,8 +326,19 @@ def _ensure_inventory_support_tables() -> None:
         )
 
         prov_cols = {r[1] for r in conn.execute("PRAGMA table_info(proveedores)").fetchall()}
-        if "especialidades" not in prov_cols:
-            conn.execute("ALTER TABLE proveedores ADD COLUMN especialidades TEXT")
+        base_provider_columns = {
+            "telefono": "TEXT",
+            "rif": "TEXT",
+            "contacto": "TEXT",
+            "observaciones": "TEXT",
+            "especialidades": "TEXT",
+            "activo": "INTEGER DEFAULT 1",
+            "fecha_creacion": "TEXT DEFAULT CURRENT_TIMESTAMP",
+        }
+        for name, ddl in base_provider_columns.items():
+            if name not in prov_cols:
+                conn.execute(f"ALTER TABLE proveedores ADD COLUMN {name} {ddl}")
+                prov_cols.add(name)
 
         extra_provider_columns = {
             "email": "TEXT",
@@ -349,6 +360,7 @@ def _ensure_inventory_support_tables() -> None:
         for name, ddl in extra_provider_columns.items():
             if name not in prov_cols:
                 conn.execute(f"ALTER TABLE proveedores ADD COLUMN {name} {ddl}")
+                prov_cols.add(name)
 
         conn.execute(
             """
@@ -371,6 +383,7 @@ def _ensure_inventory_support_tables() -> None:
             )
             """
         )
+
 
         compra_cols = {r[1] for r in conn.execute("PRAGMA table_info(historial_compras)").fetchall()}
         if "tipo_pago" not in compra_cols:
