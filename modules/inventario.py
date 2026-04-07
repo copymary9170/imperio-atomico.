@@ -4014,7 +4014,7 @@ def _render_integridad_e_integraciones() -> None:
 
 
 def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
-   st.title("📦 Centro de Control de Inventario")
+    st.title("📦 Centro de Control de Inventario")
     df = _load_inventory_df()
 
     sections = [
