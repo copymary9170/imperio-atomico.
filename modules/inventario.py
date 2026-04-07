@@ -2104,6 +2104,7 @@ def _load_pagos_proveedores_df(cuenta_por_pagar_id: int) -> pd.DataFrame:
 
 
 def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
+    _ensure_inventory_support_tables()
     with db_transaction() as conn:
         rows = conn.execute(
             """
