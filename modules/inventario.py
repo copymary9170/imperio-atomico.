@@ -3970,18 +3970,37 @@ def _render_resumen_financiero() -> None:
     c2.metric("Pagado inicial", f"${total_pagado:,.2f}")
     c3.metric("Saldo pendiente", f"${total_saldo:,.2f}")
 
-@@ -3648,90 +4103,105 @@ def _render_integridad_e_integraciones() -> None:
-            ("🛠️ Otros procesos", "costeo_ordenes"),
-            ("♻️ Mermas y desperdicio", "mermas_desperdicio"),
-            ("💸 Cuentas por pagar", "cuentas_por_pagar_proveedores"),
-            ("🧮 Costeo", "costeo_detalle"),
-            ("🧮 Costeo industrial", "costeo_ordenes"),
-            ("📚 Contabilidad", "libro_diario"),
-        ]
-        rows: list[dict[str, Any]] = []
+    df_group = (
+        df.groupby("proveedor", dropna=False)
+        .agg(compras=("id", "count"), total_usd=("costo_total_usd", "sum"), saldo_usd=("saldo_pendiente_usd", "sum"))
+        .reset_index()
+        .sort_values("total_usd", ascending=False)
+    )
+    df_group["proveedor"] = df_group["proveedor"].fillna("Sin proveedor")
+    st.markdown("#### 🏷️ Top proveedores por monto comprado")
+    st.dataframe(df_group.head(20), use_container_width=True, hide_index=True)
+
+
+def _render_integridad_e_integraciones() -> None:
+    st.subheader("🧪 Integridad e integraciones")
+    st.caption("Verifica la disponibilidad de tablas de módulos relacionados y su volumen de registros.")
+
+    integraciones: list[tuple[str, str]] = [
+        ("📥 Compras", "historial_compras"),
+        ("🧾 Órdenes de compra", "ordenes_compra"),
+        ("👤 Proveedores", "proveedores"),
+        ("💸 Cuentas por pagar", "cuentas_por_pagar_proveedores"),
+        ("🧮 Costeo", "costeo_detalle"),
+        ("📚 Contabilidad", "libro_diario"),
+    ]
+
+    rows: list[dict[str, Any]] = []
+    with db_transaction() as conn:
         for modulo, tabla in integraciones:
-            existe = _table_exists(conn, tabla)
-            total = _scalar(conn, f"SELECT COUNT(*) FROM {tabla}") if existe else 0
+            existe = bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tabla,)).fetchone())
+            total = 0
+            if existe:
+                total = _safe_int(conn.execute(f"SELECT COUNT(*) FROM {tabla}").fetchone()[0], 0)
             rows.append(
                 {
                     "modulo": modulo,
@@ -3991,9 +4010,7 @@ def _render_resumen_financiero() -> None:
                 }
             )
 
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        st.markdown("#### 🧵 Consumo por procesos conectados")
-        st.dataframe(pd.DataFrame(consumo_breakdown), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
@@ -4019,6 +4036,7 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
             "🔧 Ajustes",
             "📈 Reportes",
             "🧪 Integración",
+
         ]
     )
 
