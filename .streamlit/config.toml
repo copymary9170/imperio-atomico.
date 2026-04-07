@@ -1,0 +1,7 @@
+[server]
+# Recarga automática cuando guardas archivos .py/.toml/.css
+runOnSave = true
+# Fuerza observación de archivos para detectar cambios en más entornos
+fileWatcherType = "auto"
+# Evita caché agresivo estático durante desarrollo
+enableStaticServing = false
