@@ -3177,6 +3177,117 @@ def _render_proveedores() -> None:
                     st.rerun()
 
 
+def _render_variantes() -> None:
+    st.subheader("🎨 Variantes por color")
+    df_var = _load_variantes_df()
+    if df_var.empty:
+        st.info("No hay variantes registradas.")
+        return
+    q = st.text_input("🔎 Buscar variante", key="inv_var_q")
+    view = _filter_df_by_query(df_var.copy(), q, ["producto", "color", "sku_variante", "sku_base"])
+    st.dataframe(view, use_container_width=True, hide_index=True)
+
+
+def _render_resumen_abastecimiento() -> None:
+    st.subheader("📊 Resumen de abastecimiento")
+    df_oc = _load_ordenes_compra_df()
+    df_eval = _load_evaluaciones_df()
+    df_cxp = _load_cuentas_por_pagar_df()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("OC abiertas", 0 if df_oc.empty else int(df_oc["estado"].astype(str).str.lower().isin(["emitida", "parcial", "borrador"]).sum()))
+    c2.metric("Saldo CxP", f"${0.0 if df_cxp.empty else float(df_cxp['saldo_usd'].fillna(0).sum()):,.2f}")
+    c3.metric("Evaluación promedio", f"{0.0 if df_eval.empty else float(df_eval['calificacion_general'].fillna(0).mean()):.2f}/5")
+
+
+def _render_catalogo_proveedor_producto() -> None:
+    st.subheader("🔗 Catálogo proveedor-producto")
+    df_rel = _load_proveedor_items_df()
+    if df_rel.empty:
+        st.info("No hay relaciones proveedor-producto registradas.")
+        return
+    q = st.text_input("🔎 Buscar relación", key="inv_rel_q")
+    view = _filter_df_by_query(df_rel.copy(), q, ["proveedor", "producto", "sku", "sku_proveedor", "nombre_proveedor_item"])
+    st.dataframe(view, use_container_width=True, hide_index=True)
+
+
+def _render_ordenes_compra(usuario: str) -> None:
+    st.subheader("🧾 Órdenes de compra")
+    st.caption("Vista resumida rescatada.")
+    df_oc = _load_ordenes_compra_df()
+    if df_oc.empty:
+        st.info("No hay órdenes de compra registradas.")
+    else:
+        st.dataframe(df_oc, use_container_width=True, hide_index=True)
+
+
+def _render_evaluacion_proveedores(usuario: str) -> None:
+    st.subheader("⭐ Evaluación de proveedores")
+    df_eval = _load_evaluaciones_df()
+    if df_eval.empty:
+        st.info("No hay evaluaciones registradas.")
+    else:
+        st.dataframe(df_eval, use_container_width=True, hide_index=True)
+
+
+def _render_documentos_proveedor() -> None:
+    st.subheader("📎 Documentos y soportes")
+    df_doc = _load_documentos_df()
+    if df_doc.empty:
+        st.info("No hay documentos registrados.")
+    else:
+        st.dataframe(df_doc, use_container_width=True, hide_index=True)
+
+
+def _render_cuentas_por_pagar() -> None:
+    st.subheader("💳 Cuentas por pagar a proveedores")
+    df_cxp = _load_cuentas_por_pagar_df()
+    if df_cxp.empty:
+        st.info("No hay cuentas por pagar registradas.")
+        return
+    st.dataframe(df_cxp, use_container_width=True, hide_index=True)
+    st.markdown("### 📅 Calendario de cuotas")
+    _render_calendario_cuotas(_load_cuotas_compra_df())
+
+
+def _render_pagos_proveedores(usuario: str) -> None:
+    st.subheader("💸 Pagos a proveedores")
+    st.info("Flujo de pagos disponible en esta vista resumida vía CxP y cronograma.")
+
+
+def _render_movimientos() -> None:
+    st.subheader("🔄 Movimientos de inventario")
+    df = _load_movements_df(limit=2000)
+    if df.empty:
+        st.info("No hay movimientos registrados.")
+    else:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def _render_reposicion(df: pd.DataFrame) -> None:
+    st.subheader("📦 Reposición")
+    plan = _build_restock_recommendations(df)
+    if plan.empty:
+        st.success("No hay productos críticos para reponer.")
+    else:
+        st.dataframe(plan, use_container_width=True, hide_index=True)
+
+
+def _render_ajustes(usuario: str) -> None:
+    st.subheader("🔧 Ajustes de inventario")
+    st.info("Ajustes avanzados en proceso de rescate. Usa la pestaña Productos para cambios base.")
+
+
+def _render_reportes(df: pd.DataFrame) -> None:
+    st.subheader("📈 Reportes")
+    if df.empty:
+        st.info("No hay inventario activo para reportar.")
+        return
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total productos", len(df))
+    c2.metric("Valor inventario", f"${float(df['valor_stock'].sum()):,.2f}")
+    c3.metric("Productos críticos", int((df["stock_actual"] <= df["stock_minimo"]).sum()))
+
+
 def _render_productos(usuario: str) -> None:
     st.subheader("📦 Productos")
 
@@ -3559,51 +3670,68 @@ def _render_integridad_e_integraciones() -> None:
         st.dataframe(pd.DataFrame(consumo_breakdown), use_container_width=True, hide_index=True)
 
 
-def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
-    st.title("📦 Módulo de Inventario")
+ef render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
+    st.title("📦 Centro de Control de Inventario")
+    df = _load_inventory_df()
 
-    df_inv = _load_inventory_df()
-
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+    tabs = st.tabs(
         [
-            "Dashboard",
-            "Existencias",
-            "Productos",
-            "Compras",
-            "Historial",
-            "Proveedores",
-            "Cuotas",
-            "Integración",
+            "📊 Panel de control",
+            "📋 Existencias",
+            "📥 Compras",
+            "🧾 Órdenes de compra",
+            "🎨 Variantes",
+            "👤 Proveedores",
+            "🔗 Proveedor-Producto",
+            "⭐ Evaluación",
+            "📎 Documentos",
+            "💳 CxP",
+            "💸 Pagos proveedores",
+            "🔄 Movimientos",
+            "📦 Reposición",
+            "🔧 Ajustes",
+            "📈 Reportes",
+            "🧪 Integración",
         ]
     )
 
-    with tab1:
-        _render_inventario_dashboard(df_inv)
-        st.divider()
-        _render_resumen_financiero()
-
-    with tab2:
-        _render_existencias(df_inv)
-
-    with tab3:
-        _render_productos(usuario)
-
-    with tab4:
-        _render_compras(usuario=usuario, tasa_bcv=tasa_bcv, tasa_binance=tasa_binance)
-
-    with tab5:
-        _render_historial_compras()
-
-    with tab6:
+    with tabs[0]:
+        _render_inventario_dashboard(df)
+    with tabs[1]:
+        _render_existencias(df)
+    with tabs[2]:
+        compras_tabs = st.tabs(["Registrar compra", "Historial compras", "Resumen abastecimiento"])
+        with compras_tabs[0]:
+            _render_compras(usuario, tasa_bcv, tasa_binance)
+        with compras_tabs[1]:
+            _render_historial_compras()
+        with compras_tabs[2]:
+            _render_resumen_abastecimiento()
+    with tabs[3]:
+        _render_ordenes_compra(usuario)
+    with tabs[4]:
+        _render_variantes()
+    with tabs[5]:
         _render_proveedores()
-
-    with tab7:
-        df_cuotas = _load_cuotas_compra_df()
-        _render_calendario_cuotas(df_cuotas)
-
-    with tab8:
+    with tabs[6]:
+        _render_catalogo_proveedor_producto()
+    with tabs[7]:
+        _render_evaluacion_proveedores(usuario)
+    with tabs[8]:
+        _render_documentos_proveedor()
+    with tabs[9]:
+        _render_cuentas_por_pagar()
+    with tabs[10]:
+        _render_pagos_proveedores(usuario)
+    with tabs[11]:
+        _render_movimientos()
+    with tabs[12]:
+        _render_reposicion(df)
+    with tabs[13]:
+        _render_ajustes(usuario)
+    with tabs[14]:
+        _render_reportes(df)
+    with tabs[15]:
         _render_integridad_e_integraciones()
-
-
 
 
