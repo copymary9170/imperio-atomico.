@@ -3428,12 +3428,142 @@ def _render_resumen_financiero() -> None:
     )
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (str(table_name),),
+    ).fetchone()
+    return bool(row)
+
+
+def _scalar(conn, query: str, params: tuple[Any, ...] = ()) -> float:
+    row = conn.execute(query, params).fetchone()
+    if not row:
+        return 0.0
+    return float(row[0] or 0.0)
+
+
+def _render_integridad_e_integraciones() -> None:
+    st.subheader("🧪 Verificación de inventario e integraciones")
+    st.caption(
+        "Control rápido de consistencia para stock, movimientos, costo promedio, entradas/salidas, "
+        "compras y consumo de producción."
+    )
+
+    with db_transaction() as conn:
+        stock_descuadrado = _scalar(
+            conn,
+            """
+            WITH ultimo AS (
+                SELECT item_id, MAX(id) AS max_id
+                FROM inventario_movs
+                GROUP BY item_id
+            )
+            SELECT COUNT(*)
+            FROM inventario i
+            LEFT JOIN ultimo u ON u.item_id = i.id
+            LEFT JOIN inventario_movs m ON m.id = u.max_id
+            WHERE COALESCE(i.estado, 'activo') <> 'inactivo'
+              AND ABS(COALESCE(i.stock_actual, 0) - COALESCE(m.saldo_despues, COALESCE(i.stock_actual, 0))) > 0.0001
+            """,
+        )
+        movs_invalidos = _scalar(
+            conn,
+            """
+            SELECT COUNT(*)
+            FROM inventario_movs
+            WHERE cantidad IS NULL
+               OR costo_unitario IS NULL
+               OR costo_total IS NULL
+               OR saldo_despues < 0
+            """,
+        )
+        costo_promedio_descuadrado = _scalar(
+            conn,
+            """
+            SELECT COUNT(*)
+            FROM inventario
+            WHERE COALESCE(cantidad, 0) > 0
+              AND ABS(COALESCE(costo_promedio, 0) - (COALESCE(valor_total, 0) / COALESCE(cantidad, 1))) > 0.0001
+            """,
+        )
+        entradas = _scalar(
+            conn,
+            "SELECT COALESCE(SUM(cantidad), 0) FROM inventario_movs WHERE tipo IN ('ENTRADA', 'COMPRA')",
+        )
+        salidas = _scalar(
+            conn,
+            "SELECT COALESCE(SUM(cantidad), 0) FROM inventario_movs WHERE tipo IN ('SALIDA', 'MERMA', 'VENTA')",
+        )
+        compras_registradas = _scalar(conn, "SELECT COUNT(*) FROM historial_compras WHERE COALESCE(activo,1)=1")
+        compras_con_mov = _scalar(conn, "SELECT COUNT(*) FROM inventario_movs WHERE tipo='COMPRA'")
+
+        consumo_tablas: dict[str, tuple[str, str]] = {
+            "Corte Industrial": ("movimientos_corte_material", "SELECT COALESCE(SUM(cantidad), 0) FROM movimientos_corte_material WHERE tipo='consumo'"),
+            "Planificación producción": ("produccion_materiales", "SELECT COALESCE(SUM(cantidad_usada), 0) FROM produccion_materiales"),
+            "Sublimación mermas": ("sublimacion_mermas", "SELECT COALESCE(SUM(cantidad), 0) FROM sublimacion_mermas"),
+            "Mermas y desperdicio": ("mermas_desperdicio", "SELECT COALESCE(SUM(cantidad), 0) FROM mermas_desperdicio"),
+        }
+        consumo_total = 0.0
+        consumo_breakdown: list[dict[str, Any]] = []
+        for label, (table_name, query) in consumo_tablas.items():
+            if not _table_exists(conn, table_name):
+                consumo_breakdown.append({"proceso": label, "consumo": 0.0, "estado": "Sin tabla"})
+                continue
+            subtotal = _scalar(conn, query)
+            consumo_total += subtotal
+            consumo_breakdown.append({"proceso": label, "consumo": subtotal, "estado": "Conectado"})
+
+        cards = [
+            ("stock correcto", int(stock_descuadrado), "items descuadrados entre inventario y último movimiento"),
+            ("movimientos confiables", int(movs_invalidos), "movimientos con datos inválidos/stock negativo"),
+            ("costo promedio", int(costo_promedio_descuadrado), "items con costo promedio inconsistente"),
+            ("entradas/salidas", round(entradas - salidas, 3), "balance neto (entradas - salidas)"),
+            ("compras conectadas", int(compras_registradas - compras_con_mov), "compras sin movimiento tipo COMPRA equivalente"),
+            ("consumo por producción", round(consumo_total, 3), "consumo agregado reportado por módulos productivos"),
+        ]
+
+        cols = st.columns(3)
+        for idx, (titulo, valor, ayuda) in enumerate(cards):
+            cols[idx % 3].metric(titulo, f"{valor}", help=ayuda)
+
+        st.markdown("#### 🔗 Matriz de integración de Inventario")
+        integraciones = [
+            ("📊 Kardex", "kardex"),
+            ("✂️ Corte Industrial", "movimientos_corte_material"),
+            ("🔥 Sublimación", "sublimacion_lotes"),
+            ("🎨 Producción Manual", "produccion_ordenes"),
+            ("🛠️ Otros procesos", "costeo_ordenes"),
+            ("♻️ Mermas y desperdicio", "mermas_desperdicio"),
+            ("💸 Cuentas por pagar", "cuentas_por_pagar_proveedores"),
+            ("🧮 Costeo", "costeo_detalle"),
+            ("🧮 Costeo industrial", "costeo_ordenes"),
+            ("📚 Contabilidad", "libro_diario"),
+        ]
+        rows: list[dict[str, Any]] = []
+        for modulo, tabla in integraciones:
+            existe = _table_exists(conn, tabla)
+            total = _scalar(conn, f"SELECT COUNT(*) FROM {tabla}") if existe else 0
+            rows.append(
+                {
+                    "modulo": modulo,
+                    "tabla_referencia": tabla,
+                    "estado": "✅ Conectado" if existe else "⚠️ Sin tabla",
+                    "registros": int(total),
+                }
+            )
+
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.markdown("#### 🧵 Consumo por procesos conectados")
+        st.dataframe(pd.DataFrame(consumo_breakdown), use_container_width=True, hide_index=True)
+
+
 def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
     st.title("📦 Módulo de Inventario")
 
     df_inv = _load_inventory_df()
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         [
             "Dashboard",
             "Existencias",
@@ -3442,6 +3572,7 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
             "Historial",
             "Proveedores",
             "Cuotas",
+            "Integración",
         ]
     )
 
@@ -3469,6 +3600,8 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
         df_cuotas = _load_cuotas_compra_df()
         _render_calendario_cuotas(df_cuotas)
 
+    with tab8:
+        _render_integridad_e_integraciones()
 
 
 
