@@ -4014,39 +4014,37 @@ def _render_integridad_e_integraciones() -> None:
 
 
 def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
-    st.title("📦 Centro de Control de Inventario")
+   st.title("📦 Centro de Control de Inventario")
     df = _load_inventory_df()
 
-    tabs = st.tabs(
-        [
-            "📊 Panel de control",
-            "📋 Existencias",
-            "📦 Productos",
-            "📥 Compras",
-            "🧾 Órdenes de compra",
-            "🎨 Variantes",
-            "👤 Proveedores",
-            "🔗 Proveedor-Producto",
-            "⭐ Evaluación",
-            "📎 Documentos",
-            "💳 CxP",
-            "💸 Pagos proveedores",
-            "🔄 Movimientos",
-            "📦 Reposición",
-            "🔧 Ajustes",
-            "📈 Reportes",
-            "🧪 Integración",
+    sections = [
+        "📊 Panel de control",
+        "📋 Existencias",
+        "📦 Productos",
+        "📥 Compras",
+        "🧾 Órdenes de compra",
+        "🎨 Variantes",
+        "👤 Proveedores",
+        "🔗 Proveedor-Producto",
+        "⭐ Evaluación",
+        "📎 Documentos",
+        "💳 CxP",
+        "💸 Pagos proveedores",
+        "🔄 Movimientos",
+        "📦 Reposición",
+        "🔧 Ajustes",
+        "📈 Reportes",
+        "🧪 Integración",
+    ]
+    selected_section = st.selectbox("Navegación del módulo de inventario", sections, index=0)
 
-        ]
-    )
-
-    with tabs[0]:
+    if selected_section == "📊 Panel de control":
         _render_inventario_dashboard(df)
-    with tabs[1]:
+    elif selected_section == "📋 Existencias":
         _render_existencias(df)
-    with tabs[2]:
+    elif selected_section == "📦 Productos":
         _render_productos(usuario)
-    with tabs[3]:
+    elif selected_section == "📥 Compras":
         compras_tabs = st.tabs(["Registrar compra", "Historial compras", "Resumen abastecimiento"])
         with compras_tabs[0]:
             _render_compras(usuario, tasa_bcv, tasa_binance)
@@ -4054,31 +4052,31 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
             _render_historial_compras()
         with compras_tabs[2]:
             _render_resumen_abastecimiento()
-    with tabs[4]:
+    elif selected_section == "🧾 Órdenes de compra":
         _render_ordenes_compra(usuario)
-    with tabs[5]:
+    elif selected_section == "🎨 Variantes":
         _render_variantes()
-    with tabs[6]:
+    elif selected_section == "👤 Proveedores":
         _render_proveedores()
-    with tabs[7]:
+    elif selected_section == "🔗 Proveedor-Producto":
         _render_catalogo_proveedor_producto()
-    with tabs[8]:
+    elif selected_section == "⭐ Evaluación":
         _render_evaluacion_proveedores(usuario)
-    with tabs[9]:
+    elif selected_section == "📎 Documentos":
         _render_documentos_proveedor()
-    with tabs[10]:
+    elif selected_section == "💳 CxP":
         _render_cuentas_por_pagar()
-    with tabs[11]:
+    elif selected_section == "💸 Pagos proveedores":
         _render_pagos_proveedores(usuario)
-    with tabs[12]:
+    elif selected_section == "🔄 Movimientos":
         _render_movimientos()
-    with tabs[13]:
+    elif selected_section == "📦 Reposición":
         _render_reposicion(df)
-    with tabs[14]:
+    elif selected_section == "🔧 Ajustes":
         _render_ajustes(usuario)
-    with tabs[15]:
+    elif selected_section == "📈 Reportes":
         _render_reportes(df)
-    with tabs[16]:
+    elif selected_section == "🧪 Integración":
         _render_integridad_e_integraciones()
 
 
@@ -4094,7 +4092,6 @@ def render_inventario(usuario: str) -> None:
         tasa_bcv=tasa_bcv,
         tasa_binance=tasa_binance,
     )
-
 
 
 
