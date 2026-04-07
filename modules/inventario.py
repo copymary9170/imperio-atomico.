@@ -4094,3 +4094,7 @@ def render_inventario(usuario: str) -> None:
         tasa_bcv=tasa_bcv,
         tasa_binance=tasa_binance,
     )
+
+
+
+
