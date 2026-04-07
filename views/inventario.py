@@ -9,7 +9,7 @@ def render_inventario(usuario: str) -> None:
     """
     try:
         from modules.configuracion import DEFAULT_CONFIG, get_current_config
-        from modules.inventario import render_inventario_module as inventario_module
+        from modules.inventario import render_inventario as inventario_module
     except Exception as exc:
         st.error("No se pudo cargar el módulo de Inventario.")
         st.exception(exc)
@@ -29,4 +29,3 @@ def render_inventario(usuario: str) -> None:
     )
 
     inventario_module(usuario, tasa_bcv=tasa_bcv, tasa_binance=tasa_binance)
-
