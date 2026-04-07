@@ -11,7 +11,6 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, money, require_text
-from modules.integration_hub import dispatch_to_module, render_send_buttons
 from services.contabilidad_service import contabilizar_compra
 from services.conciliacion_service import periodo_esta_cerrado
 from services.cxp_proveedores_service import (
@@ -24,6 +23,7 @@ from services.tesoreria_service import registrar_egreso
 # ============================================================
 # INTEGRACION ENTRE MODULOS (FALLBACK SEGURO)
 # ============================================================
+
 
 try:
     from modules.integration_hub import dispatch_to_module, render_send_buttons
@@ -1588,9 +1588,9 @@ def _load_inventory_df(include_inactive: bool = False) -> pd.DataFrame:
         "nombre",
         "categoria",
         "unidad",
-        "estado",
         "stock_actual",
         "stock_minimo",
+        "estado",
         "costo_unitario_usd",
         "precio_venta_usd",
         "valor_stock",
@@ -3177,15 +3177,54 @@ def _render_proveedores() -> None:
                     st.rerun()
 
 
+def _inventario_has_column(col_name: str) -> bool:
+    with db_transaction() as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+    return col_name in cols
+
+
 def _render_variantes() -> None:
     st.subheader("🎨 Variantes por color")
-    df_var = _load_variantes_df()
-    if df_var.empty:
-        st.info("No hay variantes registradas.")
-        return
-    q = st.text_input("🔎 Buscar variante", key="inv_var_q")
-    view = _filter_df_by_query(df_var.copy(), q, ["producto", "color", "sku_variante", "sku_base"])
-    st.dataframe(view, use_container_width=True, hide_index=True)
+
+    df_items = _load_inventory_df(include_inactive=False)
+    tab_alta, tab_listado = st.tabs(["➕ Registrar variante", "📋 Listado"])
+
+    with tab_alta:
+        if df_items.empty:
+            st.info("Primero registra productos en inventario para poder crear variantes.")
+        else:
+            with st.form("form_inv_variante"):
+                inventario_id = _select_inventory_item(df_items, "Producto base", "inv_var_producto")
+                c1, c2 = st.columns(2)
+                color = c1.text_input("Color", placeholder="Ej: Negro")
+                sku_variante = c2.text_input("SKU variante (opcional)")
+                c3, c4 = st.columns(2)
+                stock_actual = c3.number_input("Stock inicial", min_value=0.0, value=0.0, format="%.3f")
+                stock_minimo = c4.number_input("Stock mínimo", min_value=0.0, value=0.0, format="%.3f")
+                guardar = st.form_submit_button("💾 Guardar variante", use_container_width=True)
+
+            if guardar:
+                try:
+                    var_id = _create_variant(
+                        inventario_id=int(inventario_id),
+                        color=color,
+                        sku_variante=sku_variante,
+                        stock_actual=float(stock_actual),
+                        stock_minimo=float(stock_minimo),
+                    )
+                    st.success(f"Variante registrada. ID #{var_id}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo registrar la variante: {exc}")
+
+    with tab_listado:
+        df_var = _load_variantes_df()
+        if df_var.empty:
+            st.info("No hay variantes registradas.")
+            return
+        q = st.text_input("🔎 Buscar variante", key="inv_var_q")
+        view = _filter_df_by_query(df_var.copy(), q, ["producto", "color", "sku_variante", "sku_base"])
+        st.dataframe(view, use_container_width=True, hide_index=True)
 
 
 def _render_resumen_abastecimiento() -> None:
@@ -3212,16 +3251,169 @@ def _render_catalogo_proveedor_producto() -> None:
 
 def _render_ordenes_compra(usuario: str) -> None:
     st.subheader("🧾 Órdenes de compra")
-    st.caption("Vista resumida rescatada.")
-    df_oc = _load_ordenes_compra_df()
-    if df_oc.empty:
-        st.info("No hay órdenes de compra registradas.")
-    else:
-        st.dataframe(df_oc, use_container_width=True, hide_index=True)
+    tab_crear, tab_listar, tab_recibir = st.tabs(["➕ Crear OC", "📋 Órdenes", "📥 Recepción"])
+
+    with tab_crear:
+        df_prov = _load_proveedores_full_df()
+        df_items = _load_inventory_df(include_inactive=False)
+        if df_prov.empty:
+            st.info("Debes registrar al menos un proveedor para crear órdenes.")
+        elif df_items.empty:
+            st.info("Debes registrar productos en inventario para crear órdenes.")
+        else:
+            proveedor_id = int(
+                st.selectbox(
+                    "Proveedor",
+                    df_prov["id"].tolist(),
+                    format_func=lambda i: str(df_prov[df_prov["id"] == i]["nombre"].iloc[0]),
+                    key="inv_oc_prov",
+                )
+            )
+            c1, c2, c3 = st.columns(3)
+            moneda = c1.selectbox("Moneda", ["USD", "VES (BCV)", "VES (Binance)"], key="inv_oc_moneda")
+            tasa_cambio = c2.number_input("Tasa cambio", min_value=0.0001, value=1.0, format="%.4f", key="inv_oc_tasa")
+            condicion_pago = c3.selectbox("Condición pago", ["contado", "credito"], key="inv_oc_cond")
+            c4, c5 = st.columns(2)
+            delivery_usd = c4.number_input("Delivery USD", min_value=0.0, value=0.0, format="%.2f", key="inv_oc_delivery")
+            fecha_entrega = c5.date_input("Fecha entrega estimada", value=date.today(), key="inv_oc_fecha")
+            observaciones = st.text_area("Observaciones", key="inv_oc_obs")
+
+            lineas: list[dict[str, Any]] = []
+            st.markdown("##### Ítems")
+            n_lineas = st.number_input("Cantidad de líneas", min_value=1, max_value=20, value=1, step=1, key="inv_oc_nlineas")
+            for idx in range(int(n_lineas)):
+                l1, l2, l3, l4 = st.columns([3, 1, 1, 1])
+                inv_id = int(
+                    l1.selectbox(
+                        f"Producto línea {idx + 1}",
+                        df_items["id"].tolist(),
+                        format_func=lambda i: f"{df_items[df_items['id']==i]['nombre'].iloc[0]} ({df_items[df_items['id']==i]['sku'].iloc[0]})",
+                        key=f"inv_oc_item_{idx}",
+                    )
+                )
+                qty = float(l2.number_input("Cantidad", min_value=0.0, value=0.0, format="%.3f", key=f"inv_oc_qty_{idx}"))
+                cost = float(l3.number_input("Costo USD", min_value=0.0, value=0.0, format="%.4f", key=f"inv_oc_cost_{idx}"))
+                imp = float(l4.number_input("Imp %", min_value=0.0, value=0.0, format="%.2f", key=f"inv_oc_imp_{idx}"))
+                if qty > 0:
+                    unidad = str(df_items[df_items["id"] == inv_id]["unidad"].iloc[0])
+                    lineas.append({"inventario_id": inv_id, "cantidad": qty, "costo_unit_usd": cost, "impuesto_pct": imp, "unidad": unidad})
+
+            if st.button("💾 Crear orden de compra", use_container_width=True, key="inv_oc_save"):
+                try:
+                    oc_id = create_orden_compra(
+                        usuario=usuario,
+                        proveedor_id=proveedor_id,
+                        header={
+                            "moneda": moneda,
+                            "tasa_cambio": float(tasa_cambio),
+                            "delivery_usd": float(delivery_usd),
+                            "condicion_pago": condicion_pago,
+                            "fecha_entrega_estimada": fecha_entrega.isoformat() if fecha_entrega else None,
+                            "observaciones": observaciones,
+                            "estado": "emitida",
+                        },
+                        items=lineas,
+                    )
+                    st.success(f"Orden de compra creada. ID #{oc_id}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo crear la orden: {exc}")
+
+    with tab_listar:
+        df_oc = _load_ordenes_compra_df()
+        if df_oc.empty:
+            st.info("No hay órdenes de compra registradas.")
+        else:
+            q = st.text_input("🔎 Buscar OC", key="inv_oc_q")
+            view = _filter_df_by_query(df_oc.copy(), q, ["codigo", "proveedor", "estado", "usuario"])
+            st.dataframe(view, use_container_width=True, hide_index=True)
+            sel_oc = int(st.selectbox("Ver detalle de OC", df_oc["id"].tolist(), key="inv_oc_det_sel"))
+            st.dataframe(_load_orden_detalle_df(sel_oc), use_container_width=True, hide_index=True)
+
+    with tab_recibir:
+        df_oc = _load_ordenes_compra_df()
+        abiertas = df_oc[df_oc["estado"].astype(str).str.lower().isin(["emitida", "parcial", "borrador"])].copy() if not df_oc.empty else pd.DataFrame()
+        if abiertas.empty:
+            st.info("No hay órdenes abiertas para recepción.")
+        else:
+            oc_id = int(
+                st.selectbox(
+                    "Orden a recibir",
+                    abiertas["id"].tolist(),
+                    format_func=lambda i: f"{abiertas[abiertas['id']==i]['codigo'].iloc[0]} - {abiertas[abiertas['id']==i]['proveedor'].iloc[0]}",
+                    key="inv_oc_recv_sel",
+                )
+            )
+            detalle = _load_orden_detalle_df(oc_id)
+            qty_map: dict[int, float] = {}
+            for _, row in detalle.iterrows():
+                pendiente = max(_safe_float(row.get("cantidad")) - _safe_float(row.get("cantidad_recibida")), 0.0)
+                if pendiente <= 0:
+                    continue
+                qty_map[int(row["id"])] = st.number_input(
+                    f"{row['producto']} | Pendiente {pendiente:,.3f}",
+                    min_value=0.0,
+                    max_value=float(pendiente),
+                    value=0.0,
+                    format="%.3f",
+                    key=f"inv_recv_qty_{int(row['id'])}",
+                )
+            referencia = st.text_input("Referencia recepción", key="inv_recv_ref")
+            if st.button("📥 Registrar recepción", use_container_width=True, key="inv_recv_save"):
+                try:
+                    rec_id = receive_orden_compra(usuario=usuario, orden_compra_id=oc_id, quantities=qty_map, referencia=referencia)
+                    st.success(f"Recepción registrada. ID #{rec_id}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo registrar la recepción: {exc}")
 
 
 def _render_evaluacion_proveedores(usuario: str) -> None:
     st.subheader("⭐ Evaluación de proveedores")
+    df_prov = _load_proveedores_full_df()
+    if df_prov.empty:
+        st.info("Debes registrar proveedores antes de evaluar.")
+        return
+
+    with st.form("form_eval_proveedor"):
+        proveedor_id = int(
+            st.selectbox(
+                "Proveedor",
+                df_prov["id"].tolist(),
+                format_func=lambda i: str(df_prov[df_prov["id"] == i]["nombre"].iloc[0]),
+                key="inv_eval_prov",
+            )
+        )
+        c1, c2, c3, c4 = st.columns(4)
+        calidad = c1.slider("Calidad", 0, 5, 4)
+        entrega = c2.slider("Entrega", 0, 5, 4)
+        precio = c3.slider("Precio", 0, 5, 4)
+        soporte = c4.slider("Soporte", 0, 5, 4)
+        incidencia = st.text_input("Incidencia")
+        comentario = st.text_area("Comentario")
+        decision = st.selectbox("Decisión", ["aprobado", "condicionado", "bloqueado"])
+        guardar = st.form_submit_button("💾 Guardar evaluación", use_container_width=True)
+
+    if guardar:
+        try:
+            eval_id = save_evaluacion(
+                usuario=usuario,
+                proveedor_id=proveedor_id,
+                payload={
+                    "calidad": calidad,
+                    "entrega": entrega,
+                    "precio": precio,
+                    "soporte": soporte,
+                    "incidencia": incidencia,
+                    "comentario": comentario,
+                    "decision": decision,
+                },
+            )
+            st.success(f"Evaluación registrada. ID #{eval_id}")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo registrar la evaluación: {exc}")
+
     df_eval = _load_evaluaciones_df()
     if df_eval.empty:
         st.info("No hay evaluaciones registradas.")
@@ -3231,6 +3423,62 @@ def _render_evaluacion_proveedores(usuario: str) -> None:
 
 def _render_documentos_proveedor() -> None:
     st.subheader("📎 Documentos y soportes")
+    df_prov = _load_proveedores_full_df()
+
+    with st.form("form_doc_proveedor"):
+        proveedor_opts = [None] + (df_prov["id"].tolist() if not df_prov.empty else [])
+        proveedor_id = st.selectbox(
+            "Proveedor (opcional)",
+            proveedor_opts,
+            format_func=lambda i: "Sin proveedor" if i is None else str(df_prov[df_prov["id"] == i]["nombre"].iloc[0]),
+            key="inv_doc_prov",
+        )
+        c1, c2 = st.columns(2)
+        tipo_referencia = c1.selectbox("Tipo referencia", ["general", "compra", "orden_compra", "cuenta_por_pagar", "pago"])
+        referencia_id_txt = c2.text_input("ID referencia")
+        c3, c4 = st.columns(2)
+        titulo = c3.text_input("Título")
+        tipo_documento = c4.text_input("Tipo documento", placeholder="factura, contrato, soporte...")
+        url_externa = st.text_input("URL externa (opcional)")
+        c5, c6 = st.columns(2)
+        fecha_documento = c5.date_input("Fecha documento", value=date.today())
+        fecha_vencimiento = c6.date_input("Fecha vencimiento", value=date.today() + timedelta(days=30))
+        observaciones = st.text_area("Observaciones")
+        archivo = st.file_uploader("Archivo", type=["pdf", "png", "jpg", "jpeg", "doc", "docx", "xls", "xlsx", "txt"])
+        guardar = st.form_submit_button("💾 Guardar documento", use_container_width=True)
+
+    if guardar:
+        try:
+            ref_id = _safe_int(referencia_id_txt, 0) or None
+            ruta = _save_uploaded_support_file(archivo, int(proveedor_id) if proveedor_id is not None else None, tipo_referencia, ref_id)
+            nombre_archivo = Path(archivo.name).name if archivo is not None else ""
+            with db_transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO proveedor_documentos(
+                        proveedor_id, tipo_referencia, referencia_id, titulo, tipo_documento,
+                        nombre_archivo, ruta_archivo, url_externa, fecha_documento, fecha_vencimiento, observaciones
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        int(proveedor_id) if proveedor_id is not None else None,
+                        clean_text(tipo_referencia) or "general",
+                        ref_id,
+                        clean_text(titulo),
+                        clean_text(tipo_documento),
+                        clean_text(nombre_archivo),
+                        clean_text(ruta),
+                        clean_text(url_externa),
+                        fecha_documento.isoformat() if fecha_documento else None,
+                        fecha_vencimiento.isoformat() if fecha_vencimiento else None,
+                        clean_text(observaciones),
+                    ),
+                )
+            st.success("Documento guardado correctamente.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo guardar el documento: {exc}")
+
     df_doc = _load_documentos_df()
     if df_doc.empty:
         st.info("No hay documentos registrados.")
@@ -3251,7 +3499,63 @@ def _render_cuentas_por_pagar() -> None:
 
 def _render_pagos_proveedores(usuario: str) -> None:
     st.subheader("💸 Pagos a proveedores")
-    st.info("Flujo de pagos disponible en esta vista resumida vía CxP y cronograma.")
+    df_cxp = _load_cuentas_por_pagar_df()
+    if df_cxp.empty:
+        st.info("No hay cuentas por pagar registradas.")
+        return
+
+    abiertas = df_cxp[df_cxp["saldo_usd"].fillna(0).astype(float) > 0].copy()
+    if abiertas.empty:
+        st.success("No hay saldos pendientes por pagar.")
+        return
+
+    cuenta_id = int(
+        st.selectbox(
+            "Cuenta por pagar",
+            abiertas["id"].tolist(),
+            format_func=lambda i: f"CxP #{i} | {abiertas[abiertas['id']==i]['proveedor'].iloc[0]} | Saldo ${float(abiertas[abiertas['id']==i]['saldo_usd'].iloc[0]):,.2f}",
+            key="inv_pago_cxp",
+        )
+    )
+    fila = abiertas[abiertas["id"] == cuenta_id].iloc[0]
+    saldo = float(fila["saldo_usd"] or 0.0)
+    st.caption(f"Saldo pendiente: ${saldo:,.2f}")
+
+    c1, c2, c3 = st.columns(3)
+    monto_usd = c1.number_input("Monto USD", min_value=0.0, max_value=max(saldo, 0.0), value=min(saldo, saldo), format="%.2f")
+    moneda_pago = c2.selectbox("Moneda pago", ["USD", "VES (BCV)", "VES (Binance)"])
+    tasa = c3.number_input("Tasa cambio", min_value=0.0001, value=1.0, format="%.4f")
+    c4, c5 = st.columns(2)
+    metodo = c4.selectbox("Método pago", ["transferencia", "efectivo", "pago_movil", "zelle", "binance", "tarjeta", "otro"])
+    referencia = c5.text_input("Referencia")
+    observaciones = st.text_area("Observaciones")
+    monto_moneda = monto_usd if "USD" in moneda_pago else (monto_usd * tasa)
+    st.caption(f"Monto en moneda de pago: {monto_moneda:,.2f} {moneda_pago}")
+
+    if st.button("💾 Registrar pago", use_container_width=True, key="inv_pago_save"):
+        try:
+            pago_id = registrar_pago_proveedor_ui(
+                usuario=usuario,
+                cuenta_por_pagar_id=cuenta_id,
+                monto_usd=float(monto_usd),
+                moneda_pago=moneda_pago,
+                monto_moneda_pago=float(monto_moneda),
+                tasa_cambio=float(tasa),
+                metodo_pago=metodo,
+                referencia=referencia,
+                observaciones=observaciones,
+            )
+            st.success(f"Pago registrado. ID #{pago_id}")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo registrar el pago: {exc}")
+
+    st.markdown("#### Historial de pagos de la cuenta")
+    df_pagos = _load_pagos_proveedores_df(cuenta_id)
+    if df_pagos.empty:
+        st.info("Aún no hay pagos para esta cuenta.")
+    else:
+        st.dataframe(df_pagos, use_container_width=True, hide_index=True)
 
 
 def _render_movimientos() -> None:
@@ -3274,7 +3578,74 @@ def _render_reposicion(df: pd.DataFrame) -> None:
 
 def _render_ajustes(usuario: str) -> None:
     st.subheader("🔧 Ajustes de inventario")
-    st.info("Ajustes avanzados en proceso de rescate. Usa la pestaña Productos para cambios base.")
+    df_items = _load_inventory_df(include_inactive=False)
+    tab_stock, tab_reval, tab_config = st.tabs(["📦 Ajuste de stock", "💲 Revalorización", "⚙️ Configuración"])
+
+    with tab_stock:
+        if df_items.empty:
+            st.info("No hay productos activos para ajustar.")
+        else:
+            item_id = _select_inventory_item(df_items, "Producto", "inv_adj_item")
+            tipo = st.selectbox("Tipo", ["entrada", "salida", "ajuste"], key="inv_adj_tipo")
+            cantidad = st.number_input("Cantidad", min_value=0.0, value=0.0, format="%.3f", key="inv_adj_qty")
+            costo = st.number_input(
+                "Costo unitario USD",
+                min_value=0.0,
+                value=float(df_items[df_items["id"] == item_id]["costo_unitario_usd"].iloc[0]),
+                format="%.4f",
+                key="inv_adj_cost",
+            )
+            motivo = st.text_input("Motivo / referencia", key="inv_adj_ref")
+            if st.button("💾 Registrar ajuste", use_container_width=True, key="inv_adj_save"):
+                try:
+                    mov_id = add_inventory_movement(
+                        usuario=usuario,
+                        inventario_id=item_id,
+                        tipo=tipo,
+                        cantidad=float(cantidad),
+                        costo_unitario_usd=float(costo),
+                        referencia=motivo,
+                    )
+                    st.success(f"Movimiento registrado. ID #{mov_id}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo registrar el ajuste: {exc}")
+
+    with tab_reval:
+        if df_items.empty:
+            st.info("No hay productos activos para revalorizar.")
+        else:
+            item_id = _select_inventory_item(df_items, "Producto a revalorizar", "inv_reval_item")
+            fila = df_items[df_items["id"] == item_id].iloc[0]
+            c1, c2 = st.columns(2)
+            costo_nuevo = c1.number_input("Nuevo costo unitario USD", min_value=0.0, value=float(fila["costo_unitario_usd"] or 0.0), format="%.4f")
+            precio_nuevo = c2.number_input("Nuevo precio venta USD", min_value=0.0, value=float(fila["precio_venta_usd"] or 0.0), format="%.4f")
+            if st.button("💾 Guardar revalorización", use_container_width=True, key="inv_reval_save"):
+                try:
+                    with db_transaction() as conn:
+                        conn.execute(
+                            "UPDATE inventario SET costo_unitario_usd=?, precio_venta_usd=? WHERE id=?",
+                            (money(costo_nuevo), money(precio_nuevo), int(item_id)),
+                        )
+                    st.success("Revalorización aplicada.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo actualizar el producto: {exc}")
+
+    with tab_config:
+        c1, c2, c3 = st.columns(3)
+        alerta = c1.number_input("Días de alerta", min_value=1, value=_safe_int(st.session_state.get("inv_alerta_dias", 14), 14))
+        imp = c2.number_input("Impuesto default %", min_value=0.0, value=_safe_float(st.session_state.get("inv_impuesto_default", 16.0), 16.0), format="%.2f")
+        delivery = c3.number_input("Delivery default USD", min_value=0.0, value=_safe_float(st.session_state.get("inv_delivery_default", 0.0), 0.0), format="%.2f")
+        if st.button("💾 Guardar configuración", use_container_width=True, key="inv_cfg_save"):
+            with db_transaction() as conn:
+                conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_alerta_dias'", (str(int(alerta)),))
+                conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_impuesto_default'", (str(float(imp)),))
+                conn.execute("UPDATE configuracion SET valor=? WHERE parametro='inv_delivery_default'", (str(float(delivery)),))
+            st.session_state["inv_alerta_dias"] = int(alerta)
+            st.session_state["inv_impuesto_default"] = float(imp)
+            st.session_state["inv_delivery_default"] = float(delivery)
+            st.success("Configuración guardada.")
 
 
 def _render_reportes(df: pd.DataFrame) -> None:
@@ -3286,6 +3657,41 @@ def _render_reportes(df: pd.DataFrame) -> None:
     c1.metric("Total productos", len(df))
     c2.metric("Valor inventario", f"${float(df['valor_stock'].sum()):,.2f}")
     c3.metric("Productos críticos", int((df["stock_actual"] <= df["stock_minimo"]).sum()))
+
+    st.markdown("#### 🏆 Top productos por valor")
+    top = df.copy().sort_values("valor_stock", ascending=False).head(10)
+    st.dataframe(
+        top[["sku", "nombre", "categoria", "stock_actual", "costo_unitario_usd", "valor_stock"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.markdown("#### ⬇️ Exportaciones CSV")
+    st.download_button(
+        "Exportar inventario CSV",
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name=f"inventario_{date.today().isoformat()}.csv",
+        mime="text/csv",
+        key="inv_export_stock",
+    )
+    df_mov = _load_movements_df(limit=50000)
+    if not df_mov.empty:
+        st.download_button(
+            "Exportar movimientos CSV",
+            data=df_mov.to_csv(index=False).encode("utf-8"),
+            file_name=f"movimientos_inventario_{date.today().isoformat()}.csv",
+            mime="text/csv",
+            key="inv_export_mov",
+        )
+    df_var = _load_variantes_df()
+    if not df_var.empty:
+        st.download_button(
+            "Exportar variantes CSV",
+            data=df_var.to_csv(index=False).encode("utf-8"),
+            file_name=f"variantes_inventario_{date.today().isoformat()}.csv",
+            mime="text/csv",
+            key="inv_export_var",
+        )
 
 
 def _render_productos(usuario: str) -> None:
@@ -3394,62 +3800,109 @@ def _render_productos(usuario: str) -> None:
 
             with db_transaction() as conn:
                 if producto_existente is None:
-                    conn.execute(
-                        """
-                        INSERT INTO inventario (
-                            sku, nombre, categoria, unidad,
-                            stock_actual, stock_minimo,
-                            costo_unitario_usd, precio_venta_usd,
-                            estado, creado_por, creado_en
+                    if _inventario_has_column("creado_por") and _inventario_has_column("creado_en"):
+                        conn.execute(
+                            """
+                            INSERT INTO inventario (
+                                usuario, sku, nombre, categoria, unidad,
+                                stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd,
+                                estado, creado_por, creado_en
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                usuario,
+                                clean_text(sku),
+                                clean_text(nombre),
+                                clean_text(categoria),
+                                clean_text(unidad),
+                                float(stock_actual),
+                                float(stock_minimo),
+                                float(costo_unitario_usd),
+                                float(precio_venta_usd),
+                                clean_text(estado_producto).lower(),
+                                usuario,
+                                datetime.now().isoformat(timespec="seconds"),
+                            ),
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            clean_text(sku),
-                            clean_text(nombre),
-                            clean_text(categoria),
-                            clean_text(unidad),
-                            float(stock_actual),
-                            float(stock_minimo),
-                            float(costo_unitario_usd),
-                            float(precio_venta_usd),
-                            clean_text(estado_producto).lower(),
-                            usuario,
-                            datetime.now().isoformat(timespec="seconds"),
-                        ),
-                    )
+                    else:
+                        conn.execute(
+                            """
+                            INSERT INTO inventario (
+                                usuario, sku, nombre, categoria, unidad,
+                                stock_actual, stock_minimo,
+                                costo_unitario_usd, precio_venta_usd, estado
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                usuario,
+                                clean_text(sku),
+                                clean_text(nombre),
+                                clean_text(categoria),
+                                clean_text(unidad),
+                                float(stock_actual),
+                                float(stock_minimo),
+                                float(costo_unitario_usd),
+                                float(precio_venta_usd),
+                                clean_text(estado_producto).lower(),
+                            ),
+                        )
                 else:
-                    conn.execute(
-                        """
-                        UPDATE inventario
-                        SET sku=?,
-                            nombre=?,
-                            categoria=?,
-                            unidad=?,
-                            stock_actual=?,
-                            stock_minimo=?,
-                            costo_unitario_usd=?,
-                            precio_venta_usd=?,
-                            estado=?,
-                            actualizado_en=?,
-                            actualizado_por=?
-                        WHERE id=?
-                        """,
-                        (
-                            clean_text(sku),
-                            clean_text(nombre),
-                            clean_text(categoria),
-                            clean_text(unidad),
-                            float(stock_actual),
-                            float(stock_minimo),
-                            float(costo_unitario_usd),
-                            float(precio_venta_usd),
-                            clean_text(estado_producto).lower(),
-                            datetime.now().isoformat(timespec="seconds"),
-                            usuario,
-                            int(producto_existente["id"]),
-                        ),
-                    )
+                    if _inventario_has_column("actualizado_en") and _inventario_has_column("actualizado_por"):
+                        conn.execute(
+                            """
+                            UPDATE inventario
+                            SET sku=?,
+                                nombre=?,
+                                categoria=?,
+                                unidad=?,
+                                stock_actual=?,
+                                stock_minimo=?,
+                                costo_unitario_usd=?,
+                                precio_venta_usd=?,
+                                estado=?,
+                                actualizado_en=?,
+                                actualizado_por=?
+                            WHERE id=?
+                            """,
+                            (
+                                clean_text(sku),
+                                clean_text(nombre),
+                                clean_text(categoria),
+                                clean_text(unidad),
+                                float(stock_actual),
+                                float(stock_minimo),
+                                float(costo_unitario_usd),
+                                float(precio_venta_usd),
+                                clean_text(estado_producto).lower(),
+                                datetime.now().isoformat(timespec="seconds"),
+                                usuario,
+                                int(producto_existente["id"]),
+                            ),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            UPDATE inventario
+                            SET sku=?, nombre=?, categoria=?, unidad=?,
+                                stock_actual=?, stock_minimo=?,
+                                costo_unitario_usd=?, precio_venta_usd=?, estado=?
+                            WHERE id=?
+                            """,
+                            (
+                                clean_text(sku),
+                                clean_text(nombre),
+                                clean_text(categoria),
+                                clean_text(unidad),
+                                float(stock_actual),
+                                float(stock_minimo),
+                                float(costo_unitario_usd),
+                                float(precio_venta_usd),
+                                clean_text(estado_producto).lower(),
+                                int(producto_existente["id"]),
+                            ),
+                        )
 
             st.success("Producto guardado correctamente.")
             st.rerun()
@@ -3475,20 +3928,23 @@ def _render_productos(usuario: str) -> None:
             if st.button("🗑 Desactivar producto", key="inv_delete_producto_btn"):
                 try:
                     with db_transaction() as conn:
-                        conn.execute(
-                            """
-                            UPDATE inventario
-                            SET estado='inactivo',
-                                actualizado_en=?,
-                                actualizado_por=?
-                            WHERE id=?
-                            """,
-                            (
-                                datetime.now().isoformat(timespec="seconds"),
-                                usuario,
-                                int(prod_del),
-                            ),
-                        )
+                        if _inventario_has_column("actualizado_en") and _inventario_has_column("actualizado_por"):
+                            conn.execute(
+                                """
+                                UPDATE inventario
+                                SET estado='inactivo',
+                                    actualizado_en=?,
+                                    actualizado_por=?
+                                WHERE id=?
+                                """,
+                                (
+                                    datetime.now().isoformat(timespec="seconds"),
+                                    usuario,
+                                    int(prod_del),
+                                ),
+                            )
+                        else:
+                            conn.execute("UPDATE inventario SET estado='inactivo' WHERE id=?", (int(prod_del),))
                     st.success("Producto desactivado.")
                     st.rerun()
                 except Exception as exc:
@@ -3514,137 +3970,7 @@ def _render_resumen_financiero() -> None:
     c2.metric("Pagado inicial", f"${total_pagado:,.2f}")
     c3.metric("Saldo pendiente", f"${total_saldo:,.2f}")
 
-    st.markdown("### 📈 Compras por proveedor")
-    if "proveedor" in df.columns:
-        prov = (
-            df.groupby("proveedor", as_index=False)["costo_total_usd"]
-            .sum()
-            .sort_values("costo_total_usd", ascending=False)
-            .head(15)
-        )
-        if not prov.empty:
-            st.bar_chart(prov.set_index("proveedor")[["costo_total_usd"]])
-
-    st.markdown("### 📄 Detalle")
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "cantidad": st.column_config.NumberColumn("Cantidad", format="%.3f"),
-            "costo_total_usd": st.column_config.NumberColumn("Total final USD", format="%.2f"),
-            "costo_unit_usd": st.column_config.NumberColumn("Costo unitario", format="%.4f"),
-            "monto_pagado_inicial_usd": st.column_config.NumberColumn("Pagado inicial", format="%.2f"),
-            "saldo_pendiente_usd": st.column_config.NumberColumn("Saldo", format="%.2f"),
-        },
-    )
-
-
-def _table_exists(conn, table_name: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
-        (str(table_name),),
-    ).fetchone()
-    return bool(row)
-
-
-def _scalar(conn, query: str, params: tuple[Any, ...] = ()) -> float:
-    row = conn.execute(query, params).fetchone()
-    if not row:
-        return 0.0
-    return float(row[0] or 0.0)
-
-
-def _render_integridad_e_integraciones() -> None:
-    st.subheader("🧪 Verificación de inventario e integraciones")
-    st.caption(
-        "Control rápido de consistencia para stock, movimientos, costo promedio, entradas/salidas, "
-        "compras y consumo de producción."
-    )
-
-    with db_transaction() as conn:
-        stock_descuadrado = _scalar(
-            conn,
-            """
-            WITH ultimo AS (
-                SELECT item_id, MAX(id) AS max_id
-                FROM inventario_movs
-                GROUP BY item_id
-            )
-            SELECT COUNT(*)
-            FROM inventario i
-            LEFT JOIN ultimo u ON u.item_id = i.id
-            LEFT JOIN inventario_movs m ON m.id = u.max_id
-            WHERE COALESCE(i.estado, 'activo') <> 'inactivo'
-              AND ABS(COALESCE(i.stock_actual, 0) - COALESCE(m.saldo_despues, COALESCE(i.stock_actual, 0))) > 0.0001
-            """,
-        )
-        movs_invalidos = _scalar(
-            conn,
-            """
-            SELECT COUNT(*)
-            FROM inventario_movs
-            WHERE cantidad IS NULL
-               OR costo_unitario IS NULL
-               OR costo_total IS NULL
-               OR saldo_despues < 0
-            """,
-        )
-        costo_promedio_descuadrado = _scalar(
-            conn,
-            """
-            SELECT COUNT(*)
-            FROM inventario
-            WHERE COALESCE(cantidad, 0) > 0
-              AND ABS(COALESCE(costo_promedio, 0) - (COALESCE(valor_total, 0) / COALESCE(cantidad, 1))) > 0.0001
-            """,
-        )
-        entradas = _scalar(
-            conn,
-            "SELECT COALESCE(SUM(cantidad), 0) FROM inventario_movs WHERE tipo IN ('ENTRADA', 'COMPRA')",
-        )
-        salidas = _scalar(
-            conn,
-            "SELECT COALESCE(SUM(cantidad), 0) FROM inventario_movs WHERE tipo IN ('SALIDA', 'MERMA', 'VENTA')",
-        )
-        compras_registradas = _scalar(conn, "SELECT COUNT(*) FROM historial_compras WHERE COALESCE(activo,1)=1")
-        compras_con_mov = _scalar(conn, "SELECT COUNT(*) FROM inventario_movs WHERE tipo='COMPRA'")
-
-        consumo_tablas: dict[str, tuple[str, str]] = {
-            "Corte Industrial": ("movimientos_corte_material", "SELECT COALESCE(SUM(cantidad), 0) FROM movimientos_corte_material WHERE tipo='consumo'"),
-            "Planificación producción": ("produccion_materiales", "SELECT COALESCE(SUM(cantidad_usada), 0) FROM produccion_materiales"),
-            "Sublimación mermas": ("sublimacion_mermas", "SELECT COALESCE(SUM(cantidad), 0) FROM sublimacion_mermas"),
-            "Mermas y desperdicio": ("mermas_desperdicio", "SELECT COALESCE(SUM(cantidad), 0) FROM mermas_desperdicio"),
-        }
-        consumo_total = 0.0
-        consumo_breakdown: list[dict[str, Any]] = []
-        for label, (table_name, query) in consumo_tablas.items():
-            if not _table_exists(conn, table_name):
-                consumo_breakdown.append({"proceso": label, "consumo": 0.0, "estado": "Sin tabla"})
-                continue
-            subtotal = _scalar(conn, query)
-            consumo_total += subtotal
-            consumo_breakdown.append({"proceso": label, "consumo": subtotal, "estado": "Conectado"})
-
-        cards = [
-            ("stock correcto", int(stock_descuadrado), "items descuadrados entre inventario y último movimiento"),
-            ("movimientos confiables", int(movs_invalidos), "movimientos con datos inválidos/stock negativo"),
-            ("costo promedio", int(costo_promedio_descuadrado), "items con costo promedio inconsistente"),
-            ("entradas/salidas", round(entradas - salidas, 3), "balance neto (entradas - salidas)"),
-            ("compras conectadas", int(compras_registradas - compras_con_mov), "compras sin movimiento tipo COMPRA equivalente"),
-            ("consumo por producción", round(consumo_total, 3), "consumo agregado reportado por módulos productivos"),
-        ]
-
-        cols = st.columns(3)
-        for idx, (titulo, valor, ayuda) in enumerate(cards):
-            cols[idx % 3].metric(titulo, f"{valor}", help=ayuda)
-
-        st.markdown("#### 🔗 Matriz de integración de Inventario")
-        integraciones = [
-            ("📊 Kardex", "kardex"),
-            ("✂️ Corte Industrial", "movimientos_corte_material"),
-            ("🔥 Sublimación", "sublimacion_lotes"),
-            ("🎨 Producción Manual", "produccion_ordenes"),
+@@ -3648,90 +4103,105 @@ def _render_integridad_e_integraciones() -> None:
             ("🛠️ Otros procesos", "costeo_ordenes"),
             ("♻️ Mermas y desperdicio", "mermas_desperdicio"),
             ("💸 Cuentas por pagar", "cuentas_por_pagar_proveedores"),
@@ -3670,7 +3996,7 @@ def _render_integridad_e_integraciones() -> None:
         st.dataframe(pd.DataFrame(consumo_breakdown), use_container_width=True, hide_index=True)
 
 
-ef render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
+def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
     st.title("📦 Centro de Control de Inventario")
     df = _load_inventory_df()
 
@@ -3678,6 +4004,7 @@ ef render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) 
         [
             "📊 Panel de control",
             "📋 Existencias",
+            "📦 Productos",
             "📥 Compras",
             "🧾 Órdenes de compra",
             "🎨 Variantes",
@@ -3700,6 +4027,8 @@ ef render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) 
     with tabs[1]:
         _render_existencias(df)
     with tabs[2]:
+        _render_productos(usuario)
+    with tabs[3]:
         compras_tabs = st.tabs(["Registrar compra", "Historial compras", "Resumen abastecimiento"])
         with compras_tabs[0]:
             _render_compras(usuario, tasa_bcv, tasa_binance)
@@ -3707,31 +4036,43 @@ ef render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float) 
             _render_historial_compras()
         with compras_tabs[2]:
             _render_resumen_abastecimiento()
-    with tabs[3]:
-        _render_ordenes_compra(usuario)
     with tabs[4]:
-        _render_variantes()
+        _render_ordenes_compra(usuario)
     with tabs[5]:
-        _render_proveedores()
+        _render_variantes()
     with tabs[6]:
-        _render_catalogo_proveedor_producto()
+        _render_proveedores()
     with tabs[7]:
-        _render_evaluacion_proveedores(usuario)
+        _render_catalogo_proveedor_producto()
     with tabs[8]:
-        _render_documentos_proveedor()
+        _render_evaluacion_proveedores(usuario)
     with tabs[9]:
-        _render_cuentas_por_pagar()
+        _render_documentos_proveedor()
     with tabs[10]:
-        _render_pagos_proveedores(usuario)
+        _render_cuentas_por_pagar()
     with tabs[11]:
-        _render_movimientos()
+        _render_pagos_proveedores(usuario)
     with tabs[12]:
-        _render_reposicion(df)
+        _render_movimientos()
     with tabs[13]:
-        _render_ajustes(usuario)
+        _render_reposicion(df)
     with tabs[14]:
-        _render_reportes(df)
+        _render_ajustes(usuario)
     with tabs[15]:
+        _render_reportes(df)
+    with tabs[16]:
         _render_integridad_e_integraciones()
 
 
+def render_inventario(usuario: str) -> None:
+    _ensure_inventory_support_tables()
+    _ensure_config_defaults()
+
+    tasa_bcv = float(st.session_state.get("tasa_bcv", 36.5) or 36.5)
+    tasa_binance = float(st.session_state.get("tasa_binance", 38.0) or 38.0)
+
+    render_inventario_module(
+        usuario=usuario,
+        tasa_bcv=tasa_bcv,
+        tasa_binance=tasa_binance,
+    )
