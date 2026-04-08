@@ -1730,11 +1730,18 @@ def _load_proveedores_df() -> pd.DataFrame:
     with db_transaction() as conn:
         rows = conn.execute(
             """
-            SELECT id, nombre, telefono, rif, contacto, observaciones,
-                   COALESCE(especialidades,'') AS especialidades, fecha_creacion
-            FROM proveedores
-            WHERE COALESCE(activo,1)=1
-            ORDER BY nombre ASC
+            SELECT
+                p.id,
+                p.nombre,
+                p.telefono,
+                p.rif,
+                p.contacto,
+                p.observaciones,
+                COALESCE(p.especialidades,'') AS especialidades,
+                p.fecha_creacion
+            FROM proveedores p
+            WHERE COALESCE(p.activo,1)=1
+            ORDER BY COALESCE(p.fecha_creacion,'1900-01-01') DESC, p.nombre ASC
             """
         ).fetchall()
 
