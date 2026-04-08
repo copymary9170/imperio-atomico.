@@ -10,3 +10,6 @@ py -m streamlit run app.py --server.runOnSave true --server.fileWatcherType auto
 echo.
 echo Si hubo un error revisa arriba.
 pause
+
+
+
