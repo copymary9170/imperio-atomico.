@@ -4145,3 +4145,8 @@ def render_inventario(
 
 
 
+
+
+
+
+
