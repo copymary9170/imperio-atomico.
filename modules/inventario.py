@@ -4113,17 +4113,23 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
         _render_integridad_e_integraciones()
 
 
-def render_inventario(usuario: str) -> None:
+def render_inventario(
+    usuario: str,
+    tasa_bcv: float | None = None,
+    tasa_binance: float | None = None,
+) -> None:
     _ensure_inventory_support_tables()
     _ensure_config_defaults()
 
-    tasa_bcv = float(st.session_state.get("tasa_bcv", 36.5) or 36.5)
-    tasa_binance = float(st.session_state.get("tasa_binance", 38.0) or 38.0)
+    tasa_bcv_value = float(tasa_bcv if tasa_bcv is not None else (st.session_state.get("tasa_bcv", 36.5) or 36.5))
+    tasa_binance_value = float(
+        tasa_binance if tasa_binance is not None else (st.session_state.get("tasa_binance", 38.0) or 38.0)
+    )
 
     render_inventario_module(
         usuario=usuario,
-        tasa_bcv=tasa_bcv,
-        tasa_binance=tasa_binance,
+        tasa_bcv=tasa_bcv_value,
+        tasa_binance=tasa_binance_value,
     )
 
 
