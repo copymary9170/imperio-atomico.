@@ -2138,10 +2138,11 @@ def _load_pagos_proveedores_df(cuenta_por_pagar_id: int) -> pd.DataFrame:
 
 
 def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
+    safe_limit = max(1, int(limit))
     _ensure_inventory_support_tables()
     with db_transaction() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT hc.id,
                    hc.fecha,
                    hc.usuario,
@@ -2165,9 +2166,8 @@ def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
             LEFT JOIN proveedores p ON p.id = hc.proveedor_id
             WHERE COALESCE(hc.activo, 1)=1
             ORDER BY hc.fecha DESC, hc.id DESC
-            LIMIT ?
-            """,
-            (int(limit),),
+            LIMIT {safe_limit}
+            """
         ).fetchall()
 
     cols = [
