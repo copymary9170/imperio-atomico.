@@ -4134,19 +4134,3 @@ def render_inventario(
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
