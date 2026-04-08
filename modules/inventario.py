@@ -1680,6 +1680,7 @@ def _load_variantes_df(inventario_id: int | None = None) -> pd.DataFrame:
 
 
 def _load_movements_df(limit: int = 1000) -> pd.DataFrame:
+    safe_limit = max(1, int(limit))
     cols = [
         "id",
         "fecha",
@@ -1694,7 +1695,7 @@ def _load_movements_df(limit: int = 1000) -> pd.DataFrame:
     ]
     with db_transaction() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT m.id, m.fecha, m.usuario, i.sku, i.nombre, m.tipo, m.cantidad,
                    m.costo_unitario_usd, (ABS(m.cantidad) * m.costo_unitario_usd) AS costo_total_usd,
                    m.referencia
@@ -1702,26 +1703,25 @@ def _load_movements_df(limit: int = 1000) -> pd.DataFrame:
             JOIN inventario i ON i.id = m.inventario_id
             WHERE COALESCE(m.estado,'activo')='activo'
             ORDER BY m.fecha DESC
-            LIMIT ?
-            """,
-            (int(limit),),
+            LIMIT {safe_limit}
+            """
         ).fetchall()
     return pd.DataFrame(rows, columns=cols)
 
 
 def _load_diagnostico_movimientos(limit: int = 20) -> pd.DataFrame:
+    safe_limit = max(1, int(limit))
     with db_transaction() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT m.fecha, i.nombre AS insumo, m.cantidad, i.unidad, m.referencia
             FROM movimientos_inventario m
             JOIN inventario i ON i.id = m.inventario_id
             WHERE COALESCE(m.estado,'activo')='activo'
               AND lower(COALESCE(m.referencia, '')) LIKE '%diagnóstico ia%'
             ORDER BY m.fecha DESC
-            LIMIT ?
-            """,
-            (int(limit),),
+            LIMIT {safe_limit}
+            """
         ).fetchall()
     return pd.DataFrame(rows, columns=["fecha", "insumo", "cantidad", "unidad", "referencia"])
 
@@ -1821,32 +1821,36 @@ def _load_proveedores_full_df() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
-def _load_proveedor_items_df() -> pd.DataFrame:
+def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
+    safe_limit = max(1, int(limit))
+    _ensure_inventory_support_tables()
     with db_transaction() as conn:
         rows = conn.execute(
-            """
-            SELECT
-                pi.id,
-                pi.proveedor_id,
-                p.nombre AS proveedor,
-                pi.inventario_id,
-                i.sku,
-                i.nombre AS producto,
-                pi.sku_proveedor,
-                pi.nombre_proveedor_item,
-                pi.unidad_compra,
-                pi.equivalencia_unidad,
-                pi.precio_referencia_usd,
-                pi.moneda_referencia,
-                pi.pedido_minimo,
-                pi.lead_time_dias,
-                pi.proveedor_principal,
-                pi.activo
-            FROM proveedor_items pi
-            JOIN proveedores p ON p.id = pi.proveedor_id
-            JOIN inventario i ON i.id = pi.inventario_id
-            WHERE COALESCE(pi.activo,1)=1
-            ORDER BY p.nombre ASC, i.nombre ASC
+            f"""
+            SELECT hc.id,
+                   hc.fecha,
+                   hc.usuario,
+                   i.sku,
+                   hc.item,
+                   COALESCE(p.nombre, 'SIN PROVEEDOR') AS proveedor,
+                   hc.cantidad,
+                   hc.unidad,
+                   hc.costo_total_usd,
+                   hc.costo_unit_usd,
+                   hc.impuestos,
+                   hc.delivery,
+                   hc.moneda_pago,
+                   COALESCE(hc.tipo_pago, 'contado') AS tipo_pago,
+                   COALESCE(hc.metodo_pago, 'efectivo') AS metodo_pago,
+                   COALESCE(hc.monto_pagado_inicial_usd, 0) AS monto_pagado_inicial_usd,
+                   COALESCE(hc.saldo_pendiente_usd, 0) AS saldo_pendiente_usd,
+                   hc.fecha_vencimiento
+            FROM historial_compras hc
+            LEFT JOIN inventario i ON i.id = hc.inventario_id
+            LEFT JOIN proveedores p ON p.id = hc.proveedor_id
+            WHERE COALESCE(hc.activo, 1)=1
+            ORDER BY hc.fecha DESC, hc.id DESC
+            LIMIT {safe_limit}
             """
         ).fetchall()
 
