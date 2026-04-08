@@ -19,10 +19,20 @@ from services.cxp_proveedores_service import (
     validar_condicion_compra,
 )
 from services.tesoreria_service import registrar_egreso
+from services.recibo_inteligente_service import (
+    ReceiptHeader,
+    allocate_delivery,
+    build_receipt_review_df,
+    extract_text_from_receipt,
+    invoice_already_processed,
+    parse_receipt_text,
+    save_processed_purchase,
+)
 
 # ============================================================
 # INTEGRACION ENTRE MODULOS (FALLBACK SEGURO)
 # ============================================================
+
 
 
 try:
@@ -690,6 +700,71 @@ def _ensure_inventory_support_tables() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_oc_estado ON ordenes_compra(estado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_proveedor ON evaluaciones_proveedor(proveedor_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_doc_proveedor ON proveedor_documentos(proveedor_id)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recibos_procesados (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_compra TEXT,
+                proveedor_id INTEGER,
+                proveedor_detectado TEXT,
+                numero_factura TEXT,
+                moneda_detectada TEXT,
+                subtotal_detectado REAL DEFAULT 0,
+                total_detectado REAL DEFAULT 0,
+                tasa_cambio_usada REAL DEFAULT 1,
+                delivery_usd REAL DEFAULT 0,
+                texto_extraido TEXT,
+                usuario TEXT,
+                creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS compras_importadas_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recibo_id INTEGER NOT NULL,
+                compra_id INTEGER,
+                inventario_id INTEGER,
+                descripcion_detectada TEXT,
+                cantidad REAL DEFAULT 0,
+                precio_unitario_detectado REAL DEFAULT 0,
+                precio_linea_detectado REAL DEFAULT 0,
+                delivery_asignado_usd REAL DEFAULT 0,
+                costo_unitario_final_usd REAL DEFAULT 0,
+                costo_total_final_usd REAL DEFAULT 0,
+                costo_unitario_final_bs REAL DEFAULT 0,
+                costo_total_final_bs REAL DEFAULT 0,
+                score_match REAL DEFAULT 0,
+                decision_match TEXT,
+                creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (recibo_id) REFERENCES recibos_procesados(id),
+                FOREIGN KEY (compra_id) REFERENCES historial_compras(id),
+                FOREIGN KEY (inventario_id) REFERENCES inventario(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mapeos_alias_productos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                inventario_id INTEGER NOT NULL,
+                alias_original TEXT NOT NULL,
+                alias_normalizado TEXT NOT NULL,
+                creado_por TEXT,
+                actualizado_por TEXT,
+                activo INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventario_id, alias_normalizado),
+                FOREIGN KEY (inventario_id) REFERENCES inventario(id)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_recibos_numero_factura ON recibos_procesados(numero_factura)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_compra_importada_recibo ON compras_importadas_items(recibo_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alias_producto_inv ON mapeos_alias_productos(inventario_id)")
 
 
 def _ensure_config_defaults() -> None:
@@ -708,6 +783,7 @@ def _ensure_config_defaults() -> None:
 # ============================================================
 # PRODUCTOS Y MOVIMIENTOS
 # ============================================================
+
 
 def create_producto(
     usuario: str,
@@ -2964,6 +3040,169 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             st.error(f"No se pudo registrar la compra: {exc}")
 
 
+def _render_recibo_inteligente(usuario: str, tasa_bcv: float) -> None:
+    st.subheader("🧠 Recibo inteligente")
+    st.caption("Carga un recibo/factura, revisa la conciliación sugerida y guarda las compras en inventario.")
+
+    df_proveedores = _load_proveedores_df()
+    proveedor_map = {str(r["nombre"]): int(r["id"]) for _, r in df_proveedores.iterrows()} if not df_proveedores.empty else {}
+
+    uploaded = st.file_uploader(
+        "Sube imagen o PDF del recibo",
+        type=["pdf", "png", "jpg", "jpeg", "webp"],
+        key="inv_receipt_file",
+    )
+    if uploaded is not None:
+        if str(uploaded.type).startswith("image/"):
+            st.image(uploaded, caption=f"Vista previa: {uploaded.name}", use_container_width=True)
+        else:
+            st.info(f"Archivo PDF cargado: {uploaded.name}")
+
+    c1, c2, c3 = st.columns(3)
+    threshold_auto = c1.slider("Umbral auto-match", min_value=0.70, max_value=0.99, value=0.88, step=0.01)
+    threshold_review = c2.slider("Umbral revisión", min_value=0.40, max_value=0.95, value=0.70, step=0.01)
+    tasa_manual = c3.number_input("Tasa Bs/USD", min_value=0.0001, value=float(tasa_bcv or 1.0), format="%.4f")
+
+    if st.button("🔎 Analizar recibo", type="primary", use_container_width=True):
+        if uploaded is None:
+            st.warning("Debes subir un archivo primero.")
+        else:
+            texto = extract_text_from_receipt(uploaded)
+            header, items = parse_receipt_text(texto)
+            st.session_state["inv_receipt_text"] = texto
+            st.session_state["inv_receipt_header"] = header
+            st.session_state["inv_receipt_items"] = items
+            st.session_state["inv_receipt_df"] = build_receipt_review_df(
+                items,
+                threshold_auto=threshold_auto,
+                threshold_review=threshold_review,
+            )
+            if not items:
+                st.warning("No se detectaron líneas de productos automáticamente. Puedes editar/crear manualmente.")
+
+    header: ReceiptHeader = st.session_state.get("inv_receipt_header", ReceiptHeader())
+    base_df = st.session_state.get("inv_receipt_df", pd.DataFrame())
+    if base_df.empty:
+        return
+
+    st.markdown("### 🧾 Encabezado detectado")
+    h1, h2, h3, h4 = st.columns(4)
+    proveedor_detectado = h1.text_input("Proveedor detectado", value=str(header.proveedor or ""))
+    fecha_detectada = h2.text_input("Fecha", value=str(header.fecha or ""))
+    factura_detectada = h3.text_input("Factura / referencia", value=str(header.numero_factura or ""))
+    moneda_detectada = h4.selectbox("Moneda", ["USD", "VES"], index=0 if str(header.moneda).upper() == "USD" else 1)
+
+    p1, p2 = st.columns(2)
+    proveedor_sel = p1.selectbox(
+        "Proveedor existente",
+        ["-- Nuevo proveedor --"] + sorted(proveedor_map.keys()),
+        index=0,
+        key="inv_receipt_proveedor_sel",
+    )
+    proveedor_manual = p2.text_input("Nombre proveedor (si es nuevo)", value=proveedor_detectado if proveedor_sel == "-- Nuevo proveedor --" else "")
+
+    d1, d2 = st.columns(2)
+    delivery_input = d1.number_input("Delivery/Flete", min_value=0.0, value=0.0, format="%.4f")
+    metodo_prorrateo = d2.selectbox(
+        "Método prorrateo delivery",
+        ["proporcional_costo", "proporcional_cantidad", "manual"],
+        format_func=lambda x: {
+            "proporcional_costo": "Proporcional al costo",
+            "proporcional_cantidad": "Proporcional a la cantidad",
+            "manual": "Manual por producto",
+        }[x],
+    )
+
+    inv_options = [0]
+    try:
+        inv_options = [0] + _load_inventory_df()["id"].astype(int).tolist()
+    except Exception:
+        pass
+
+    review_df = st.data_editor(
+        base_df,
+        use_container_width=True,
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "descripcion_detectada": st.column_config.TextColumn("Descripción detectada"),
+            "cantidad": st.column_config.NumberColumn("Cantidad", format="%.4f"),
+            "precio_unitario_detectado": st.column_config.NumberColumn("Precio unitario", format="%.4f"),
+            "precio_linea_detectado": st.column_config.NumberColumn("Total línea", format="%.4f"),
+            "inventario_id": st.column_config.SelectboxColumn("Inventario ID", options=inv_options, required=False),
+            "score_match": st.column_config.NumberColumn("Score", format="%.2f"),
+            "decision": st.column_config.SelectboxColumn("Decisión", options=["auto", "revisar", "nuevo"]),
+            "crear_producto_nuevo": st.column_config.CheckboxColumn("Crear nuevo"),
+            "delivery_manual_usd": st.column_config.NumberColumn("Delivery manual USD", format="%.4f"),
+            "guardar": st.column_config.CheckboxColumn("Guardar"),
+        },
+        key="inv_receipt_editor",
+    )
+
+    tasa_ves = float(tasa_manual if moneda_detectada == "VES" else 1.0)
+    review_df = allocate_delivery(review_df, delivery_usd=float(delivery_input if moneda_detectada == "USD" else delivery_input / tasa_ves), metodo=metodo_prorrateo)
+    review_df["precio_linea_final_usd"] = review_df["precio_linea_detectado"].astype(float) + review_df["delivery_asignado_usd"].astype(float)
+    review_df["precio_unitario_final_usd"] = review_df["precio_linea_final_usd"] / review_df["cantidad"].replace(0, 1)
+    review_df["precio_linea_final_bs"] = review_df["precio_linea_final_usd"] * tasa_ves
+    review_df["precio_unitario_final_bs"] = review_df["precio_unitario_final_usd"] * tasa_ves
+
+    st.markdown("### 💰 Costos finales")
+    st.dataframe(
+        review_df[
+            [
+                "descripcion_detectada",
+                "cantidad",
+                "delivery_asignado_usd",
+                "precio_unitario_final_usd",
+                "precio_linea_final_usd",
+                "precio_unitario_final_bs",
+                "precio_linea_final_bs",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    if st.button("💾 Guardar compra procesada", use_container_width=True):
+        try:
+            proveedor_nombre_final = clean_text(
+                proveedor_manual if proveedor_sel == "-- Nuevo proveedor --" else proveedor_sel
+            )
+            if not proveedor_nombre_final:
+                raise ValueError("Debes indicar un proveedor.")
+            with db_transaction() as conn:
+                proveedor_id = _get_or_create_provider(conn, proveedor_nombre_final)
+
+            if invoice_already_processed(factura_detectada, proveedor_id, fecha_detectada):
+                raise ValueError("Factura duplicada: ya fue procesada anteriormente para este proveedor/fecha.")
+
+            header_data = ReceiptHeader(
+                proveedor=proveedor_nombre_final,
+                fecha=fecha_detectada or None,
+                numero_factura=factura_detectada,
+                moneda=moneda_detectada,
+                subtotal=float(review_df["precio_linea_detectado"].sum()),
+                total=float(review_df["precio_linea_final_usd"].sum()),
+            )
+
+            result = save_processed_purchase(
+                usuario=usuario,
+                header=header_data,
+                proveedor_id=proveedor_id,
+                df_review=review_df,
+                tasa_cambio=tasa_ves,
+                delivery_usd=float(delivery_input if moneda_detectada == "USD" else delivery_input / max(tasa_ves, 0.0001)),
+                create_product_fn=_create_inventory_item_for_purchase,
+                registrar_compra_fn=registrar_compra,
+            )
+            st.success(
+                f"Recibo procesado correctamente. Recibo #{result['recibo_id']} con "
+                f"{result['lineas_procesadas']} líneas guardadas."
+            )
+        except Exception as exc:
+            st.error(f"No se pudo guardar el recibo procesado: {exc}")
+
+
 def _render_historial_compras() -> None:
     st.subheader("📊 Historial de compras")
     df_hist = _load_historial_compras_df(limit=2000)
@@ -4078,12 +4317,16 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
     elif selected_section == "📦 Productos":
         _render_productos(usuario)
     elif selected_section == "📥 Compras":
-        compras_tabs = st.tabs(["Registrar compra", "Historial compras", "Resumen abastecimiento"])
+        compras_tabs = st.tabs(
+            ["Registrar compra", "Recibo inteligente", "Historial compras", "Resumen abastecimiento"]
+        )
         with compras_tabs[0]:
             _render_compras(usuario, tasa_bcv, tasa_binance)
         with compras_tabs[1]:
-            _render_historial_compras()
+            _render_recibo_inteligente(usuario, tasa_bcv)
         with compras_tabs[2]:
+            _render_historial_compras()
+        with compras_tabs[3]:
             _render_resumen_abastecimiento()
     elif selected_section == "🧾 Órdenes de compra":
         _render_ordenes_compra(usuario)
