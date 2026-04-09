@@ -4394,3 +4394,6 @@ def render_inventario(
 
 
 
+
+
+
