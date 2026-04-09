@@ -3040,7 +3040,7 @@ def _render_compras(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
             st.error(f"No se pudo registrar la compra: {exc}")
 
 
-def _render_recibo_inteligente(usuario: str, tasa_bcv: float) -> None:
+def _render_recibo_inteligente(usuario: str, tasa_bcv: float, tasa_binance: float) -> None:
     st.subheader("🧠 Recibo inteligente")
     st.caption("Carga un recibo/factura, revisa la conciliación sugerida y guarda las compras en inventario.")
 
@@ -3058,10 +3058,27 @@ def _render_recibo_inteligente(usuario: str, tasa_bcv: float) -> None:
         else:
             st.info(f"Archivo PDF cargado: {uploaded.name}")
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     threshold_auto = c1.slider("Umbral auto-match", min_value=0.70, max_value=0.99, value=0.88, step=0.01)
     threshold_review = c2.slider("Umbral revisión", min_value=0.40, max_value=0.95, value=0.70, step=0.01)
-    tasa_manual = c3.number_input("Tasa Bs/USD", min_value=0.0001, value=float(tasa_bcv or 1.0), format="%.4f")
+    fuente_tasa = c3.selectbox(
+        "Tasa desde Configuración",
+        ["BCV", "Binance", "Manual"],
+        index=0,
+        key="inv_receipt_fuente_tasa",
+        help="Usa las tasas activas definidas en Configuración o ingresa una manual.",
+    )
+    tasa_config = float(tasa_binance if fuente_tasa == "Binance" else tasa_bcv)
+    tasa_manual = c4.number_input(
+        "Tasa Bs/USD",
+        min_value=0.0001,
+        value=float(tasa_config or 1.0),
+        format="%.4f",
+        disabled=fuente_tasa != "Manual",
+        key="inv_receipt_tasa_manual",
+        help="Si eliges BCV o Binance, se toma automáticamente la tasa guardada en Configuración.",
+    )
+    tasa_referencia = float(tasa_manual if fuente_tasa == "Manual" else tasa_config)
 
     if st.button("🔎 Analizar recibo", type="primary", use_container_width=True):
         if uploaded is None:
@@ -3139,7 +3156,7 @@ def _render_recibo_inteligente(usuario: str, tasa_bcv: float) -> None:
         key="inv_receipt_editor",
     )
 
-    tasa_ves = float(tasa_manual if moneda_detectada == "VES" else 1.0)
+    tasa_ves = float(tasa_referencia if moneda_detectada == "VES" else 1.0)
     review_df = allocate_delivery(review_df, delivery_usd=float(delivery_input if moneda_detectada == "USD" else delivery_input / tasa_ves), metodo=metodo_prorrateo)
     review_df["precio_linea_final_usd"] = review_df["precio_linea_detectado"].astype(float) + review_df["delivery_asignado_usd"].astype(float)
     review_df["precio_unitario_final_usd"] = review_df["precio_linea_final_usd"] / review_df["cantidad"].replace(0, 1)
@@ -4323,7 +4340,7 @@ def render_inventario_module(usuario: str, tasa_bcv: float, tasa_binance: float)
         with compras_tabs[0]:
             _render_compras(usuario, tasa_bcv, tasa_binance)
         with compras_tabs[1]:
-            _render_recibo_inteligente(usuario, tasa_bcv)
+            _render_recibo_inteligente(usuario, tasa_bcv, tasa_binance)
         with compras_tabs[2]:
             _render_historial_compras()
         with compras_tabs[3]:
