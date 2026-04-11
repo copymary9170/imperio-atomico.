@@ -116,7 +116,6 @@ CREATE TABLE IF NOT EXISTS gastos (
     cancelado_motivo TEXT
 );
 
-
 CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -434,14 +433,6 @@ CREATE TABLE IF NOT EXISTS pedidos_negocio (
     estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente','en_proceso','entregado','cancelado'))
 );
 
-CREATE TABLE IF NOT EXISTS produccion_auditoria (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    usuario TEXT NOT NULL,
-    modulo TEXT NOT NULL,
-    accion TEXT NOT NULL,
-    detalle TEXT
-);
 CREATE TABLE IF NOT EXISTS ordenes_produccion (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -470,49 +461,10 @@ CREATE TABLE IF NOT EXISTS produccion_auditoria (
     detalle TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_fecha ON ordenes_produccion(fecha);
-CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_detalle_orden ON ordenes_produccion_detalle(orden_id);
-CREATE INDEX IF NOT EXISTS idx_produccion_auditoria_fecha ON produccion_auditoria(fecha);
-CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_estado ON cuentas_por_pagar_proveedores(estado);
-CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_vencimiento ON cuentas_por_pagar_proveedores(fecha_vencimiento);
-CREATE INDEX IF NOT EXISTS idx_pagos_proveedores_cxp ON pagos_proveedores(cuenta_por_pagar_id);
-CREATE INDEX IF NOT EXISTS idx_cxc_estado ON cuentas_por_cobrar(estado);
-CREATE INDEX IF NOT EXISTS idx_cxc_cliente_estado ON cuentas_por_cobrar(cliente_id, estado);
-CREATE INDEX IF NOT EXISTS idx_cxc_vencimiento ON cuentas_por_cobrar(fecha_vencimiento);
-CREATE INDEX IF NOT EXISTS idx_pagos_clientes_cxc ON pagos_clientes(cuenta_por_cobrar_id);
-CREATE INDEX IF NOT EXISTS idx_pagos_clientes_cliente ON pagos_clientes(cliente_id, fecha);
-CREATE INDEX IF NOT EXISTS idx_gestiones_cobranza_cxc ON gestiones_cobranza(cuenta_por_cobrar_id, fecha);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tesoreria_origen_referencia_tipo
-ON movimientos_tesoreria(origen, referencia_id, tipo)
-WHERE referencia_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_tesoreria_fecha ON movimientos_tesoreria(fecha);
-CREATE INDEX IF NOT EXISTS idx_tesoreria_tipo_fecha ON movimientos_tesoreria(tipo, fecha);
-CREATE INDEX IF NOT EXISTS idx_tesoreria_origen_fecha ON movimientos_tesoreria(origen, fecha);
-CREATE INDEX IF NOT EXISTS idx_tesoreria_metodo_pago ON movimientos_tesoreria(metodo_pago);
-CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_fecha ON movimientos_bancarios(fecha);
-CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_cuenta_fecha ON movimientos_bancarios(cuenta_bancaria, fecha);
-CREATE INDEX IF NOT EXISTS idx_conciliaciones_tesoreria ON conciliaciones_bancarias(tesoreria_movimiento_id);
-CREATE INDEX IF NOT EXISTS idx_cierres_periodo_rango ON cierres_periodo(tipo_cierre, fecha_desde, fecha_hasta, estado);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_cierres_periodo_unique ON cierres_periodo(periodo, tipo_cierre, estado);
-CREATE INDEX IF NOT EXISTS idx_presupuesto_operativo_periodo ON presupuesto_operativo(periodo, tipo);
-CREATE INDEX IF NOT EXISTS idx_alertas_gerenciales_fecha ON alertas_gerenciales_log(fecha, prioridad);
-CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_fecha ON costeo_ordenes(fecha);
-CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_tipo_fecha ON costeo_ordenes(tipo_proceso, fecha);
-CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_estado ON costeo_ordenes(estado);
-CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_cotizacion ON costeo_ordenes(cotizacion_id);
-CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_venta ON costeo_ordenes(venta_id);
-CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_produccion ON costeo_ordenes(orden_produccion_id);
-CREATE INDEX IF NOT EXISTS idx_costeo_detalle_orden ON costeo_detalle(orden_id);
-CREATE INDEX IF NOT EXISTS idx_crm_leads_estado_etapa ON crm_leads(estado, etapa);
-CREATE INDEX IF NOT EXISTS idx_crm_leads_proximo_contacto ON crm_leads(proximo_contacto);
-CREATE INDEX IF NOT EXISTS idx_crm_interacciones_lead_fecha ON crm_interacciones(lead_id, fecha);
-CREATE INDEX IF NOT EXISTS idx_pedidos_negocio_estado_entrega ON pedidos_negocio(estado, fecha_entrega);
-
 CREATE TABLE IF NOT EXISTS configuracion (
     parametro TEXT PRIMARY KEY,
     valor TEXT
 );
-
 
 CREATE TABLE IF NOT EXISTS catalogo_cuentas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -555,12 +507,224 @@ CREATE TABLE IF NOT EXISTS asientos_contables_detalle (
     FOREIGN KEY (cuenta_codigo) REFERENCES catalogo_cuentas(codigo)
 );
 
+-- ===========================================
+-- Seguridad / Roles
+-- ===========================================
+
+CREATE TABLE IF NOT EXISTS permisos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo TEXT NOT NULL UNIQUE,
+    descripcion TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS roles_permisos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rol TEXT NOT NULL,
+    permiso_codigo TEXT NOT NULL,
+    UNIQUE(rol, permiso_codigo)
+);
+
+CREATE TABLE IF NOT EXISTS auditoria_seguridad (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    accion TEXT NOT NULL,
+    detalle TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_fecha ON ordenes_produccion(fecha);
+CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_detalle_orden ON ordenes_produccion_detalle(orden_id);
+CREATE INDEX IF NOT EXISTS idx_produccion_auditoria_fecha ON produccion_auditoria(fecha);
+CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_estado ON cuentas_por_pagar_proveedores(estado);
+CREATE INDEX IF NOT EXISTS idx_cxp_proveedor_vencimiento ON cuentas_por_pagar_proveedores(fecha_vencimiento);
+CREATE INDEX IF NOT EXISTS idx_pagos_proveedores_cxp ON pagos_proveedores(cuenta_por_pagar_id);
+CREATE INDEX IF NOT EXISTS idx_cxc_estado ON cuentas_por_cobrar(estado);
+CREATE INDEX IF NOT EXISTS idx_cxc_cliente_estado ON cuentas_por_cobrar(cliente_id, estado);
+CREATE INDEX IF NOT EXISTS idx_cxc_vencimiento ON cuentas_por_cobrar(fecha_vencimiento);
+CREATE INDEX IF NOT EXISTS idx_pagos_clientes_cxc ON pagos_clientes(cuenta_por_cobrar_id);
+CREATE INDEX IF NOT EXISTS idx_pagos_clientes_cliente ON pagos_clientes(cliente_id, fecha);
+CREATE INDEX IF NOT EXISTS idx_gestiones_cobranza_cxc ON gestiones_cobranza(cuenta_por_cobrar_id, fecha);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tesoreria_origen_referencia_tipo
+ON movimientos_tesoreria(origen, referencia_id, tipo)
+WHERE referencia_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tesoreria_fecha ON movimientos_tesoreria(fecha);
+CREATE INDEX IF NOT EXISTS idx_tesoreria_tipo_fecha ON movimientos_tesoreria(tipo, fecha);
+CREATE INDEX IF NOT EXISTS idx_tesoreria_origen_fecha ON movimientos_tesoreria(origen, fecha);
+CREATE INDEX IF NOT EXISTS idx_tesoreria_metodo_pago ON movimientos_tesoreria(metodo_pago);
+CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_fecha ON movimientos_bancarios(fecha);
+CREATE INDEX IF NOT EXISTS idx_movimientos_bancarios_cuenta_fecha ON movimientos_bancarios(cuenta_bancaria, fecha);
+CREATE INDEX IF NOT EXISTS idx_conciliaciones_tesoreria ON conciliaciones_bancarias(tesoreria_movimiento_id);
+CREATE INDEX IF NOT EXISTS idx_cierres_periodo_rango ON cierres_periodo(tipo_cierre, fecha_desde, fecha_hasta, estado);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cierres_periodo_unique ON cierres_periodo(periodo, tipo_cierre, estado);
+CREATE INDEX IF NOT EXISTS idx_presupuesto_operativo_periodo ON presupuesto_operativo(periodo, tipo);
+CREATE INDEX IF NOT EXISTS idx_alertas_gerenciales_fecha ON alertas_gerenciales_log(fecha, prioridad);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_fecha ON costeo_ordenes(fecha);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_tipo_fecha ON costeo_ordenes(tipo_proceso, fecha);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_estado ON costeo_ordenes(estado);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_cotizacion ON costeo_ordenes(cotizacion_id);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_venta ON costeo_ordenes(venta_id);
+CREATE INDEX IF NOT EXISTS idx_costeo_ordenes_produccion ON costeo_ordenes(orden_produccion_id);
+CREATE INDEX IF NOT EXISTS idx_costeo_detalle_orden ON costeo_detalle(orden_id);
+CREATE INDEX IF NOT EXISTS idx_crm_leads_estado_etapa ON crm_leads(estado, etapa);
+CREATE INDEX IF NOT EXISTS idx_crm_leads_proximo_contacto ON crm_leads(proximo_contacto);
+CREATE INDEX IF NOT EXISTS idx_crm_interacciones_lead_fecha ON crm_interacciones(lead_id, fecha);
+CREATE INDEX IF NOT EXISTS idx_pedidos_negocio_estado_entrega ON pedidos_negocio(estado, fecha_entrega);
 CREATE INDEX IF NOT EXISTS idx_catalogo_cuentas_tipo ON catalogo_cuentas(tipo);
 CREATE INDEX IF NOT EXISTS idx_asientos_fecha ON asientos_contables(fecha);
 CREATE INDEX IF NOT EXISTS idx_asientos_evento_ref ON asientos_contables(evento_tipo, referencia_tabla, referencia_id);
 CREATE INDEX IF NOT EXISTS idx_asientos_detalle_asiento ON asientos_contables_detalle(asiento_id);
 CREATE INDEX IF NOT EXISTS idx_asientos_detalle_cuenta ON asientos_contables_detalle(cuenta_codigo);
+
+CREATE INDEX IF NOT EXISTS idx_roles_permisos_rol ON roles_permisos(rol);
+CREATE INDEX IF NOT EXISTS idx_roles_permisos_permiso ON roles_permisos(permiso_codigo);
+CREATE INDEX IF NOT EXISTS idx_auditoria_seguridad_fecha ON auditoria_seguridad(fecha);
 """
+DEFAULT_PERMISSIONS = [
+    ("dashboard.view", "Ver panel de control"),
+
+    ("inventario.view", "Ver inventario"),
+    ("inventario.create", "Crear inventario"),
+    ("inventario.edit", "Editar inventario"),
+    ("inventario.move", "Mover inventario"),
+    ("inventario.adjust", "Ajustar inventario"),
+
+    ("kardex.view", "Ver kardex"),
+
+    ("clientes.view", "Ver clientes"),
+    ("clientes.create", "Crear clientes"),
+    ("clientes.edit", "Editar clientes"),
+
+    ("crm.view", "Ver CRM"),
+    ("crm.edit", "Editar CRM"),
+
+    ("ventas.view", "Ver ventas"),
+    ("ventas.create", "Registrar ventas"),
+    ("ventas.edit", "Editar ventas"),
+    ("ventas.cancel", "Anular ventas"),
+    ("ventas.approve_discount", "Aprobar descuentos"),
+
+    ("cotizaciones.view", "Ver cotizaciones"),
+    ("cotizaciones.create", "Crear cotizaciones"),
+    ("cotizaciones.edit", "Editar cotizaciones"),
+    ("cotizaciones.approve", "Aprobar cotizaciones"),
+
+    ("gastos.view", "Ver gastos"),
+    ("gastos.create", "Registrar gastos"),
+    ("gastos.edit", "Editar gastos"),
+
+    ("caja.view", "Ver caja"),
+    ("caja.payment_in", "Registrar cobros"),
+    ("caja.payment_out", "Registrar pagos"),
+    ("caja.close", "Cerrar caja"),
+
+    ("tesoreria.view", "Ver tesorería"),
+    ("tesoreria.edit", "Editar tesorería"),
+
+    ("cxp.view", "Ver cuentas por pagar"),
+    ("cxp.edit", "Editar cuentas por pagar"),
+
+    ("contabilidad.view", "Ver contabilidad"),
+    ("contabilidad.entry", "Registrar ajustes contables"),
+    ("contabilidad.approve", "Aprobar ajustes contables"),
+
+    ("conciliacion.view", "Ver conciliación bancaria"),
+    ("conciliacion.edit", "Editar conciliación bancaria"),
+
+    ("impuestos.view", "Ver impuestos"),
+    ("impuestos.edit", "Editar impuestos"),
+
+    ("costeo.view", "Ver costeo"),
+    ("costeo.edit", "Modificar costos"),
+
+    ("costeo_industrial.view", "Ver costeo industrial"),
+    ("costeo_industrial.edit", "Modificar costeo industrial"),
+
+    ("produccion.view", "Ver producción"),
+    ("produccion.plan", "Planificar producción"),
+    ("produccion.route", "Gestionar rutas"),
+    ("produccion.execute", "Ejecutar producción"),
+    ("produccion.quality", "Control de calidad"),
+    ("produccion.scrap", "Registrar mermas"),
+
+    ("activos.view", "Ver activos"),
+    ("activos.edit", "Editar activos"),
+
+    ("mantenimiento.view", "Ver mantenimiento"),
+    ("mantenimiento.edit", "Editar mantenimiento"),
+
+    ("rrhh.view", "Ver RRHH"),
+    ("rrhh.edit", "Editar RRHH"),
+
+    ("config.view", "Ver configuración"),
+    ("config.edit", "Editar configuración"),
+
+    ("security.view", "Ver seguridad y roles"),
+    ("security.edit", "Editar seguridad y roles"),
+
+    ("auditoria.view", "Ver auditoría"),
+]
+
+DEFAULT_ROLE_PERMISSIONS = {
+    "Admin": ["*"],
+
+    "Administration": [
+        "dashboard.view",
+
+        "inventario.view", "inventario.create", "inventario.edit", "inventario.move", "inventario.adjust",
+        "kardex.view",
+
+        "clientes.view", "clientes.create", "clientes.edit",
+        "crm.view", "crm.edit",
+        "ventas.view", "ventas.create", "ventas.edit", "ventas.cancel", "ventas.approve_discount",
+        "cotizaciones.view", "cotizaciones.create", "cotizaciones.edit", "cotizaciones.approve",
+
+        "gastos.view", "gastos.create", "gastos.edit",
+        "caja.view", "caja.payment_in", "caja.payment_out", "caja.close",
+        "tesoreria.view", "tesoreria.edit",
+        "cxp.view", "cxp.edit",
+        "contabilidad.view", "contabilidad.entry", "contabilidad.approve",
+        "conciliacion.view", "conciliacion.edit",
+        "impuestos.view", "impuestos.edit",
+
+        "costeo.view", "costeo.edit",
+        "costeo_industrial.view", "costeo_industrial.edit",
+
+        "produccion.view", "produccion.plan", "produccion.route", "produccion.execute", "produccion.quality", "produccion.scrap",
+
+        "activos.view", "activos.edit",
+        "mantenimiento.view", "mantenimiento.edit",
+        "rrhh.view", "rrhh.edit",
+
+        "config.view", "config.edit",
+        "security.view",
+        "auditoria.view",
+    ],
+
+    "Operator": [
+        "dashboard.view",
+
+        "inventario.view",
+        "kardex.view",
+
+        "clientes.view",
+        "crm.view",
+        "ventas.view", "ventas.create",
+        "cotizaciones.view", "cotizaciones.create",
+
+        "gastos.view", "gastos.create",
+        "caja.view", "caja.payment_in",
+
+        "tesoreria.view",
+
+        "costeo.view",
+        "produccion.view", "produccion.execute",
+
+        "activos.view",
+        "mantenimiento.view",
+
+        "config.view",
+    ],
+}
 
 
 def _ensure_gastos_migration(conn) -> None:
@@ -671,7 +835,6 @@ def _ensure_cxc_migration(conn) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(cuentas_por_cobrar)").fetchall()}
     if not columns:
         return
-
 
     if "tipo_documento" not in columns:
         conn.execute("ALTER TABLE cuentas_por_cobrar ADD COLUMN tipo_documento TEXT NOT NULL DEFAULT 'venta'")
@@ -846,7 +1009,7 @@ def _ensure_conciliacion_migration(conn) -> None:
             """
             UPDATE movimientos_bancarios
             SET estado_conciliacion = CASE
-                     WHEN LOWER(COALESCE(estado_conciliacion, '')) IN ('pendiente','conciliado','con_diferencia') THEN LOWER(estado_conciliacion)
+                WHEN LOWER(COALESCE(estado_conciliacion, '')) IN ('pendiente','conciliado','con_diferencia') THEN LOWER(estado_conciliacion)
                 ELSE 'pendiente'
             END
             """
@@ -886,6 +1049,38 @@ def _ensure_gestion_negocio_migration(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_costeo_sucursal_fecha ON costeo_ordenes(sucursal, fecha)")
 
 
+def _ensure_security_seed(conn) -> None:
+    conn.executemany(
+        """
+        INSERT INTO permisos (codigo, descripcion)
+        VALUES (?, ?)
+        ON CONFLICT(codigo) DO UPDATE SET
+            descripcion = excluded.descripcion
+        """,
+        DEFAULT_PERMISSIONS,
+    )
+
+    for rol, permisos in DEFAULT_ROLE_PERMISSIONS.items():
+        if "*" in permisos:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+                VALUES (?, ?)
+                """,
+                (rol, "*"),
+            )
+            continue
+
+        for permiso in permisos:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+                VALUES (?, ?)
+                """,
+                (rol, permiso),
+            )
+
+
 def init_schema() -> None:
     with db_transaction() as conn:
         conn.executescript(SCHEMA_SQL)
@@ -897,3 +1092,4 @@ def init_schema() -> None:
         _ensure_contabilidad_migration(conn)
         _ensure_conciliacion_migration(conn)
         _ensure_gestion_negocio_migration(conn)
+        _ensure_security_seed(conn)
