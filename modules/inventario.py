@@ -1,4 +1,4 @@
- __future__ import annotations
+fr __future__ import annotations
 
 import calendar
 import re
