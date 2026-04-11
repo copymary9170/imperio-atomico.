@@ -21,6 +21,12 @@ init_schema()
 restore_session_snapshot()
 
 # ==================================================
+# SEGURIDAD / PERMISOS
+# ==================================================
+
+from security.permissions import has_permission
+
+# ==================================================
 # IMPORTAR VISTAS
 # ==================================================
 
@@ -76,7 +82,7 @@ from modules.configuracion import render_sidebar_config_snapshot
 # ==================================================
 
 usuario = st.session_state.get("usuario", "Sistema")
-user_role = st.session_state.get("rol", "Admin")
+user_role = st.session_state.get("rol", "Operator")
 
 # ==================================================
 # ESTILOS SIDEBAR PRO
@@ -124,73 +130,89 @@ if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
 render_sidebar_config_snapshot()
 
 # ==================================================
-# MENÚ PRINCIPAL (ORDEN EMPRESARIAL)
+# MENÚ PRINCIPAL (ORDEN EMPRESARIAL + PERMISOS)
+# Cada entrada: "Etiqueta": ("permiso", callback)
 # ==================================================
 
 MENU_ROUTES = {
-
     # CORE
-    "📊 Panel de control": lambda: render_dashboard(),
+    "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
 
     # OPERACIONES
-    "📦 Inventario": lambda: render_inventario(usuario),
-    "📊 Kardex": lambda: render_kardex(usuario),
-    "🏗️ Activos": lambda: render_activos(usuario),
+    "📦 Inventario": ("inventario.view", lambda: render_inventario(usuario)),
+    "📊 Kardex": ("kardex.view", lambda: render_kardex(usuario)),
+    "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
 
     # CLIENTES Y VENTAS
-    "👥 Clientes": lambda: render_clientes(usuario),
-    "🤝 CRM": lambda: render_crm(usuario),
-    "💰 Ventas": lambda: render_ventas(usuario),
-    "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
-    "📣 Marketing / Ventas": lambda: render_marketing_ventas(usuario),
-    "⭐ Fidelización": lambda: render_fidelizacion(usuario),
+    "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
+    "🤝 CRM": ("crm.view", lambda: render_crm(usuario)),
+    "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
+    "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
+    "📣 Marketing / Ventas": ("crm.view", lambda: render_marketing_ventas(usuario)),
+    "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
 
     # PRODUCCIÓN
-    "✂️ Corte Industrial": lambda: render_corte(usuario),
-    "🔥 Sublimación": lambda: render_sublimacion(usuario),
-    "🎨 Producción Manual": lambda: render_produccion_manual(usuario),
-    "🗓️ Planificación de producción": lambda: render_planificacion_produccion(usuario),
-    "🧭 Rutas de producción": lambda: render_rutas_produccion(usuario),
-    "✅ Control de calidad": lambda: render_control_calidad(usuario),
-    "♻️ Mermas y desperdicio": lambda: render_mermas_desperdicio(usuario),
+    "✂️ Corte Industrial": ("produccion.execute", lambda: render_corte(usuario)),
+    "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
+    "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
+    "🗓️ Planificación de producción": ("produccion.plan", lambda: render_planificacion_produccion(usuario)),
+    "🧭 Rutas de producción": ("produccion.route", lambda: render_rutas_produccion(usuario)),
+    "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
+    "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
 
     # FINANZAS
-    "📉 Gastos": lambda: render_gastos(usuario),
-    "🏦 Caja empresarial": lambda: render_caja(usuario, user_role),
-    "🏦 Tesorería": lambda: render_tesoreria(usuario),
-    "💸 Cuentas por pagar": lambda: render_cuentas_por_pagar(usuario),
-    "📚 Contabilidad": lambda: render_contabilidad(usuario),
-    "🏛️ Conciliación bancaria": lambda: render_conciliacion_bancaria(usuario),
-    "🧾 Impuestos": lambda: render_impuestos(usuario),
+    "📉 Gastos": ("gastos.view", lambda: render_gastos(usuario)),
+    "🏦 Caja empresarial": ("caja.view", lambda: render_caja(usuario, user_role)),
+    "🏦 Tesorería": ("tesoreria.view", lambda: render_tesoreria(usuario)),
+    "💸 Cuentas por pagar": ("cxp.view", lambda: render_cuentas_por_pagar(usuario)),
+    "📚 Contabilidad": ("contabilidad.view", lambda: render_contabilidad(usuario)),
+    "🏛️ Conciliación bancaria": ("conciliacion.view", lambda: render_conciliacion_bancaria(usuario)),
+    "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
 
     # ANALÍTICA
-    "📈 Rentabilidad": lambda: render_rentabilidad(usuario),
-    "🔮 Planeación financiera": lambda: render_planeacion_financiera(usuario),
-    "📊 Auditoría": lambda: render_auditoria(usuario),
+    "📈 Rentabilidad": ("costeo.view", lambda: render_rentabilidad(usuario)),
+    "🔮 Planeación financiera": ("tesoreria.view", lambda: render_planeacion_financiera(usuario)),
+    "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
 
     # COSTOS
-    "🧮 Costeo": lambda: render_costeo(usuario),
-    "🧮 Costeo industrial": lambda: render_costeo_industrial(usuario),
-    "🧮 Calculadora": lambda: render_calculadora(usuario),
+    "🧮 Costeo": ("costeo.view", lambda: render_costeo(usuario)),
+    "🧮 Costeo industrial": ("costeo_industrial.view", lambda: render_costeo_industrial(usuario)),
+    "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
 
     # RRHH
-    "👨‍💼 RRHH": lambda: render_rrhh(usuario),
+    "👨‍💼 RRHH": ("rrhh.view", lambda: render_rrhh(usuario)),
 
     # SISTEMA
-    "⚙️ Configuración": lambda: render_configuracion(usuario),
-    "🔐 Seguridad / Roles": lambda: render_seguridad_roles(usuario),
-    "📘 Manuales / SOP": lambda: render_manuales_sop(usuario),
+    "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
+    "🔐 Seguridad / Roles": ("security.view", lambda: render_seguridad_roles(usuario)),
+    "📘 Manuales / SOP": ("dashboard.view", lambda: render_manuales_sop(usuario)),
 
     # OTROS
-    "🎨 CMYK": lambda: render_cmyk(usuario),
-    "🧠 Diagnóstico IA": lambda: render_diagnostico(usuario),
-    "🛠️ Otros procesos": lambda: render_otros_procesos(usuario),
-    "🛍️ Catálogo": lambda: render_catalogo(usuario),
+    "🎨 CMYK": ("produccion.view", lambda: render_cmyk(usuario)),
+    "🧠 Diagnóstico IA": ("dashboard.view", lambda: render_diagnostico(usuario)),
+    "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
+    "🛍️ Catálogo": ("inventario.view", lambda: render_catalogo(usuario)),
 
     # EXPANSIÓN ERP
-    "🧩 Nuevos módulos ERP": lambda: render_portafolio_modulos(usuario),
-    "🛠️ Mantenimiento": lambda: render_mantenimiento_activos(usuario),
+    "🧩 Nuevos módulos ERP": ("dashboard.view", lambda: render_portafolio_modulos(usuario)),
+    "🛠️ Mantenimiento": ("mantenimiento.view", lambda: render_mantenimiento_activos(usuario)),
 }
+
+# ==================================================
+# FILTRAR MENÚ SEGÚN PERMISOS
+# ==================================================
+
+VISIBLE_MENU = {
+    label: callback
+    for label, (permiso, callback) in MENU_ROUTES.items()
+    if has_permission(permiso)
+}
+
+# Fallback para evitar pantalla vacía
+if not VISIBLE_MENU:
+    st.error("🚫 Tu usuario no tiene acceso a módulos habilitados.")
+    save_session_snapshot()
+    st.stop()
 
 # ==================================================
 # SELECTOR
@@ -198,7 +220,7 @@ MENU_ROUTES = {
 
 menu = st.sidebar.radio(
     "Menú principal",
-    list(MENU_ROUTES.keys()),
+    list(VISIBLE_MENU.keys()),
     label_visibility="collapsed",
 )
 
@@ -206,6 +228,5 @@ menu = st.sidebar.radio(
 # EJECUCIÓN
 # ==================================================
 
-MENU_ROUTES[menu]()
+VISIBLE_MENU[menu]()
 save_session_snapshot()
-
