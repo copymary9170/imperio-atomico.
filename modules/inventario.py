@@ -1904,6 +1904,57 @@ def _load_proveedores_full_df() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
+def _load_proveedor_items_df() -> pd.DataFrame:
+    _ensure_inventory_support_tables()
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                pi.id,
+                pi.proveedor_id,
+                p.nombre AS proveedor,
+                pi.inventario_id,
+                i.nombre AS producto,
+                i.sku,
+                pi.sku_proveedor,
+                pi.nombre_proveedor_item,
+                pi.unidad_compra,
+                pi.equivalencia_unidad,
+                pi.precio_referencia_usd,
+                pi.moneda_referencia,
+                pi.pedido_minimo,
+                pi.lead_time_dias,
+                pi.proveedor_principal,
+                pi.fecha_actualizacion
+            FROM proveedor_items pi
+            JOIN proveedores p ON p.id = pi.proveedor_id
+            JOIN inventario i ON i.id = pi.inventario_id
+            WHERE COALESCE(pi.activo,1)=1
+            ORDER BY p.nombre ASC, i.nombre ASC
+            """
+        ).fetchall()
+
+    cols = [
+        "id",
+        "proveedor_id",
+        "proveedor",
+        "inventario_id",
+        "producto",
+        "sku",
+        "sku_proveedor",
+        "nombre_proveedor_item",
+        "unidad_compra",
+        "equivalencia_unidad",
+        "precio_referencia_usd",
+        "moneda_referencia",
+        "pedido_minimo",
+        "lead_time_dias",
+        "proveedor_principal",
+        "fecha_actualizacion",
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
 def _load_historial_compras_df(limit: int = 1000) -> pd.DataFrame:
     safe_limit = max(1, int(limit))
     _ensure_inventory_support_tables()
