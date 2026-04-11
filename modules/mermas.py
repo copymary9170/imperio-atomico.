@@ -458,6 +458,187 @@ def registrar_merma(
 # UI
 # ============================================================
 
+def _render_tab_registro(usuario: str) -> None:
+    st.subheader("Registrar nueva merma")
+
+    inv_df = _load_inventory_df()
+    opciones = ["Manual (sin inventario)"]
+    index_to_inv_id: dict[int, int | None] = {0: None}
+
+    if not inv_df.empty:
+        for idx, row in inv_df.reset_index(drop=True).iterrows():
+            opt = f"{row['nombre']} · SKU {row['sku'] or 'N/A'} · Stock {float(row['stock_actual'] or 0):,.2f}"
+            opciones.append(opt)
+            index_to_inv_id[idx + 1] = int(row["id"])
+
+    selected = st.selectbox("Producto", opciones, key="merma_producto_select")
+    selected_idx = opciones.index(selected)
+    inventario_id = index_to_inv_id.get(selected_idx)
+
+    producto_base = st.session_state.get("merma_producto_manual", "")
+    sku_base = ""
+    categoria_base = ""
+    unidad_base = "unidad"
+    costo_base = 0.0
+
+    if inventario_id is not None and not inv_df.empty:
+        row = inv_df[inv_df["id"] == inventario_id].iloc[0]
+        producto_base = str(row["nombre"] or "")
+        sku_base = str(row["sku"] or "")
+        categoria_base = str(row["categoria"] or "")
+        unidad_base = str(row["unidad"] or "unidad")
+        costo_base = _safe_float(row["costo_unitario_usd"], 0.0)
+
+    c1, c2, c3, c4 = st.columns(4)
+    producto = c1.text_input("Producto", value=producto_base, key="merma_producto")
+    sku = c2.text_input("SKU", value=sku_base, key="merma_sku")
+    categoria = c3.text_input("Categoría", value=categoria_base, key="merma_categoria")
+    unidad = c4.selectbox(
+        "Unidad",
+        UNIDADES_BASE,
+        index=UNIDADES_BASE.index(unidad_base) if unidad_base in UNIDADES_BASE else 0,
+        key="merma_unidad",
+    )
+
+    d1, d2, d3, d4 = st.columns(4)
+    cantidad = d1.number_input("Cantidad", min_value=0.0001, format="%.4f", key="merma_cantidad")
+    costo_unitario = d2.number_input(
+        "Costo unitario (USD)",
+        min_value=0.0,
+        value=float(costo_base),
+        format="%.4f",
+        key="merma_costo_unitario",
+    )
+    tipo_merma = d3.selectbox("Tipo de merma", TIPOS_MERMA, key="merma_tipo")
+    causa = d4.selectbox("Causa", CAUSAS_MERMA, key="merma_causa")
+
+    e1, e2, e3 = st.columns(3)
+    area = e1.selectbox("Área", AREAS_MERMA, key="merma_area")
+    proceso = e2.text_input("Proceso", value=st.session_state.get("merma_proceso", ""), key="merma_proceso")
+    orden = e3.text_input("Orden de producción", value=st.session_state.get("merma_op", ""), key="merma_op")
+
+    f1, f2, f3, f4 = st.columns(4)
+    maquina = f1.text_input("Máquina", key="merma_maquina")
+    operador = f2.text_input("Operador", key="merma_operador")
+    lote = f3.text_input("Lote", key="merma_lote")
+    cliente = f4.text_input("Cliente", key="merma_cliente")
+
+    observacion = st.text_area(
+        "Observación",
+        value=st.session_state.get("merma_observacion", ""),
+        key="merma_observacion",
+    )
+    evidencia_url = st.text_input("URL evidencia (opcional)", key="merma_evidencia")
+
+    r1, r2, r3, r4 = st.columns(4)
+    recuperable = r1.checkbox("Recuperable", key="merma_recuperable")
+    cantidad_recuperada = r2.number_input("Cant. recuperada", min_value=0.0, format="%.4f", key="merma_recuperada")
+    valor_recuperado = r3.number_input("Valor recuperado (USD)", min_value=0.0, format="%.4f", key="merma_valor_rec")
+    destino_rec = r4.selectbox("Destino recuperación", DESTINOS_RECUPERACION, key="merma_destino")
+
+    costo_total = float(cantidad) * float(costo_unitario)
+    st.caption(f"Impacto económico estimado: **$ {costo_total:,.2f} USD**")
+
+    if st.button("♻️ Registrar merma", use_container_width=True, key="merma_submit"):
+        try:
+            merma_id = registrar_merma(
+                usuario=usuario,
+                inventario_id=inventario_id,
+                producto=producto,
+                sku=sku,
+                categoria=categoria,
+                unidad=unidad,
+                cantidad=float(cantidad),
+                costo_unitario_usd=float(costo_unitario),
+                tipo_merma=tipo_merma,
+                causa=causa,
+                area=area,
+                proceso=proceso,
+                orden_produccion=orden,
+                maquina=maquina,
+                operador=operador,
+                lote=lote,
+                cliente=cliente,
+                observacion=observacion,
+                recuperable=bool(recuperable),
+                cantidad_recuperada=float(cantidad_recuperada),
+                valor_recuperado_usd=float(valor_recuperado),
+                destino_recuperacion=destino_rec,
+                evidencia_url=evidencia_url,
+            )
+            st.success(f"✅ Merma #{merma_id} registrada correctamente")
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            st.error("Error registrando merma")
+            st.exception(exc)
+
+
+def _render_tab_historial() -> None:
+    st.subheader("Historial de mermas")
+    df = _load_mermas_df()
+
+    if df.empty:
+        st.info("No hay mermas registradas.")
+        return
+
+    c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+    buscar = c1.text_input("Buscar")
+    tipo = c2.selectbox("Tipo", ["Todos"] + TIPOS_MERMA)
+    causa = c3.selectbox("Causa", ["Todas"] + CAUSAS_MERMA)
+    area = c4.selectbox("Área", ["Todas"] + AREAS_MERMA)
+
+    view = _filter_mermas(df, buscar, tipo, causa, area)
+    st.dataframe(view, use_container_width=True, hide_index=True)
+
+    if not view.empty:
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            view.to_excel(writer, index=False, sheet_name="Mermas")
+        st.download_button(
+            "📥 Exportar Excel",
+            buffer.getvalue(),
+            file_name="historial_mermas.xlsx",
+            use_container_width=True,
+        )
+
+
+def _render_tab_resumen() -> None:
+    st.subheader("Resumen de mermas")
+    df = _load_mermas_df()
+
+    if df.empty:
+        st.info("No hay datos para resumir.")
+        return
+
+    total_cantidad = _sum_method(df, "cantidad")
+    total_costo = _sum_method(df, "costo_total_usd")
+    total_recuperado = _sum_method(df, "valor_recuperado_usd")
+    impacto_neto = total_costo - total_recuperado
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Cantidad total", f"{total_cantidad:,.2f}")
+    k2.metric("Costo total", f"$ {total_costo:,.2f}")
+    k3.metric("Valor recuperado", f"$ {total_recuperado:,.2f}")
+    k4.metric("Impacto neto", f"$ {impacto_neto:,.2f}")
+
+    by_tipo = df.groupby("tipo_merma", as_index=False)["costo_total_usd"].sum().sort_values("costo_total_usd", ascending=False)
+    by_causa = df.groupby("causa", as_index=False)["costo_total_usd"].sum().sort_values("costo_total_usd", ascending=False)
+    by_area = df.groupby("area", as_index=False)["costo_total_usd"].sum().sort_values("costo_total_usd", ascending=False)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.caption("Impacto por tipo de merma")
+        st.bar_chart(by_tipo.set_index("tipo_merma")["costo_total_usd"])
+    with c2:
+        st.caption("Impacto por causa")
+        st.bar_chart(by_causa.set_index("causa")["costo_total_usd"])
+    with c3:
+        st.caption("Impacto por área")
+        st.bar_chart(by_area.set_index("area")["costo_total_usd"])
+
+
 def render_mermas(usuario: str) -> None:
     _ensure_mermas_tables()
 
