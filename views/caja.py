@@ -185,6 +185,7 @@ def _guardar_cierre_caja(
             ),
         )
 
+    # Tu schema exige monto_usd > 0
     _registrar_movimiento_tesoreria(
         tipo="egreso",
         origen="cierre_caja",
@@ -221,7 +222,7 @@ def _get_cierres_df() -> pd.DataFrame:
         )
 
 
-def render_caja(usuario: str, user_role: str) -> None:
+def render_caja(usuario: str) -> None:
     if not require_permission("caja.view", "🚫 No tienes acceso al módulo Caja empresarial."):
         return
 
@@ -229,10 +230,18 @@ def render_caja(usuario: str, user_role: str) -> None:
     puede_registrar_pagos = has_permission("caja.payment_out")
     puede_cerrar_caja = has_permission("caja.close")
 
+    solo_lectura = not any(
+        [
+            puede_registrar_cobros,
+            puede_registrar_pagos,
+            puede_cerrar_caja,
+        ]
+    )
+
     st.subheader("🏦 Caja empresarial")
     st.info("Control de ingresos, egresos y cierres de caja.")
 
-    if not any([puede_registrar_cobros, puede_registrar_pagos, puede_cerrar_caja]):
+    if solo_lectura:
         st.warning("Modo solo lectura: puedes consultar caja, pero no registrar movimientos ni cerrar caja.")
 
     resumen = _get_resumen_caja()
@@ -250,11 +259,13 @@ def render_caja(usuario: str, user_role: str) -> None:
 
     st.divider()
 
-    tab1, tab2, tab3 = st.tabs([
-        "💵 Registrar cobro",
-        "💸 Registrar pago",
-        "🔒 Cierre de caja",
-    ])
+    tab1, tab2, tab3 = st.tabs(
+        [
+            "💵 Registrar cobro",
+            "💸 Registrar pago",
+            "🔒 Cierre de caja",
+        ]
+    )
 
     with tab1:
         st.markdown("### Registrar cobro manual")
@@ -318,7 +329,7 @@ def render_caja(usuario: str, user_role: str) -> None:
             )
             c_out_1, c_out_2 = st.columns(2)
             monto_out = c_out_1.number_input(
-                "Monto USD ",
+                "Monto USD",
                 min_value=0.0,
                 step=0.01,
                 format="%.2f",
@@ -326,7 +337,7 @@ def render_caja(usuario: str, user_role: str) -> None:
                 disabled=not puede_registrar_pagos,
             )
             metodo_out = c_out_2.selectbox(
-                "Método de pago ",
+                "Método de pago",
                 METODOS_PAGO,
                 key="metodo_pago_caja",
                 disabled=not puede_registrar_pagos,
