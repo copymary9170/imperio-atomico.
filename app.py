@@ -16,15 +16,11 @@ st.set_page_config(
 
 from database.schema import init_schema
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
+from security.permissions import has_permission, set_session_role_from_db
 
 init_schema()
 restore_session_snapshot()
-
-# ==================================================
-# SEGURIDAD / PERMISOS
-# ==================================================
-
-from security.permissions import has_permission
+set_session_role_from_db()
 
 # ==================================================
 # IMPORTAR VISTAS
@@ -49,10 +45,12 @@ from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
 from views.calculadora import render_calculadora
 from views.costeo import render_costeo
-from views.configuracion import render_configuracion
 from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
+
+# Usa tu módulo unificado de configuración
+from modules.configuracion import render_sidebar_config_snapshot, render_configuracion
 
 # ERP EXPANDIDO
 from views.erp_nuevos_modulos import (
@@ -75,7 +73,6 @@ from views.erp_nuevos_modulos import (
 )
 
 from views.catalogo import render_catalogo
-from modules.configuracion import render_sidebar_config_snapshot
 
 # ==================================================
 # USUARIO
@@ -162,7 +159,7 @@ MENU_ROUTES = {
 
     # FINANZAS
     "📉 Gastos": ("gastos.view", lambda: render_gastos(usuario)),
-    "🏦 Caja empresarial": ("caja.view", lambda: render_caja(usuario, user_role)),
+    "🏦 Caja empresarial": ("caja.view", lambda: render_caja(usuario)),
     "🏦 Tesorería": ("tesoreria.view", lambda: render_tesoreria(usuario)),
     "💸 Cuentas por pagar": ("cxp.view", lambda: render_cuentas_por_pagar(usuario)),
     "📚 Contabilidad": ("contabilidad.view", lambda: render_contabilidad(usuario)),
@@ -208,7 +205,6 @@ VISIBLE_MENU = {
     if has_permission(permiso)
 }
 
-# Fallback para evitar pantalla vacía
 if not VISIBLE_MENU:
     st.error("🚫 Tu usuario no tiene acceso a módulos habilitados.")
     save_session_snapshot()
