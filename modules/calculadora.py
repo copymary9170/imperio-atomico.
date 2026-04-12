@@ -3,17 +3,25 @@ from __future__ import annotations
 import streamlit as st
 
 from database.connection import db_transaction
-from modules.configuracion import DEFAULT_CONFIG
-
-
 CALCULATOR_DEFAULTS = {
     "monto_usd": 100.0,
-    "tasa_manual": DEFAULT_CONFIG["tasa_bcv"],
+    "tasa_manual": 36.50,
+}
+
+# Defaults locales para evitar acoplamiento de importación con el módulo
+# de Configuración (esta vista puede operar aun si Configuración falla).
+CONFIG_FALLBACKS = {
+    "tasa_bcv": 36.50,
+    "tasa_binance": 38.00,
+    "kontigo_perc": 5.0,
+    "kontigo_perc_entrada": 5.0,
+    "kontigo_perc_salida": 5.0,
+    "kontigo_saldo": 0.0,
 }
 
 
 def _load_config() -> dict[str, float]:
-    config = DEFAULT_CONFIG.copy()
+    config = CONFIG_FALLBACKS.copy()
 
     try:
         with db_transaction() as conn:
