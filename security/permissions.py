@@ -10,7 +10,23 @@ from database.connection import db_transaction
 
 
 SUPERUSER_PERMISSION = "*"
-ADMIN_ROLE_ALIASES = {"admin", "administration", "administracion", "administración"}
+ADMIN_ROLE_ALIASES = {"admin", "administrador", "administradora", "administrator"}
+ADMINISTRATION_ROLE_ALIASES = {"administration", "administracion", "administración"}
+OPERATOR_ROLE_ALIASES = {"operator", "operador"}
+
+
+def normalize_role_name(role: str | None) -> str:
+    role_raw = str(role or "").strip()
+    role_key = role_raw.casefold()
+
+    if role_key in ADMIN_ROLE_ALIASES:
+        return "Admin"
+    if role_key in ADMINISTRATION_ROLE_ALIASES:
+        return "Administration"
+    if role_key in OPERATOR_ROLE_ALIASES:
+        return "Operator"
+
+    return role_raw or "Operator"
 
 
 def get_current_user() -> str:
@@ -18,7 +34,7 @@ def get_current_user() -> str:
 
 
 def get_current_role() -> str:
-    return st.session_state.get("rol", "Operator")
+    return normalize_role_name(st.session_state.get("rol", "Operator"))
 
 
 def set_session_role_from_db() -> str:
@@ -40,16 +56,20 @@ def set_session_role_from_db() -> str:
         ).fetchone()
 
     if row and row["rol"]:
-        st.session_state["rol"] = row["rol"]
-        return str(row["rol"])
+        canonical_role = normalize_role_name(row["rol"])
+        st.session_state["rol"] = canonical_role
+        return canonical_role
 
     if "rol" not in st.session_state:
         st.session_state["rol"] = "Operator"
 
+    st.session_state["rol"] = normalize_role_name(st.session_state.get("rol"))
     return str(st.session_state["rol"])
 
 
 def get_permissions_for_role(rol: str) -> Set[str]:
+    canonical_role = normalize_role_name(rol)
+
     try:
         with db_transaction() as conn:
             rows = conn.execute(
@@ -58,7 +78,7 @@ def get_permissions_for_role(rol: str) -> Set[str]:
                 FROM roles_permisos
                 WHERE rol = ?
                 """,
-                (rol,),
+                (canonical_role,),
             ).fetchall()
     except sqlite3.OperationalError:
         # En despliegues con DB vacía o desfasada (p.ej. Streamlit Cloud),
@@ -73,10 +93,15 @@ def get_permissions_for_role(rol: str) -> Set[str]:
                 FROM roles_permisos
                 WHERE rol = ?
                 """,
-                (rol,),
+                (canonical_role,),
             ).fetchall()
 
-    return {str(r["permiso_codigo"]) for r in rows}
+    permissions = {str(r["permiso_codigo"]) for r in rows}
+
+    if not permissions and canonical_role == "Admin":
+        return {SUPERUSER_PERMISSION}
+
+    return permissions
 
 
 def get_current_permissions() -> Set[str]:
@@ -101,6 +126,7 @@ def require_any_permission(permission_codes: List[str], message: str | None = No
     permisos = get_current_permissions()
     if SUPERUSER_PERMISSION in permisos:
         return True
+
 
     if any(code in permisos for code in permission_codes):
         return True
