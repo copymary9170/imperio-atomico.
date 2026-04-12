@@ -14,6 +14,7 @@ METODOS_CAJA = [
     "efectivo",
     "transferencia",
     "pago móvil",
+    "pago_movil",
     "zelle",
     "binance",
     "kontigo",
@@ -125,11 +126,21 @@ def _to_float(value: object, default: float = 0.0) -> float:
         return float(default)
 
 
+def _normalize_method(value: object) -> str:
+    method = clean_text(value).lower()
+    if method == "pago movil":
+        return "pago_movil"
+    if method == "pago móvil":
+        return "pago_movil"
+    return method
+
+
 def _sum_method(df: pd.DataFrame, method: str, column: str) -> float:
     if df.empty or column not in df.columns or "metodo_pago" not in df.columns:
         return 0.0
+    method_norm = _normalize_method(method)
     return float(
-        df[df["metodo_pago"].fillna("").astype(str).str.lower() == method.lower()][column].fillna(0).sum()
+        df[df["metodo_pago"].fillna("").astype(str).apply(_normalize_method) == method_norm][column].fillna(0).sum()
     )
 
 
@@ -152,7 +163,7 @@ def _load_resumen_dia(fecha_str: str) -> dict[str, object]:
             """
             SELECT id, fecha, metodo_pago, total_usd
             FROM ventas
-            WHERE LOWER(COALESCE(estado, '')) = 'registrada'
+            WHERE LOWER(COALESCE(estado, '')) IN ('registrado', 'registrada', 'activo', 'activa')
               AND date(fecha) = ?
             """,
             conn,
@@ -173,7 +184,7 @@ def _load_resumen_dia(fecha_str: str) -> dict[str, object]:
         ingresos_tesoreria = _safe_read_sql(
             """
             SELECT id, fecha, metodo_pago, monto_usd, origen, descripcion
-            FROM tesoreria_movimientos
+            FROM movimientos_tesoreria
             WHERE LOWER(COALESCE(tipo, '')) = 'ingreso'
               AND date(fecha) = ?
             """,
@@ -184,7 +195,7 @@ def _load_resumen_dia(fecha_str: str) -> dict[str, object]:
         egresos_tesoreria = _safe_read_sql(
             """
             SELECT id, fecha, metodo_pago, monto_usd, origen, descripcion
-            FROM tesoreria_movimientos
+            FROM movimientos_tesoreria
             WHERE LOWER(COALESCE(tipo, '')) = 'egreso'
               AND date(fecha) = ?
             """,
@@ -215,20 +226,28 @@ def _load_resumen_dia(fecha_str: str) -> dict[str, object]:
             (fecha_str,),
         ).fetchone()
 
-    ventas["metodo_pago"] = ventas.get("metodo_pago", pd.Series(dtype=str)).fillna("sin definir")
-    gastos["metodo_pago"] = gastos.get("metodo_pago", pd.Series(dtype=str)).fillna("sin definir")
-    ingresos_tesoreria["metodo_pago"] = ingresos_tesoreria.get("metodo_pago", pd.Series(dtype=str)).fillna("sin definir")
-    egresos_tesoreria["metodo_pago"] = egresos_tesoreria.get("metodo_pago", pd.Series(dtype=str)).fillna("sin definir")
+    for df_name in [ventas, gastos, ingresos_tesoreria, egresos_tesoreria]:
+        if not df_name.empty and "metodo_pago" in df_name.columns:
+            df_name["metodo_pago"] = df_name["metodo_pago"].fillna("sin definir").astype(str).apply(_normalize_method)
+
     if not manuales.empty:
-        manuales["metodo_pago"] = manuales["metodo_pago"].fillna("sin definir")
+        manuales["metodo_pago"] = manuales["metodo_pago"].fillna("sin definir").astype(str).apply(_normalize_method)
         manuales["tipo"] = manuales["tipo"].fillna("sin definir")
 
-    ingresos_manual = manuales[manuales["tipo"].astype(str).str.lower() == "ingreso"].copy() if not manuales.empty else pd.DataFrame()
-    egresos_manual = manuales[manuales["tipo"].astype(str).str.lower() == "egreso"].copy() if not manuales.empty else pd.DataFrame()
+    ingresos_manual = (
+        manuales[manuales["tipo"].astype(str).str.lower() == "ingreso"].copy()
+        if not manuales.empty
+        else pd.DataFrame()
+    )
+    egresos_manual = (
+        manuales[manuales["tipo"].astype(str).str.lower() == "egreso"].copy()
+        if not manuales.empty
+        else pd.DataFrame()
+    )
 
     sales_cash = _sum_method(ventas, "efectivo", "total_usd")
     sales_transfer = _sum_method(ventas, "transferencia", "total_usd")
-    sales_pago_movil = _sum_method(ventas, "pago móvil", "total_usd") + _sum_method(ventas, "pago_movil", "total_usd")
+    sales_pago_movil = _sum_method(ventas, "pago_movil", "total_usd")
     sales_zelle = _sum_method(ventas, "zelle", "total_usd")
     sales_binance = _sum_method(ventas, "binance", "total_usd")
     sales_kontigo = _sum_method(ventas, "kontigo", "total_usd")
@@ -237,7 +256,7 @@ def _load_resumen_dia(fecha_str: str) -> dict[str, object]:
 
     expenses_cash = _sum_method(gastos, "efectivo", "monto_usd")
     expenses_transfer = _sum_method(gastos, "transferencia", "monto_usd")
-    expenses_pago_movil = _sum_method(gastos, "pago móvil", "monto_usd") + _sum_method(gastos, "pago_movil", "monto_usd")
+    expenses_pago_movil = _sum_method(gastos, "pago_movil", "monto_usd")
     expenses_zelle = _sum_method(gastos, "zelle", "monto_usd")
     expenses_binance = _sum_method(gastos, "binance", "monto_usd")
     expenses_kontigo = _sum_method(gastos, "kontigo", "monto_usd")
@@ -246,8 +265,8 @@ def _load_resumen_dia(fecha_str: str) -> dict[str, object]:
     other_income_cash = _sum_method(ingresos_manual, "efectivo", "monto_usd")
     other_income_transfer = float(
         ingresos_manual[
-            ingresos_manual["metodo_pago"].astype(str).str.lower().isin(
-                ["transferencia", "pago móvil", "pago_movil", "zelle", "binance", "kontigo", "tarjeta"]
+            ingresos_manual["metodo_pago"].astype(str).isin(
+                ["transferencia", "pago_movil", "zelle", "binance", "kontigo", "tarjeta"]
             )
         ]["monto_usd"].sum()
     ) if not ingresos_manual.empty else 0.0
@@ -255,8 +274,8 @@ def _load_resumen_dia(fecha_str: str) -> dict[str, object]:
     manual_expenses_cash = _sum_method(egresos_manual, "efectivo", "monto_usd")
     manual_expenses_transfer = float(
         egresos_manual[
-            egresos_manual["metodo_pago"].astype(str).str.lower().isin(
-                ["transferencia", "pago móvil", "pago_movil", "zelle", "binance", "kontigo", "tarjeta"]
+            egresos_manual["metodo_pago"].astype(str).isin(
+                ["transferencia", "pago_movil", "zelle", "binance", "kontigo", "tarjeta"]
             )
         ]["monto_usd"].sum()
     ) if not egresos_manual.empty else 0.0
@@ -357,7 +376,11 @@ def _render_tab_movimientos_manuales(usuario: str) -> None:
     with st.form("form_caja_mov_manual", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         tipo = c1.selectbox("Tipo", ["ingreso", "egreso"])
-        metodo = c2.selectbox("Método de pago", [m for m in METODOS_CAJA if m != "credito"])
+        metodo = c2.selectbox(
+            "Método de pago",
+            [m for m in METODOS_CAJA if m != "credito"],
+            format_func=lambda x: x.replace("_", " ").title(),
+        )
         monto = c3.number_input("Monto USD", min_value=0.01, value=0.01, format="%.2f")
 
         c4, c5 = st.columns(2)
@@ -380,8 +403,8 @@ def _render_tab_movimientos_manuales(usuario: str) -> None:
                     """,
                     (
                         usuario,
-                        tipo,
-                        metodo,
+                        clean_text(tipo).lower(),
+                        _normalize_method(metodo),
                         concepto_ok,
                         float(monto),
                         clean_text(referencia),
@@ -411,7 +434,10 @@ def _render_tab_movimientos_manuales(usuario: str) -> None:
 
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    opciones = {f"#{int(r['id'])} · {r['tipo']} · {r['concepto']} · {_money(r['monto_usd'])}": int(r["id"]) for _, r in df.iterrows()}
+    opciones = {
+        f"#{int(r['id'])} · {r['tipo']} · {r['concepto']} · {_money(r['monto_usd'])}": int(r["id"])
+        for _, r in df.iterrows()
+    }
     seleccionado = st.selectbox("Movimiento a anular", list(opciones.keys()), key="caja_mov_manual_anular")
 
     if st.button("Anular movimiento manual", key="btn_anular_mov_manual", use_container_width=True):
@@ -448,10 +474,27 @@ def _render_tab_cierre(usuario: str) -> None:
     obs_default = str(cierre_existente["observaciones"] or "") if cierre_existente else ""
 
     c1, c2 = st.columns(2)
-    cash_start = c1.number_input("Fondo inicial de caja (USD)", min_value=0.0, value=float(cash_start_default), step=1.0, key="caja_cash_start")
-    counted_cash_end = c2.number_input("Efectivo contado al cierre (USD)", min_value=0.0, value=float(counted_default), step=1.0, key="caja_counted_cash_end")
+    cash_start = c1.number_input(
+        "Fondo inicial de caja (USD)",
+        min_value=0.0,
+        value=float(cash_start_default),
+        step=1.0,
+        key="caja_cash_start",
+    )
+    counted_cash_end = c2.number_input(
+        "Efectivo contado al cierre (USD)",
+        min_value=0.0,
+        value=float(counted_default),
+        step=1.0,
+        key="caja_counted_cash_end",
+    )
 
-    observaciones = st.text_area("Observaciones del cierre", value=obs_default, placeholder="Incidencias, faltantes, sobrantes, notas...", key="caja_obs")
+    observaciones = st.text_area(
+        "Observaciones del cierre",
+        value=obs_default,
+        placeholder="Incidencias, faltantes, sobrantes, notas...",
+        key="caja_obs",
+    )
 
     expected_cash_end = round(
         float(cash_start)
@@ -769,8 +812,11 @@ def _render_tab_resumen_empresa() -> None:
 # UI
 # ============================================================
 
-def render_caja(usuario: str, user_role: str) -> None:
+def render_caja(usuario: str, user_role: str | None = None) -> None:
     _ensure_caja_tables()
+
+    if user_role is None:
+        user_role = str(st.session_state.get("rol", "Operator"))
 
     st.subheader("🏦 Caja empresarial")
     st.caption("Cierre diario, arqueo, movimientos manuales, historial y control ejecutivo de caja.")
