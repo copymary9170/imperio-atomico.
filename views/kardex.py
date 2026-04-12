@@ -8,8 +8,7 @@ from security.permissions import require_permission
 def render_kardex(usuario: str) -> None:
     """Wrapper del módulo Kardex con control de permisos y carga segura"""
 
-    # 🔐 Permiso de acceso
-    if not require_permission("inventario.view", "🚫 No tienes acceso al Kardex."):
+    if not require_permission("kardex.view", "🚫 No tienes acceso al Kardex."):
         return
 
     try:
@@ -19,8 +18,6 @@ def render_kardex(usuario: str) -> None:
         st.exception(exc)
         return
 
-    # 🧠 Contexto opcional futuro (puedes expandir luego)
     st.session_state["perm_kardex_view"] = True
 
-    # 🚀 Render del módulo real
     kardex_module(usuario)
