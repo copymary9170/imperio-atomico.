@@ -1,4 +1,4 @@
-from __future__ import annotations
+rom __future__ import annotations
 
 import streamlit as st
 
@@ -12,10 +12,17 @@ def render_contabilidad(usuario: str) -> None:
 
     # 🎯 Permisos internos
     st.session_state["perm_contabilidad_view"] = True
-    st.session_state["perm_contabilidad_create"] = has_permission("contabilidad.create")
-    st.session_state["perm_contabilidad_adjust"] = has_permission("contabilidad.adjust")
+    # Compatibilidad: prioriza permisos actuales y mantiene fallback legacy.
+    st.session_state["perm_contabilidad_create"] = has_permission("contabilidad.entry") or has_permission(
+        "contabilidad.create"
+    )
+    st.session_state["perm_contabilidad_adjust"] = has_permission("contabilidad.approve") or has_permission(
+        "contabilidad.adjust"
+    )
     st.session_state["perm_contabilidad_close"] = has_permission("contabilidad.close")
-    st.session_state["perm_contabilidad_audit"] = has_permission("contabilidad.audit")
+    st.session_state["perm_contabilidad_audit"] = has_permission("auditoria.view") or has_permission(
+        "contabilidad.audit"
+    )
 
     st.session_state["contabilidad_readonly"] = not any(
         [
@@ -40,5 +47,3 @@ def render_contabilidad(usuario: str) -> None:
             "Modo solo lectura: puedes consultar información contable, "
             "pero no registrar asientos, hacer ajustes ni cerrar períodos."
         )
-
-    render_contabilidad_dashboard(usuario)
