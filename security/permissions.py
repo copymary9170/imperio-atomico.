@@ -214,6 +214,43 @@ def _insert_auditoria_seguridad(*, usuario: str, accion: str, detalle: str) -> N
         )
 
 
+def create_user(
+    *,
+    usuario: str,
+    nombre_completo: str,
+    rol: str,
+    password_hash: str,
+    actor_usuario: str | None = None,
+) -> None:
+    actor = actor_usuario or get_current_user()
+    usuario_clean = str(usuario).strip()
+    nombre_clean = str(nombre_completo).strip()
+    rol_clean = normalize_role_name(rol)
+    password_clean = str(password_hash).strip()
+
+    if not usuario_clean:
+        raise ValueError("El usuario es obligatorio.")
+    if not nombre_clean:
+        raise ValueError("El nombre completo es obligatorio.")
+    if not password_clean:
+        raise ValueError("La contraseña es obligatoria.")
+
+    with db_transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO usuarios (usuario, nombre_completo, hash_password, rol)
+            VALUES (?, ?, ?, ?)
+            """,
+            (usuario_clean, nombre_clean, password_clean, rol_clean),
+        )
+
+    _insert_auditoria_seguridad(
+        usuario=actor,
+        accion="create_user",
+        detalle=f"Usuario '{usuario_clean}' creado con rol '{rol_clean}'.",
+    )
+
+
 def set_role_permissions(rol: str, permission_codes: List[str], usuario: str | None = None) -> None:
     actor = usuario or get_current_user()
 
