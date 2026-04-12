@@ -747,6 +747,95 @@ CREATE TABLE IF NOT EXISTS asientos_contables_detalle (
     FOREIGN KEY (cuenta_codigo) REFERENCES catalogo_cuentas(codigo)
 );
 
+/* ==========================================================
+   PLANIFICACION DE PRODUCCION
+   ========================================================== */
+
+CREATE TABLE IF NOT EXISTS plan_produccion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    codigo TEXT NOT NULL UNIQUE,
+    titulo TEXT NOT NULL,
+    descripcion TEXT,
+    fecha_inicio TEXT,
+    fecha_fin TEXT,
+    estado TEXT NOT NULL DEFAULT 'borrador' CHECK (
+        estado IN ('borrador','planificado','en_proceso','completado','cancelado')
+    ),
+    prioridad TEXT NOT NULL DEFAULT 'media' CHECK (
+        prioridad IN ('baja','media','alta','urgente')
+    ),
+    origen TEXT NOT NULL DEFAULT 'manual' CHECK (
+        origen IN ('manual','venta','cotizacion','reposicion')
+    ),
+    referencia_tipo TEXT,
+    referencia_id INTEGER,
+    observaciones TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS plan_produccion_detalle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    inventario_id INTEGER,
+    venta_id INTEGER,
+    cotizacion_id INTEGER,
+    orden_produccion_id INTEGER,
+    producto_nombre TEXT NOT NULL,
+    sku TEXT,
+    cantidad_planificada REAL NOT NULL DEFAULT 0,
+    cantidad_producida REAL NOT NULL DEFAULT 0,
+    unidad TEXT NOT NULL DEFAULT 'unidad',
+    prioridad TEXT NOT NULL DEFAULT 'media' CHECK (
+        prioridad IN ('baja','media','alta','urgente')
+    ),
+    fecha_requerida TEXT,
+    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (
+        estado IN ('pendiente','en_proceso','parcial','completado','cancelado')
+    ),
+    notas TEXT,
+    FOREIGN KEY (plan_id) REFERENCES plan_produccion(id),
+    FOREIGN KEY (inventario_id) REFERENCES inventario(id),
+    FOREIGN KEY (venta_id) REFERENCES ventas(id),
+    FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones(id),
+    FOREIGN KEY (orden_produccion_id) REFERENCES ordenes_produccion(id)
+);
+
+CREATE TABLE IF NOT EXISTS plan_produccion_recursos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    detalle_id INTEGER,
+    tipo_recurso TEXT NOT NULL CHECK (
+        tipo_recurso IN ('maquina','persona','material','turno','otro')
+    ),
+    recurso_nombre TEXT NOT NULL,
+    referencia_id INTEGER,
+    cantidad REAL NOT NULL DEFAULT 0,
+    unidad TEXT,
+    disponibilidad TEXT NOT NULL DEFAULT 'pendiente' CHECK (
+        disponibilidad IN ('pendiente','reservado','asignado','consumido','liberado')
+    ),
+    notas TEXT,
+    FOREIGN KEY (plan_id) REFERENCES plan_produccion(id),
+    FOREIGN KEY (detalle_id) REFERENCES plan_produccion_detalle(id)
+);
+
+CREATE TABLE IF NOT EXISTS plan_produccion_seguimiento (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    detalle_id INTEGER,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    estado_anterior TEXT,
+    estado_nuevo TEXT,
+    comentario TEXT,
+    avance_pct REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (plan_id) REFERENCES plan_produccion(id),
+    FOREIGN KEY (detalle_id) REFERENCES plan_produccion_detalle(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_inventario_sku ON inventario(sku);
 CREATE INDEX IF NOT EXISTS idx_movimientos_inventario_fecha ON movimientos_inventario(fecha);
 CREATE INDEX IF NOT EXISTS idx_movimientos_inventario_item ON movimientos_inventario(inventario_id, fecha);
@@ -798,6 +887,20 @@ CREATE INDEX IF NOT EXISTS idx_asientos_fecha ON asientos_contables(fecha);
 CREATE INDEX IF NOT EXISTS idx_asientos_evento_ref ON asientos_contables(evento_tipo, referencia_tabla, referencia_id);
 CREATE INDEX IF NOT EXISTS idx_asientos_detalle_asiento ON asientos_contables_detalle(asiento_id);
 CREATE INDEX IF NOT EXISTS idx_asientos_detalle_cuenta ON asientos_contables_detalle(cuenta_codigo);
+
+/* Indices de planificacion */
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_fecha ON plan_produccion(fecha);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_estado ON plan_produccion(estado);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_prioridad ON plan_produccion(prioridad);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_fechas ON plan_produccion(fecha_inicio, fecha_fin);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_plan ON plan_produccion_detalle(plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_estado ON plan_produccion_detalle(estado);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_fecha_req ON plan_produccion_detalle(fecha_requerida);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_recursos_plan ON plan_produccion_recursos(plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_recursos_detalle ON plan_produccion_recursos(detalle_id);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_plan ON plan_produccion_seguimiento(plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_detalle ON plan_produccion_seguimiento(detalle_id);
+CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_fecha ON plan_produccion_seguimiento(fecha);
 """
 
 DEFAULT_CONFIG_VALUES = (
@@ -1053,6 +1156,122 @@ def _ensure_conciliacion_migration(conn) -> None:
     )
 
 
+def _ensure_planificacion_produccion_migration(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plan_produccion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT NOT NULL,
+            codigo TEXT NOT NULL UNIQUE,
+            titulo TEXT NOT NULL,
+            descripcion TEXT,
+            fecha_inicio TEXT,
+            fecha_fin TEXT,
+            estado TEXT NOT NULL DEFAULT 'borrador' CHECK (
+                estado IN ('borrador','planificado','en_proceso','completado','cancelado')
+            ),
+            prioridad TEXT NOT NULL DEFAULT 'media' CHECK (
+                prioridad IN ('baja','media','alta','urgente')
+            ),
+            origen TEXT NOT NULL DEFAULT 'manual' CHECK (
+                origen IN ('manual','venta','cotizacion','reposicion')
+            ),
+            referencia_tipo TEXT,
+            referencia_id INTEGER,
+            observaciones TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plan_produccion_detalle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id INTEGER NOT NULL,
+            inventario_id INTEGER,
+            venta_id INTEGER,
+            cotizacion_id INTEGER,
+            orden_produccion_id INTEGER,
+            producto_nombre TEXT NOT NULL,
+            sku TEXT,
+            cantidad_planificada REAL NOT NULL DEFAULT 0,
+            cantidad_producida REAL NOT NULL DEFAULT 0,
+            unidad TEXT NOT NULL DEFAULT 'unidad',
+            prioridad TEXT NOT NULL DEFAULT 'media' CHECK (
+                prioridad IN ('baja','media','alta','urgente')
+            ),
+            fecha_requerida TEXT,
+            estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (
+                estado IN ('pendiente','en_proceso','parcial','completado','cancelado')
+            ),
+            notas TEXT,
+            FOREIGN KEY (plan_id) REFERENCES plan_produccion(id),
+            FOREIGN KEY (inventario_id) REFERENCES inventario(id),
+            FOREIGN KEY (venta_id) REFERENCES ventas(id),
+            FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones(id),
+            FOREIGN KEY (orden_produccion_id) REFERENCES ordenes_produccion(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plan_produccion_recursos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id INTEGER NOT NULL,
+            detalle_id INTEGER,
+            tipo_recurso TEXT NOT NULL CHECK (
+                tipo_recurso IN ('maquina','persona','material','turno','otro')
+            ),
+            recurso_nombre TEXT NOT NULL,
+            referencia_id INTEGER,
+            cantidad REAL NOT NULL DEFAULT 0,
+            unidad TEXT,
+            disponibilidad TEXT NOT NULL DEFAULT 'pendiente' CHECK (
+                disponibilidad IN ('pendiente','reservado','asignado','consumido','liberado')
+            ),
+            notas TEXT,
+            FOREIGN KEY (plan_id) REFERENCES plan_produccion(id),
+            FOREIGN KEY (detalle_id) REFERENCES plan_produccion_detalle(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plan_produccion_seguimiento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id INTEGER NOT NULL,
+            detalle_id INTEGER,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT NOT NULL,
+            estado_anterior TEXT,
+            estado_nuevo TEXT,
+            comentario TEXT,
+            avance_pct REAL NOT NULL DEFAULT 0,
+            FOREIGN KEY (plan_id) REFERENCES plan_produccion(id),
+            FOREIGN KEY (detalle_id) REFERENCES plan_produccion_detalle(id)
+        )
+        """
+    )
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_fecha ON plan_produccion(fecha)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_estado ON plan_produccion(estado)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_prioridad ON plan_produccion(prioridad)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_fechas ON plan_produccion(fecha_inicio, fecha_fin)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_plan ON plan_produccion_detalle(plan_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_estado ON plan_produccion_detalle(estado)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_fecha_req ON plan_produccion_detalle(fecha_requerida)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_recursos_plan ON plan_produccion_recursos(plan_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_recursos_detalle ON plan_produccion_recursos(detalle_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_plan ON plan_produccion_seguimiento(plan_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_detalle ON plan_produccion_seguimiento(detalle_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_fecha ON plan_produccion_seguimiento(fecha)")
+
+
 def _ensure_security_migration(conn) -> None:
     conn.execute(
         """
@@ -1119,4 +1338,5 @@ def init_schema() -> None:
         _ensure_costeo_migration(conn)
         _ensure_contabilidad_migration(conn)
         _ensure_conciliacion_migration(conn)
+        _ensure_planificacion_produccion_migration(conn)
         _ensure_security_migration(conn)
