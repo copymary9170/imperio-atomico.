@@ -442,7 +442,7 @@ def render_configuracion(usuario: str) -> None:
     st.info("Estos parámetros afectan cotizaciones, costos, inventario, producción y análisis financieros.")
 
     if not puede_editar:
-     
+        st.warning("Tienes permisos de solo lectura en Configuración.")
 
     try:
         config = get_current_config()
