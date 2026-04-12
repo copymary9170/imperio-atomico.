@@ -5,16 +5,23 @@ from pathlib import Path
 
 import streamlit as st
 
+from security.permissions import require_permission
+
 
 def _load_planificacion_module():
-    """Load the production planning module stored with a non-ASCII filename."""
+    """Carga el módulo de planificación almacenado con nombre no ASCII."""
     module_path = (
         Path(__file__).resolve().parents[1]
         / "modules"
         / "Planificación_de_producción.py"
     )
+
+    if not module_path.exists():
+        raise FileNotFoundError(f"No existe el archivo del módulo: {module_path}")
+
     spec = importlib.util.spec_from_file_location(
-        "modules.planificacion_de_produccion", module_path
+        "modules.planificacion_de_produccion",
+        module_path,
     )
     if spec is None or spec.loader is None:
         raise ImportError(f"No se pudo cargar el módulo desde: {module_path}")
@@ -25,14 +32,22 @@ def _load_planificacion_module():
 
 
 def render_planificacion_produccion(usuario: str) -> None:
-    st.title("🗓️ Planificación de producción")
-    st.caption(
-        "Organiza, programa y controla tu producción: órdenes, tiempos, costos y ejecución."
-    )
+    if not require_permission("produccion.plan", "🚫 No tienes acceso a Planificación de producción."):
+        return
 
     try:
         module = _load_planificacion_module()
-        module.render_produccion(usuario)
+
+        if hasattr(module, "render_planificacion_produccion"):
+            module.render_planificacion_produccion(usuario)
+        elif hasattr(module, "render_produccion"):
+            module.render_produccion(usuario)
+        else:
+            raise AttributeError(
+                "El módulo no expone ni 'render_planificacion_produccion(usuario)' "
+                "ni 'render_produccion(usuario)'."
+            )
+
     except Exception as exc:
-        st.error("Error cargando el módulo de planificación de producción")
+        st.error("No se pudo cargar el módulo de planificación de producción.")
         st.exception(exc)
