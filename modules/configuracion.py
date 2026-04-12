@@ -443,6 +443,10 @@ def render_configuracion(usuario: str) -> None:
 
     if not puede_editar:
         st.warning("Modo solo lectura: puedes consultar la configuración, pero no modificarla.")
+        st.caption(
+            "Para habilitar edición, solicita a un administrador el permiso `config.edit` "
+            "(Seguridad → Roles y permisos)."
+        )
 
     try:
         config = get_current_config()
