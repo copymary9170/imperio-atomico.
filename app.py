@@ -28,6 +28,7 @@ set_session_role_from_db()
 
 from views.dashboard import render_dashboard
 from views.inventario import render_inventario
+from views.kardex import render_kardex
 from views.clientes import render_clientes
 from views.crm import render_crm
 from views.cmyk import render_cmyk
@@ -43,6 +44,7 @@ from views.caja import render_caja
 from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
 from views.calculadora import render_calculadora
+from views.costeo import render_costeo
 from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
@@ -135,6 +137,7 @@ MENU_ROUTES = {
 
     # OPERACIONES
     "📦 Inventario": ("inventario.view", lambda: render_inventario(usuario)),
+    "📊 Kardex": ("kardex.view", lambda: render_kardex(usuario)),
     "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
 
     # CLIENTES Y VENTAS
@@ -169,6 +172,7 @@ MENU_ROUTES = {
     "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
 
     # COSTOS
+    "🧮 Costeo": ("costeo.view", lambda: render_costeo(usuario)),
     "🧮 Costeo industrial": ("costeo_industrial.view", lambda: render_costeo_industrial(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
 
@@ -178,7 +182,7 @@ MENU_ROUTES = {
     # SISTEMA
     "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
     "🔐 Seguridad / Roles": ("security.view", lambda: render_seguridad_roles(usuario)),
-    "📘 Manuales / SOP": ("dashboard.view", lambda: render_manuales_sop(usuario)),
+    "📘 Manuales / SOP": ("manuales.view", lambda: render_manuales_sop(usuario)),
 
     # OTROS
     "🎨 CMYK": ("produccion.view", lambda: render_cmyk(usuario)),
