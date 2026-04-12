@@ -1,4 +1,4 @@
-@echo off
+
 echo ===============================
 echo INICIANDO IMPERIO ERP
 echo ===============================
