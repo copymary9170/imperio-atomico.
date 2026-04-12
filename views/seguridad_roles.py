@@ -4,6 +4,7 @@ import streamlit as st
 
 from security.permissions import (
     assign_role_to_user,
+    create_user,
     get_auditoria_seguridad_df,
     get_permissions_catalog_df,
     get_role_permissions_df,
@@ -36,6 +37,40 @@ def render_seguridad_roles(usuario: str) -> None:
 
     with tab_users:
         st.subheader("Usuarios y roles actuales")
+        roles_disponibles = sorted(role_permissions_df["rol"].dropna().unique().tolist())
+
+        with st.expander("➕ Crear usuario", expanded=False):
+            if not roles_disponibles:
+                st.info("No hay roles disponibles. Configura roles/permisos antes de crear usuarios.")
+            else:
+                with st.form("seg_create_user_form", clear_on_submit=True):
+                    new_usuario = st.text_input("Usuario nuevo")
+                    new_nombre = st.text_input("Nombre completo")
+                    default_idx = roles_disponibles.index("Operator") if "Operator" in roles_disponibles else 0
+                    new_rol = st.selectbox(
+                        "Rol inicial",
+                        roles_disponibles,
+                        index=default_idx,
+                        disabled=not puede_editar,
+                    )
+                    new_password = st.text_input("Contraseña temporal", type="password")
+                    submit_create = st.form_submit_button("Crear usuario", disabled=not puede_editar)
+
+                if submit_create:
+                    try:
+                        create_user(
+                            usuario=new_usuario,
+                            nombre_completo=new_nombre,
+                            rol=new_rol,
+                            password_hash=new_password,
+                            actor_usuario=usuario,
+                        )
+                    except Exception as exc:
+                        st.error(f"No se pudo crear el usuario: {exc}")
+                    else:
+                        st.success(f"Usuario '{new_usuario}' creado correctamente.")
+                        st.rerun()
+
         st.dataframe(users_df, use_container_width=True, hide_index=True)
 
         if users_df.empty:
@@ -43,12 +78,11 @@ def render_seguridad_roles(usuario: str) -> None:
         else:
             selected_user = st.selectbox("Usuario", users_df["usuario"].tolist(), key="seg_user")
             current_role = users_df.loc[users_df["usuario"] == selected_user, "rol"].iloc[0]
-            available_roles = sorted(role_permissions_df["rol"].dropna().unique().tolist())
-            role_index = available_roles.index(current_role) if current_role in available_roles else 0
+            role_index = roles_disponibles.index(current_role) if current_role in roles_disponibles else 0
 
             new_role = st.selectbox(
                 "Nuevo rol",
-                available_roles,
+                roles_disponibles,
                 index=role_index,
                 disabled=not puede_editar,
                 key="seg_user_role",
