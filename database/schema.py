@@ -722,7 +722,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "activos.view",
         "mantenimiento.view",
 
-        "config.view",
+        "config.view", "config.edit",
     ],
 }
 
