@@ -48,25 +48,33 @@ def add_inventory_movement_shared(
         raise ValueError("Tipo de movimiento inválido. Usa: entrada, salida o ajuste.")
 
     qty = float(cantidad or 0.0)
+
     if tipo_normalizado == "entrada":
         qty = abs(qty)
     elif tipo_normalizado == "salida":
         qty = -abs(qty)
+    # ajuste conserva el signo tal como venga
 
     if qty == 0:
         raise ValueError("La cantidad del movimiento debe ser distinta de cero.")
 
     with db_transaction() as conn:
         row = conn.execute(
-            "SELECT stock_actual, costo_unitario_usd FROM inventario WHERE id=?",
+            """
+            SELECT stock_actual, costo_unitario_usd
+            FROM inventario
+            WHERE id=?
+            """,
             (int(inventario_id),),
         ).fetchone()
+
         if not row:
             raise ValueError("El ítem de inventario no existe.")
 
         stock_actual = float(row["stock_actual"] or 0.0)
         costo_actual = float(row["costo_unitario_usd"] or 0.0)
         nuevo_stock = stock_actual + qty
+
         if nuevo_stock < 0:
             raise ValueError("El ajuste deja el inventario en negativo.")
 
@@ -90,7 +98,11 @@ def add_inventory_movement_shared(
         )
 
         conn.execute(
-            "UPDATE inventario SET stock_actual = stock_actual + ? WHERE id=?",
+            """
+            UPDATE inventario
+            SET stock_actual = stock_actual + ?
+            WHERE id=?
+            """,
             (float(qty), int(inventario_id)),
         )
 
@@ -131,7 +143,7 @@ def render_kardex(usuario: str) -> None:
                 FROM movimientos_inventario m
                 LEFT JOIN inventario i ON i.id = m.inventario_id
                 WHERE COALESCE(m.estado, 'activo')='activo'
-                ORDER BY m.fecha DESC
+                ORDER BY m.fecha DESC, m.id DESC
                 LIMIT 5000
                 """
             ).fetchall()
@@ -160,7 +172,6 @@ def render_kardex(usuario: str) -> None:
     ]
 
     if not rows:
-        st.info("No hay movimientos registrados.")
         df = pd.DataFrame(columns=movement_columns)
     else:
         df = pd.DataFrame(rows, columns=movement_columns)
@@ -181,8 +192,8 @@ def render_kardex(usuario: str) -> None:
         "Producto",
         options=df_items["id"].tolist(),
         format_func=lambda item_id: (
-            f"{df_items.loc[df_items['id'] == item_id, 'nombre'].iloc[0]}"
-            f" ({df_items.loc[df_items['id'] == item_id, 'sku'].iloc[0]})"
+            f"{df_items.loc[df_items['id'] == item_id, 'nombre'].iloc[0]} "
+            f"({df_items.loc[df_items['id'] == item_id, 'sku'].iloc[0]})"
         ),
         key="kdx_producto",
     )
@@ -212,8 +223,13 @@ def render_kardex(usuario: str) -> None:
         return
 
     producto_df = df[df["inventario_id"] == int(selected_label)].copy()
-    producto_df = producto_df.sort_values("fecha")
-    buscar = st.text_input("🔎 Buscar", placeholder="usuario o referencia", key="kdx_buscar")
+    producto_df = producto_df.sort_values(["fecha", "id"])
+
+    buscar = st.text_input(
+        "🔎 Buscar",
+        placeholder="usuario, referencia o documento",
+        key="kdx_buscar",
+    )
 
     fecha_inicio_ts = pd.Timestamp(fecha_inicio)
     fecha_fin_ts = pd.Timestamp(fecha_fin) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
@@ -221,15 +237,19 @@ def render_kardex(usuario: str) -> None:
     view = producto_df[
         producto_df["fecha"].between(fecha_inicio_ts, fecha_fin_ts)
     ].copy()
+
     if tipo_filtro:
         view = view[view["tipo"].isin(tipo_filtro)]
 
     if buscar:
-        view = view[
-            view.astype(str)
-            .apply(lambda x: x.str.contains(buscar, case=False, na=False))
+        mask = (
+            view[["usuario", "sku", "nombre", "tipo", "referencia"]]
+            .fillna("")
+            .astype(str)
+            .apply(lambda col: col.str.contains(buscar, case=False, na=False))
             .any(axis=1)
-        ]
+        )
+        view = view[mask]
 
     stock_actual = float(item_row["stock_actual"] or 0.0)
     costo_ref = float(item_row["costo_unitario_usd"] or 0.0)
@@ -241,10 +261,10 @@ def render_kardex(usuario: str) -> None:
     stock_inicial_periodo = float(stock_actual - movimientos_desde_inicio["cantidad"].sum())
 
     if not view.empty:
-        saldo = stock_inicial_periodo + view["cantidad"].cumsum()
-        view = view.assign(saldo=saldo)
+        view = view.sort_values(["fecha", "id"]).copy()
+        view["saldo"] = stock_inicial_periodo + view["cantidad"].cumsum()
     else:
-        view = view.assign(saldo=pd.Series(dtype=float))
+        view["saldo"] = pd.Series(dtype=float)
 
     entradas_periodo = float(view[view["cantidad"] > 0]["cantidad"].sum()) if not view.empty else 0.0
     salidas_periodo = float(view[view["cantidad"] < 0]["cantidad"].abs().sum()) if not view.empty else 0.0
@@ -253,7 +273,11 @@ def render_kardex(usuario: str) -> None:
     total_invertido = float(view[view["cantidad"] > 0]["costo_total_usd"].sum()) if not view.empty else 0.0
     valor_total_actual = stock_actual * costo_promedio
 
-    stock_base_rotacion = (stock_inicial_periodo + stock_actual) / 2 if (stock_inicial_periodo + stock_actual) > 0 else 0.0
+    stock_base_rotacion = (
+        (stock_inicial_periodo + stock_actual) / 2
+        if (stock_inicial_periodo + stock_actual) > 0
+        else 0.0
+    )
     rotacion = (salidas_periodo / stock_base_rotacion) if stock_base_rotacion > 0 else 0.0
 
     k1, k2, k3, k4, k5 = st.columns(5)
@@ -277,9 +301,9 @@ def render_kardex(usuario: str) -> None:
     if view.empty:
         st.info("Sin movimientos para los filtros seleccionados.")
     else:
-        table_view = view.sort_values("fecha", ascending=False).copy()
-        table_view["cantidad"] = table_view["cantidad"].map(lambda value: float(value))
-        table_view["saldo"] = table_view["saldo"].map(lambda value: float(value))
+        table_view = view.sort_values(["fecha", "id"], ascending=[False, False]).copy()
+        table_view["cantidad"] = table_view["cantidad"].map(float)
+        table_view["saldo"] = table_view["saldo"].map(float)
 
         st.dataframe(
             table_view[
