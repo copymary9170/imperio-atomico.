@@ -48,6 +48,7 @@ from views.costeo import render_costeo
 from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
+from views.manuales_sop import render_manuales_sop
 
 # Usa tu módulo unificado de configuración
 from modules.configuracion import render_sidebar_config_snapshot, render_configuracion
@@ -69,7 +70,6 @@ from views.erp_nuevos_modulos import (
     render_fidelizacion,
     render_rrhh,
     render_seguridad_roles,
-    render_manuales_sop,
 )
 
 from views.catalogo import render_catalogo
