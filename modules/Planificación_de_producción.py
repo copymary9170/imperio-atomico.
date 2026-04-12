@@ -236,7 +236,7 @@ def _load_ventas_df() -> pd.DataFrame:
                 """
                 SELECT id, fecha, total_usd
                 FROM ventas
-                WHERE COALESCE(estado, 'registrada')='registrada'
+                WHERE LOWER(COALESCE(estado, '')) IN ('registrado', 'registrada')
                 ORDER BY fecha DESC, id DESC
                 LIMIT 500
                 """
@@ -1698,6 +1698,5 @@ def render_produccion(usuario: str) -> None:
         _render_resumen_costos(df_ordenes)
 
 
-
-
-
+def render_planificacion_produccion(usuario: str) -> None:
+    render_produccion(usuario)
