@@ -49,8 +49,9 @@ from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
 from views.manuales_sop import render_manuales_sop
+from views.catalogo import render_catalogo
 
-# Usa tu módulo unificado de configuración
+# CONFIGURACIÓN
 from modules.configuracion import render_sidebar_config_snapshot, render_configuracion
 
 # ERP EXPANDIDO
@@ -72,8 +73,6 @@ from views.erp_nuevos_modulos import (
     render_seguridad_roles,
 )
 
-from views.catalogo import render_catalogo
-
 # ==================================================
 # USUARIO
 # ==================================================
@@ -82,7 +81,7 @@ usuario = st.session_state.get("usuario", "Sistema")
 user_role = st.session_state.get("rol", "Operator")
 
 # ==================================================
-# ESTILOS SIDEBAR PRO
+# ESTILOS SIDEBAR
 # ==================================================
 
 st.markdown(
@@ -119,25 +118,24 @@ st.sidebar.title("⚛️ Imperio Atómico ERP")
 st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral.")
 
 if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
-    st.session_state.pop("usuario", None)
-    st.session_state.pop("rol", None)
+    st.session_state.clear()
     save_session_snapshot()
     st.rerun()
 
 render_sidebar_config_snapshot()
 
 # ==================================================
-# MENÚ PRINCIPAL (ORDEN EMPRESARIAL + PERMISOS)
-# Cada entrada: "Etiqueta": ("permiso", callback)
+# MENÚ PRINCIPAL
 # ==================================================
 
 MENU_ROUTES = {
+
     # CORE
     "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
 
     # OPERACIONES
     "📦 Inventario": ("inventario.view", lambda: render_inventario(usuario)),
-    "📊 Kardex": ("kardex.view", lambda: render_kardex(usuario)),
+    "📊 Kardex": ("inventario.view", lambda: render_kardex(usuario)),
     "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
 
     # CLIENTES Y VENTAS
@@ -196,7 +194,7 @@ MENU_ROUTES = {
 }
 
 # ==================================================
-# FILTRAR MENÚ SEGÚN PERMISOS
+# FILTRAR POR PERMISOS
 # ==================================================
 
 VISIBLE_MENU = {
