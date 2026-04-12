@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import streamlit as st
 
-from security.permissions import require_permission
+from security.permissions import has_permission, require_permission
 
 
 def render_costeo(usuario: str) -> None:
     """Wrapper del módulo Costeo con control de permisos y carga segura"""
 
-    # 🔐 Permiso de acceso (temporal: usa inventario.view)
-    if not require_permission("inventario.view", "🚫 No tienes acceso al módulo Costeo."):
+    if not require_permission("costeo.view", "🚫 No tienes acceso al módulo Costeo."):
         return
 
     try:
@@ -19,8 +18,11 @@ def render_costeo(usuario: str) -> None:
         st.exception(exc)
         return
 
-    # 🧠 Contexto para futuro control fino
     st.session_state["perm_costeo_view"] = True
+    st.session_state["perm_costeo_edit"] = has_permission("costeo.edit")
+    st.session_state["costeo_readonly"] = not st.session_state["perm_costeo_edit"]
 
-    # 🚀 Render real
+    if st.session_state["costeo_readonly"]:
+        st.info("Modo solo lectura: puedes consultar costeo, pero no modificarlo.")
+
     costeo_module(usuario)
