@@ -10,6 +10,7 @@ from database.connection import db_transaction
 
 
 SUPERUSER_PERMISSION = "*"
+ADMIN_ROLE_ALIASES = {"admin", "administration", "administracion", "administración"}
 
 
 def get_current_user() -> str:
