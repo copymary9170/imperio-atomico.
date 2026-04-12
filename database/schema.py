@@ -1,4 +1,4 @@
-from __future__ import annotations
+ __future__ import annotations
 
 from database.connection import db_transaction
 
