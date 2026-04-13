@@ -50,6 +50,7 @@ from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
 from views.manuales_sop import render_manuales_sop
 from views.catalogo import render_catalogo
+from views.rutas_produccion import render_rutas_produccion
 
 # CONFIGURACIÓN
 from modules.configuracion import render_sidebar_config_snapshot, render_configuracion
@@ -231,3 +232,6 @@ menu = st.sidebar.radio(
 
 VISIBLE_MENU[menu]()
 save_session_snapshot()
+
+
+
