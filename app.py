@@ -128,7 +128,7 @@ render_sidebar_config_snapshot()
 # MENÚ PRINCIPAL
 # ==================================================
 
-MENU_ROUTES = {
+MENU_ROUTES = {␊
 
     # CORE
     "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
@@ -150,7 +150,7 @@ MENU_ROUTES = {
     "✂️ Corte Industrial": ("produccion.execute", lambda: render_corte(usuario)),
     "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
     "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
-    "🗓️ Planificación de producción": ("produccion.execute", lambda: render_planificacion_produccion(usuario)),
+    "🗓️ Planificación de producción": (("produccion.plan", "produccion.execute"), lambda: render_planificacion_produccion(usuario)),
     "🧭 Rutas de producción": ("produccion.route", lambda: render_rutas_produccion(usuario)),
     "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
     "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
@@ -197,10 +197,17 @@ MENU_ROUTES = {
 # FILTRAR POR PERMISOS
 # ==================================================
 
+def _can_access_menu_route(permission_rule):
+    if isinstance(permission_rule, str):
+        return has_permission(permission_rule)
+    if isinstance(permission_rule, (tuple, list, set)):
+        return any(has_permission(permission_code) for permission_code in permission_rule)
+    return False
+
 VISIBLE_MENU = {
     label: callback
     for label, (permiso, callback) in MENU_ROUTES.items()
-    if has_permission(permiso)
+    if _can_access_menu_route(permiso)
 }
 
 if not VISIBLE_MENU:
