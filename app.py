@@ -128,7 +128,7 @@ render_sidebar_config_snapshot()
 # MENÚ PRINCIPAL
 # ==================================================
 
-MENU_ROUTES = {␊
+MENU_ROUTES = {
 
     # CORE
     "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
