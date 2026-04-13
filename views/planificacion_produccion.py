@@ -5,7 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from security.permissions import require_permission
+from security.permissions import require_any_permission
 
 
 def _load_planificacion_module():
@@ -32,7 +32,10 @@ def _load_planificacion_module():
 
 
 def render_planificacion_produccion(usuario: str) -> None:
-    if not require_permission("produccion.plan", "🚫 No tienes acceso a Planificación de producción."):
+    if not require_any_permission(
+        ["produccion.plan", "produccion.execute"],
+        "🚫 No tienes acceso a Planificación de producción.",
+    ):
         return
 
     try:
