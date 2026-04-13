@@ -1,4 +1,4 @@
-port streamlit as st
+import streamlit as st
 
 # ==================================================
 # CONFIGURACIÓN DE LA APP
