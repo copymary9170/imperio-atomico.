@@ -116,6 +116,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "ventas.view",
         "ventas.create",
         "cotizaciones.view",
+        "produccion.plan",
         "gastos.view",
         "caja.view",
         "tesoreria.view",
@@ -1326,6 +1327,14 @@ def _ensure_security_migration(conn) -> None:
             """,
             [(role, permission) for permission in permissions],
         )
+
+    # Backfill incremental de permisos críticos para instalaciones existentes.
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+        VALUES ('Operator', 'produccion.plan')
+        """
+    )
 
 
 def init_schema() -> None:
