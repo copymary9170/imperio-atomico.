@@ -152,7 +152,7 @@ MENU_ROUTES = {
     "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
     "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
     "🗓️ Planificación de producción": (("produccion.plan", "produccion.execute"), lambda: render_planificacion_produccion(usuario)),
-    "🧭 Rutas de producción": ("produccion.route", lambda: render_rutas_produccion(usuario)),
+    "🧭 Rutas de producción": (("produccion.route", "produccion.execute"), lambda: render_rutas_produccion(usuario)),
     "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
     "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
 
