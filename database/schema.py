@@ -1335,6 +1335,12 @@ def _ensure_security_migration(conn) -> None:
         VALUES ('Operator', 'produccion.plan')
         """
     )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+        VALUES ('Operator', 'produccion.route')
+        """
+    )
 
 
 def init_schema() -> None:
