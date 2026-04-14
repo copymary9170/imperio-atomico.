@@ -10,6 +10,21 @@ from database.connection import db_transaction
 from modules.integration_hub import dispatch_to_module, render_module_inbox, render_send_buttons
 
 
+ESTADOS_CORTE = (
+    "analizado",
+    "aprobado",
+    "en_proceso",
+    "terminado",
+    "cancelado",
+)
+
+PRIORIDADES_CORTE = (
+    "normal",
+    "alta",
+    "urgente",
+)
+
+
 # ============================================================
 # AUXILIARES
 # ============================================================
@@ -21,14 +36,14 @@ def _clean_text(value: Any) -> str:
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except Exception:
         return float(default)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except Exception:
         return int(default)
 
 
@@ -54,27 +69,36 @@ def _get_table_columns(conn, table_name: str) -> list[str]:
     return [r[1] for r in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
 
 
-def _next_cut_code() -> str:
-    with db_transaction() as conn:
-        row = conn.execute(
-            "SELECT codigo FROM ordenes_corte ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-    if not row or not row["codigo"]:
-        return "CUT-0001"
-    last = str(row["codigo"]).split("-")[-1]
-    n = _safe_int(last, 0) + 1
-    return f"CUT-{n:04d}"
-
-
 def _filter_df(df: pd.DataFrame, query: str, columns: list[str]) -> pd.DataFrame:
     txt = _clean_text(query)
     if not txt or df.empty:
         return df
+
     mask = pd.Series(False, index=df.index)
     for col in columns:
         if col in df.columns:
             mask = mask | df[col].astype(str).str.contains(txt, case=False, na=False)
     return df[mask]
+
+
+def _next_cut_code() -> str:
+    _ensure_corte_tables()
+    with db_transaction() as conn:
+        row = conn.execute(
+            "SELECT codigo FROM ordenes_corte ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    if not row or not row["codigo"]:
+        return "CUT-0001"
+
+    last = str(row["codigo"]).split("-")[-1]
+    n = _safe_int(last, 0) + 1
+    return f"CUT-{n:04d}"
+
+
+def _has_table(table_name: str) -> bool:
+    with db_transaction() as conn:
+        return _table_exists(conn, table_name)
 
 
 # ============================================================
@@ -90,26 +114,46 @@ def _ensure_corte_tables() -> None:
                 codigo TEXT NOT NULL UNIQUE,
                 fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 usuario TEXT NOT NULL,
+
                 archivo_nombre TEXT,
                 referencia TEXT,
+
                 material_id INTEGER,
                 material_nombre TEXT,
+                material_unidad TEXT DEFAULT 'unidad',
+
                 equipo_id INTEGER,
                 equipo_nombre TEXT,
+
+                ruta_id INTEGER,
+                ruta_codigo TEXT,
+                ruta_nombre TEXT,
+
+                orden_produccion_id INTEGER,
+
                 profundidad REAL NOT NULL DEFAULT 0,
                 velocidad REAL NOT NULL DEFAULT 0,
                 presion REAL NOT NULL DEFAULT 0,
+
                 area_cm2_estimada REAL NOT NULL DEFAULT 0,
                 cm_corte_estimado REAL NOT NULL DEFAULT 0,
                 tiempo_estimado_min REAL NOT NULL DEFAULT 0,
-                costo_estimado_usd REAL NOT NULL DEFAULT 0,
+
+                costo_material_estimado_usd REAL NOT NULL DEFAULT 0,
+                costo_mano_obra_estimado_usd REAL NOT NULL DEFAULT 0,
+                costo_desgaste_estimado_usd REAL NOT NULL DEFAULT 0,
+                costo_total_estimado_usd REAL NOT NULL DEFAULT 0,
+
                 cantidad_material_estimada REAL NOT NULL DEFAULT 0,
                 desgaste_por_cm REAL NOT NULL DEFAULT 0,
-                orden_produccion_id INTEGER,
+
+                lote TEXT,
                 prioridad TEXT NOT NULL DEFAULT 'normal',
                 estado TEXT NOT NULL DEFAULT 'analizado',
+
                 observaciones TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -119,19 +163,27 @@ def _ensure_corte_tables() -> None:
             CREATE TABLE IF NOT EXISTS ejecuciones_corte (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 orden_corte_id INTEGER NOT NULL,
+
                 fecha_inicio TEXT,
                 fecha_fin TEXT,
                 usuario TEXT NOT NULL,
+
                 cm_corte_real REAL NOT NULL DEFAULT 0,
                 tiempo_real_min REAL NOT NULL DEFAULT 0,
                 material_real_usado REAL NOT NULL DEFAULT 0,
                 merma REAL NOT NULL DEFAULT 0,
                 retazo_reutilizable REAL NOT NULL DEFAULT 0,
+
+                costo_material_real_usd REAL NOT NULL DEFAULT 0,
+                costo_mano_obra_real_usd REAL NOT NULL DEFAULT 0,
+                costo_desgaste_real_usd REAL NOT NULL DEFAULT 0,
                 costo_real_usd REAL NOT NULL DEFAULT 0,
+
                 desgaste_registrado REAL NOT NULL DEFAULT 0,
                 incidencias TEXT,
                 estado_final TEXT NOT NULL DEFAULT 'terminado',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
                 FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
             )
             """
@@ -172,11 +224,75 @@ def _ensure_corte_tables() -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS corte_historial (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                orden_corte_id INTEGER NOT NULL,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                usuario TEXT NOT NULL,
+                accion TEXT NOT NULL,
+                detalle TEXT,
+                FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+            )
+            """
+        )
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ordenes_corte_codigo ON ordenes_corte(codigo)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ordenes_corte_estado ON ordenes_corte(estado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ordenes_corte_material ON ordenes_corte(material_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ordenes_corte_ruta ON ordenes_corte(ruta_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ordenes_corte_op ON ordenes_corte(orden_produccion_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ejecuciones_corte_orden ON ejecuciones_corte(orden_corte_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_movimientos_corte_orden ON movimientos_corte_material(orden_corte_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_retazos_corte_orden ON retazos_corte(orden_corte_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_corte_historial_orden ON corte_historial(orden_corte_id, fecha)")
+
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ordenes_corte)").fetchall()}
+        missing = {
+            "material_unidad": "ALTER TABLE ordenes_corte ADD COLUMN material_unidad TEXT DEFAULT 'unidad'",
+            "ruta_id": "ALTER TABLE ordenes_corte ADD COLUMN ruta_id INTEGER",
+            "ruta_codigo": "ALTER TABLE ordenes_corte ADD COLUMN ruta_codigo TEXT",
+            "ruta_nombre": "ALTER TABLE ordenes_corte ADD COLUMN ruta_nombre TEXT",
+            "lote": "ALTER TABLE ordenes_corte ADD COLUMN lote TEXT",
+            "costo_material_estimado_usd": "ALTER TABLE ordenes_corte ADD COLUMN costo_material_estimado_usd REAL NOT NULL DEFAULT 0",
+            "costo_mano_obra_estimado_usd": "ALTER TABLE ordenes_corte ADD COLUMN costo_mano_obra_estimado_usd REAL NOT NULL DEFAULT 0",
+            "costo_desgaste_estimado_usd": "ALTER TABLE ordenes_corte ADD COLUMN costo_desgaste_estimado_usd REAL NOT NULL DEFAULT 0",
+            "costo_total_estimado_usd": "ALTER TABLE ordenes_corte ADD COLUMN costo_total_estimado_usd REAL NOT NULL DEFAULT 0",
+            "updated_at": "ALTER TABLE ordenes_corte ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        }
+        for col, sql in missing.items():
+            if col not in cols:
+                conn.execute(sql)
+
+        cols_e = {r[1] for r in conn.execute("PRAGMA table_info(ejecuciones_corte)").fetchall()}
+        missing_e = {
+            "costo_material_real_usd": "ALTER TABLE ejecuciones_corte ADD COLUMN costo_material_real_usd REAL NOT NULL DEFAULT 0",
+            "costo_mano_obra_real_usd": "ALTER TABLE ejecuciones_corte ADD COLUMN costo_mano_obra_real_usd REAL NOT NULL DEFAULT 0",
+            "costo_desgaste_real_usd": "ALTER TABLE ejecuciones_corte ADD COLUMN costo_desgaste_real_usd REAL NOT NULL DEFAULT 0",
+        }
+        for col, sql in missing_e.items():
+            if col not in cols_e:
+                conn.execute(sql)
+
+
+# ============================================================
+# HISTORIAL
+# ============================================================
+
+def _log_corte(conn, orden_corte_id: int, usuario: str, accion: str, detalle: str = "") -> None:
+    conn.execute(
+        """
+        INSERT INTO corte_historial (orden_corte_id, usuario, accion, detalle)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            int(orden_corte_id),
+            _clean_text(usuario) or "Sistema",
+            _clean_text(accion) or "accion",
+            _clean_text(detalle),
+        ),
+    )
 
 
 # ============================================================
@@ -193,13 +309,7 @@ def _load_materiales_df() -> pd.DataFrame:
         name_col = "nombre" if "nombre" in cols else "item" if "item" in cols else None
         stock_col = "stock_actual" if "stock_actual" in cols else "cantidad" if "cantidad" in cols else None
         unidad_col = "unidad" if "unidad" in cols else None
-        cost_col = (
-            "costo_unitario_usd"
-            if "costo_unitario_usd" in cols
-            else "precio_usd"
-            if "precio_usd" in cols
-            else None
-        )
+        cost_col = "costo_unitario_usd" if "costo_unitario_usd" in cols else "precio_usd" if "precio_usd" in cols else None
         active_col = "estado" if "estado" in cols else "activo" if "activo" in cols else None
 
         if not name_col:
@@ -220,7 +330,6 @@ def _load_materiales_df() -> pd.DataFrame:
             query += " WHERE " + " AND ".join(conditions)
 
         query += " ORDER BY material ASC"
-
         rows = conn.execute(query).fetchall()
 
     return pd.DataFrame(rows, columns=["id", "material", "stock", "unidad", "costo_ref"])
@@ -235,18 +344,8 @@ def _load_equipos_df() -> pd.DataFrame:
         id_col = "id"
         equipo_col = "equipo" if "equipo" in cols else "nombre" if "nombre" in cols else None
         categoria_col = "categoria" if "categoria" in cols else None
-        desgaste_cm_expr = (
-            "COALESCE(desgaste_por_cm, desgaste_por_uso, 0)"
-            if "desgaste_por_cm" in cols or "desgaste_por_uso" in cols
-            else "0"
-        )
-        desgaste_actual_expr = (
-            "COALESCE(desgaste, 0)"
-            if "desgaste" in cols
-            else "COALESCE(desgaste_por_uso, 0)"
-            if "desgaste_por_uso" in cols
-            else "0"
-        )
+        desgaste_cm_expr = "COALESCE(desgaste_por_cm, desgaste_por_uso, 0)" if "desgaste_por_cm" in cols or "desgaste_por_uso" in cols else "0"
+        desgaste_actual_expr = "COALESCE(desgaste, 0)" if "desgaste" in cols else "COALESCE(desgaste_por_uso, 0)" if "desgaste_por_uso" in cols else "0"
         active_col = "activo" if "activo" in cols else "estado" if "estado" in cols else None
 
         if not equipo_col:
@@ -271,7 +370,6 @@ def _load_equipos_df() -> pd.DataFrame:
             query += " WHERE " + " AND ".join(conditions)
 
         query += " ORDER BY equipo ASC"
-
         rows = conn.execute(query).fetchall()
 
     df = pd.DataFrame(rows, columns=["id", "equipo", "categoria", "desgaste_por_cm", "desgaste_actual"])
@@ -282,10 +380,53 @@ def _load_equipos_df() -> pd.DataFrame:
     return filtered if not filtered.empty else df
 
 
+def _load_rutas_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        if not _table_exists(conn, "rutas_produccion"):
+            return pd.DataFrame(columns=["id", "codigo", "nombre", "tiempo_total_min", "costo_base_usd"])
+
+        return pd.read_sql_query(
+            """
+            SELECT
+                id,
+                codigo,
+                nombre,
+                producto_tipo,
+                tiempo_total_min,
+                costo_base_usd,
+                estado
+            FROM rutas_produccion
+            WHERE COALESCE(estado, 'activa') = 'activa'
+            ORDER BY codigo ASC, nombre ASC
+            """,
+            conn,
+        )
+
+
+def _load_ordenes_produccion_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        if not _table_exists(conn, "produccion_ordenes"):
+            return pd.DataFrame(columns=["id", "titulo", "producto", "estado", "prioridad"])
+
+        return pd.read_sql_query(
+            """
+            SELECT
+                id,
+                titulo,
+                producto,
+                estado,
+                prioridad
+            FROM produccion_ordenes
+            ORDER BY id DESC
+            """,
+            conn,
+        )
+
+
 def _load_ordenes_corte_df() -> pd.DataFrame:
     _ensure_corte_tables()
     with db_transaction() as conn:
-        rows = conn.execute(
+        df = pd.read_sql_query(
             """
             SELECT
                 id,
@@ -294,61 +435,54 @@ def _load_ordenes_corte_df() -> pd.DataFrame:
                 usuario,
                 archivo_nombre,
                 referencia,
+                material_id,
                 material_nombre,
+                material_unidad,
+                equipo_id,
                 equipo_nombre,
+                ruta_id,
+                ruta_codigo,
+                ruta_nombre,
+                orden_produccion_id,
                 profundidad,
                 velocidad,
                 presion,
                 area_cm2_estimada,
                 cm_corte_estimado,
                 tiempo_estimado_min,
-                costo_estimado_usd,
+                costo_material_estimado_usd,
+                costo_mano_obra_estimado_usd,
+                costo_desgaste_estimado_usd,
+                costo_total_estimado_usd,
                 cantidad_material_estimada,
+                desgaste_por_cm,
+                lote,
                 prioridad,
                 estado,
                 observaciones,
-                orden_produccion_id
+                created_at,
+                updated_at
             FROM ordenes_corte
             ORDER BY id DESC
-            """
-        ).fetchall()
-
-    cols = [
-        "id",
-        "codigo",
-        "fecha",
-        "usuario",
-        "archivo_nombre",
-        "referencia",
-        "material_nombre",
-        "equipo_nombre",
-        "profundidad",
-        "velocidad",
-        "presion",
-        "area_cm2_estimada",
-        "cm_corte_estimado",
-        "tiempo_estimado_min",
-        "costo_estimado_usd",
-        "cantidad_material_estimada",
-        "prioridad",
-        "estado",
-        "observaciones",
-        "orden_produccion_id",
-    ]
-    return pd.DataFrame(rows, columns=cols)
+            """,
+            conn,
+        )
+    return df
 
 
 def _load_ejecuciones_corte_df() -> pd.DataFrame:
     _ensure_corte_tables()
     with db_transaction() as conn:
-        rows = conn.execute(
+        df = pd.read_sql_query(
             """
             SELECT
                 e.id,
                 e.orden_corte_id,
                 o.codigo,
+                o.referencia,
                 o.material_nombre,
                 o.equipo_nombre,
+                o.ruta_codigo,
                 e.fecha_inicio,
                 e.fecha_fin,
                 e.usuario,
@@ -357,6 +491,9 @@ def _load_ejecuciones_corte_df() -> pd.DataFrame:
                 e.material_real_usado,
                 e.merma,
                 e.retazo_reutilizable,
+                e.costo_material_real_usd,
+                e.costo_mano_obra_real_usd,
+                e.costo_desgaste_real_usd,
                 e.costo_real_usd,
                 e.desgaste_registrado,
                 e.incidencias,
@@ -364,77 +501,48 @@ def _load_ejecuciones_corte_df() -> pd.DataFrame:
             FROM ejecuciones_corte e
             JOIN ordenes_corte o ON o.id = e.orden_corte_id
             ORDER BY e.id DESC
-            """
-        ).fetchall()
-
-    cols = [
-        "id",
-        "orden_corte_id",
-        "codigo",
-        "material_nombre",
-        "equipo_nombre",
-        "fecha_inicio",
-        "fecha_fin",
-        "usuario",
-        "cm_corte_real",
-        "tiempo_real_min",
-        "material_real_usado",
-        "merma",
-        "retazo_reutilizable",
-        "costo_real_usd",
-        "desgaste_registrado",
-        "incidencias",
-        "estado_final",
-    ]
-    return pd.DataFrame(rows, columns=cols)
+            """,
+            conn,
+        )
+    return df
 
 
 def _load_movimientos_corte_df() -> pd.DataFrame:
     _ensure_corte_tables()
     with db_transaction() as conn:
-        rows = conn.execute(
+        df = pd.read_sql_query(
             """
             SELECT
                 m.id,
                 m.orden_corte_id,
                 o.codigo,
+                o.referencia,
                 m.material_nombre,
                 m.tipo,
                 m.cantidad,
                 m.unidad,
-                m.referencia,
+                m.referencia AS referencia_mov,
                 m.usuario,
                 m.fecha
             FROM movimientos_corte_material m
             JOIN ordenes_corte o ON o.id = m.orden_corte_id
             ORDER BY m.id DESC
-            """
-        ).fetchall()
-
-    cols = [
-        "id",
-        "orden_corte_id",
-        "codigo",
-        "material_nombre",
-        "tipo",
-        "cantidad",
-        "unidad",
-        "referencia",
-        "usuario",
-        "fecha",
-    ]
-    return pd.DataFrame(rows, columns=cols)
+            """,
+            conn,
+        )
+    return df
 
 
 def _load_retazos_df() -> pd.DataFrame:
     _ensure_corte_tables()
     with db_transaction() as conn:
-        rows = conn.execute(
+        df = pd.read_sql_query(
             """
             SELECT
                 r.id,
                 r.orden_corte_id,
                 o.codigo,
+                o.referencia,
                 r.material_nombre,
                 r.cantidad,
                 r.unidad,
@@ -444,21 +552,32 @@ def _load_retazos_df() -> pd.DataFrame:
             FROM retazos_corte r
             JOIN ordenes_corte o ON o.id = r.orden_corte_id
             ORDER BY r.id DESC
-            """
-        ).fetchall()
+            """,
+            conn,
+        )
+    return df
 
-    cols = [
-        "id",
-        "orden_corte_id",
-        "codigo",
-        "material_nombre",
-        "cantidad",
-        "unidad",
-        "reutilizable",
-        "observaciones",
-        "fecha",
-    ]
-    return pd.DataFrame(rows, columns=cols)
+
+def _load_historial_corte_df() -> pd.DataFrame:
+    _ensure_corte_tables()
+    with db_transaction() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT
+                h.id,
+                h.orden_corte_id,
+                o.codigo,
+                h.fecha,
+                h.usuario,
+                h.accion,
+                h.detalle
+            FROM corte_historial h
+            JOIN ordenes_corte o ON o.id = h.orden_corte_id
+            ORDER BY h.id DESC
+            """,
+            conn,
+        )
+    return df
 
 
 # ============================================================
@@ -471,14 +590,23 @@ def _registrar_orden_produccion(
     referencia: str,
     costo_estimado: float,
     estado: str = "Pendiente",
-) -> int:
+) -> int | None:
+    if not _has_table("ordenes_produccion"):
+        return None
+
     with db_transaction() as conn:
         cur = conn.execute(
             """
             INSERT INTO ordenes_produccion (usuario, tipo, referencia, costo_estimado, estado)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (str(usuario), str(tipo), str(referencia), float(costo_estimado), str(estado)),
+            (
+                str(usuario),
+                str(tipo),
+                str(referencia),
+                float(costo_estimado),
+                str(estado),
+            ),
         )
         return int(cur.lastrowid)
 
@@ -489,6 +617,7 @@ def _crear_orden_corte(
     referencia: str,
     material_id: int,
     material_nombre: str,
+    material_unidad: str,
     equipo_id: int,
     equipo_nombre: str,
     profundidad: float,
@@ -497,12 +626,19 @@ def _crear_orden_corte(
     area_cm2_estimada: float,
     cm_corte_estimado: float,
     tiempo_estimado_min: float,
-    costo_estimado_usd: float,
+    costo_material_estimado_usd: float,
+    costo_mano_obra_estimado_usd: float,
+    costo_desgaste_estimado_usd: float,
+    costo_total_estimado_usd: float,
     cantidad_material_estimada: float,
     desgaste_por_cm: float,
     prioridad: str = "normal",
     observaciones: str = "",
     orden_produccion_id: int | None = None,
+    ruta_id: int | None = None,
+    ruta_codigo: str = "",
+    ruta_nombre: str = "",
+    lote: str = "",
 ) -> int:
     _ensure_corte_tables()
     codigo = _next_cut_code()
@@ -512,12 +648,17 @@ def _crear_orden_corte(
             """
             INSERT INTO ordenes_corte(
                 codigo, fecha, usuario, archivo_nombre, referencia,
-                material_id, material_nombre, equipo_id, equipo_nombre,
+                material_id, material_nombre, material_unidad,
+                equipo_id, equipo_nombre,
+                ruta_id, ruta_codigo, ruta_nombre,
+                orden_produccion_id,
                 profundidad, velocidad, presion,
                 area_cm2_estimada, cm_corte_estimado, tiempo_estimado_min,
-                costo_estimado_usd, cantidad_material_estimada, desgaste_por_cm,
-                prioridad, estado, observaciones, orden_produccion_id
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                costo_material_estimado_usd, costo_mano_obra_estimado_usd, costo_desgaste_estimado_usd, costo_total_estimado_usd,
+                cantidad_material_estimada, desgaste_por_cm, lote,
+                prioridad, estado, observaciones
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'analizado', ?)
             """,
             (
                 codigo,
@@ -527,39 +668,54 @@ def _crear_orden_corte(
                 _clean_text(referencia),
                 int(material_id),
                 _clean_text(material_nombre),
+                _clean_text(material_unidad) or "unidad",
                 int(equipo_id),
                 _clean_text(equipo_nombre),
+                int(ruta_id) if ruta_id else None,
+                _clean_text(ruta_codigo),
+                _clean_text(ruta_nombre),
+                int(orden_produccion_id) if orden_produccion_id else None,
                 float(profundidad),
                 float(velocidad),
                 float(presion),
                 float(area_cm2_estimada),
                 float(cm_corte_estimado),
                 float(tiempo_estimado_min),
-                float(costo_estimado_usd),
+                float(costo_material_estimado_usd),
+                float(costo_mano_obra_estimado_usd),
+                float(costo_desgaste_estimado_usd),
+                float(costo_total_estimado_usd),
                 float(cantidad_material_estimada),
                 float(desgaste_por_cm),
+                _clean_text(lote),
                 _clean_text(prioridad) or "normal",
-                "analizado",
                 _clean_text(observaciones),
-                int(orden_produccion_id) if orden_produccion_id is not None else None,
             ),
         )
-        return int(cur.lastrowid)
+        orden_id = int(cur.lastrowid)
+        _log_corte(conn, orden_id, usuario, "crear_orden", f"Orden creada {codigo}")
+        return orden_id
 
 
-def _actualizar_estado_orden_corte(orden_id: int, estado: str) -> None:
+def _actualizar_estado_orden_corte(orden_id: int, estado: str, usuario: str = "Sistema") -> None:
+    estado = _clean_text(estado).lower()
+    if estado not in ESTADOS_CORTE:
+        raise ValueError("Estado de corte inválido.")
+
     with db_transaction() as conn:
         conn.execute(
-            "UPDATE ordenes_corte SET estado=? WHERE id=?",
-            (_clean_text(estado), int(orden_id)),
+            """
+            UPDATE ordenes_corte
+            SET estado = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (estado, int(orden_id)),
         )
+        _log_corte(conn, orden_id, usuario, "cambiar_estado", f"Nuevo estado: {estado}")
 
 
-def _descontar_inventario_material(
-    conn,
-    inventario_id: int,
-    cantidad: float,
-) -> tuple[str, str]:
+def _descontar_inventario_material(conn, inventario_id: int, cantidad: float) -> tuple[str, str, float]:
     cols = _get_table_columns(conn, "inventario")
     if not cols:
         raise ValueError("La tabla inventario no existe.")
@@ -567,14 +723,24 @@ def _descontar_inventario_material(
     stock_col = "stock_actual" if "stock_actual" in cols else "cantidad" if "cantidad" in cols else None
     name_col = "nombre" if "nombre" in cols else "item" if "item" in cols else None
     unidad_col = "unidad" if "unidad" in cols else None
+    costo_col = "costo_unitario_usd" if "costo_unitario_usd" in cols else "precio_usd" if "precio_usd" in cols else None
 
     if not stock_col or not name_col:
         raise ValueError("La tabla inventario no tiene columnas compatibles para corte.")
 
     unidad_expr = f"COALESCE({unidad_col}, 'unidad')" if unidad_col else "'unidad'"
+    costo_expr = f"COALESCE({costo_col}, 0)" if costo_col else "0"
+
     row = conn.execute(
-        f"SELECT {name_col} AS nombre, COALESCE({stock_col},0) AS stock, {unidad_expr} AS unidad "
-        "FROM inventario WHERE id=?",
+        f"""
+        SELECT
+            {name_col} AS nombre,
+            COALESCE({stock_col}, 0) AS stock,
+            {unidad_expr} AS unidad,
+            {costo_expr} AS costo_ref
+        FROM inventario
+        WHERE id = ?
+        """,
         (int(inventario_id),),
     ).fetchone()
 
@@ -589,10 +755,11 @@ def _descontar_inventario_material(
         raise ValueError("Inventario insuficiente para descontar material.")
 
     conn.execute(
-        f"UPDATE inventario SET {stock_col} = COALESCE({stock_col},0) - ? WHERE id=?",
+        f"UPDATE inventario SET {stock_col} = COALESCE({stock_col}, 0) - ? WHERE id = ?",
         (float(cantidad), int(inventario_id)),
     )
-    return str(row["nombre"]), str(row["unidad"])
+
+    return str(row["nombre"]), str(row["unidad"]), float(row["costo_ref"] or 0.0)
 
 
 def _registrar_movimiento_corte_material(
@@ -610,7 +777,7 @@ def _registrar_movimiento_corte_material(
         """
         INSERT INTO movimientos_corte_material(
             orden_corte_id, inventario_id, material_nombre, tipo, cantidad, unidad, referencia, usuario, fecha
-        ) VALUES(?,?,?,?,?,?,?,?,?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             int(orden_corte_id),
@@ -641,7 +808,7 @@ def _registrar_retazo(
         """
         INSERT INTO retazos_corte(
             orden_corte_id, inventario_id_origen, material_nombre, cantidad, unidad, reutilizable, observaciones, fecha
-        ) VALUES(?,?,?,?,?,?,?,?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             int(orden_corte_id),
@@ -664,12 +831,12 @@ def _registrar_desgaste_equipo(conn, equipo_id: int, desgaste_inc: float) -> Non
 
     if "desgaste" in cols:
         conn.execute(
-            "UPDATE activos SET desgaste = COALESCE(desgaste,0) + ? WHERE id=?",
+            "UPDATE activos SET desgaste = COALESCE(desgaste, 0) + ? WHERE id = ?",
             (float(desgaste_inc), int(equipo_id)),
         )
     elif "desgaste_por_uso" in cols:
         conn.execute(
-            "UPDATE activos SET desgaste_por_uso = COALESCE(desgaste_por_uso,0) + ? WHERE id=?",
+            "UPDATE activos SET desgaste_por_uso = COALESCE(desgaste_por_uso, 0) + ? WHERE id = ?",
             (float(desgaste_inc), int(equipo_id)),
         )
 
@@ -689,21 +856,29 @@ def _ejecutar_corte(
     with db_transaction() as conn:
         orden = conn.execute(
             """
-            SELECT id, codigo, material_id, material_nombre, equipo_id, desgaste_por_cm, costo_estimado_usd
+            SELECT
+                id,
+                codigo,
+                material_id,
+                material_nombre,
+                material_unidad,
+                equipo_id,
+                desgaste_por_cm,
+                estado
             FROM ordenes_corte
-            WHERE id=?
+            WHERE id = ?
             """,
             (int(orden_corte_id),),
         ).fetchone()
+
         if not orden:
             raise ValueError("La orden de corte no existe.")
 
-        if str(
-            conn.execute("SELECT estado FROM ordenes_corte WHERE id=?", (int(orden_corte_id),)).fetchone()["estado"]
-        ).lower() in {"terminado", "cancelado"}:
+        estado_actual = str(orden["estado"] or "").lower()
+        if estado_actual in {"terminado", "cancelado"}:
             raise ValueError("La orden ya está cerrada o cancelada.")
 
-        material_nombre, unidad = _descontar_inventario_material(
+        material_nombre, unidad, costo_unitario_ref = _descontar_inventario_material(
             conn,
             inventario_id=int(orden["material_id"]),
             cantidad=float(material_real_usado),
@@ -736,21 +911,20 @@ def _ejecutar_corte(
         desgaste_registrado = float(cm_corte_real or 0.0) * float(orden["desgaste_por_cm"] or 0.0)
         _registrar_desgaste_equipo(conn, int(orden["equipo_id"]), desgaste_registrado)
 
-        costo_real = round(
-            (_safe_float(orden["costo_estimado_usd"], 0.0) * 0.6)
-            + (float(tiempo_real_min or 0.0) * 0.35)
-            + (float(merma or 0.0) * 0.1),
-            2,
-        )
+        costo_material_real = round(float(material_real_usado or 0.0) * float(costo_unitario_ref or 0.0), 2)
+        costo_mano_obra_real = round(float(tiempo_real_min or 0.0) * 0.35, 2)
+        costo_desgaste_real = round(float(desgaste_registrado or 0.0), 2)
+        costo_real = round(costo_material_real + costo_mano_obra_real + costo_desgaste_real, 2)
 
         cur = conn.execute(
             """
             INSERT INTO ejecuciones_corte(
                 orden_corte_id, fecha_inicio, fecha_fin, usuario,
                 cm_corte_real, tiempo_real_min, material_real_usado, merma,
-                retazo_reutilizable, costo_real_usd, desgaste_registrado,
-                incidencias, estado_final
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                retazo_reutilizable,
+                costo_material_real_usd, costo_mano_obra_real_usd, costo_desgaste_real_usd, costo_real_usd,
+                desgaste_registrado, incidencias, estado_final
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(orden_corte_id),
@@ -762,6 +936,9 @@ def _ejecutar_corte(
                 float(material_real_usado),
                 float(merma),
                 float(retazo_reutilizable),
+                float(costo_material_real),
+                float(costo_mano_obra_real),
+                float(costo_desgaste_real),
                 float(costo_real),
                 float(desgaste_registrado),
                 _clean_text(incidencias),
@@ -770,10 +947,16 @@ def _ejecutar_corte(
         )
 
         conn.execute(
-            "UPDATE ordenes_corte SET estado='terminado' WHERE id=?",
+            """
+            UPDATE ordenes_corte
+            SET estado = 'terminado',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
             (int(orden_corte_id),),
         )
 
+        _log_corte(conn, int(orden_corte_id), usuario, "ejecutar_corte", f"Ejecución registrada. Costo real: {costo_real}")
         return int(cur.lastrowid)
 
 
@@ -788,29 +971,32 @@ def _analizar_diseno(
     velocidad: float,
     costo_material_ref: float,
     desgaste_por_cm: float,
+    factor_ruta_tiempo: float = 1.0,
+    factor_ruta_costo: float = 1.0,
 ) -> dict[str, Any]:
     size_kb = max(len(archivo_bytes) / 1024.0, 1.0)
 
     area_cm2 = round(size_kb * 6.2 * (1 + (presion / 100.0)), 2)
-    cm_corte = round((area_cm2**0.5) * (2.0 + (profundidad_cuchilla / 10.0)) * 1.8, 2)
+    cm_corte = round((area_cm2 ** 0.5) * (2.0 + (profundidad_cuchilla / 10.0)) * 1.8, 2)
     complejidad = 1.0 + (presion / 80.0) + (profundidad_cuchilla / 20.0)
-    tiempo_estimado_min = round((cm_corte / max(velocidad, 0.1)) * complejidad / 60.0, 2)
+
+    tiempo_estimado_min = round(((cm_corte / max(velocidad, 0.1)) * complejidad / 60.0) * max(factor_ruta_tiempo, 0.1), 2)
 
     costo_material_cm2 = float(costo_material_ref or 0.0) / 100.0
-    costo_material = area_cm2 * costo_material_cm2
-    costo_desgaste = cm_corte * float(desgaste_por_cm or 0.0)
-    mano_obra = tiempo_estimado_min * 0.35
-    costo_estimado = round(costo_material + costo_desgaste + mano_obra, 2)
+    costo_material = round(area_cm2 * costo_material_cm2, 2)
+    costo_desgaste = round(cm_corte * float(desgaste_por_cm or 0.0), 2)
+    costo_mano_obra = round(tiempo_estimado_min * 0.35, 2)
+    costo_total = round((costo_material + costo_desgaste + costo_mano_obra) * max(factor_ruta_costo, 0.1), 2)
 
     return {
         "area_cm2": float(area_cm2),
         "cm_corte": float(cm_corte),
         "tiempo_estimado_min": float(tiempo_estimado_min),
-        "costo_estimado": float(costo_estimado),
+        "costo_material_estimado_usd": float(costo_material),
+        "costo_mano_obra_estimado_usd": float(costo_mano_obra),
+        "costo_desgaste_estimado_usd": float(costo_desgaste),
+        "costo_total_estimado_usd": float(costo_total),
         "cantidad_descuento_estimada": float(max(area_cm2 / 100.0, 0.01)),
-        "costo_material": float(costo_material),
-        "costo_desgaste": float(costo_desgaste),
-        "mano_obra": float(mano_obra),
     }
 
 
@@ -821,8 +1007,8 @@ def _analizar_diseno(
 def render_corte(usuario: str) -> None:
     _ensure_corte_tables()
 
-    st.title("✂️ Corte Industrial – Cameo")
-    st.caption("Análisis técnico, órdenes de corte, ejecución real, merma, retazos y trazabilidad.")
+    st.title("✂️ Corte Industrial")
+    st.caption("Consumo exacto de material, patrones, rendimiento, desperdicio, tiempos de corte y lotes.")
 
     def _apply_corte_inbox(inbox: dict) -> None:
         st.session_state["datos_corte_desde_cmyk"] = dict(inbox.get("payload_data", {}))
@@ -834,30 +1020,40 @@ def render_corte(usuario: str) -> None:
         st.success(
             f"Trabajo recibido desde CMYK: {cmyk_data.get('trabajo', 'N/D')} ({cmyk_data.get('cantidad', 0)} uds)"
         )
-        st.caption(f"Costo base de impresión recibido: $ {float(cmyk_data.get('costo_base', 0.0)):.2f}")
-        if st.button("Limpiar envío CMYK (Corte)", key="btn_clear_cmyk_corte"):
+        st.caption(f"Costo base recibido: $ {float(cmyk_data.get('costo_base', 0.0)):.2f}")
+        if st.button("Limpiar envío CMYK", key="btn_clear_cmyk_corte"):
             st.session_state.pop("datos_corte_desde_cmyk", None)
             st.rerun()
 
     df_materiales = _load_materiales_df()
     df_equipos = _load_equipos_df()
+    df_rutas = _load_rutas_df()
+    df_op = _load_ordenes_produccion_df()
+
     df_ordenes = _load_ordenes_corte_df()
     df_ejec = _load_ejecuciones_corte_df()
     df_movs = _load_movimientos_corte_df()
     df_retazos = _load_retazos_df()
+    df_hist = _load_historial_corte_df()
 
     total_ordenes = len(df_ordenes)
     abiertas = int(df_ordenes["estado"].astype(str).str.lower().isin(["analizado", "aprobado", "en_proceso"]).sum()) if not df_ordenes.empty else 0
     terminadas = int((df_ordenes["estado"].astype(str).str.lower() == "terminado").sum()) if not df_ordenes.empty else 0
     merma_total = float(df_ejec["merma"].sum()) if not df_ejec.empty else 0.0
     costo_total = float(df_ejec["costo_real_usd"].sum()) if not df_ejec.empty else 0.0
+    eficiencia = 0.0
+    if not df_ejec.empty:
+        total_material = float(df_ejec["material_real_usado"].sum() or 0.0)
+        total_merma = float(df_ejec["merma"].sum() or 0.0)
+        if total_material > 0:
+            eficiencia = ((total_material - total_merma) / total_material) * 100.0
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Órdenes", total_ordenes)
     m2.metric("Abiertas", abiertas)
     m3.metric("Terminadas", terminadas)
-    m4.metric("Merma total", f"{merma_total:,.2f}")
-    m5.metric("Costo real acumulado", f"$ {costo_total:,.2f}")
+    m4.metric("Merma total", f"{merma_total:,.3f}")
+    m5.metric("Eficiencia", f"{eficiencia:.1f}%")
 
     tab_analisis, tab_ordenes, tab_ejecucion, tab_material, tab_historial = st.tabs(
         [
@@ -897,8 +1093,7 @@ def render_corte(usuario: str) -> None:
                     "Equipo",
                     df_equipos.index,
                     format_func=lambda i: (
-                        f"{df_equipos.loc[i, 'equipo']} | desgaste/cm: "
-                        f"{float(df_equipos.loc[i, 'desgaste_por_cm'] or 0):.6f}"
+                        f"{df_equipos.loc[i, 'equipo']} | desgaste/cm: {float(df_equipos.loc[i, 'desgaste_por_cm'] or 0):.6f}"
                     ),
                     key="corte_equipo_idx",
                 )
@@ -907,14 +1102,40 @@ def render_corte(usuario: str) -> None:
                 equipo_row = None
                 st.warning("No hay equipos activos compatibles.")
 
+            if not df_rutas.empty:
+                ruta_idx = st.selectbox(
+                    "Ruta de producción (opcional)",
+                    options=[None] + df_rutas.index.tolist(),
+                    format_func=lambda i: "Sin ruta" if i is None else f"{df_rutas.loc[i, 'codigo']} · {df_rutas.loc[i, 'nombre']}",
+                    key="corte_ruta_idx",
+                )
+                ruta_row = df_rutas.loc[ruta_idx] if ruta_idx is not None else None
+            else:
+                ruta_row = None
+                st.caption("No hay rutas activas disponibles.")
+
+            if not df_op.empty:
+                op_sel = st.selectbox(
+                    "Orden de producción relacionada (opcional)",
+                    options=[None] + df_op["id"].tolist(),
+                    format_func=lambda x: "Sin OP" if x is None else f"OP #{x} · {df_op[df_op['id'] == x]['titulo'].iloc[0]}",
+                    key="corte_op_sel",
+                )
+            else:
+                op_sel = None
+
             c1, c2, c3 = st.columns(3)
             profundidad_cuchilla = c1.number_input("Profundidad cuchilla", min_value=0.0, value=3.0, step=0.1)
             velocidad = c2.number_input("Velocidad", min_value=0.1, value=8.0, step=0.1)
             presion = c3.number_input("Presión", min_value=1.0, value=12.0, step=0.5)
 
-            referencia = st.text_input("Referencia del trabajo", placeholder="Ej: Stickers cliente X")
-            prioridad = st.selectbox("Prioridad", ["normal", "alta", "urgente"], key="corte_prioridad")
-            observaciones = st.text_area("Observaciones")
+            c4, c5 = st.columns(2)
+            referencia = c4.text_input("Referencia del trabajo", placeholder="Ej: Stickers cliente X")
+            lote = c5.text_input("Lote", placeholder="Ej: LOTE-001")
+
+            c6, c7 = st.columns(2)
+            prioridad = c6.selectbox("Prioridad", PRIORIDADES_CORTE, key="corte_prioridad")
+            observaciones = c7.text_input("Observaciones")
 
         if "corte_resultado" not in st.session_state:
             st.session_state["corte_resultado"] = {}
@@ -929,6 +1150,14 @@ def render_corte(usuario: str) -> None:
             elif equipo_row is None:
                 st.error("Debes seleccionar un equipo válido.")
             else:
+                factor_ruta_tiempo = 1.0
+                factor_ruta_costo = 1.0
+                if ruta_row is not None:
+                    tiempo_ruta = float(ruta_row.get("tiempo_total_min") or 0.0)
+                    costo_ruta = float(ruta_row.get("costo_base_usd") or 0.0)
+                    factor_ruta_tiempo = 1.0 + min(tiempo_ruta / 600.0, 0.5)
+                    factor_ruta_costo = 1.0 + min(costo_ruta / 1000.0, 0.5)
+
                 analysis = _analizar_diseno(
                     archivo_bytes=archivo.getvalue(),
                     presion=float(presion),
@@ -936,6 +1165,8 @@ def render_corte(usuario: str) -> None:
                     velocidad=float(velocidad),
                     costo_material_ref=float(material_row.get("costo_ref") or 0.0),
                     desgaste_por_cm=float(equipo_row.get("desgaste_por_cm") or 0.0),
+                    factor_ruta_tiempo=float(factor_ruta_tiempo),
+                    factor_ruta_costo=float(factor_ruta_costo),
                 )
 
                 st.session_state["corte_resultado"] = {
@@ -953,6 +1184,11 @@ def render_corte(usuario: str) -> None:
                     "prioridad": str(prioridad),
                     "observaciones": _clean_text(observaciones),
                     "desgaste_por_cm": float(equipo_row.get("desgaste_por_cm") or 0.0),
+                    "ruta_id": int(ruta_row["id"]) if ruta_row is not None else None,
+                    "ruta_codigo": str(ruta_row["codigo"]) if ruta_row is not None else "",
+                    "ruta_nombre": str(ruta_row["nombre"]) if ruta_row is not None else "",
+                    "orden_produccion_id": int(op_sel) if op_sel else None,
+                    "lote": _clean_text(lote),
                     **analysis,
                 }
                 st.success("Análisis completado. Aún no se descontó material.")
@@ -963,7 +1199,7 @@ def render_corte(usuario: str) -> None:
             x1.metric("CM de corte", f"{r.get('cm_corte', 0):,.2f}")
             x2.metric("Área estimada", f"{r.get('area_cm2', 0):,.2f} cm²")
             x3.metric("Tiempo estimado", f"{r.get('tiempo_estimado_min', 0):,.2f} min")
-            x4.metric("Costo estimado", f"$ {r.get('costo_estimado', 0):,.2f}")
+            x4.metric("Costo total estimado", f"$ {r.get('costo_total_estimado_usd', 0):,.2f}")
 
             st.dataframe(
                 pd.DataFrame(
@@ -973,9 +1209,13 @@ def render_corte(usuario: str) -> None:
                             "referencia": r.get("referencia"),
                             "material": r.get("material"),
                             "equipo": r.get("equipo"),
+                            "ruta": r.get("ruta_codigo"),
                             "cm_corte": r.get("cm_corte"),
                             "tiempo_estimado": r.get("tiempo_estimado_min"),
-                            "costo_estimado": r.get("costo_estimado"),
+                            "costo_material": r.get("costo_material_estimado_usd"),
+                            "costo_mano_obra": r.get("costo_mano_obra_estimado_usd"),
+                            "costo_desgaste": r.get("costo_desgaste_estimado_usd"),
+                            "costo_total": r.get("costo_total_estimado_usd"),
                             "consumo_estimado": r.get("cantidad_descuento_estimada"),
                         }
                     ]
@@ -994,9 +1234,10 @@ def render_corte(usuario: str) -> None:
                     "material": r.get("material"),
                     "cm_corte": r.get("cm_corte"),
                     "tiempo_estimado": r.get("tiempo_estimado_min"),
-                    "costo_base": r.get("costo_estimado"),
-                    "costo_estimado": r.get("costo_estimado"),
+                    "costo_base": r.get("costo_total_estimado_usd"),
+                    "costo_estimado": r.get("costo_total_estimado_usd"),
                     "referencia": r.get("referencia"),
+                    "ruta": r.get("ruta_codigo"),
                 }
                 st.session_state["datos_pre_cotizacion"] = payload_data
                 dispatch_to_module(
@@ -1019,22 +1260,17 @@ def render_corte(usuario: str) -> None:
                 st.error("Primero debes analizar el diseño.")
             else:
                 try:
-                    orden_prod_id = None
-                    if _table_exists(next(iter([db_transaction().__enter__()])), "ordenes_produccion"):  # unsafe
-                        pass
-                except Exception:
-                    orden_prod_id = None
-
-                try:
-                    try:
-                        orden_prod_id = _registrar_orden_produccion(
-                            usuario=usuario,
-                            tipo="corte",
-                            referencia=f"Corte industrial {r.get('archivo', 'Trabajo corte')}",
-                            costo_estimado=float(r.get("costo_estimado", 0.0)),
-                        )
-                    except Exception:
-                        orden_prod_id = None
+                    orden_prod_id = r.get("orden_produccion_id")
+                    if not orden_prod_id:
+                        try:
+                            orden_prod_id = _registrar_orden_produccion(
+                                usuario=usuario,
+                                tipo="corte",
+                                referencia=f"Corte industrial {r.get('archivo', 'Trabajo corte')}",
+                                costo_estimado=float(r.get("costo_total_estimado_usd", 0.0)),
+                            )
+                        except Exception:
+                            orden_prod_id = None
 
                     oid = _crear_orden_corte(
                         usuario=usuario,
@@ -1042,6 +1278,7 @@ def render_corte(usuario: str) -> None:
                         referencia=str(r.get("referencia")),
                         material_id=int(r.get("material_id")),
                         material_nombre=str(r.get("material")),
+                        material_unidad=str(r.get("material_unidad") or "unidad"),
                         equipo_id=int(r.get("equipo_id")),
                         equipo_nombre=str(r.get("equipo")),
                         profundidad=float(r.get("profundidad", 0.0)),
@@ -1050,12 +1287,19 @@ def render_corte(usuario: str) -> None:
                         area_cm2_estimada=float(r.get("area_cm2", 0.0)),
                         cm_corte_estimado=float(r.get("cm_corte", 0.0)),
                         tiempo_estimado_min=float(r.get("tiempo_estimado_min", 0.0)),
-                        costo_estimado_usd=float(r.get("costo_estimado", 0.0)),
+                        costo_material_estimado_usd=float(r.get("costo_material_estimado_usd", 0.0)),
+                        costo_mano_obra_estimado_usd=float(r.get("costo_mano_obra_estimado_usd", 0.0)),
+                        costo_desgaste_estimado_usd=float(r.get("costo_desgaste_estimado_usd", 0.0)),
+                        costo_total_estimado_usd=float(r.get("costo_total_estimado_usd", 0.0)),
                         cantidad_material_estimada=float(r.get("cantidad_descuento_estimada", 0.0)),
                         desgaste_por_cm=float(r.get("desgaste_por_cm", 0.0)),
                         prioridad=str(r.get("prioridad", "normal")),
                         observaciones=str(r.get("observaciones", "")),
-                        orden_produccion_id=orden_prod_id,
+                        orden_produccion_id=int(orden_prod_id) if orden_prod_id else None,
+                        ruta_id=int(r.get("ruta_id")) if r.get("ruta_id") else None,
+                        ruta_codigo=str(r.get("ruta_codigo", "")),
+                        ruta_nombre=str(r.get("ruta_nombre", "")),
+                        lote=str(r.get("lote", "")),
                     )
                     st.session_state["corte_resultado"]["orden_id"] = int(oid)
                     st.success(f"Orden de corte creada #{oid}")
@@ -1074,15 +1318,31 @@ def render_corte(usuario: str) -> None:
                         "analisis": r.get("referencia"),
                         "material": r.get("material"),
                         "equipo": r.get("equipo"),
+                        "ruta": r.get("ruta_codigo"),
                         "tiempos": r.get("tiempo_estimado_min"),
-                        "costo": r.get("costo_estimado"),
+                        "costo": r.get("costo_total_estimado_usd"),
                         "referencia": r.get("referencia"),
+                    },
+                )
+
+            def _build_to_rutas():
+                return (
+                    "corte_desde_analisis",
+                    {
+                        "referencia": r.get("referencia"),
+                        "material": r.get("material"),
+                        "equipo": r.get("equipo"),
+                        "cm_corte": r.get("cm_corte"),
+                        "tiempo": r.get("tiempo_estimado_min"),
                     },
                 )
 
             render_send_buttons(
                 source_module="corte industrial",
-                payload_builders={"planificación de producción": _build_to_planificacion},
+                payload_builders={
+                    "planificación de producción": _build_to_planificacion,
+                    "rutas de producción": _build_to_rutas,
+                },
             )
 
     with tab_ordenes:
@@ -1090,21 +1350,20 @@ def render_corte(usuario: str) -> None:
         if df_ordenes.empty:
             st.info("No hay órdenes de corte registradas.")
         else:
-            f1, f2 = st.columns([2, 1])
+            f1, f2, f3 = st.columns([2, 1, 1])
             buscar = f1.text_input("Buscar orden", key="corte_buscar_orden")
-            estado = f2.selectbox(
-                "Estado",
-                ["Todos", "analizado", "aprobado", "en_proceso", "terminado", "cancelado"],
-                key="corte_estado_orden",
-            )
+            estado = f2.selectbox("Estado", ["Todos"] + list(ESTADOS_CORTE), key="corte_estado_orden")
+            prioridad = f3.selectbox("Prioridad", ["Todas"] + list(PRIORIDADES_CORTE), key="corte_prioridad_filtro")
 
             view = _filter_df(
                 df_ordenes.copy(),
                 buscar,
-                ["codigo", "archivo_nombre", "referencia", "material_nombre", "equipo_nombre", "usuario", "estado"],
+                ["codigo", "archivo_nombre", "referencia", "material_nombre", "equipo_nombre", "usuario", "estado", "ruta_codigo", "ruta_nombre", "lote"],
             )
             if estado != "Todos":
                 view = view[view["estado"].astype(str).str.lower() == estado]
+            if prioridad != "Todas":
+                view = view[view["prioridad"].astype(str).str.lower() == prioridad]
 
             st.dataframe(
                 view,
@@ -1114,8 +1373,11 @@ def render_corte(usuario: str) -> None:
                     "area_cm2_estimada": st.column_config.NumberColumn("Área", format="%.2f"),
                     "cm_corte_estimado": st.column_config.NumberColumn("CM corte", format="%.2f"),
                     "tiempo_estimado_min": st.column_config.NumberColumn("Tiempo min", format="%.2f"),
-                    "costo_estimado_usd": st.column_config.NumberColumn("Costo estimado", format="%.2f"),
                     "cantidad_material_estimada": st.column_config.NumberColumn("Consumo estimado", format="%.3f"),
+                    "costo_material_estimado_usd": st.column_config.NumberColumn("Mat. USD", format="%.2f"),
+                    "costo_mano_obra_estimado_usd": st.column_config.NumberColumn("M.O. USD", format="%.2f"),
+                    "costo_desgaste_estimado_usd": st.column_config.NumberColumn("Desgaste USD", format="%.2f"),
+                    "costo_total_estimado_usd": st.column_config.NumberColumn("Costo total", format="%.2f"),
                 },
             )
 
@@ -1126,14 +1388,11 @@ def render_corte(usuario: str) -> None:
                 format_func=lambda i: f"{df_ordenes[df_ordenes['id'] == i]['codigo'].iloc[0]} · {df_ordenes[df_ordenes['id'] == i]['referencia'].iloc[0]}",
                 key="corte_sel_orden_estado",
             )
-            nuevo_estado = d2.selectbox(
-                "Actualizar estado",
-                ["analizado", "aprobado", "en_proceso", "terminado", "cancelado"],
-                key="corte_nuevo_estado",
-            )
+            nuevo_estado = d2.selectbox("Actualizar estado", ESTADOS_CORTE, key="corte_nuevo_estado")
+
             if st.button("💾 Guardar estado", use_container_width=True):
                 try:
-                    _actualizar_estado_orden_corte(int(orden_sel), str(nuevo_estado))
+                    _actualizar_estado_orden_corte(int(orden_sel), str(nuevo_estado), usuario=usuario)
                     st.success("Estado actualizado.")
                     st.rerun()
                 except Exception as exc:
@@ -1156,10 +1415,11 @@ def render_corte(usuario: str) -> None:
                 )
                 row = ejecutables[ejecutables["id"] == orden_id].iloc[0]
 
-                p1, p2, p3 = st.columns(3)
+                p1, p2, p3, p4 = st.columns(4)
                 p1.metric("Consumo estimado", f"{float(row['cantidad_material_estimada'] or 0):,.3f}")
                 p2.metric("Tiempo estimado", f"{float(row['tiempo_estimado_min'] or 0):,.2f} min")
-                p3.metric("Costo estimado", f"$ {float(row['costo_estimado_usd'] or 0):,.2f}")
+                p3.metric("Costo total estimado", f"$ {float(row['costo_total_estimado_usd'] or 0):,.2f}")
+                p4.metric("Ruta", str(row["ruta_codigo"] or "-"))
 
                 e1, e2, e3 = st.columns(3)
                 cm_corte_real = e1.number_input(
@@ -1247,7 +1507,7 @@ def render_corte(usuario: str) -> None:
     with tab_historial:
         st.subheader("Historial de corte")
 
-        ht1, ht2 = st.tabs(["Ejecuciones", "Resumen"])
+        ht1, ht2, ht3 = st.tabs(["Ejecuciones", "Resumen", "Bitácora"])
 
         with ht1:
             if df_ejec.empty:
@@ -1263,6 +1523,9 @@ def render_corte(usuario: str) -> None:
                         "material_real_usado": st.column_config.NumberColumn("Material real", format="%.3f"),
                         "merma": st.column_config.NumberColumn("Merma", format="%.3f"),
                         "retazo_reutilizable": st.column_config.NumberColumn("Retazo", format="%.3f"),
+                        "costo_material_real_usd": st.column_config.NumberColumn("Mat. USD", format="%.2f"),
+                        "costo_mano_obra_real_usd": st.column_config.NumberColumn("M.O. USD", format="%.2f"),
+                        "costo_desgaste_real_usd": st.column_config.NumberColumn("Desgaste USD", format="%.2f"),
                         "costo_real_usd": st.column_config.NumberColumn("Costo real", format="%.2f"),
                         "desgaste_registrado": st.column_config.NumberColumn("Desgaste", format="%.6f"),
                     },
@@ -1272,13 +1535,6 @@ def render_corte(usuario: str) -> None:
             if df_ordenes.empty:
                 st.info("Sin datos aún.")
             else:
-                eficiencia = 0.0
-                if not df_ejec.empty:
-                    total_material = float(df_ejec["material_real_usado"].sum() or 0.0)
-                    total_merma = float(df_ejec["merma"].sum() or 0.0)
-                    if total_material > 0:
-                        eficiencia = ((total_material - total_merma) / total_material) * 100.0
-
                 s1, s2, s3, s4 = st.columns(4)
                 s1.metric("Órdenes totales", len(df_ordenes))
                 s2.metric("Material usado", f"{float(df_ejec['material_real_usado'].sum()) if not df_ejec.empty else 0:,.3f}")
@@ -1287,7 +1543,14 @@ def render_corte(usuario: str) -> None:
 
                 if not df_ejec.empty:
                     resumen = (
-                        df_ejec.groupby("material_nombre", as_index=False)[["material_real_usado", "merma", "retazo_reutilizable", "costo_real_usd"]]
+                        df_ejec.groupby("material_nombre", as_index=False)[
+                            [
+                                "material_real_usado",
+                                "merma",
+                                "retazo_reutilizable",
+                                "costo_real_usd",
+                            ]
+                        ]
                         .sum()
                         .sort_values("costo_real_usd", ascending=False)
                     )
@@ -1303,3 +1566,9 @@ def render_corte(usuario: str) -> None:
                             "costo_real_usd": st.column_config.NumberColumn("Costo real", format="%.2f"),
                         },
                     )
+
+        with ht3:
+            if df_hist.empty:
+                st.info("No hay bitácora registrada.")
+            else:
+                st.dataframe(df_hist, use_container_width=True, hide_index=True)
