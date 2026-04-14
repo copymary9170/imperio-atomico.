@@ -1,7 +1,7 @@
 import streamlit as st
 
 # ==================================================
-# CONFIGURACIÓN DE LA APP
+# CONFIGURACION DE LA APP
 # ==================================================
 
 st.set_page_config(
@@ -50,8 +50,10 @@ from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
 from views.manuales_sop import render_manuales_sop
 from views.catalogo import render_catalogo
+from views.rutas_produccion import render_rutas_produccion
+from views.planificacion_produccion import render_planificacion_produccion
 
-# CONFIGURACIÓN
+# CONFIGURACION
 from modules.configuracion import render_sidebar_config_snapshot, render_configuracion
 
 # ERP EXPANDIDO
@@ -62,9 +64,7 @@ from views.erp_nuevos_modulos import (
     render_costeo_industrial,
     render_mermas_desperdicio,
     render_mantenimiento_activos,
-    render_planificacion_produccion,
     render_control_calidad,
-    render_rutas_produccion,
     render_impuestos,
     render_conciliacion_bancaria,
     render_marketing_ventas,
@@ -115,7 +115,7 @@ st.markdown(
 # ==================================================
 
 st.sidebar.title("⚛️ Imperio Atómico ERP")
-st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral.")
+st.sidebar.caption("Accede rapido a cada modulo desde el menu lateral.")
 
 if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
     st.session_state.clear()
@@ -125,17 +125,16 @@ if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
 render_sidebar_config_snapshot()
 
 # ==================================================
-# MENÚ PRINCIPAL
+# MENU PRINCIPAL
 # ==================================================
 
 MENU_ROUTES = {
-
     # CORE
     "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
 
     # OPERACIONES
     "📦 Inventario": ("inventario.view", lambda: render_inventario(usuario)),
-    "📊 Kardex": ("kardex.view", lambda: render_kardex(usuario)),
+    "📊 Kardex": ("inventario.view", lambda: render_kardex(usuario)),
     "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
 
     # CLIENTES Y VENTAS
@@ -146,12 +145,12 @@ MENU_ROUTES = {
     "📣 Marketing / Ventas": ("crm.view", lambda: render_marketing_ventas(usuario)),
     "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
 
-    # PRODUCCIÓN
-    "🗓️ Planificación de producción": (("produccion.plan", "produccion.execute"), lambda: render_planificacion_produccion(usuario)),
-    "🧭 Rutas de producción": (("produccion.route", "produccion.execute"), lambda: render_rutas_produccion(usuario)),
-    "✂️ Corte": ("produccion.execute", lambda: render_corte(usuario)),
+    # PRODUCCION
+    "✂️ Corte Industrial": ("produccion.execute", lambda: render_corte(usuario)),
     "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
     "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
+    "🗓️ Planificación de producción": (("produccion.plan", "produccion.execute"), lambda: render_planificacion_produccion(usuario)),
+    "🧭 Rutas de producción": (("produccion.route", "produccion.execute"), lambda: render_rutas_produccion(usuario)),
     "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
     "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
 
@@ -164,7 +163,7 @@ MENU_ROUTES = {
     "🏛️ Conciliación bancaria": ("conciliacion.view", lambda: render_conciliacion_bancaria(usuario)),
     "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
 
-    # ANALÍTICA
+    # ANALITICA
     "📈 Rentabilidad": ("costeo.view", lambda: render_rentabilidad(usuario)),
     "🔮 Planeación financiera": ("tesoreria.view", lambda: render_planeacion_financiera(usuario)),
     "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
@@ -188,7 +187,7 @@ MENU_ROUTES = {
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
     "🛍️ Catálogo": ("inventario.view", lambda: render_catalogo(usuario)),
 
-    # EXPANSIÓN ERP
+    # EXPANSION ERP
     "🧩 Nuevos módulos ERP": ("dashboard.view", lambda: render_portafolio_modulos(usuario)),
     "🛠️ Mantenimiento": ("mantenimiento.view", lambda: render_mantenimiento_activos(usuario)),
 }
@@ -203,6 +202,7 @@ def _can_access_menu_route(permission_rule):
     if isinstance(permission_rule, (tuple, list, set)):
         return any(has_permission(permission_code) for permission_code in permission_rule)
     return False
+
 
 VISIBLE_MENU = {
     label: callback
@@ -226,7 +226,7 @@ menu = st.sidebar.radio(
 )
 
 # ==================================================
-# EJECUCIÓN
+# EJECUCION
 # ==================================================
 
 VISIBLE_MENU[menu]()
