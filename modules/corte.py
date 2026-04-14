@@ -7,7 +7,11 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
-from modules.integration_hub import dispatch_to_module, render_module_inbox, render_send_buttons
+from modules.integration_hub import (
+    dispatch_to_module,
+    render_module_inbox,
+    render_send_buttons,
+)
 
 
 ESTADOS_CORTE = (
@@ -99,6 +103,35 @@ def _next_cut_code() -> str:
 def _has_table(table_name: str) -> bool:
     with db_transaction() as conn:
         return _table_exists(conn, table_name)
+
+
+def _safe_series_sum(df: pd.DataFrame, col: str) -> float:
+    if df.empty or col not in df.columns:
+        return 0.0
+    return float(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
+
+
+def _safe_series_mean(df: pd.DataFrame, col: str) -> float:
+    if df.empty or col not in df.columns:
+        return 0.0
+    s = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    return float(s.mean()) if not s.empty else 0.0
+
+
+def _calc_efficiency(material_real_usado: float, merma: float) -> float:
+    material_real_usado = float(material_real_usado or 0.0)
+    merma = float(merma or 0.0)
+    if material_real_usado <= 0:
+        return 0.0
+    return max(0.0, min(100.0, ((material_real_usado - merma) / material_real_usado) * 100.0))
+
+
+def _calc_yield(material_real_usado: float, retazo_reutilizable: float) -> float:
+    material_real_usado = float(material_real_usado or 0.0)
+    retazo_reutilizable = float(retazo_reutilizable or 0.0)
+    if material_real_usado <= 0:
+        return 0.0
+    return max(0.0, min(100.0, (retazo_reutilizable / material_real_usado) * 100.0))
 
 
 # ============================================================
@@ -405,22 +438,37 @@ def _load_rutas_df() -> pd.DataFrame:
 
 def _load_ordenes_produccion_df() -> pd.DataFrame:
     with db_transaction() as conn:
-        if not _table_exists(conn, "produccion_ordenes"):
-            return pd.DataFrame(columns=["id", "titulo", "producto", "estado", "prioridad"])
+        if _table_exists(conn, "produccion_ordenes"):
+            return pd.read_sql_query(
+                """
+                SELECT
+                    id,
+                    titulo,
+                    producto,
+                    estado,
+                    prioridad
+                FROM produccion_ordenes
+                ORDER BY id DESC
+                """,
+                conn,
+            )
 
-        return pd.read_sql_query(
-            """
-            SELECT
-                id,
-                titulo,
-                producto,
-                estado,
-                prioridad
-            FROM produccion_ordenes
-            ORDER BY id DESC
-            """,
-            conn,
-        )
+        if _table_exists(conn, "ordenes_produccion"):
+            return pd.read_sql_query(
+                """
+                SELECT
+                    id,
+                    referencia AS titulo,
+                    tipo AS producto,
+                    estado,
+                    'media' AS prioridad
+                FROM ordenes_produccion
+                ORDER BY id DESC
+                """,
+                conn,
+            )
+
+        return pd.DataFrame(columns=["id", "titulo", "producto", "estado", "prioridad"])
 
 
 def _load_ordenes_corte_df() -> pd.DataFrame:
@@ -956,7 +1004,13 @@ def _ejecutar_corte(
             (int(orden_corte_id),),
         )
 
-        _log_corte(conn, int(orden_corte_id), usuario, "ejecutar_corte", f"Ejecución registrada. Costo real: {costo_real}")
+        _log_corte(
+            conn,
+            int(orden_corte_id),
+            usuario,
+            "ejecutar_corte",
+            f"Ejecución registrada. Costo real: {costo_real}",
+        )
         return int(cur.lastrowid)
 
 
@@ -980,7 +1034,10 @@ def _analizar_diseno(
     cm_corte = round((area_cm2 ** 0.5) * (2.0 + (profundidad_cuchilla / 10.0)) * 1.8, 2)
     complejidad = 1.0 + (presion / 80.0) + (profundidad_cuchilla / 20.0)
 
-    tiempo_estimado_min = round(((cm_corte / max(velocidad, 0.1)) * complejidad / 60.0) * max(factor_ruta_tiempo, 0.1), 2)
+    tiempo_estimado_min = round(
+        ((cm_corte / max(velocidad, 0.1)) * complejidad / 60.0) * max(factor_ruta_tiempo, 0.1),
+        2,
+    )
 
     costo_material_cm2 = float(costo_material_ref or 0.0) / 100.0
     costo_material = round(area_cm2 * costo_material_cm2, 2)
@@ -998,6 +1055,52 @@ def _analizar_diseno(
         "costo_total_estimado_usd": float(costo_total),
         "cantidad_descuento_estimada": float(max(area_cm2 / 100.0, 0.01)),
     }
+
+
+# ============================================================
+# UI HELPERS
+# ============================================================
+
+def _render_kpis(df_ordenes: pd.DataFrame, df_ejec: pd.DataFrame) -> None:
+    total_ordenes = len(df_ordenes)
+    abiertas = int(df_ordenes["estado"].astype(str).str.lower().isin(["analizado", "aprobado", "en_proceso"]).sum()) if not df_ordenes.empty else 0
+    terminadas = int((df_ordenes["estado"].astype(str).str.lower() == "terminado").sum()) if not df_ordenes.empty else 0
+    merma_total = _safe_series_sum(df_ejec, "merma")
+    costo_total = _safe_series_sum(df_ejec, "costo_real_usd")
+
+    total_material = _safe_series_sum(df_ejec, "material_real_usado")
+    total_merma = _safe_series_sum(df_ejec, "merma")
+    eficiencia = _calc_efficiency(total_material, total_merma)
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Órdenes", total_ordenes)
+    m2.metric("Abiertas", abiertas)
+    m3.metric("Terminadas", terminadas)
+    m4.metric("Merma total", f"{merma_total:,.3f}")
+    m5.metric("Eficiencia", f"{eficiencia:.1f}%")
+
+    if not df_ordenes.empty:
+        a1, a2 = st.columns(2)
+
+        with a1:
+            estado_df = (
+                df_ordenes.groupby("estado", as_index=False)["id"]
+                .count()
+                .rename(columns={"id": "cantidad"})
+            )
+            if not estado_df.empty:
+                st.markdown("#### Órdenes por estado")
+                st.bar_chart(estado_df.set_index("estado")["cantidad"])
+
+        with a2:
+            prioridad_df = (
+                df_ordenes.groupby("prioridad", as_index=False)["id"]
+                .count()
+                .rename(columns={"id": "cantidad"})
+            )
+            if not prioridad_df.empty:
+                st.markdown("#### Órdenes por prioridad")
+                st.bar_chart(prioridad_df.set_index("prioridad")["cantidad"])
 
 
 # ============================================================
@@ -1036,24 +1139,7 @@ def render_corte(usuario: str) -> None:
     df_retazos = _load_retazos_df()
     df_hist = _load_historial_corte_df()
 
-    total_ordenes = len(df_ordenes)
-    abiertas = int(df_ordenes["estado"].astype(str).str.lower().isin(["analizado", "aprobado", "en_proceso"]).sum()) if not df_ordenes.empty else 0
-    terminadas = int((df_ordenes["estado"].astype(str).str.lower() == "terminado").sum()) if not df_ordenes.empty else 0
-    merma_total = float(df_ejec["merma"].sum()) if not df_ejec.empty else 0.0
-    costo_total = float(df_ejec["costo_real_usd"].sum()) if not df_ejec.empty else 0.0
-    eficiencia = 0.0
-    if not df_ejec.empty:
-        total_material = float(df_ejec["material_real_usado"].sum() or 0.0)
-        total_merma = float(df_ejec["merma"].sum() or 0.0)
-        if total_material > 0:
-            eficiencia = ((total_material - total_merma) / total_material) * 100.0
-
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Órdenes", total_ordenes)
-    m2.metric("Abiertas", abiertas)
-    m3.metric("Terminadas", terminadas)
-    m4.metric("Merma total", f"{merma_total:,.3f}")
-    m5.metric("Eficiencia", f"{eficiencia:.1f}%")
+    _render_kpis(df_ordenes, df_ejec)
 
     tab_analisis, tab_ordenes, tab_ejecucion, tab_material, tab_historial = st.tabs(
         [
@@ -1535,11 +1621,22 @@ def render_corte(usuario: str) -> None:
             if df_ordenes.empty:
                 st.info("Sin datos aún.")
             else:
+                total_material = _safe_series_sum(df_ejec, "material_real_usado")
+                total_merma = _safe_series_sum(df_ejec, "merma")
+                total_retazo = _safe_series_sum(df_ejec, "retazo_reutilizable")
+                eficiencia = _calc_efficiency(total_material, total_merma)
+                rendimiento_retazo = _calc_yield(total_material, total_retazo)
+
                 s1, s2, s3, s4 = st.columns(4)
                 s1.metric("Órdenes totales", len(df_ordenes))
-                s2.metric("Material usado", f"{float(df_ejec['material_real_usado'].sum()) if not df_ejec.empty else 0:,.3f}")
-                s3.metric("Merma acumulada", f"{float(df_ejec['merma'].sum()) if not df_ejec.empty else 0:,.3f}")
+                s2.metric("Material usado", f"{total_material:,.3f}")
+                s3.metric("Merma acumulada", f"{total_merma:,.3f}")
                 s4.metric("Eficiencia estimada", f"{eficiencia:.1f}%")
+
+                s5, s6, s7 = st.columns(3)
+                s5.metric("Retazo reutilizable", f"{total_retazo:,.3f}")
+                s6.metric("Rendimiento retazo", f"{rendimiento_retazo:.1f}%")
+                s7.metric("Costo real total", f"$ {_safe_series_sum(df_ejec, 'costo_real_usd'):,.2f}")
 
                 if not df_ejec.empty:
                     resumen = (
