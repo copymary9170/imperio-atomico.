@@ -146,7 +146,7 @@ MENU_ROUTES = {
     "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
 
     # PRODUCCION
-    "✂️ Corte Industrial": ("produccion.execute", lambda: render_corte(usuario)),
+    "✂️ Corte Industrial": (("produccion.execute", "produccion.plan"), lambda: render_corte(usuario)),
     "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
     "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
     "🗓️ Planificación de producción": (("produccion.plan", "produccion.execute"), lambda: render_planificacion_produccion(usuario)),
