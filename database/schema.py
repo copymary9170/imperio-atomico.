@@ -1328,7 +1328,6 @@ def _ensure_security_migration(conn) -> None:
             [(role, permission) for permission in permissions],
         )
 
-    # Backfill incremental de permisos críticos para instalaciones existentes.
     conn.execute(
         """
         INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
