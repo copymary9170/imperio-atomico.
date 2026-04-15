@@ -7,6 +7,11 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from modules.integration_hub import (
+    dispatch_to_module,
+    render_module_inbox,
+    render_send_buttons,
+)
 
 
 # ============================================================
@@ -26,10 +31,13 @@ TIPOS_PRODUCTO = [
 
 ESTADOS_LOTE = [
     "pendiente",
+    "analizado",
+    "aprobado",
     "en_proceso",
     "completado",
     "con_merma",
     "rechazado",
+    "cancelado",
 ]
 
 RESULTADOS_CALIDAD = [
@@ -49,6 +57,13 @@ MAQUINAS_DEFAULT = [
     "Plancha 2",
     "Horno",
     "Sublimadora automática",
+]
+
+CALIDADES_ACABADO = [
+    "excelente",
+    "buena",
+    "regular",
+    "rechazada",
 ]
 
 
@@ -74,43 +89,141 @@ def _clean_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _today_iso() -> str:
+    return date.today().isoformat()
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (str(table_name),),
+    ).fetchone()
+    return row is not None
+
+
+def _get_table_columns(conn, table_name: str) -> list[str]:
+    if not _table_exists(conn, table_name):
+        return []
+    return [r[1] for r in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
+
+
+def _filter_df(df: pd.DataFrame, query: str, columns: list[str]) -> pd.DataFrame:
+    txt = _clean_text(query)
+    if not txt or df.empty:
+        return df
+
+    mask = pd.Series(False, index=df.index)
+    for col in columns:
+        if col in df.columns:
+            mask = mask | df[col].astype(str).str.contains(txt, case=False, na=False)
+    return df[mask]
+
+
+def _safe_sum(df: pd.DataFrame, col: str) -> float:
+    if df.empty or col not in df.columns:
+        return 0.0
+    return float(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
+
+
+def _next_sublimacion_code() -> str:
+    _ensure_sublimacion_tables()
+    with db_transaction() as conn:
+        row = conn.execute(
+            "SELECT codigo FROM sublimacion_lotes ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    if not row or not row["codigo"]:
+        return "SUB-0001"
+
+    last = str(row["codigo"]).split("-")[-1]
+    n = _safe_int(last, 0) + 1
+    return f"SUB-{n:04d}"
+
+
+# ============================================================
+# SCHEMA
+# ============================================================
+
 def _ensure_sublimacion_tables() -> None:
     with db_transaction() as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sublimacion_lotes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                codigo TEXT NOT NULL UNIQUE,
                 fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
                 usuario TEXT,
+
                 origen TEXT,
                 referencia_origen TEXT,
+
                 cliente TEXT,
                 producto TEXT NOT NULL,
                 tipo_producto TEXT DEFAULT 'Otro',
                 diseno TEXT,
+
+                ruta_id INTEGER,
+                ruta_codigo TEXT,
+                ruta_nombre TEXT,
+
+                orden_produccion_id INTEGER,
+                lote_codigo TEXT,
+
                 cantidad_programada REAL NOT NULL DEFAULT 0,
                 cantidad_producida REAL NOT NULL DEFAULT 0,
                 cantidad_aprobada REAL NOT NULL DEFAULT 0,
                 cantidad_reproceso REAL NOT NULL DEFAULT 0,
                 cantidad_merma REAL NOT NULL DEFAULT 0,
                 cantidad_rechazada REAL NOT NULL DEFAULT 0,
+
                 maquina TEXT,
                 temperatura_c REAL DEFAULT 0,
                 tiempo_seg REAL DEFAULT 0,
                 presion TEXT,
+
                 papel_tipo TEXT,
                 tinta_tipo TEXT,
-                observaciones TEXT,
+
+                area_estimada_cm2 REAL DEFAULT 0,
+                consumo_tinta_estimado_ml REAL DEFAULT 0,
+                consumo_material_estimado_unid REAL DEFAULT 0,
+
+                consumo_tinta_real_ml REAL DEFAULT 0,
+                consumo_material_real_unid REAL DEFAULT 0,
+
+                capacidad_turno_unidades REAL DEFAULT 0,
+                utilizacion_capacidad_pct REAL DEFAULT 0,
+
+                tiempo_preparacion_min REAL DEFAULT 0,
+                tiempo_impresion_min REAL DEFAULT 0,
+                tiempo_transferencia_min REAL DEFAULT 0,
+                tiempo_total_estimado_min REAL DEFAULT 0,
+                tiempo_total_real_min REAL DEFAULT 0,
+
+                calidad_acabado TEXT DEFAULT 'buena',
+
                 costo_transfer_total REAL DEFAULT 0,
                 costo_transfer_unit REAL DEFAULT 0,
+                costo_tinta_unit REAL DEFAULT 0,
                 costo_energia_unit REAL DEFAULT 0,
                 costo_mano_obra_unit REAL DEFAULT 0,
                 costo_depreciacion_unit REAL DEFAULT 0,
                 costo_indirecto_unit REAL DEFAULT 0,
                 costo_unitario_final REAL DEFAULT 0,
                 costo_total_final REAL DEFAULT 0,
+
+                costo_tinta_real_total REAL DEFAULT 0,
+                costo_material_real_total REAL DEFAULT 0,
+                costo_mano_obra_real_total REAL DEFAULT 0,
+                costo_total_real REAL DEFAULT 0,
+
                 merma_pct REAL DEFAULT 0,
+                observaciones TEXT,
                 estado TEXT DEFAULT 'pendiente'
             )
             """
@@ -152,10 +265,30 @@ def _ensure_sublimacion_tables() -> None:
         )
 
         conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sublimacion_historial (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                lote_id INTEGER NOT NULL,
+                usuario TEXT,
+                accion TEXT,
+                detalle TEXT,
+                FOREIGN KEY (lote_id) REFERENCES sublimacion_lotes(id)
+            )
+            """
+        )
+
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_fecha ON sublimacion_lotes(fecha)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_estado ON sublimacion_lotes(estado)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_codigo ON sublimacion_lotes(codigo)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_ruta ON sublimacion_lotes(ruta_id)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sublimacion_qc_lote ON sublimacion_control_calidad(lote_id)"
@@ -163,7 +296,75 @@ def _ensure_sublimacion_tables() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sublimacion_mermas_lote ON sublimacion_mermas(lote_id)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_historial_lote ON sublimacion_historial(lote_id, fecha)"
+        )
 
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(sublimacion_lotes)").fetchall()}
+        missing = {
+            "codigo": "ALTER TABLE sublimacion_lotes ADD COLUMN codigo TEXT",
+            "ruta_id": "ALTER TABLE sublimacion_lotes ADD COLUMN ruta_id INTEGER",
+            "ruta_codigo": "ALTER TABLE sublimacion_lotes ADD COLUMN ruta_codigo TEXT",
+            "ruta_nombre": "ALTER TABLE sublimacion_lotes ADD COLUMN ruta_nombre TEXT",
+            "orden_produccion_id": "ALTER TABLE sublimacion_lotes ADD COLUMN orden_produccion_id INTEGER",
+            "lote_codigo": "ALTER TABLE sublimacion_lotes ADD COLUMN lote_codigo TEXT",
+            "area_estimada_cm2": "ALTER TABLE sublimacion_lotes ADD COLUMN area_estimada_cm2 REAL DEFAULT 0",
+            "consumo_tinta_estimado_ml": "ALTER TABLE sublimacion_lotes ADD COLUMN consumo_tinta_estimado_ml REAL DEFAULT 0",
+            "consumo_material_estimado_unid": "ALTER TABLE sublimacion_lotes ADD COLUMN consumo_material_estimado_unid REAL DEFAULT 0",
+            "consumo_tinta_real_ml": "ALTER TABLE sublimacion_lotes ADD COLUMN consumo_tinta_real_ml REAL DEFAULT 0",
+            "consumo_material_real_unid": "ALTER TABLE sublimacion_lotes ADD COLUMN consumo_material_real_unid REAL DEFAULT 0",
+            "capacidad_turno_unidades": "ALTER TABLE sublimacion_lotes ADD COLUMN capacidad_turno_unidades REAL DEFAULT 0",
+            "utilizacion_capacidad_pct": "ALTER TABLE sublimacion_lotes ADD COLUMN utilizacion_capacidad_pct REAL DEFAULT 0",
+            "tiempo_preparacion_min": "ALTER TABLE sublimacion_lotes ADD COLUMN tiempo_preparacion_min REAL DEFAULT 0",
+            "tiempo_impresion_min": "ALTER TABLE sublimacion_lotes ADD COLUMN tiempo_impresion_min REAL DEFAULT 0",
+            "tiempo_transferencia_min": "ALTER TABLE sublimacion_lotes ADD COLUMN tiempo_transferencia_min REAL DEFAULT 0",
+            "tiempo_total_estimado_min": "ALTER TABLE sublimacion_lotes ADD COLUMN tiempo_total_estimado_min REAL DEFAULT 0",
+            "tiempo_total_real_min": "ALTER TABLE sublimacion_lotes ADD COLUMN tiempo_total_real_min REAL DEFAULT 0",
+            "calidad_acabado": "ALTER TABLE sublimacion_lotes ADD COLUMN calidad_acabado TEXT DEFAULT 'buena'",
+            "costo_tinta_unit": "ALTER TABLE sublimacion_lotes ADD COLUMN costo_tinta_unit REAL DEFAULT 0",
+            "costo_tinta_real_total": "ALTER TABLE sublimacion_lotes ADD COLUMN costo_tinta_real_total REAL DEFAULT 0",
+            "costo_material_real_total": "ALTER TABLE sublimacion_lotes ADD COLUMN costo_material_real_total REAL DEFAULT 0",
+            "costo_mano_obra_real_total": "ALTER TABLE sublimacion_lotes ADD COLUMN costo_mano_obra_real_total REAL DEFAULT 0",
+            "costo_total_real": "ALTER TABLE sublimacion_lotes ADD COLUMN costo_total_real REAL DEFAULT 0",
+        }
+        for col, sql in missing.items():
+            if col not in cols:
+                conn.execute(sql)
+
+        # backfill codigo para registros viejos
+        rows = conn.execute(
+            "SELECT id, codigo FROM sublimacion_lotes WHERE codigo IS NULL OR TRIM(codigo) = '' ORDER BY id ASC"
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                "UPDATE sublimacion_lotes SET codigo = ? WHERE id = ?",
+                (f"SUB-{int(row['id']):04d}", int(row["id"])),
+            )
+
+
+# ============================================================
+# HISTORIAL
+# ============================================================
+
+def _log_sublimacion(lote_id: int, usuario: str, accion: str, detalle: str = "") -> None:
+    with db_transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO sublimacion_historial (lote_id, usuario, accion, detalle)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                int(lote_id),
+                _clean_text(usuario) or "Sistema",
+                _clean_text(accion),
+                _clean_text(detalle),
+            ),
+        )
+
+
+# ============================================================
+# CARGADORES
+# ============================================================
 
 def _load_queue_df() -> pd.DataFrame:
     cola = st.session_state.get("cola_sublimacion", [])
@@ -196,19 +397,111 @@ def _load_queue_df() -> pd.DataFrame:
     return df
 
 
-def _load_lotes_df() -> pd.DataFrame:
-    _ensure_sublimacion_tables()
+def _load_rutas_df() -> pd.DataFrame:
     with db_transaction() as conn:
-        df = pd.read_sql_query(
+        if not _table_exists(conn, "rutas_produccion"):
+            return pd.DataFrame(columns=["id", "codigo", "nombre", "tiempo_total_min", "costo_base_usd"])
+
+        return pd.read_sql_query(
             """
             SELECT
                 id,
+                codigo,
+                nombre,
+                producto_tipo,
+                tiempo_total_min,
+                costo_base_usd,
+                estado
+            FROM rutas_produccion
+            WHERE COALESCE(estado, 'activa') = 'activa'
+            ORDER BY codigo ASC, nombre ASC
+            """,
+            conn,
+        )
+
+
+def _load_inventario_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        cols = _get_table_columns(conn, "inventario")
+        if not cols:
+            return pd.DataFrame(columns=["id", "nombre", "categoria", "unidad", "stock", "costo_ref"])
+
+        name_col = "nombre" if "nombre" in cols else "item" if "item" in cols else None
+        stock_col = "stock_actual" if "stock_actual" in cols else "cantidad" if "cantidad" in cols else None
+        unidad_col = "unidad" if "unidad" in cols else None
+        cost_col = "costo_unitario_usd" if "costo_unitario_usd" in cols else "precio_usd" if "precio_usd" in cols else None
+        categoria_col = "categoria" if "categoria" in cols else None
+        active_col = "estado" if "estado" in cols else "activo" if "activo" in cols else None
+
+        if not name_col:
+            return pd.DataFrame(columns=["id", "nombre", "categoria", "unidad", "stock", "costo_ref"])
+
+        query = f"SELECT id, {name_col} AS nombre"
+        query += f", COALESCE({categoria_col}, '') AS categoria" if categoria_col else ", '' AS categoria"
+        query += f", COALESCE({unidad_col}, 'unidad') AS unidad" if unidad_col else ", 'unidad' AS unidad"
+        query += f", COALESCE({stock_col}, 0) AS stock" if stock_col else ", 0 AS stock"
+        query += f", COALESCE({cost_col}, 0) AS costo_ref" if cost_col else ", 0 AS costo_ref"
+        query += " FROM inventario"
+
+        conditions: list[str] = []
+        if active_col == "estado":
+            conditions.append("COALESCE(estado,'activo')='activo'")
+        elif active_col == "activo":
+            conditions.append("COALESCE(activo,1)=1")
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY nombre ASC"
+        rows = conn.execute(query).fetchall()
+
+    return pd.DataFrame(rows, columns=["id", "nombre", "categoria", "unidad", "stock", "costo_ref"])
+
+
+def _load_materiales_df() -> pd.DataFrame:
+    df = _load_inventario_df()
+    if df.empty:
+        return df
+
+    filtered = df[
+        df["categoria"].astype(str).str.contains(
+            "papel|tela|taza|gorro|mousepad|rompecabezas|metal|madera|sustrato|material|blank",
+            case=False,
+            na=False,
+        )
+    ]
+    return filtered if not filtered.empty else df
+
+
+def _load_tintas_df() -> pd.DataFrame:
+    df = _load_inventario_df()
+    if df.empty:
+        return df
+
+    filtered = df[
+        df["nombre"].astype(str).str.contains("tinta", case=False, na=False)
+        | df["categoria"].astype(str).str.contains("tinta", case=False, na=False)
+    ]
+    return filtered if not filtered.empty else pd.DataFrame(columns=df.columns)
+
+
+def _load_lotes_df() -> pd.DataFrame:
+    _ensure_sublimacion_tables()
+    with db_transaction() as conn:
+        return pd.read_sql_query(
+            """
+            SELECT
+                id,
+                codigo,
                 fecha,
                 usuario,
                 cliente,
                 producto,
                 tipo_producto,
                 diseno,
+                ruta_codigo,
+                ruta_nombre,
+                orden_produccion_id,
+                lote_codigo,
                 cantidad_programada,
                 cantidad_producida,
                 cantidad_aprobada,
@@ -219,14 +512,34 @@ def _load_lotes_df() -> pd.DataFrame:
                 temperatura_c,
                 tiempo_seg,
                 presion,
+                papel_tipo,
+                tinta_tipo,
+                area_estimada_cm2,
+                consumo_tinta_estimado_ml,
+                consumo_material_estimado_unid,
+                consumo_tinta_real_ml,
+                consumo_material_real_unid,
+                capacidad_turno_unidades,
+                utilizacion_capacidad_pct,
+                tiempo_preparacion_min,
+                tiempo_impresion_min,
+                tiempo_transferencia_min,
+                tiempo_total_estimado_min,
+                tiempo_total_real_min,
+                calidad_acabado,
                 costo_transfer_total,
                 costo_transfer_unit,
+                costo_tinta_unit,
                 costo_energia_unit,
                 costo_mano_obra_unit,
                 costo_depreciacion_unit,
                 costo_indirecto_unit,
                 costo_unitario_final,
                 costo_total_final,
+                costo_tinta_real_total,
+                costo_material_real_total,
+                costo_mano_obra_real_total,
+                costo_total_real,
                 merma_pct,
                 estado,
                 observaciones
@@ -235,18 +548,18 @@ def _load_lotes_df() -> pd.DataFrame:
             """,
             conn,
         )
-    return df
 
 
 def _load_qc_df() -> pd.DataFrame:
     _ensure_sublimacion_tables()
     with db_transaction() as conn:
-        df = pd.read_sql_query(
+        return pd.read_sql_query(
             """
             SELECT
                 qc.id,
                 qc.fecha,
                 qc.lote_id,
+                l.codigo,
                 l.producto,
                 l.cliente,
                 qc.usuario,
@@ -263,18 +576,18 @@ def _load_qc_df() -> pd.DataFrame:
             """,
             conn,
         )
-    return df
 
 
 def _load_mermas_df() -> pd.DataFrame:
     _ensure_sublimacion_tables()
     with db_transaction() as conn:
-        df = pd.read_sql_query(
+        return pd.read_sql_query(
             """
             SELECT
                 m.id,
                 m.fecha,
                 m.lote_id,
+                l.codigo,
                 l.producto,
                 l.cliente,
                 m.usuario,
@@ -288,8 +601,33 @@ def _load_mermas_df() -> pd.DataFrame:
             """,
             conn,
         )
-    return df
 
+
+def _load_historial_df() -> pd.DataFrame:
+    _ensure_sublimacion_tables()
+    with db_transaction() as conn:
+        return pd.read_sql_query(
+            """
+            SELECT
+                h.id,
+                h.fecha,
+                h.lote_id,
+                l.codigo,
+                l.producto,
+                h.usuario,
+                h.accion,
+                h.detalle
+            FROM sublimacion_historial h
+            JOIN sublimacion_lotes l ON l.id = h.lote_id
+            ORDER BY h.id DESC
+            """,
+            conn,
+        )
+
+
+# ============================================================
+# COSTEO / ANALISIS
+# ============================================================
 
 def _calc_costs(
     cantidad_total: float,
@@ -302,6 +640,7 @@ def _calc_costs(
     valor_maquina: float,
     vida_horas: float,
     costo_indirecto_unit: float,
+    costo_tinta_unit: float,
 ) -> dict[str, float]:
     qty = max(float(cantidad_total or 0.0), 0.0001)
 
@@ -310,9 +649,11 @@ def _calc_costs(
     costo_mano_obra_unit = float(salario_hora or 0.0) / max(float(unidades_hora or 1.0), 0.0001)
     costo_depreciacion_unit = (float(valor_maquina or 0.0) / max(float(vida_horas or 1.0), 0.0001)) / max(float(unidades_hora or 1.0), 0.0001)
     costo_indirecto_unit = float(costo_indirecto_unit or 0.0)
+    costo_tinta_unit = float(costo_tinta_unit or 0.0)
 
     costo_unitario_final = (
         costo_transfer_unit
+        + costo_tinta_unit
         + costo_energia_unit
         + costo_mano_obra_unit
         + costo_depreciacion_unit
@@ -322,6 +663,7 @@ def _calc_costs(
 
     return {
         "costo_transfer_unit": round(costo_transfer_unit, 6),
+        "costo_tinta_unit": round(costo_tinta_unit, 6),
         "costo_energia_unit": round(costo_energia_unit, 6),
         "costo_mano_obra_unit": round(costo_mano_obra_unit, 6),
         "costo_depreciacion_unit": round(costo_depreciacion_unit, 6),
@@ -330,6 +672,49 @@ def _calc_costs(
         "costo_total_final": round(costo_total_final, 4),
     }
 
+
+def _calc_operacion(
+    cantidad_total: float,
+    minutos_unidad: float,
+    ancho_cm: float,
+    alto_cm: float,
+    tinta_ml_unidad: float,
+    capacidad_turno_horas: float = 8.0,
+) -> dict[str, float]:
+    qty = max(float(cantidad_total or 0.0), 0.0)
+    area_estimada_cm2 = max(float(ancho_cm or 0.0), 0.0) * max(float(alto_cm or 0.0), 0.0) * qty
+    consumo_tinta_estimado_ml = max(float(tinta_ml_unidad or 0.0), 0.0) * qty
+    consumo_material_estimado_unid = qty
+
+    tiempo_preparacion_min = 10.0 if qty > 0 else 0.0
+    tiempo_impresion_min = max(float(minutos_unidad or 0.0), 0.0) * qty
+    tiempo_transferencia_min = round(qty * 0.75, 2)
+    tiempo_total_estimado_min = round(tiempo_preparacion_min + tiempo_impresion_min + tiempo_transferencia_min, 2)
+
+    capacidad_turno_unidades = 0.0
+    if float(minutos_unidad or 0.0) > 0:
+        capacidad_turno_unidades = (float(capacidad_turno_horas) * 60.0) / float(minutos_unidad)
+
+    utilizacion_capacidad_pct = 0.0
+    if capacidad_turno_unidades > 0:
+        utilizacion_capacidad_pct = (qty / capacidad_turno_unidades) * 100.0
+
+    return {
+        "area_estimada_cm2": round(area_estimada_cm2, 2),
+        "consumo_tinta_estimado_ml": round(consumo_tinta_estimado_ml, 4),
+        "consumo_material_estimado_unid": round(consumo_material_estimado_unid, 4),
+        "tiempo_preparacion_min": round(tiempo_preparacion_min, 2),
+        "tiempo_impresion_min": round(tiempo_impresion_min, 2),
+        "tiempo_transferencia_min": round(tiempo_transferencia_min, 2),
+        "tiempo_total_estimado_min": round(tiempo_total_estimado_min, 2),
+        "capacidad_turno_unidades": round(capacidad_turno_unidades, 2),
+        "utilizacion_capacidad_pct": round(utilizacion_capacidad_pct, 2),
+    }
+
+
+# ============================================================
+# SERVICIOS
+# ============================================================
 
 def _registrar_lote(
     usuario: str,
@@ -347,25 +732,44 @@ def _registrar_lote(
     observaciones: str,
     costo_transfer_total: float,
     costos: dict[str, float],
+    operacion: dict[str, float],
     origen: str = "manual",
     referencia_origen: str = "",
+    ruta_id: int | None = None,
+    ruta_codigo: str = "",
+    ruta_nombre: str = "",
+    orden_produccion_id: int | None = None,
+    lote_codigo: str = "",
 ) -> int:
     _ensure_sublimacion_tables()
+    codigo = _next_sublimacion_code()
+
     with db_transaction() as conn:
         cur = conn.execute(
             """
             INSERT INTO sublimacion_lotes (
-                usuario, origen, referencia_origen, cliente, producto, tipo_producto, diseno,
+                codigo, usuario, origen, referencia_origen, cliente, producto, tipo_producto, diseno,
+                ruta_id, ruta_codigo, ruta_nombre, orden_produccion_id, lote_codigo,
                 cantidad_programada, cantidad_producida, cantidad_aprobada, cantidad_reproceso,
-                cantidad_merma, cantidad_rechazada, maquina, temperatura_c, tiempo_seg, presion,
-                papel_tipo, tinta_tipo, observaciones, costo_transfer_total,
-                costo_transfer_unit, costo_energia_unit, costo_mano_obra_unit,
-                costo_depreciacion_unit, costo_indirecto_unit, costo_unitario_final,
-                costo_total_final, merma_pct, estado
+                cantidad_merma, cantidad_rechazada,
+                maquina, temperatura_c, tiempo_seg, presion, papel_tipo, tinta_tipo,
+                area_estimada_cm2, consumo_tinta_estimado_ml, consumo_material_estimado_unid,
+                consumo_tinta_real_ml, consumo_material_real_unid,
+                capacidad_turno_unidades, utilizacion_capacidad_pct,
+                tiempo_preparacion_min, tiempo_impresion_min, tiempo_transferencia_min, tiempo_total_estimado_min,
+                tiempo_total_real_min, calidad_acabado,
+                observaciones,
+                costo_transfer_total, costo_transfer_unit, costo_tinta_unit, costo_energia_unit,
+                costo_mano_obra_unit, costo_depreciacion_unit, costo_indirecto_unit,
+                costo_unitario_final, costo_total_final,
+                costo_tinta_real_total, costo_material_real_total, costo_mano_obra_real_total, costo_total_real,
+                merma_pct, estado
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pendiente')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 0, 'buena', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'analizado')
             """,
             (
+                codigo,
                 usuario,
                 origen,
                 referencia_origen,
@@ -373,6 +777,11 @@ def _registrar_lote(
                 producto,
                 tipo_producto,
                 diseno,
+                int(ruta_id) if ruta_id else None,
+                ruta_codigo,
+                ruta_nombre,
+                int(orden_produccion_id) if orden_produccion_id else None,
+                lote_codigo,
                 float(cantidad_programada),
                 maquina,
                 float(temperatura_c),
@@ -380,9 +789,19 @@ def _registrar_lote(
                 presion,
                 papel_tipo,
                 tinta_tipo,
+                float(operacion["area_estimada_cm2"]),
+                float(operacion["consumo_tinta_estimado_ml"]),
+                float(operacion["consumo_material_estimado_unid"]),
+                float(operacion["capacidad_turno_unidades"]),
+                float(operacion["utilizacion_capacidad_pct"]),
+                float(operacion["tiempo_preparacion_min"]),
+                float(operacion["tiempo_impresion_min"]),
+                float(operacion["tiempo_transferencia_min"]),
+                float(operacion["tiempo_total_estimado_min"]),
                 observaciones,
                 float(costo_transfer_total),
                 float(costos["costo_transfer_unit"]),
+                float(costos["costo_tinta_unit"]),
                 float(costos["costo_energia_unit"]),
                 float(costos["costo_mano_obra_unit"]),
                 float(costos["costo_depreciacion_unit"]),
@@ -391,7 +810,10 @@ def _registrar_lote(
                 float(costos["costo_total_final"]),
             ),
         )
-        return int(cur.lastrowid)
+        lote_id = int(cur.lastrowid)
+
+    _log_sublimacion(lote_id, usuario, "crear_lote", f"Lote creado: {codigo}")
+    return lote_id
 
 
 def _actualizar_resultado_lote(
@@ -401,9 +823,12 @@ def _actualizar_resultado_lote(
     reproceso: float,
     merma: float,
     rechazada: float,
+    consumo_tinta_real_ml: float,
+    consumo_material_real_unid: float,
+    tiempo_total_real_min: float,
+    calidad_acabado: str,
     observaciones: str,
 ) -> None:
-    qty_prog = max(producida, 0.0)
     merma_pct = (float(merma or 0.0) / max(float(producida or 0.0), 0.0001)) * 100.0 if producida > 0 else 0.0
 
     if rechazada > 0 and aprobada <= 0:
@@ -416,6 +841,27 @@ def _actualizar_resultado_lote(
         estado = "en_proceso"
 
     with db_transaction() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                costo_tinta_unit,
+                costo_unitario_final,
+                costo_mano_obra_unit
+            FROM sublimacion_lotes
+            WHERE id = ?
+            """,
+            (int(lote_id),),
+        ).fetchone()
+
+        costo_tinta_unit = float(row["costo_tinta_unit"] or 0.0) if row else 0.0
+        costo_unitario_final = float(row["costo_unitario_final"] or 0.0) if row else 0.0
+        costo_mano_obra_unit = float(row["costo_mano_obra_unit"] or 0.0) if row else 0.0
+
+        costo_tinta_real_total = round(float(consumo_tinta_real_ml or 0.0) * costo_tinta_unit, 4)
+        costo_material_real_total = round(float(consumo_material_real_unid or 0.0) * max(costo_unitario_final - costo_tinta_unit, 0.0), 4)
+        costo_mano_obra_real_total = round((float(tiempo_total_real_min or 0.0) / max(float(producida or 1.0), 1.0)) * costo_mano_obra_unit * max(float(producida or 0.0), 0.0), 4)
+        costo_total_real = round(costo_tinta_real_total + costo_material_real_total + costo_mano_obra_real_total, 4)
+
         conn.execute(
             """
             UPDATE sublimacion_lotes
@@ -424,24 +870,42 @@ def _actualizar_resultado_lote(
                 cantidad_reproceso=?,
                 cantidad_merma=?,
                 cantidad_rechazada=?,
+                consumo_tinta_real_ml=?,
+                consumo_material_real_unid=?,
+                tiempo_total_real_min=?,
+                calidad_acabado=?,
                 merma_pct=?,
                 observaciones=?,
+                costo_tinta_real_total=?,
+                costo_material_real_total=?,
+                costo_mano_obra_real_total=?,
+                costo_total_real=?,
                 estado=?,
                 actualizado_en=CURRENT_TIMESTAMP
             WHERE id=?
             """,
             (
-                float(qty_prog),
+                float(producida),
                 float(aprobada),
                 float(reproceso),
                 float(merma),
                 float(rechazada),
+                float(consumo_tinta_real_ml),
+                float(consumo_material_real_unid),
+                float(tiempo_total_real_min),
+                _clean_text(calidad_acabado) or "buena",
                 round(merma_pct, 4),
                 _clean_text(observaciones),
+                float(costo_tinta_real_total),
+                float(costo_material_real_total),
+                float(costo_mano_obra_real_total),
+                float(costo_total_real),
                 estado,
                 int(lote_id),
             ),
         )
+
+    _log_sublimacion(lote_id, "Sistema", "actualizar_produccion", f"Producción actualizada. Estado: {estado}")
 
 
 def _registrar_control_calidad(
@@ -477,6 +941,8 @@ def _registrar_control_calidad(
             ),
         )
 
+    _log_sublimacion(lote_id, usuario, "control_calidad", f"Resultado QC: {resultado}")
+
 
 def _registrar_merma(
     lote_id: int,
@@ -503,6 +969,8 @@ def _registrar_merma(
                 _clean_text(observaciones),
             ),
         )
+
+    _log_sublimacion(lote_id, usuario, "registrar_merma", f"Merma: {tipo_falla} ({cantidad})")
 
 
 # ============================================================
@@ -537,6 +1005,9 @@ def _render_registro(usuario: str) -> None:
     st.subheader("⚙️ Registrar lote de sublimación")
 
     df_cola = _load_queue_df()
+    df_rutas = _load_rutas_df()
+    df_tintas = _load_tintas_df()
+
     usar_cola = st.checkbox("Usar datos desde la cola de CMYK", value=not df_cola.empty)
 
     trabajo_sel = None
@@ -558,7 +1029,7 @@ def _render_registro(usuario: str) -> None:
         index=TIPOS_PRODUCTO.index(_clean_text(trabajo_sel["tipo_producto"])) if trabajo_sel is not None and _clean_text(trabajo_sel["tipo_producto"]) in TIPOS_PRODUCTO else len(TIPOS_PRODUCTO) - 1,
     )
 
-    c4, c5 = st.columns(2)
+    c4, c5, c6 = st.columns(3)
     diseno = c4.text_input("Diseño / referencia", value=_clean_text(trabajo_sel["diseno"]) if trabajo_sel is not None else "")
     cantidad_programada = c5.number_input(
         "Cantidad programada",
@@ -566,6 +1037,23 @@ def _render_registro(usuario: str) -> None:
         value=float(_safe_float(trabajo_sel["cantidad"], 1.0)) if trabajo_sel is not None else 1.0,
         step=1.0,
     )
+    lote_codigo = c6.text_input("Código de lote", value="")
+
+    st.markdown("### Integración")
+    i1, i2 = st.columns(2)
+
+    if not df_rutas.empty:
+        ruta_idx = i1.selectbox(
+            "Ruta de producción (opcional)",
+            options=[None] + df_rutas.index.tolist(),
+            format_func=lambda i: "Sin ruta" if i is None else f"{df_rutas.loc[i, 'codigo']} · {df_rutas.loc[i, 'nombre']}",
+        )
+        ruta_sel = df_rutas.loc[ruta_idx] if ruta_idx is not None else None
+    else:
+        ruta_sel = None
+        i1.caption("No hay rutas activas.")
+
+    orden_produccion_id = i2.number_input("Orden de producción ID (opcional)", min_value=0, value=0, step=1)
 
     st.markdown("### Parámetros de sublimación")
     p1, p2, p3, p4 = st.columns(4)
@@ -576,7 +1064,27 @@ def _render_registro(usuario: str) -> None:
 
     p5, p6 = st.columns(2)
     papel_tipo = p5.text_input("Tipo de papel", value="Papel sublimación")
-    tinta_tipo = p6.text_input("Tipo de tinta", value="Tinta sublimación")
+
+    if not df_tintas.empty:
+        tinta_idx = p6.selectbox(
+            "Tinta base inventario (opcional)",
+            options=[None] + df_tintas.index.tolist(),
+            format_func=lambda i: "Manual" if i is None else f"{df_tintas.loc[i, 'nombre']} · {df_tintas.loc[i, 'stock']} {df_tintas.loc[i, 'unidad']}",
+        )
+        tinta_sel = df_tintas.loc[tinta_idx] if tinta_idx is not None else None
+        tinta_tipo = str(tinta_sel["nombre"]) if tinta_sel is not None else "Tinta sublimación"
+        costo_tinta_base = float(tinta_sel["costo_ref"]) if tinta_sel is not None else 0.0
+    else:
+        tinta_sel = None
+        tinta_tipo = p6.text_input("Tipo de tinta", value="Tinta sublimación")
+        costo_tinta_base = 0.0
+
+    st.markdown("### Operación y capacidad")
+    o1, o2, o3, o4 = st.columns(4)
+    ancho_cm = o1.number_input("Ancho diseño (cm)", min_value=0.0, value=10.0, format="%.2f")
+    alto_cm = o2.number_input("Alto diseño (cm)", min_value=0.0, value=10.0, format="%.2f")
+    tinta_ml_unidad = o3.number_input("Tinta estimada por unidad (ml)", min_value=0.0, value=1.5, format="%.4f")
+    minutos_unidad = o4.number_input("Minutos por unidad", min_value=0.0, value=5.0, format="%.4f")
 
     st.markdown("### Costos del lote")
     total_transfer_default = float(_safe_float(trabajo_sel["costo_transfer_total"], 0.0)) if trabajo_sel is not None else 0.0
@@ -585,15 +1093,23 @@ def _render_registro(usuario: str) -> None:
     potencia_kw = k2.number_input("Potencia máquina (kW)", min_value=0.0, value=1.5, format="%.4f")
     costo_kwh = k3.number_input("Costo kWh USD", min_value=0.0, value=0.15, format="%.4f")
 
-    k4, k5, k6 = st.columns(3)
-    minutos_unidad = k4.number_input("Minutos por unidad", min_value=0.0, value=5.0, format="%.4f")
-    salario_hora = k5.number_input("Salario/hora operador", min_value=0.0, value=3.0, format="%.4f")
-    unidades_hora = k6.number_input("Unidades por hora", min_value=0.1, value=12.0, format="%.4f")
+    k4, k5, k6, k7 = st.columns(4)
+    salario_hora = k4.number_input("Salario/hora operador", min_value=0.0, value=3.0, format="%.4f")
+    unidades_hora = k5.number_input("Unidades por hora", min_value=0.1, value=12.0, format="%.4f")
+    valor_maquina = k6.number_input("Valor máquina USD", min_value=0.0, value=1500.0, format="%.2f")
+    vida_horas = k7.number_input("Vida útil máquina (horas)", min_value=1.0, value=5000.0, format="%.2f")
 
-    k7, k8, k9 = st.columns(3)
-    valor_maquina = k7.number_input("Valor máquina USD", min_value=0.0, value=1500.0, format="%.2f")
-    vida_horas = k8.number_input("Vida útil máquina (horas)", min_value=1.0, value=5000.0, format="%.2f")
-    costo_indirecto_unit = k9.number_input("Costo indirecto unitario USD", min_value=0.0, value=0.0, format="%.4f")
+    k8, k9 = st.columns(2)
+    costo_indirecto_unit = k8.number_input("Costo indirecto unitario USD", min_value=0.0, value=0.0, format="%.4f")
+    costo_tinta_unit = k9.number_input("Costo tinta unitario USD", min_value=0.0, value=float(costo_tinta_base), format="%.4f")
+
+    operacion = _calc_operacion(
+        cantidad_total=float(cantidad_programada),
+        minutos_unidad=float(minutos_unidad),
+        ancho_cm=float(ancho_cm),
+        alto_cm=float(alto_cm),
+        tinta_ml_unidad=float(tinta_ml_unidad),
+    )
 
     costos = _calc_costs(
         cantidad_total=float(cantidad_programada),
@@ -606,18 +1122,27 @@ def _render_registro(usuario: str) -> None:
         valor_maquina=float(valor_maquina),
         vida_horas=float(vida_horas),
         costo_indirecto_unit=float(costo_indirecto_unit),
+        costo_tinta_unit=float(costo_tinta_unit),
     )
+
+    st.markdown("### Resumen técnico")
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Área estimada", f"{operacion['area_estimada_cm2']:,.2f} cm²")
+    t2.metric("Tinta estimada", f"{operacion['consumo_tinta_estimado_ml']:,.2f} ml")
+    t3.metric("Tiempo total", f"{operacion['tiempo_total_estimado_min']:,.2f} min")
+    t4.metric("Uso de capacidad", f"{operacion['utilizacion_capacidad_pct']:,.2f}%")
 
     st.markdown("### Resumen de costo")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Transfer unitario", f"$ {costos['costo_transfer_unit']:.4f}")
-    m2.metric("Energía unitaria", f"$ {costos['costo_energia_unit']:.4f}")
-    m3.metric("Mano de obra unitaria", f"$ {costos['costo_mano_obra_unit']:.4f}")
-    m4.metric("Depreciación unitaria", f"$ {costos['costo_depreciacion_unit']:.4f}")
+    m2.metric("Tinta unitaria", f"$ {costos['costo_tinta_unit']:.4f}")
+    m3.metric("Energía unitaria", f"$ {costos['costo_energia_unit']:.4f}")
+    m4.metric("Mano de obra unitaria", f"$ {costos['costo_mano_obra_unit']:.4f}")
 
-    m5, m6 = st.columns(2)
-    m5.metric("Costo unitario final", f"$ {costos['costo_unitario_final']:.4f}")
-    m6.metric("Costo total final", f"$ {costos['costo_total_final']:.2f}")
+    m5, m6, m7 = st.columns(3)
+    m5.metric("Depreciación unitaria", f"$ {costos['costo_depreciacion_unit']:.4f}")
+    m6.metric("Costo unitario final", f"$ {costos['costo_unitario_final']:.4f}")
+    m7.metric("Costo total final", f"$ {costos['costo_total_final']:.2f}")
 
     observaciones = st.text_area("Observaciones del lote")
 
@@ -642,8 +1167,14 @@ def _render_registro(usuario: str) -> None:
             observaciones=observaciones,
             costo_transfer_total=float(costo_transfer_total),
             costos=costos,
+            operacion=operacion,
             origen="cola_cmyk" if trabajo_sel is not None else "manual",
             referencia_origen=str(trabajo_sel.name) if trabajo_sel is not None else "",
+            ruta_id=int(ruta_sel["id"]) if ruta_sel is not None else None,
+            ruta_codigo=str(ruta_sel["codigo"]) if ruta_sel is not None else "",
+            ruta_nombre=str(ruta_sel["nombre"]) if ruta_sel is not None else "",
+            orden_produccion_id=int(orden_produccion_id) if int(orden_produccion_id) > 0 else None,
+            lote_codigo=lote_codigo,
         )
 
         st.success(f"Lote registrado correctamente. ID #{lote_id}")
@@ -661,7 +1192,7 @@ def _render_control_produccion(usuario: str) -> None:
     lote_id = st.selectbox(
         "Selecciona lote",
         options=df_lotes["id"].tolist(),
-        format_func=lambda x: f"Lote #{x} · {df_lotes.loc[df_lotes['id'] == x, 'producto'].iloc[0]}",
+        format_func=lambda x: f"{df_lotes.loc[df_lotes['id'] == x, 'codigo'].iloc[0]} · {df_lotes.loc[df_lotes['id'] == x, 'producto'].iloc[0]}",
     )
 
     row = df_lotes[df_lotes["id"] == lote_id].iloc[0]
@@ -681,8 +1212,34 @@ def _render_control_produccion(usuario: str) -> None:
     rechazada = r4.number_input("Cantidad rechazada", min_value=0.0, value=float(row["cantidad_rechazada"] or 0.0), step=1.0)
 
     merma = max(float(producida) - float(aprobada) - float(reproceso), 0.0)
-    st.caption(f"Merma calculada sugerida: {merma:,.2f} unidades")
 
+    rr1, rr2, rr3 = st.columns(3)
+    consumo_tinta_real = rr1.number_input(
+        "Consumo real tinta (ml)",
+        min_value=0.0,
+        value=float(row["consumo_tinta_estimado_ml"] or 0.0),
+        format="%.4f",
+    )
+    consumo_material_real = rr2.number_input(
+        "Consumo real material",
+        min_value=0.0,
+        value=float(row["consumo_material_estimado_unid"] or 0.0),
+        format="%.4f",
+    )
+    tiempo_total_real = rr3.number_input(
+        "Tiempo total real (min)",
+        min_value=0.0,
+        value=float(row["tiempo_total_estimado_min"] or 0.0),
+        format="%.2f",
+    )
+
+    calidad_acabado = st.selectbox(
+        "Calidad del acabado",
+        CALIDADES_ACABADO,
+        index=CALIDADES_ACABADO.index(str(row["calidad_acabado"]).lower()) if str(row["calidad_acabado"]).lower() in CALIDADES_ACABADO else 1,
+    )
+
+    st.caption(f"Merma calculada sugerida: {merma:,.2f} unidades")
     prod_obs = st.text_area("Observaciones de producción", value=_clean_text(row["observaciones"]), key="sub_prod_obs")
 
     if st.button("💾 Guardar resultado de producción", use_container_width=True):
@@ -693,6 +1250,10 @@ def _render_control_produccion(usuario: str) -> None:
             reproceso=float(reproceso),
             merma=float(merma),
             rechazada=float(rechazada),
+            consumo_tinta_real_ml=float(consumo_tinta_real),
+            consumo_material_real_unid=float(consumo_material_real),
+            tiempo_total_real_min=float(tiempo_total_real),
+            calidad_acabado=str(calidad_acabado),
             observaciones=prod_obs,
         )
         st.success("Resultado de producción actualizado.")
@@ -753,6 +1314,56 @@ def _render_control_produccion(usuario: str) -> None:
         st.success("Merma registrada.")
         st.rerun()
 
+    st.divider()
+    st.markdown("### 🔗 Interoperabilidad")
+
+    def _build_to_calidad():
+        return (
+            "sublimacion_lote",
+            {
+                "lote_id": int(lote_id),
+                "codigo": str(row["codigo"]),
+                "producto": str(row["producto"]),
+                "cliente": str(row["cliente"]),
+                "cantidad_programada": float(row["cantidad_programada"] or 0.0),
+                "estado": str(row["estado"]),
+            },
+        )
+
+    def _build_to_mermas():
+        return (
+            "sublimacion_merma",
+            {
+                "lote_id": int(lote_id),
+                "codigo": str(row["codigo"]),
+                "producto": str(row["producto"]),
+                "merma_pct": float(row["merma_pct"] or 0.0),
+                "cantidad_merma": float(row["cantidad_merma"] or 0.0),
+            },
+        )
+
+    def _build_to_costeo():
+        return (
+            "sublimacion_costeo",
+            {
+                "lote_id": int(lote_id),
+                "codigo": str(row["codigo"]),
+                "producto": str(row["producto"]),
+                "costo_unitario_final": float(row["costo_unitario_final"] or 0.0),
+                "costo_total_final": float(row["costo_total_final"] or 0.0),
+                "costo_total_real": float(row["costo_total_real"] or 0.0),
+            },
+        )
+
+    render_send_buttons(
+        source_module="sublimación",
+        payload_builders={
+            "control de calidad": _build_to_calidad,
+            "mermas y desperdicio": _build_to_mermas,
+            "costeo industrial": _build_to_costeo,
+        },
+    )
+
 
 def _render_historial() -> None:
     st.subheader("📚 Historial de sublimación")
@@ -772,6 +1383,7 @@ def _render_historial() -> None:
             view["producto"].astype(str).str.contains(buscar, case=False, na=False)
             | view["cliente"].astype(str).str.contains(buscar, case=False, na=False)
             | view["diseno"].astype(str).str.contains(buscar, case=False, na=False)
+            | view["codigo"].astype(str).str.contains(buscar, case=False, na=False)
         )
         view = view[mask]
 
@@ -788,9 +1400,15 @@ def _render_historial() -> None:
             "cantidad_aprobada": st.column_config.NumberColumn("Aprobada", format="%.2f"),
             "cantidad_reproceso": st.column_config.NumberColumn("Reproceso", format="%.2f"),
             "cantidad_merma": st.column_config.NumberColumn("Merma", format="%.2f"),
+            "consumo_tinta_estimado_ml": st.column_config.NumberColumn("Tinta est.", format="%.2f"),
+            "consumo_tinta_real_ml": st.column_config.NumberColumn("Tinta real", format="%.2f"),
+            "tiempo_total_estimado_min": st.column_config.NumberColumn("Tiempo est.", format="%.2f"),
+            "tiempo_total_real_min": st.column_config.NumberColumn("Tiempo real", format="%.2f"),
             "costo_unitario_final": st.column_config.NumberColumn("Costo unitario", format="%.4f"),
-            "costo_total_final": st.column_config.NumberColumn("Costo total", format="%.2f"),
+            "costo_total_final": st.column_config.NumberColumn("Costo total est.", format="%.2f"),
+            "costo_total_real": st.column_config.NumberColumn("Costo total real", format="%.2f"),
             "merma_pct": st.column_config.NumberColumn("Merma %", format="%.2f"),
+            "utilizacion_capacidad_pct": st.column_config.NumberColumn("Capacidad %", format="%.2f"),
         },
     )
 
@@ -803,6 +1421,11 @@ def _render_historial() -> None:
     if not df_mermas.empty:
         st.markdown("### Mermas registradas")
         st.dataframe(df_mermas, use_container_width=True, hide_index=True)
+
+    df_hist = _load_historial_df()
+    if not df_hist.empty:
+        st.markdown("### Bitácora")
+        st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
 
 def _render_metricas() -> None:
@@ -817,25 +1440,46 @@ def _render_metricas() -> None:
         return
 
     total_lotes = len(df_lotes)
-    total_programado = float(df_lotes["cantidad_programada"].sum())
-    total_aprobado = float(df_lotes["cantidad_aprobada"].sum())
-    total_merma = float(df_lotes["cantidad_merma"].sum())
-    costo_total = float(df_lotes["costo_total_final"].sum())
-    merma_pct_global = (total_merma / max(total_programado, 0.0001)) * 100.0 if total_programado > 0 else 0.0
+    total_programado = _safe_sum(df_lotes, "cantidad_programada")
+    total_aprobado = _safe_sum(df_lotes, "cantidad_aprobada")
+    total_merma = _safe_sum(df_lotes, "cantidad_merma")
+    costo_total = _safe_sum(df_lotes, "costo_total_final")
+    costo_total_real = _safe_sum(df_lotes, "costo_total_real")
+    tiempo_total_est = _safe_sum(df_lotes, "tiempo_total_estimado_min")
+    tiempo_total_real = _safe_sum(df_lotes, "tiempo_total_real_min")
 
-    m1, m2, m3, m4, m5 = st.columns(5)
+    merma_pct_global = (total_merma / max(total_programado, 0.0001)) * 100.0 if total_programado > 0 else 0.0
+    eficiencia_global = (total_aprobado / max(total_programado, 0.0001)) * 100.0 if total_programado > 0 else 0.0
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Lotes", total_lotes)
     m2.metric("Unidades programadas", f"{total_programado:,.2f}")
     m3.metric("Unidades aprobadas", f"{total_aprobado:,.2f}")
     m4.metric("Merma global", f"{merma_pct_global:,.2f}%")
-    m5.metric("Costo total", f"$ {costo_total:,.2f}")
+    m5.metric("Costo estimado", f"$ {costo_total:,.2f}")
+    m6.metric("Costo real", f"$ {costo_total_real:,.2f}")
 
-    if not df_lotes.empty:
-        por_producto = (
-            df_lotes.groupby("producto", as_index=False)[["cantidad_programada", "cantidad_aprobada", "cantidad_merma", "costo_total_final"]]
-            .sum()
-            .sort_values("costo_total_final", ascending=False)
-        )
+    n1, n2, n3 = st.columns(3)
+    n1.metric("Eficiencia global", f"{eficiencia_global:,.2f}%")
+    n2.metric("Tiempo estimado", f"{tiempo_total_est:,.2f} min")
+    n3.metric("Tiempo real", f"{tiempo_total_real:,.2f} min")
+
+    por_producto = (
+        df_lotes.groupby("producto", as_index=False)[
+            [
+                "cantidad_programada",
+                "cantidad_aprobada",
+                "cantidad_merma",
+                "consumo_tinta_estimado_ml",
+                "consumo_tinta_real_ml",
+                "costo_total_final",
+                "costo_total_real",
+            ]
+        ]
+        .sum()
+        .sort_values("costo_total_real", ascending=False)
+    )
+    if not por_producto.empty:
         st.markdown("### Producción por producto")
         st.dataframe(por_producto, use_container_width=True, hide_index=True)
 
@@ -868,6 +1512,14 @@ def render_sublimacion(usuario: str) -> None:
 
     st.title("🔥 Sublimación Industrial PRO")
     st.caption(f"Operador: {usuario}")
+
+    def _apply_sublimacion_inbox(inbox: dict) -> None:
+        payload = dict(inbox.get("payload_data", {}))
+        cola = st.session_state.get("cola_sublimacion", [])
+        cola.append(payload)
+        st.session_state["cola_sublimacion"] = cola
+
+    render_module_inbox("sublimación", apply_callback=_apply_sublimacion_inbox, clear_after_apply=False)
 
     tabs = st.tabs(
         [
