@@ -7,7 +7,7 @@ import streamlit as st
 st.set_page_config(
     page_title="Imperio Atómico ERP",
     layout="wide",
-    page_icon="⚛️"
+    page_icon="⚛️",
 )
 
 # ==================================================
@@ -115,7 +115,7 @@ st.markdown(
 # ==================================================
 
 st.sidebar.title("⚛️ Imperio Atómico ERP")
-st.sidebar.caption("Accede rapido a cada modulo desde el menu lateral.")
+st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral.")
 
 if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
     st.session_state.clear()
