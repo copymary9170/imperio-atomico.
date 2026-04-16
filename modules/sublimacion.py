@@ -307,31 +307,6 @@ def _ensure_sublimacion_tables() -> None:
             """
         )
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_fecha ON sublimacion_lotes(fecha)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_estado ON sublimacion_lotes(estado)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_codigo ON sublimacion_lotes(codigo)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_ruta ON sublimacion_lotes(ruta_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sublimacion_qc_lote ON sublimacion_control_calidad(lote_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sublimacion_mermas_lote ON sublimacion_mermas(lote_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sublimacion_historial_lote ON sublimacion_historial(lote_id, fecha)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sublimacion_consumos_lote ON sublimacion_consumos(lote_id, fecha)"
-        )
-
         cols = {r[1] for r in conn.execute("PRAGMA table_info(sublimacion_lotes)").fetchall()}
         missing = {
             "codigo": "ALTER TABLE sublimacion_lotes ADD COLUMN codigo TEXT",
@@ -370,6 +345,31 @@ def _ensure_sublimacion_tables() -> None:
             if col not in cols:
                 conn.execute(sql)
 
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_fecha ON sublimacion_lotes(fecha)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_estado ON sublimacion_lotes(estado)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_codigo ON sublimacion_lotes(codigo)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_ruta ON sublimacion_lotes(ruta_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_qc_lote ON sublimacion_control_calidad(lote_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_mermas_lote ON sublimacion_mermas(lote_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_historial_lote ON sublimacion_historial(lote_id, fecha)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sublimacion_consumos_lote ON sublimacion_consumos(lote_id, fecha)"
+        )
+
         rows = conn.execute(
             "SELECT id, codigo FROM sublimacion_lotes WHERE codigo IS NULL OR TRIM(codigo) = '' ORDER BY id ASC"
         ).fetchall()
@@ -383,27 +383,6 @@ def _ensure_sublimacion_tables() -> None:
 # ============================================================
 # HISTORIAL
 # ============================================================
-
-def _log_sublimacion(lote_id: int, usuario: str, accion: str, detalle: str = "") -> None:
-    with db_transaction() as conn:
-        conn.execute(
-            """
-            INSERT INTO sublimacion_historial (lote_id, usuario, accion, detalle)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                int(lote_id),
-                _clean_text(usuario) or "Sistema",
-                _clean_text(accion),
-                _clean_text(detalle),
-            ),
-        )
-
-
-# ============================================================
-# CARGADORES
-# ============================================================
-
 def _load_queue_df() -> pd.DataFrame:
     cola = st.session_state.get("cola_sublimacion", [])
     if not cola:
