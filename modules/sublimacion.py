@@ -1,4 +1,4 @@
-fom __future__ import annotations
+from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
