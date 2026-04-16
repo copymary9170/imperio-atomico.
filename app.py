@@ -1,4 +1,4 @@
-impot streamlit as st
+impt streamlit as st
 
 # ==================================================
 # CONFIGURACION DE LA APP
