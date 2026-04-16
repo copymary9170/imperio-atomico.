@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import date, datetime
 from typing import Any
 
@@ -342,8 +343,16 @@ def _ensure_sublimacion_tables() -> None:
             "costo_total_real": "ALTER TABLE sublimacion_lotes ADD COLUMN costo_total_real REAL DEFAULT 0",
         }
         for col, sql in missing.items():
-            if col not in cols:
+            if col in cols:
+                continue
+            try:
                 conn.execute(sql)
+                cols.add(col)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" in str(exc).lower():
+                    cols.add(col)
+                    continue
+                raise
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_fecha ON sublimacion_lotes(fecha)"
