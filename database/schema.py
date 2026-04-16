@@ -116,7 +116,11 @@ DEFAULT_ROLE_PERMISSIONS = {
         "ventas.view",
         "ventas.create",
         "cotizaciones.view",
+        "produccion.execute",
         "produccion.plan",
+        "produccion.route",
+        "produccion.quality",
+        "produccion.scrap",
         "gastos.view",
         "caja.view",
         "tesoreria.view",
@@ -837,6 +841,280 @@ CREATE TABLE IF NOT EXISTS plan_produccion_seguimiento (
     FOREIGN KEY (detalle_id) REFERENCES plan_produccion_detalle(id)
 );
 
+/* ==========================================================
+   RUTAS DE PRODUCCION
+   ========================================================== */
+
+CREATE TABLE IF NOT EXISTS rutas_produccion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    codigo TEXT NOT NULL UNIQUE,
+    nombre TEXT NOT NULL,
+    producto_tipo TEXT,
+    descripcion TEXT,
+    estado TEXT NOT NULL DEFAULT 'activa',
+    tiempo_total_min REAL NOT NULL DEFAULT 0,
+    costo_base_usd REAL NOT NULL DEFAULT 0,
+    observaciones TEXT
+);
+
+CREATE TABLE IF NOT EXISTS rutas_produccion_detalle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ruta_id INTEGER NOT NULL,
+    secuencia INTEGER NOT NULL DEFAULT 1,
+    proceso TEXT NOT NULL,
+    centro_trabajo TEXT,
+    maquina TEXT,
+    operario TEXT,
+    insumo_principal TEXT,
+    tiempo_estimado_min REAL NOT NULL DEFAULT 0,
+    costo_estimado_usd REAL NOT NULL DEFAULT 0,
+    punto_control INTEGER NOT NULL DEFAULT 0,
+    requiere_mantenimiento INTEGER NOT NULL DEFAULT 0,
+    observaciones TEXT,
+    FOREIGN KEY (ruta_id) REFERENCES rutas_produccion(id)
+);
+
+/* ==========================================================
+   CORTE INDUSTRIAL
+   ========================================================== */
+
+CREATE TABLE IF NOT EXISTS ordenes_corte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo TEXT NOT NULL UNIQUE,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    archivo_nombre TEXT,
+    referencia TEXT,
+    material_id INTEGER,
+    material_nombre TEXT,
+    material_unidad TEXT DEFAULT 'unidad',
+    equipo_id INTEGER,
+    equipo_nombre TEXT,
+    ruta_id INTEGER,
+    ruta_codigo TEXT,
+    ruta_nombre TEXT,
+    orden_produccion_id INTEGER,
+    profundidad REAL NOT NULL DEFAULT 0,
+    velocidad REAL NOT NULL DEFAULT 0,
+    presion REAL NOT NULL DEFAULT 0,
+    area_cm2_estimada REAL NOT NULL DEFAULT 0,
+    cm_corte_estimado REAL NOT NULL DEFAULT 0,
+    tiempo_estimado_min REAL NOT NULL DEFAULT 0,
+    costo_material_estimado_usd REAL NOT NULL DEFAULT 0,
+    costo_mano_obra_estimado_usd REAL NOT NULL DEFAULT 0,
+    costo_desgaste_estimado_usd REAL NOT NULL DEFAULT 0,
+    costo_total_estimado_usd REAL NOT NULL DEFAULT 0,
+    cantidad_material_estimada REAL NOT NULL DEFAULT 0,
+    desgaste_por_cm REAL NOT NULL DEFAULT 0,
+    lote TEXT,
+    prioridad TEXT NOT NULL DEFAULT 'normal',
+    estado TEXT NOT NULL DEFAULT 'analizado',
+    observaciones TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ejecuciones_corte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_corte_id INTEGER NOT NULL,
+    fecha_inicio TEXT,
+    fecha_fin TEXT,
+    usuario TEXT NOT NULL,
+    cm_corte_real REAL NOT NULL DEFAULT 0,
+    tiempo_real_min REAL NOT NULL DEFAULT 0,
+    material_real_usado REAL NOT NULL DEFAULT 0,
+    merma REAL NOT NULL DEFAULT 0,
+    retazo_reutilizable REAL NOT NULL DEFAULT 0,
+    costo_material_real_usd REAL NOT NULL DEFAULT 0,
+    costo_mano_obra_real_usd REAL NOT NULL DEFAULT 0,
+    costo_desgaste_real_usd REAL NOT NULL DEFAULT 0,
+    costo_real_usd REAL NOT NULL DEFAULT 0,
+    desgaste_registrado REAL NOT NULL DEFAULT 0,
+    incidencias TEXT,
+    estado_final TEXT NOT NULL DEFAULT 'terminado',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+);
+
+CREATE TABLE IF NOT EXISTS movimientos_corte_material (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_corte_id INTEGER NOT NULL,
+    inventario_id INTEGER,
+    material_nombre TEXT,
+    tipo TEXT NOT NULL DEFAULT 'salida',
+    cantidad REAL NOT NULL DEFAULT 0,
+    unidad TEXT,
+    referencia TEXT,
+    usuario TEXT NOT NULL,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+);
+
+CREATE TABLE IF NOT EXISTS retazos_corte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_corte_id INTEGER NOT NULL,
+    inventario_id_origen INTEGER,
+    material_nombre TEXT,
+    cantidad REAL NOT NULL DEFAULT 0,
+    unidad TEXT,
+    reutilizable INTEGER NOT NULL DEFAULT 1,
+    observaciones TEXT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+);
+
+CREATE TABLE IF NOT EXISTS corte_historial (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_corte_id INTEGER NOT NULL,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    accion TEXT NOT NULL,
+    detalle TEXT,
+    FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+);
+
+/* ==========================================================
+   SUBLIMACION
+   ========================================================== */
+
+CREATE TABLE IF NOT EXISTS sublimacion_lotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT,
+    origen TEXT,
+    referencia_origen TEXT,
+    cliente TEXT,
+    producto TEXT NOT NULL,
+    tipo_producto TEXT DEFAULT 'Otro',
+    diseno TEXT,
+    ruta_id INTEGER,
+    ruta_codigo TEXT,
+    ruta_nombre TEXT,
+    orden_produccion_id INTEGER,
+    maquina TEXT,
+    capacidad_instalada_hora REAL NOT NULL DEFAULT 0,
+    temperatura_c REAL DEFAULT 0,
+    tiempo_seg REAL DEFAULT 0,
+    presion TEXT,
+    papel_tipo TEXT,
+    tinta_tipo TEXT,
+    tinta_ml_estimado REAL NOT NULL DEFAULT 0,
+    tinta_ml_real REAL NOT NULL DEFAULT 0,
+    material_base_estimado REAL NOT NULL DEFAULT 0,
+    material_base_real REAL NOT NULL DEFAULT 0,
+    cantidad_programada REAL NOT NULL DEFAULT 0,
+    cantidad_producida REAL NOT NULL DEFAULT 0,
+    cantidad_aprobada REAL NOT NULL DEFAULT 0,
+    cantidad_reproceso REAL NOT NULL DEFAULT 0,
+    cantidad_merma REAL NOT NULL DEFAULT 0,
+    cantidad_rechazada REAL NOT NULL DEFAULT 0,
+    reproceso_pct REAL NOT NULL DEFAULT 0,
+    merma_pct REAL NOT NULL DEFAULT 0,
+    calidad_promedio REAL NOT NULL DEFAULT 0,
+    observaciones TEXT,
+    costo_transfer_total REAL DEFAULT 0,
+    costo_transfer_unit REAL DEFAULT 0,
+    costo_tinta_unit REAL DEFAULT 0,
+    costo_material_unit REAL DEFAULT 0,
+    costo_energia_unit REAL DEFAULT 0,
+    costo_mano_obra_unit REAL DEFAULT 0,
+    costo_depreciacion_unit REAL DEFAULT 0,
+    costo_indirecto_unit REAL DEFAULT 0,
+    costo_unitario_final REAL DEFAULT 0,
+    costo_total_final REAL DEFAULT 0,
+    estado TEXT DEFAULT 'pendiente'
+);
+
+CREATE TABLE IF NOT EXISTS sublimacion_control_calidad (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lote_id INTEGER NOT NULL,
+    usuario TEXT,
+    color_correcto INTEGER DEFAULT 1,
+    transferencia_completa INTEGER DEFAULT 1,
+    sin_manchas INTEGER DEFAULT 1,
+    sin_ghosting INTEGER DEFAULT 1,
+    sin_quemado INTEGER DEFAULT 1,
+    acabado_correcto INTEGER DEFAULT 1,
+    observaciones TEXT,
+    resultado TEXT DEFAULT 'aprobado',
+    puntaje REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (lote_id) REFERENCES sublimacion_lotes(id)
+);
+
+CREATE TABLE IF NOT EXISTS sublimacion_mermas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lote_id INTEGER NOT NULL,
+    usuario TEXT,
+    tipo_falla TEXT,
+    cantidad REAL NOT NULL DEFAULT 0,
+    costo_estimado_usd REAL DEFAULT 0,
+    observaciones TEXT,
+    FOREIGN KEY (lote_id) REFERENCES sublimacion_lotes(id)
+);
+
+CREATE TABLE IF NOT EXISTS sublimacion_historial (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lote_id INTEGER NOT NULL,
+    usuario TEXT NOT NULL,
+    accion TEXT NOT NULL,
+    detalle TEXT,
+    FOREIGN KEY (lote_id) REFERENCES sublimacion_lotes(id)
+);
+
+/* ==========================================================
+   CONTROL DE CALIDAD GENERAL
+   ========================================================== */
+
+CREATE TABLE IF NOT EXISTS control_calidad_registros (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    modulo_origen TEXT NOT NULL,
+    referencia_id INTEGER,
+    referencia_codigo TEXT,
+    producto TEXT,
+    criterio TEXT,
+    resultado TEXT NOT NULL DEFAULT 'aprobado',
+    puntaje REAL NOT NULL DEFAULT 0,
+    observaciones TEXT
+);
+
+CREATE TABLE IF NOT EXISTS control_calidad_hallazgos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    control_id INTEGER NOT NULL,
+    tipo_hallazgo TEXT,
+    severidad TEXT DEFAULT 'media',
+    descripcion TEXT,
+    accion_correctiva TEXT,
+    FOREIGN KEY (control_id) REFERENCES control_calidad_registros(id)
+);
+
+/* ==========================================================
+   MERMAS Y DESPERDICIO GENERAL
+   ========================================================== */
+
+CREATE TABLE IF NOT EXISTS mermas_desperdicio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT NOT NULL,
+    modulo_origen TEXT NOT NULL,
+    referencia_id INTEGER,
+    producto TEXT,
+    tipo_merma TEXT,
+    cantidad REAL NOT NULL DEFAULT 0,
+    unidad TEXT DEFAULT 'unidad',
+    costo_estimado_usd REAL NOT NULL DEFAULT 0,
+    causa TEXT,
+    observaciones TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_inventario_sku ON inventario(sku);
 CREATE INDEX IF NOT EXISTS idx_movimientos_inventario_fecha ON movimientos_inventario(fecha);
 CREATE INDEX IF NOT EXISTS idx_movimientos_inventario_item ON movimientos_inventario(inventario_id, fecha);
@@ -889,7 +1167,6 @@ CREATE INDEX IF NOT EXISTS idx_asientos_evento_ref ON asientos_contables(evento_
 CREATE INDEX IF NOT EXISTS idx_asientos_detalle_asiento ON asientos_contables_detalle(asiento_id);
 CREATE INDEX IF NOT EXISTS idx_asientos_detalle_cuenta ON asientos_contables_detalle(cuenta_codigo);
 
-/* Indices de planificacion */
 CREATE INDEX IF NOT EXISTS idx_plan_produccion_fecha ON plan_produccion(fecha);
 CREATE INDEX IF NOT EXISTS idx_plan_produccion_estado ON plan_produccion(estado);
 CREATE INDEX IF NOT EXISTS idx_plan_produccion_prioridad ON plan_produccion(prioridad);
@@ -902,6 +1179,28 @@ CREATE INDEX IF NOT EXISTS idx_plan_produccion_recursos_detalle ON plan_producci
 CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_plan ON plan_produccion_seguimiento(plan_id);
 CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_detalle ON plan_produccion_seguimiento(detalle_id);
 CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_fecha ON plan_produccion_seguimiento(fecha);
+
+CREATE INDEX IF NOT EXISTS idx_rutas_produccion_codigo ON rutas_produccion(codigo);
+CREATE INDEX IF NOT EXISTS idx_rutas_produccion_estado ON rutas_produccion(estado);
+CREATE INDEX IF NOT EXISTS idx_rutas_produccion_detalle_ruta ON rutas_produccion_detalle(ruta_id, secuencia);
+
+CREATE INDEX IF NOT EXISTS idx_ordenes_corte_estado ON ordenes_corte(estado);
+CREATE INDEX IF NOT EXISTS idx_ordenes_corte_material ON ordenes_corte(material_id);
+CREATE INDEX IF NOT EXISTS idx_ordenes_corte_ruta ON ordenes_corte(ruta_id);
+CREATE INDEX IF NOT EXISTS idx_ejecuciones_corte_orden ON ejecuciones_corte(orden_corte_id);
+CREATE INDEX IF NOT EXISTS idx_movimientos_corte_orden ON movimientos_corte_material(orden_corte_id);
+CREATE INDEX IF NOT EXISTS idx_retazos_corte_orden ON retazos_corte(orden_corte_id);
+CREATE INDEX IF NOT EXISTS idx_corte_historial_orden ON corte_historial(orden_corte_id, fecha);
+
+CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_fecha ON sublimacion_lotes(fecha);
+CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_estado ON sublimacion_lotes(estado);
+CREATE INDEX IF NOT EXISTS idx_sublimacion_lotes_ruta ON sublimacion_lotes(ruta_id);
+CREATE INDEX IF NOT EXISTS idx_sublimacion_qc_lote ON sublimacion_control_calidad(lote_id);
+CREATE INDEX IF NOT EXISTS idx_sublimacion_mermas_lote ON sublimacion_mermas(lote_id);
+CREATE INDEX IF NOT EXISTS idx_sublimacion_historial_lote ON sublimacion_historial(lote_id, fecha);
+
+CREATE INDEX IF NOT EXISTS idx_control_calidad_modulo_ref ON control_calidad_registros(modulo_origen, referencia_id);
+CREATE INDEX IF NOT EXISTS idx_mermas_modulo_ref ON mermas_desperdicio(modulo_origen, referencia_id);
 """
 
 DEFAULT_CONFIG_VALUES = (
@@ -923,8 +1222,28 @@ def _ensure_config_defaults(conn) -> None:
     )
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (str(table_name),),
+    ).fetchone()
+    return row is not None
+
+
+def _get_table_columns(conn, table_name: str) -> set[str]:
+    if not _table_exists(conn, table_name):
+        return set()
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _ensure_column(conn, table_name: str, column_name: str, ddl: str) -> None:
+    cols = _get_table_columns(conn, table_name)
+    if column_name not in cols:
+        conn.execute(ddl)
+
+
 def _ensure_gastos_migration(conn) -> None:
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(gastos)").fetchall()}
+    columns = _get_table_columns(conn, "gastos")
     if not columns:
         return
 
@@ -974,7 +1293,7 @@ def _ensure_gastos_migration(conn) -> None:
 
 
 def _ensure_cxc_migration(conn) -> None:
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(cuentas_por_cobrar)").fetchall()}
+    columns = _get_table_columns(conn, "cuentas_por_cobrar")
     if not columns:
         return
 
@@ -1017,7 +1336,7 @@ def _ensure_cxc_migration(conn) -> None:
 
 
 def _ensure_tesoreria_migration(conn) -> None:
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(movimientos_tesoreria)").fetchall()}
+    columns = _get_table_columns(conn, "movimientos_tesoreria")
     if not columns:
         return
 
@@ -1046,7 +1365,7 @@ def _ensure_tesoreria_migration(conn) -> None:
 
 
 def _ensure_costeo_migration(conn) -> None:
-    params_columns = {row[1] for row in conn.execute("PRAGMA table_info(parametros_costeo)").fetchall()}
+    params_columns = _get_table_columns(conn, "parametros_costeo")
     if params_columns and "estado" not in params_columns:
         conn.execute("ALTER TABLE parametros_costeo ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo'")
     if params_columns and "actualizado_en" not in params_columns:
@@ -1066,7 +1385,7 @@ def _ensure_costeo_migration(conn) -> None:
         ],
     )
 
-    ordenes_columns = {row[1] for row in conn.execute("PRAGMA table_info(costeo_ordenes)").fetchall()}
+    ordenes_columns = _get_table_columns(conn, "costeo_ordenes")
     if ordenes_columns:
         if "cotizacion_id" not in ordenes_columns:
             conn.execute("ALTER TABLE costeo_ordenes ADD COLUMN cotizacion_id INTEGER")
@@ -1098,7 +1417,7 @@ def _ensure_costeo_migration(conn) -> None:
             """
         )
 
-    detalle_columns = {row[1] for row in conn.execute("PRAGMA table_info(costeo_detalle)").fetchall()}
+    detalle_columns = _get_table_columns(conn, "costeo_detalle")
     if detalle_columns and "tipo_registro" not in detalle_columns:
         conn.execute("ALTER TABLE costeo_detalle ADD COLUMN tipo_registro TEXT NOT NULL DEFAULT 'estimado'")
 
@@ -1135,7 +1454,7 @@ def _ensure_contabilidad_migration(conn) -> None:
 
 
 def _ensure_conciliacion_migration(conn) -> None:
-    movimientos_banco_cols = {row[1] for row in conn.execute("PRAGMA table_info(movimientos_bancarios)").fetchall()}
+    movimientos_banco_cols = _get_table_columns(conn, "movimientos_bancarios")
     if not movimientos_banco_cols:
         return
 
@@ -1259,18 +1578,354 @@ def _ensure_planificacion_produccion_migration(conn) -> None:
         """
     )
 
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_fecha ON plan_produccion(fecha)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_estado ON plan_produccion(estado)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_prioridad ON plan_produccion(prioridad)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_fechas ON plan_produccion(fecha_inicio, fecha_fin)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_plan ON plan_produccion_detalle(plan_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_estado ON plan_produccion_detalle(estado)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_detalle_fecha_req ON plan_produccion_detalle(fecha_requerida)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_recursos_plan ON plan_produccion_recursos(plan_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_recursos_detalle ON plan_produccion_recursos(detalle_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_plan ON plan_produccion_seguimiento(plan_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_detalle ON plan_produccion_seguimiento(detalle_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_produccion_seguimiento_fecha ON plan_produccion_seguimiento(fecha)")
+
+def _ensure_rutas_produccion_migration(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rutas_produccion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT NOT NULL,
+            codigo TEXT NOT NULL UNIQUE,
+            nombre TEXT NOT NULL,
+            producto_tipo TEXT,
+            descripcion TEXT,
+            estado TEXT NOT NULL DEFAULT 'activa',
+            tiempo_total_min REAL NOT NULL DEFAULT 0,
+            costo_base_usd REAL NOT NULL DEFAULT 0,
+            observaciones TEXT
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rutas_produccion_detalle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ruta_id INTEGER NOT NULL,
+            secuencia INTEGER NOT NULL DEFAULT 1,
+            proceso TEXT NOT NULL,
+            centro_trabajo TEXT,
+            maquina TEXT,
+            operario TEXT,
+            insumo_principal TEXT,
+            tiempo_estimado_min REAL NOT NULL DEFAULT 0,
+            costo_estimado_usd REAL NOT NULL DEFAULT 0,
+            punto_control INTEGER NOT NULL DEFAULT 0,
+            requiere_mantenimiento INTEGER NOT NULL DEFAULT 0,
+            observaciones TEXT,
+            FOREIGN KEY (ruta_id) REFERENCES rutas_produccion(id)
+        )
+        """
+    )
+
+
+def _ensure_corte_migration(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ordenes_corte (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT NOT NULL UNIQUE,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT NOT NULL,
+            archivo_nombre TEXT,
+            referencia TEXT,
+            material_id INTEGER,
+            material_nombre TEXT,
+            material_unidad TEXT DEFAULT 'unidad',
+            equipo_id INTEGER,
+            equipo_nombre TEXT,
+            ruta_id INTEGER,
+            ruta_codigo TEXT,
+            ruta_nombre TEXT,
+            orden_produccion_id INTEGER,
+            profundidad REAL NOT NULL DEFAULT 0,
+            velocidad REAL NOT NULL DEFAULT 0,
+            presion REAL NOT NULL DEFAULT 0,
+            area_cm2_estimada REAL NOT NULL DEFAULT 0,
+            cm_corte_estimado REAL NOT NULL DEFAULT 0,
+            tiempo_estimado_min REAL NOT NULL DEFAULT 0,
+            costo_material_estimado_usd REAL NOT NULL DEFAULT 0,
+            costo_mano_obra_estimado_usd REAL NOT NULL DEFAULT 0,
+            costo_desgaste_estimado_usd REAL NOT NULL DEFAULT 0,
+            costo_total_estimado_usd REAL NOT NULL DEFAULT 0,
+            cantidad_material_estimada REAL NOT NULL DEFAULT 0,
+            desgaste_por_cm REAL NOT NULL DEFAULT 0,
+            lote TEXT,
+            prioridad TEXT NOT NULL DEFAULT 'normal',
+            estado TEXT NOT NULL DEFAULT 'analizado',
+            observaciones TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    _ensure_column(conn, "ordenes_corte", "material_unidad", "ALTER TABLE ordenes_corte ADD COLUMN material_unidad TEXT DEFAULT 'unidad'")
+    _ensure_column(conn, "ordenes_corte", "ruta_id", "ALTER TABLE ordenes_corte ADD COLUMN ruta_id INTEGER")
+    _ensure_column(conn, "ordenes_corte", "ruta_codigo", "ALTER TABLE ordenes_corte ADD COLUMN ruta_codigo TEXT")
+    _ensure_column(conn, "ordenes_corte", "ruta_nombre", "ALTER TABLE ordenes_corte ADD COLUMN ruta_nombre TEXT")
+    _ensure_column(conn, "ordenes_corte", "orden_produccion_id", "ALTER TABLE ordenes_corte ADD COLUMN orden_produccion_id INTEGER")
+    _ensure_column(conn, "ordenes_corte", "costo_material_estimado_usd", "ALTER TABLE ordenes_corte ADD COLUMN costo_material_estimado_usd REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "ordenes_corte", "costo_mano_obra_estimado_usd", "ALTER TABLE ordenes_corte ADD COLUMN costo_mano_obra_estimado_usd REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "ordenes_corte", "costo_desgaste_estimado_usd", "ALTER TABLE ordenes_corte ADD COLUMN costo_desgaste_estimado_usd REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "ordenes_corte", "costo_total_estimado_usd", "ALTER TABLE ordenes_corte ADD COLUMN costo_total_estimado_usd REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "ordenes_corte", "lote", "ALTER TABLE ordenes_corte ADD COLUMN lote TEXT")
+    _ensure_column(conn, "ordenes_corte", "updated_at", "ALTER TABLE ordenes_corte ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ejecuciones_corte (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            orden_corte_id INTEGER NOT NULL,
+            fecha_inicio TEXT,
+            fecha_fin TEXT,
+            usuario TEXT NOT NULL,
+            cm_corte_real REAL NOT NULL DEFAULT 0,
+            tiempo_real_min REAL NOT NULL DEFAULT 0,
+            material_real_usado REAL NOT NULL DEFAULT 0,
+            merma REAL NOT NULL DEFAULT 0,
+            retazo_reutilizable REAL NOT NULL DEFAULT 0,
+            costo_material_real_usd REAL NOT NULL DEFAULT 0,
+            costo_mano_obra_real_usd REAL NOT NULL DEFAULT 0,
+            costo_desgaste_real_usd REAL NOT NULL DEFAULT 0,
+            costo_real_usd REAL NOT NULL DEFAULT 0,
+            desgaste_registrado REAL NOT NULL DEFAULT 0,
+            incidencias TEXT,
+            estado_final TEXT NOT NULL DEFAULT 'terminado',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+        )
+        """
+    )
+
+    _ensure_column(conn, "ejecuciones_corte", "costo_material_real_usd", "ALTER TABLE ejecuciones_corte ADD COLUMN costo_material_real_usd REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "ejecuciones_corte", "costo_mano_obra_real_usd", "ALTER TABLE ejecuciones_corte ADD COLUMN costo_mano_obra_real_usd REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "ejecuciones_corte", "costo_desgaste_real_usd", "ALTER TABLE ejecuciones_corte ADD COLUMN costo_desgaste_real_usd REAL NOT NULL DEFAULT 0")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS movimientos_corte_material (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            orden_corte_id INTEGER NOT NULL,
+            inventario_id INTEGER,
+            material_nombre TEXT,
+            tipo TEXT NOT NULL DEFAULT 'salida',
+            cantidad REAL NOT NULL DEFAULT 0,
+            unidad TEXT,
+            referencia TEXT,
+            usuario TEXT NOT NULL,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS retazos_corte (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            orden_corte_id INTEGER NOT NULL,
+            inventario_id_origen INTEGER,
+            material_nombre TEXT,
+            cantidad REAL NOT NULL DEFAULT 0,
+            unidad TEXT,
+            reutilizable INTEGER NOT NULL DEFAULT 1,
+            observaciones TEXT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS corte_historial (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            orden_corte_id INTEGER NOT NULL,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT NOT NULL,
+            accion TEXT NOT NULL,
+            detalle TEXT,
+            FOREIGN KEY (orden_corte_id) REFERENCES ordenes_corte(id)
+        )
+        """
+    )
+
+
+def _ensure_sublimacion_migration(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sublimacion_lotes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT,
+            origen TEXT,
+            referencia_origen TEXT,
+            cliente TEXT,
+            producto TEXT NOT NULL,
+            tipo_producto TEXT DEFAULT 'Otro',
+            diseno TEXT,
+            ruta_id INTEGER,
+            ruta_codigo TEXT,
+            ruta_nombre TEXT,
+            orden_produccion_id INTEGER,
+            maquina TEXT,
+            capacidad_instalada_hora REAL NOT NULL DEFAULT 0,
+            temperatura_c REAL DEFAULT 0,
+            tiempo_seg REAL DEFAULT 0,
+            presion TEXT,
+            papel_tipo TEXT,
+            tinta_tipo TEXT,
+            tinta_ml_estimado REAL NOT NULL DEFAULT 0,
+            tinta_ml_real REAL NOT NULL DEFAULT 0,
+            material_base_estimado REAL NOT NULL DEFAULT 0,
+            material_base_real REAL NOT NULL DEFAULT 0,
+            cantidad_programada REAL NOT NULL DEFAULT 0,
+            cantidad_producida REAL NOT NULL DEFAULT 0,
+            cantidad_aprobada REAL NOT NULL DEFAULT 0,
+            cantidad_reproceso REAL NOT NULL DEFAULT 0,
+            cantidad_merma REAL NOT NULL DEFAULT 0,
+            cantidad_rechazada REAL NOT NULL DEFAULT 0,
+            reproceso_pct REAL NOT NULL DEFAULT 0,
+            merma_pct REAL NOT NULL DEFAULT 0,
+            calidad_promedio REAL NOT NULL DEFAULT 0,
+            observaciones TEXT,
+            costo_transfer_total REAL DEFAULT 0,
+            costo_transfer_unit REAL DEFAULT 0,
+            costo_tinta_unit REAL DEFAULT 0,
+            costo_material_unit REAL DEFAULT 0,
+            costo_energia_unit REAL DEFAULT 0,
+            costo_mano_obra_unit REAL DEFAULT 0,
+            costo_depreciacion_unit REAL DEFAULT 0,
+            costo_indirecto_unit REAL DEFAULT 0,
+            costo_unitario_final REAL DEFAULT 0,
+            costo_total_final REAL DEFAULT 0,
+            estado TEXT DEFAULT 'pendiente'
+        )
+        """
+    )
+
+    _ensure_column(conn, "sublimacion_lotes", "ruta_id", "ALTER TABLE sublimacion_lotes ADD COLUMN ruta_id INTEGER")
+    _ensure_column(conn, "sublimacion_lotes", "ruta_codigo", "ALTER TABLE sublimacion_lotes ADD COLUMN ruta_codigo TEXT")
+    _ensure_column(conn, "sublimacion_lotes", "ruta_nombre", "ALTER TABLE sublimacion_lotes ADD COLUMN ruta_nombre TEXT")
+    _ensure_column(conn, "sublimacion_lotes", "orden_produccion_id", "ALTER TABLE sublimacion_lotes ADD COLUMN orden_produccion_id INTEGER")
+    _ensure_column(conn, "sublimacion_lotes", "capacidad_instalada_hora", "ALTER TABLE sublimacion_lotes ADD COLUMN capacidad_instalada_hora REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sublimacion_lotes", "tinta_ml_estimado", "ALTER TABLE sublimacion_lotes ADD COLUMN tinta_ml_estimado REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sublimacion_lotes", "tinta_ml_real", "ALTER TABLE sublimacion_lotes ADD COLUMN tinta_ml_real REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sublimacion_lotes", "material_base_estimado", "ALTER TABLE sublimacion_lotes ADD COLUMN material_base_estimado REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sublimacion_lotes", "material_base_real", "ALTER TABLE sublimacion_lotes ADD COLUMN material_base_real REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sublimacion_lotes", "reproceso_pct", "ALTER TABLE sublimacion_lotes ADD COLUMN reproceso_pct REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sublimacion_lotes", "calidad_promedio", "ALTER TABLE sublimacion_lotes ADD COLUMN calidad_promedio REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "sublimacion_lotes", "costo_tinta_unit", "ALTER TABLE sublimacion_lotes ADD COLUMN costo_tinta_unit REAL DEFAULT 0")
+    _ensure_column(conn, "sublimacion_lotes", "costo_material_unit", "ALTER TABLE sublimacion_lotes ADD COLUMN costo_material_unit REAL DEFAULT 0")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sublimacion_control_calidad (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            lote_id INTEGER NOT NULL,
+            usuario TEXT,
+            color_correcto INTEGER DEFAULT 1,
+            transferencia_completa INTEGER DEFAULT 1,
+            sin_manchas INTEGER DEFAULT 1,
+            sin_ghosting INTEGER DEFAULT 1,
+            sin_quemado INTEGER DEFAULT 1,
+            acabado_correcto INTEGER DEFAULT 1,
+            observaciones TEXT,
+            resultado TEXT DEFAULT 'aprobado',
+            puntaje REAL NOT NULL DEFAULT 0,
+            FOREIGN KEY (lote_id) REFERENCES sublimacion_lotes(id)
+        )
+        """
+    )
+
+    _ensure_column(conn, "sublimacion_control_calidad", "acabado_correcto", "ALTER TABLE sublimacion_control_calidad ADD COLUMN acabado_correcto INTEGER DEFAULT 1")
+    _ensure_column(conn, "sublimacion_control_calidad", "puntaje", "ALTER TABLE sublimacion_control_calidad ADD COLUMN puntaje REAL NOT NULL DEFAULT 0")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sublimacion_mermas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            lote_id INTEGER NOT NULL,
+            usuario TEXT,
+            tipo_falla TEXT,
+            cantidad REAL NOT NULL DEFAULT 0,
+            costo_estimado_usd REAL DEFAULT 0,
+            observaciones TEXT,
+            FOREIGN KEY (lote_id) REFERENCES sublimacion_lotes(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sublimacion_historial (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            lote_id INTEGER NOT NULL,
+            usuario TEXT NOT NULL,
+            accion TEXT NOT NULL,
+            detalle TEXT,
+            FOREIGN KEY (lote_id) REFERENCES sublimacion_lotes(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS control_calidad_registros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT NOT NULL,
+            modulo_origen TEXT NOT NULL,
+            referencia_id INTEGER,
+            referencia_codigo TEXT,
+            producto TEXT,
+            criterio TEXT,
+            resultado TEXT NOT NULL DEFAULT 'aprobado',
+            puntaje REAL NOT NULL DEFAULT 0,
+            observaciones TEXT
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS control_calidad_hallazgos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            control_id INTEGER NOT NULL,
+            tipo_hallazgo TEXT,
+            severidad TEXT DEFAULT 'media',
+            descripcion TEXT,
+            accion_correctiva TEXT,
+            FOREIGN KEY (control_id) REFERENCES control_calidad_registros(id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mermas_desperdicio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT NOT NULL,
+            modulo_origen TEXT NOT NULL,
+            referencia_id INTEGER,
+            producto TEXT,
+            tipo_merma TEXT,
+            cantidad REAL NOT NULL DEFAULT 0,
+            unidad TEXT DEFAULT 'unidad',
+            costo_estimado_usd REAL NOT NULL DEFAULT 0,
+            causa TEXT,
+            observaciones TEXT
+        )
+        """
+    )
 
 
 def _ensure_security_migration(conn) -> None:
@@ -1340,6 +1995,24 @@ def _ensure_security_migration(conn) -> None:
         VALUES ('Operator', 'produccion.route')
         """
     )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+        VALUES ('Operator', 'produccion.execute')
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+        VALUES ('Operator', 'produccion.quality')
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+        VALUES ('Operator', 'produccion.scrap')
+        """
+    )
 
 
 def init_schema() -> None:
@@ -1353,4 +2026,7 @@ def init_schema() -> None:
         _ensure_contabilidad_migration(conn)
         _ensure_conciliacion_migration(conn)
         _ensure_planificacion_produccion_migration(conn)
+        _ensure_rutas_produccion_migration(conn)
+        _ensure_corte_migration(conn)
+        _ensure_sublimacion_migration(conn)
         _ensure_security_migration(conn)
