@@ -15,11 +15,11 @@ ORIGENES_TESORERIA = (
     "cobro_cliente",
     "gasto",
     "pago_proveedor",
-    "compra_pago_inicial",
+    "compra_inicial_pagada",
     "ajuste_manual",
     "cierre_caja",
 )
-ESTADOS_TESORERIA = ("confirmado", "anulado")
+ESTADOS_TESORERIA = ("confirmado", "cancelado")
 
 
 def _normalize_tipo(tipo: str) -> str:
