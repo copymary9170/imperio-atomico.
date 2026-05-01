@@ -1,3 +1,4 @@
+import io
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -194,11 +195,11 @@ def _load_historial_ventas() -> pd.DataFrame:
                     COALESCE(v.impuesto_usd, 0) AS impuesto_usd,
                     COALESCE(v.total_usd, 0) AS total_usd,
                     COALESCE(v.total_bs, 0) AS total_bs,
-                    COALESCE(v.estado, 'registrada') AS estado
+                    COALESCE(v.estado, 'registrado') AS estado
                 FROM ventas v
                 LEFT JOIN clientes c ON c.id = v.cliente_id
                 LEFT JOIN ventas_detalle vd ON vd.venta_id = v.id
-                WHERE COALESCE(v.estado, 'registrada') = 'registrada'
+                WHERE COALESCE(v.estado, 'registrado') = 'registrado'
                 ORDER BY v.fecha DESC, v.id DESC
                 """,
                 conn,
@@ -358,7 +359,7 @@ def registrar_venta(
                 total_bs,
                 estado
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registrada')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registrado')
             """,
             (
                 usuario,
@@ -496,7 +497,7 @@ def registrar_venta(
             conn.execute(
                 """
                 UPDATE clientes
-                SET saldo_por_cobrar_usd = COALESCE(saldo_por_cobrar_usd, 0) + ?
+                SET saldo_a_cobrar_usd = COALESCE(saldo_a_cobrar_usd, 0) + ?
                 WHERE id = ?
                 """,
                 (money(total), int(cliente_id)),
@@ -1085,7 +1086,7 @@ def _render_tab_resumen() -> None:
                     impuesto_usd,
                     cliente_id
                 FROM ventas
-                WHERE COALESCE(estado, 'registrada') = 'registrada'
+                WHERE COALESCE(estado, 'registrado') = 'registrado'
                 """,
                 conn,
             )
@@ -1097,7 +1098,7 @@ def _render_tab_resumen() -> None:
                     SUM(v.total_usd) AS total
                 FROM ventas v
                 LEFT JOIN clientes c ON c.id = v.cliente_id
-                WHERE COALESCE(v.estado, 'registrada') = 'registrada'
+                WHERE COALESCE(v.estado, 'registrado') = 'registrado'
                 GROUP BY COALESCE(c.nombre, 'Sin cliente')
                 ORDER BY total DESC
                 """,
@@ -1113,7 +1114,7 @@ def _render_tab_resumen() -> None:
                     SUM(vd.cantidad * vd.costo_unitario_usd) AS costo_usd
                 FROM ventas_detalle vd
                 JOIN ventas v ON v.id = vd.venta_id
-                WHERE COALESCE(v.estado, 'registrada') = 'registrada'
+                WHERE COALESCE(v.estado, 'registrado') = 'registrado'
                 GROUP BY vd.descripcion
                 ORDER BY ventas_usd DESC
                 LIMIT 10
