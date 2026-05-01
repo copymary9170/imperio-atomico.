@@ -1177,7 +1177,7 @@ def registrar_compra(
         if monto_pagado_inicial_usd > 0:
             registrar_egreso(
                 conn,
-                origen="compra_pago_inicial",
+                origen="compra_inicial_pagada",
                 referencia_id=compra_id,
                 descripcion=f"Pago inicial compra #{compra_id} · {row['nombre']}",
                 monto_usd=float(monto_pagado_inicial_usd),
@@ -4673,7 +4673,7 @@ def _render_integridad_e_integraciones() -> None:
         ("👤 Proveedores", "proveedores"),
         ("💸 Cuentas por pagar", "cuentas_por_pagar_proveedores"),
         ("🧮 Costeo", "costeo_detalle"),
-        ("📚 Contabilidad", "libro_diario"),
+        ("📚 Contabilidad", "asientos_contables"),
     ]
 
     rows: list[dict[str, Any]] = []
