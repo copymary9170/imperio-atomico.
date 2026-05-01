@@ -1294,15 +1294,10 @@ def render_catalogo_hub(usuario: str | None = None) -> None:
     if usuario:
         st.caption(f"Gestión de catálogo para {usuario} · versión maestra conectada")
 
-    # bandeja opcional por si luego decides enviarle datos a catálogo
-    def _apply_catalogo_inbox(inbox: dict[str, Any]) -> None:
-        st.session_state["catalogo_prefill"] = inbox.get("payload_data", {})
+    inbox = render_module_inbox("catalogo")
 
-    render_module_inbox(
-        "catalogo",
-        apply_callback=_apply_catalogo_inbox,
-        clear_after_apply=False,
-    )
+    if inbox:
+        st.session_state["catalogo_prefill"] = inbox.get("payload_data", {})
 
     df = _load_catalogo_df()
 
@@ -1333,12 +1328,4 @@ def render_catalogo_hub(usuario: str | None = None) -> None:
         _render_editor_catalogo(df, usuario)
 
     with tab_copy:
-        _render_copy_catalogo(filado if False else filtrado)
-
-
-
-
-
-
-
-
+        _render_copy_catalogo(filtrado)
