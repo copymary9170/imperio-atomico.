@@ -129,7 +129,10 @@ def calcular_margen_estimado(
         }
 
     margen = as_positive(margen_pct if margen_pct is not None else 0.0, "Margen %")
-    precio = money(costo_total * (1 + margen / 100))
+    if margen >= 100:
+        raise ValueError("El margen debe ser menor a 100%")
+
+    precio = money(costo_total / (1 - margen / 100))
     utilidad = money(precio - costo_total)
 
     return {
