@@ -3896,7 +3896,56 @@ def _render_variantes() -> None:
         view = _filter_df_by_query(df_var.copy(), q, ["producto", "color", "sku_variante", "sku_base"])
         st.dataframe(view, use_container_width=True, hide_index=True)
 
+def _load_ordenes_compra_df() -> pd.DataFrame:
+    _ensure_inventory_support_tables()
 
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                oc.id,
+                oc.codigo,
+                oc.fecha,
+                oc.usuario,
+                COALESCE(p.nombre, 'Proveedor sin nombre') AS proveedor,
+                oc.estado,
+                oc.moneda,
+                oc.tasa_cambio,
+                oc.subtotal_usd,
+                oc.impuesto_usd,
+                oc.delivery_usd,
+                oc.total_usd,
+                oc.condicion_pago,
+                oc.fecha_entrega_estimada,
+                oc.fecha_cierre,
+                oc.observaciones
+            FROM ordenes_compra oc
+            LEFT JOIN proveedores p ON p.id = oc.proveedor_id
+            ORDER BY oc.fecha DESC, oc.id DESC
+            """
+        ).fetchall()
+
+    cols = [
+        "id",
+        "codigo",
+        "fecha",
+        "usuario",
+        "proveedor",
+        "estado",
+        "moneda",
+        "tasa_cambio",
+        "subtotal_usd",
+        "impuesto_usd",
+        "delivery_usd",
+        "total_usd",
+        "condicion_pago",
+        "fecha_entrega_estimada",
+        "fecha_cierre",
+        "observaciones",
+    ]
+
+    return pd.DataFrame(rows, columns=cols)
+    
 def _render_resumen_abastecimiento() -> None:
     st.subheader("📊 Resumen de abastecimiento")
     df_oc = _load_ordenes_compra_df()
