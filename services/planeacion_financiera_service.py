@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Dict, List, Tuple, Union
 
 import pandas as pd
 
@@ -9,7 +9,6 @@ import pandas as pd
 # ============================================================
 # ESQUEMA
 # ============================================================
-
 
 def _table_exists(conn, table_name: str) -> bool:
     row = conn.execute(
@@ -52,7 +51,7 @@ def _ensure_planeacion_schema(conn) -> None:
 # ============================================================
 
 
-def _safe_scalar(conn, query: str, params: tuple[Any, ...] = ()) -> float:
+def _safe_scalar(conn, query: str, params: Tuple[Any, ...] = ()) -> float:
     try:
         row = conn.execute(query, params).fetchone()
         if not row:
@@ -62,7 +61,7 @@ def _safe_scalar(conn, query: str, params: tuple[Any, ...] = ()) -> float:
         return 0.0
 
 
-def _safe_df(conn, query: str, params: tuple[Any, ...], columns: list[str]) -> pd.DataFrame:
+def _safe_df(conn, query: str, params: Tuple[Any, ...], columns: List[str]) -> pd.DataFrame:
     try:
         return pd.read_sql_query(query, conn, params=params)
     except Exception:
@@ -82,7 +81,7 @@ def _normalize_periodo(periodo: str) -> str:
         raise ValueError("El período debe tener formato YYYY-MM.") from exc
 
 
-def _period_bounds(periodo: str) -> tuple[str, str]:
+def _period_bounds(periodo: str) -> Tuple[str, str]:
     periodo_norm = _normalize_periodo(periodo)
     year, month = periodo_norm.split("-")
     year_i = int(year)
@@ -108,113 +107,7 @@ def _ventas_reales_periodo(conn, fecha_desde: str, fecha_hasta: str) -> float:
     return _safe_scalar(
         conn,
         """
-        SELECT COALESCE(SUM(total_usd), 0)
-        FROM ventas
-        WHERE estado IN ('registrado', 'registrada')
-          AND DATE(fecha) BETWEEN DATE(?) AND DATE(?)
-        """,
-        (fecha_desde, fecha_hasta),
-    )
-
-
-def _gastos_reales_periodo(conn, fecha_desde: str, fecha_hasta: str) -> float:
-    if not _table_exists(conn, "gastos"):
-        return 0.0
-    return _safe_scalar(
-        conn,
-        """
-        SELECT COALESCE(SUM(monto_usd), 0)
-        FROM gastos
-        WHERE estado = 'activo'
-          AND DATE(fecha) BETWEEN DATE(?) AND DATE(?)
-        """,
-        (fecha_desde, fecha_hasta),
-    )
-
-
-def _cuentas_por_cobrar_en_horizonte(conn, horizonte_dias: int) -> float:
-    if _table_exists(conn, "cuentas_por_cobrar"):
-        return _safe_scalar(
-            conn,
-            """
-            SELECT COALESCE(SUM(saldo_usd), 0)
-            FROM cuentas_por_cobrar
-            WHERE estado IN ('pendiente', 'parcial')
-              AND DATE(fecha_vencimiento) <= DATE('now', ?)
-            """,
-            (f"+{int(horizonte_dias)} day",),
-        )
-
-    return 0.0
-
-
-def _cuentas_por_pagar_en_horizonte(conn, horizonte_dias: int) -> float:
-    if _table_exists(conn, "cuentas_por_pagar_proveedores"):
-        return _safe_scalar(
-            conn,
-            """
-            SELECT COALESCE(SUM(saldo_usd), 0)
-            FROM cuentas_por_pagar_proveedores
-            WHERE estado IN ('pendiente', 'parcial')
-              AND DATE(fecha_vencimiento) <= DATE('now', ?)
-            """,
-            (f"+{int(horizonte_dias)} day",),
-        )
-
-    return 0.0
-
-
-def _saldo_actual_estimado(conn) -> float:
-    if _table_exists(conn, "movimientos_tesoreria"):
-        return _safe_scalar(
-            conn,
-            """
-            SELECT COALESCE(
-                SUM(
-                    CASE
-                        WHEN LOWER(tipo) = 'ingreso' THEN monto_usd
-                        WHEN LOWER(tipo) = 'egreso' THEN -monto_usd
-                        ELSE 0
-                    END
-                ),
-                0
-            )
-            FROM movimientos_tesoreria
-            WHERE estado = 'confirmado'
-            """,
-        )
-
-    return 0.0
-
-
-# ============================================================
-# PRESUPUESTO
-# ============================================================
-
-
-def resumen_presupuesto_operativo(conn, *, periodo: str) -> dict[str, float]:
-    _ensure_planeacion_schema(conn)
-    periodo_norm = _normalize_periodo(periodo)
-    fecha_desde, fecha_hasta = _period_bounds(periodo_norm)
-
-    ingresos_reales = _ventas_reales_periodo(conn, fecha_desde, fecha_hasta)
-    egresos_reales = _gastos_reales_periodo(conn, fecha_desde, fecha_hasta)
-
-    return {
-        "ingresos_reales_usd": float(ingresos_reales),
-        "egresos_reales_usd": float(egresos_reales),
-        "utilidad_real_usd": float(ingresos_reales - egresos_reales),
-    }
-
-
-# ============================================================
-# FLUJO DE CAJA
-# ============================================================
-
-
-def calcular_flujo_caja_proyectado(conn) -> pd.DataFrame:
-    _ensure_planeacion_schema(conn)
-
+@@ -218,64 +218,64 @@ def calcular_flujo_caja_proyectado(conn) -> pd.DataFrame:
     saldo_actual = _saldo_actual_estimado(conn)
     rows = []
 
@@ -240,7 +133,7 @@ def calcular_flujo_caja_proyectado(conn) -> pd.DataFrame:
 # ============================================================
 
 
-def generar_alertas_gerenciales(conn, *, periodo: str) -> list[dict[str, str | float]]:
+def generar_alertas_gerenciales(conn, *, periodo: str) -> List[Dict[str, Union[str, float]]]:
     resumen = resumen_presupuesto_operativo(conn, periodo=periodo)
     flujo = calcular_flujo_caja_proyectado(conn)
 
@@ -253,7 +146,7 @@ def generar_alertas_gerenciales(conn, *, periodo: str) -> list[dict[str, str | f
         if not row30.empty:
             flujo_30 = float(row30.iloc[-1]["flujo_proyectado_usd"] or 0.0)
 
-    alertas: list[dict[str, str | float]] = []
+    alertas: List[Dict[str, Union[str, float]]] = []
     if ingresos <= 0:
         alertas.append({"nivel": "error", "mensaje": "No hay ingresos registrados para el período."})
     if utilidad < 0:
