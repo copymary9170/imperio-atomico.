@@ -233,3 +233,107 @@ def calcular_flujo_caja_proyectado(conn) -> pd.DataFrame:
         )
 
     return pd.DataFrame(rows)
+
+
+# ============================================================
+# ALERTAS / CRUD PRESUPUESTO
+# ============================================================
+
+
+def generar_alertas_gerenciales(conn, *, periodo: str) -> list[dict[str, str | float]]:
+    resumen = resumen_presupuesto_operativo(conn, periodo=periodo)
+    flujo = calcular_flujo_caja_proyectado(conn)
+
+    ingresos = float(resumen.get("ingresos_reales_usd", 0.0))
+    egresos = float(resumen.get("egresos_reales_usd", 0.0))
+    utilidad = float(resumen.get("utilidad_real_usd", 0.0))
+    flujo_30 = 0.0
+    if not flujo.empty and "horizonte_dias" in flujo.columns and "flujo_proyectado_usd" in flujo.columns:
+        row30 = flujo[flujo["horizonte_dias"] == 30]
+        if not row30.empty:
+            flujo_30 = float(row30.iloc[-1]["flujo_proyectado_usd"] or 0.0)
+
+    alertas: list[dict[str, str | float]] = []
+    if ingresos <= 0:
+        alertas.append({"nivel": "error", "mensaje": "No hay ingresos registrados para el período."})
+    if utilidad < 0:
+        alertas.append({"nivel": "error", "mensaje": "La utilidad del período es negativa."})
+    if egresos > ingresos > 0:
+        alertas.append({"nivel": "warning", "mensaje": "Los egresos superan a los ingresos del período."})
+    if flujo_30 < 0:
+        alertas.append({"nivel": "error", "mensaje": "El flujo proyectado a 30 días es negativo."})
+
+    if not alertas:
+        alertas.append({"nivel": "success", "mensaje": "Sin alertas críticas en la planeación financiera."})
+
+    return alertas
+
+
+def guardar_presupuesto_operativo(
+    conn,
+    *,
+    periodo: str,
+    categoria: str,
+    tipo: str,
+    monto_presupuestado_usd: float,
+    meta_kpi_usd: float = 0.0,
+    notas: str = "",
+    usuario: str = "",
+) -> int:
+    _ensure_planeacion_schema(conn)
+    periodo_norm = _normalize_periodo(periodo)
+    tipo_norm = str(tipo).strip().lower()
+    if tipo_norm not in {"ingreso", "egreso"}:
+        raise ValueError("El tipo debe ser 'ingreso' o 'egreso'.")
+
+    cur = conn.execute(
+        """
+        INSERT INTO presupuesto_operativo (
+            periodo, categoria, tipo, monto_presupuestado_usd, meta_kpi_usd, notas, usuario
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(periodo, categoria, tipo)
+        DO UPDATE SET
+            monto_presupuestado_usd=excluded.monto_presupuestado_usd,
+            meta_kpi_usd=excluded.meta_kpi_usd,
+            notas=excluded.notas,
+            usuario=excluded.usuario,
+            updated_at=CURRENT_TIMESTAMP
+        """,
+        (
+            periodo_norm,
+            str(categoria or "Sin categoría").strip(),
+            tipo_norm,
+            float(monto_presupuestado_usd or 0.0),
+            float(meta_kpi_usd or 0.0),
+            str(notas or "").strip(),
+            str(usuario or "").strip(),
+        ),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def listar_presupuesto_operativo(conn, *, periodo: str) -> pd.DataFrame:
+    _ensure_planeacion_schema(conn)
+    periodo_norm = _normalize_periodo(periodo)
+    return _safe_df(
+        conn,
+        """
+        SELECT id, periodo, categoria, tipo, monto_presupuestado_usd, meta_kpi_usd, notas, usuario, created_at, updated_at
+        FROM presupuesto_operativo
+        WHERE periodo = ?
+        ORDER BY tipo, categoria
+        """,
+        (periodo_norm,),
+        [
+            "id",
+            "periodo",
+            "categoria",
+            "tipo",
+            "monto_presupuestado_usd",
+            "meta_kpi_usd",
+            "notas",
+            "usuario",
+            "created_at",
+            "updated_at",
+        ],
+    )
