@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Dict, List, Tuple, Union
 
 import pandas as pd
 import plotly.express as px
@@ -16,7 +17,7 @@ from services.planeacion_financiera_service import (
 )
 
 
-def _placeholder_df(columns: list[str]) -> pd.DataFrame:
+def _placeholder_df(columns: List[str]) -> pd.DataFrame:
     return pd.DataFrame(columns=columns)
 
 
@@ -53,9 +54,9 @@ def _get_horizon_value(flujo: pd.DataFrame, horizon: int, column: str) -> float:
 
 
 def _salud_financiera_score(
-    resumen: dict[str, float | str],
+    resumen: Dict[str, Union[float, str]],
     flujo: pd.DataFrame,
-) -> tuple[int, str, str]:
+) -> Tuple[int, str, str]:
     ingresos = _safe_float(resumen.get("ingresos_reales_usd"))
     egresos = _safe_float(resumen.get("egresos_reales_usd"))
     desviacion_egresos = _safe_float(resumen.get("desviacion_egresos_usd"))
