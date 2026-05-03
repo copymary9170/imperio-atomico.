@@ -6,11 +6,7 @@ import plotly.express as px
 import streamlit as st
 
 from database.connection import db_transaction
-from services.planeacion_financiera_service import (
-    calcular_flujo_caja_proyectado,
-    generar_alertas_gerenciales,
-    resumen_presupuesto_operativo,
-)
+import services.planeacion_financiera_service as planeacion_financiera_service
 from utils.calculations import calculate_daily_profit
 
 
@@ -222,9 +218,9 @@ def render_dashboard() -> None:
             kontigo_perc = _config_pct(conn, "kontigo_perc", 5.0)
 
             # Planeación financiera
-            resumen_presupuesto = resumen_presupuesto_operativo(conn, periodo=periodo)
-            flujo_proyectado = calcular_flujo_caja_proyectado(conn)
-            alertas_fin = generar_alertas_gerenciales(conn, periodo=periodo)
+            resumen_presupuesto = planeacion_financiera_service.resumen_presupuesto_operativo(conn, periodo=periodo)
+            flujo_proyectado = planeacion_financiera_service.calcular_flujo_caja_proyectado(conn)
+            alertas_fin = planeacion_financiera_service.generar_alertas_gerenciales(conn, periodo=periodo)
 
     except Exception as e:
         st.error("Error cargando panel de control.")
