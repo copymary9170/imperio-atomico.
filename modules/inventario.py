@@ -2679,6 +2679,36 @@ def _load_cuentas_por_pagar_df() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
+def _load_cuotas_compra_df() -> pd.DataFrame:
+    _ensure_inventory_support_tables()
+
+    with db_transaction() as conn:
+        return pd.read_sql_query(
+            """
+            SELECT
+                c.id,
+                c.compra_id,
+                COALESCE(p.nombre, 'Proveedor sin nombre') AS proveedor,
+                c.numero_cuota,
+                c.fecha_vencimiento,
+                c.monto_base_usd,
+                c.impuesto_pct,
+                c.impuesto_usd,
+                c.monto_total_usd,
+                c.metodo_pago,
+                c.moneda_pago,
+                c.tasa_cambio,
+                c.estado,
+                c.fecha_pago
+            FROM cuotas_compra_proveedor c
+            LEFT JOIN historial_compras hc ON hc.id = c.compra_id
+            LEFT JOIN proveedores p ON p.id = c.proveedor_id
+            ORDER BY c.fecha_vencimiento ASC, c.id ASC
+            """,
+            conn,
+        )
+
+
 def _load_pagos_proveedores_df(cuenta_por_pagar_id: int) -> pd.DataFrame:
     _ensure_inventory_support_tables()
 
