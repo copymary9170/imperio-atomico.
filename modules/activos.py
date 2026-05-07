@@ -361,14 +361,13 @@ def _estado_componente_desde_vida(vida_restante_pct: float | None) -> str:
     return "Operativo"
 
 
-def _calcular_vida_restante_pct(uso_acumulado: float | int | None, vida_util_valor: float | int | None) -> float | None:
+def _calcular_vida_restante_pct(uso_acumulado: float | int | None, vida_util_valor: float | int | None) -> float:
     vida = _safe_float(vida_util_valor, 0.0)
     if vida <= 0:
-        return None
+        return 0.0
     uso = max(0.0, _safe_float(uso_acumulado, 0.0))
     restante = 100.0 - ((uso / vida) * 100.0)
     return max(0.0, min(100.0, restante))
-
 
 def _formatear_activo_relacion(row: dict | pd.Series, incluir_unidad: bool = True) -> str:
     if isinstance(row, pd.Series):
