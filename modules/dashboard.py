@@ -208,7 +208,8 @@ def render_dashboard() -> None:
                     SUM(COALESCE(vd.subtotal_usd, 0)) AS ventas,
                     SUM(COALESCE(vd.costo_unitario_usd, 0) * COALESCE(vd.cantidad, 0)) AS costos
                 FROM ventas_detalle vd
-                WHERE vd.estado = 'activo'
+                LEFT JOIN ventas v ON v.id = vd.venta_id
+                WHERE COALESCE(v.estado, 'registrada') = 'registrada'
                 GROUP BY vd.descripcion
                 """,
                 ["descripcion", "ventas", "costos"],
