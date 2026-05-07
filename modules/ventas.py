@@ -497,7 +497,7 @@ def registrar_venta(
             conn.execute(
                 """
                 UPDATE clientes
-                SET saldo_a_cobrar_usd = COALESCE(saldo_a_cobrar_usd, 0) + ?
+                SET saldo_por_cobrar_usd = COALESCE(saldo_por_cobrar_usd, 0) + ?
                 WHERE id = ?
                 """,
                 (money(total), int(cliente_id)),
