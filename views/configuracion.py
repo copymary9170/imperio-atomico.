@@ -1,4 +1,4 @@
-fom modules.configuracion import (
+from modules.configuracion import (
     DEFAULT_CONFIG,
     get_current_config,
     render_configuracion,
