@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS clientes (
     email TEXT,
     direccion TEXT,
     limite_credito_usd REAL NOT NULL DEFAULT 0,
-    saldo_a_cobrar_usd REAL NOT NULL DEFAULT 0,
+    saldo_por_cobrar_usd REAL NOT NULL DEFAULT 0,
     notas TEXT
 );
 
@@ -1292,6 +1292,27 @@ def _ensure_gastos_migration(conn) -> None:
     )
 
 
+def _ensure_clientes_migration(conn) -> None:
+    columns = _get_table_columns(conn, "clientes")
+    if not columns:
+        return
+
+    if "saldo_por_cobrar_usd" not in columns:
+        conn.execute("ALTER TABLE clientes ADD COLUMN saldo_por_cobrar_usd REAL NOT NULL DEFAULT 0")
+        columns = _get_table_columns(conn, "clientes")
+
+    if "saldo_a_cobrar_usd" in columns:
+        conn.execute(
+            """
+            UPDATE clientes
+            SET saldo_por_cobrar_usd = CASE
+                WHEN COALESCE(saldo_por_cobrar_usd, 0) <= 0 THEN COALESCE(saldo_a_cobrar_usd, 0)
+                ELSE saldo_por_cobrar_usd
+            END
+            """
+        )
+
+
 def _ensure_cxc_migration(conn) -> None:
     columns = _get_table_columns(conn, "cuentas_por_cobrar")
     if not columns:
@@ -2020,6 +2041,7 @@ def init_schema() -> None:
         conn.executescript(SCHEMA_SQL)
         _ensure_config_defaults(conn)
         _ensure_gastos_migration(conn)
+        _ensure_clientes_migration(conn)
         _ensure_cxc_migration(conn)
         _ensure_tesoreria_migration(conn)
         _ensure_costeo_migration(conn)
