@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Optional
-import sqlite3
 import pandas as pd
 import streamlit as st
 
-from .types import ModuleBlueprint
+from database.connection import db_transaction
 
-DB_PATH = "rrhh.db"
+from .types import ModuleBlueprint
 
 ADMIN_MODULES: tuple[ModuleBlueprint, ...] = (
     ModuleBlueprint(
@@ -65,51 +64,43 @@ ADMIN_MODULES: tuple[ModuleBlueprint, ...] = (
 # DB LAYER
 # =========================
 
-def get_conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
-
 def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
+    with db_transaction() as conn:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS empleados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            documento TEXT UNIQUE NOT NULL,
+            puesto TEXT NOT NULL,
+            area TEXT NOT NULL,
+            fecha_ingreso TEXT NOT NULL,
+            estado TEXT NOT NULL
+        )
+        """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS empleados (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT NOT NULL,
-        documento TEXT UNIQUE NOT NULL,
-        puesto TEXT NOT NULL,
-        area TEXT NOT NULL,
-        fecha_ingreso TEXT NOT NULL,
-        estado TEXT NOT NULL
-    )
-    """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS asistencias (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empleado_id INTEGER,
+            fecha TEXT,
+            hora_entrada TEXT,
+            hora_salida TEXT,
+            UNIQUE(empleado_id, fecha)
+        )
+        """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS asistencias (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        empleado_id INTEGER,
-        fecha TEXT,
-        hora_entrada TEXT,
-        hora_salida TEXT,
-        UNIQUE(empleado_id, fecha)
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS solicitudes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        empleado_id INTEGER,
-        tipo TEXT,
-        motivo TEXT,
-        fecha_inicio TEXT,
-        fecha_fin TEXT,
-        estado TEXT DEFAULT 'pendiente',
-        comentario_admin TEXT
-    )
-    """)
-
-    conn.commit()
-    conn.close()
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS solicitudes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empleado_id INTEGER,
+            tipo TEXT,
+            motivo TEXT,
+            fecha_inicio TEXT,
+            fecha_fin TEXT,
+            estado TEXT DEFAULT 'pendiente',
+            comentario_admin TEXT
+        )
+        """)
 
 
 # =========================
@@ -120,126 +111,96 @@ def crear_empleado(nombre, documento, puesto, area, fecha_ingreso, estado):
     if not nombre or not documento:
         raise ValueError("Nombre y documento obligatorios")
 
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-    INSERT INTO empleados (nombre, documento, puesto, area, fecha_ingreso, estado)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, (nombre, documento, puesto, area, fecha_ingreso, estado))
-    conn.commit()
-    conn.close()
+    with db_transaction() as conn:
+        conn.execute("""
+        INSERT INTO empleados (nombre, documento, puesto, area, fecha_ingreso, estado)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (nombre, documento, puesto, area, fecha_ingreso, estado))
 
 
 def listar_empleados(estado: Optional[str] = None):
-    conn = get_conn()
-    cur = conn.cursor()
+    with db_transaction() as conn:
+        if estado and estado != "todos":
+            rows = conn.execute("SELECT * FROM empleados WHERE estado=?", (estado,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM empleados").fetchall()
 
-    if estado and estado != "todos":
-        cur.execute("SELECT * FROM empleados WHERE estado=?", (estado,))
-    else:
-        cur.execute("SELECT * FROM empleados")
-
-    rows = cur.fetchall()
-    conn.close()
     return rows
 
 
 def registrar_asistencia(empleado_id, fecha, entrada, salida):
-    conn = get_conn()
-    cur = conn.cursor()
+    with db_transaction() as conn:
+        existing = conn.execute(
+            "SELECT id FROM asistencias WHERE empleado_id=? AND fecha=?",
+            (empleado_id, fecha),
+        ).fetchone()
 
-    cur.execute("SELECT id FROM asistencias WHERE empleado_id=? AND fecha=?", (empleado_id, fecha))
-    existing = cur.fetchone()
-
-    if existing:
-        cur.execute("""
-        UPDATE asistencias
-        SET hora_entrada=COALESCE(?,hora_entrada),
-            hora_salida=COALESCE(?,hora_salida)
-        WHERE id=?
-        """, (entrada, salida, existing[0]))
-    else:
-        cur.execute("""
-        INSERT INTO asistencias (empleado_id, fecha, hora_entrada, hora_salida)
-        VALUES (?, ?, ?, ?)
-        """, (empleado_id, fecha, entrada, salida))
-
-    conn.commit()
-    conn.close()
+        if existing:
+            conn.execute("""
+            UPDATE asistencias
+            SET hora_entrada=COALESCE(?,hora_entrada),
+                hora_salida=COALESCE(?,hora_salida)
+            WHERE id=?
+            """, (entrada, salida, existing[0]))
+        else:
+            conn.execute("""
+            INSERT INTO asistencias (empleado_id, fecha, hora_entrada, hora_salida)
+            VALUES (?, ?, ?, ?)
+            """, (empleado_id, fecha, entrada, salida))
 
 
 def listar_asistencia():
-    conn = get_conn()
-    df = pd.read_sql_query("""
-    SELECT a.id, a.fecha, a.hora_entrada, a.hora_salida,
-           e.nombre
-    FROM asistencias a
-    JOIN empleados e ON e.id=a.empleado_id
-    ORDER BY a.fecha DESC
-    """, conn)
-    conn.close()
-    return df
+    with db_transaction() as conn:
+        return pd.read_sql_query("""
+        SELECT a.id, a.fecha, a.hora_entrada, a.hora_salida,
+               e.nombre
+        FROM asistencias a
+        JOIN empleados e ON e.id=a.empleado_id
+        ORDER BY a.fecha DESC
+        """, conn)
 
 
 def crear_solicitud(emp_id, tipo, motivo, fi, ff):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-    INSERT INTO solicitudes (empleado_id, tipo, motivo, fecha_inicio, fecha_fin)
-    VALUES (?, ?, ?, ?, ?)
-    """, (emp_id, tipo, motivo, fi, ff))
-
-    conn.commit()
-    conn.close()
+    with db_transaction() as conn:
+        conn.execute("""
+        INSERT INTO solicitudes (empleado_id, tipo, motivo, fecha_inicio, fecha_fin)
+        VALUES (?, ?, ?, ?, ?)
+        """, (emp_id, tipo, motivo, fi, ff))
 
 
 def listar_solicitudes(estado=None):
-    conn = get_conn()
+    with db_transaction() as conn:
+        if estado and estado != "todos":
+            return pd.read_sql_query("""
+            SELECT s.*, e.nombre FROM solicitudes s
+            JOIN empleados e ON e.id=s.empleado_id
+            WHERE estado=?
+            """, conn, params=(estado,))
 
-    if estado and estado != "todos":
-        df = pd.read_sql_query("""
-        SELECT s.*, e.nombre FROM solicitudes s
-        JOIN empleados e ON e.id=s.empleado_id
-        WHERE estado=?
-        """, conn, params=(estado,))
-    else:
-        df = pd.read_sql_query("""
+        return pd.read_sql_query("""
         SELECT s.*, e.nombre FROM solicitudes s
         JOIN empleados e ON e.id=s.empleado_id
         """, conn)
 
-    conn.close()
-    return df
-
 
 def resolver_solicitud(sol_id, estado, comentario):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-    UPDATE solicitudes
-    SET estado=?, comentario_admin=?
-    WHERE id=?
-    """, (estado, comentario, sol_id))
-
-    conn.commit()
-    conn.close()
+    with db_transaction() as conn:
+        conn.execute("""
+        UPDATE solicitudes
+        SET estado=?, comentario_admin=?
+        WHERE id=?
+        """, (estado, comentario, sol_id))
 
 
 def indicadores():
-    conn = get_conn()
-    cur = conn.cursor()
+    with db_transaction() as conn:
+        today = date.today().isoformat()
 
-    today = date.today().isoformat()
-
-    activos = cur.execute("SELECT COUNT(*) FROM empleados WHERE estado='activo'").fetchone()[0]
-    asistencias = cur.execute("SELECT COUNT(*) FROM asistencias WHERE fecha=?", (today,)).fetchone()[0]
-    pendientes = cur.execute("SELECT COUNT(*) FROM solicitudes WHERE estado='pendiente'").fetchone()[0]
-    aprobadas = cur.execute("SELECT COUNT(*) FROM solicitudes WHERE estado='aprobado'").fetchone()[0]
-    rechazadas = cur.execute("SELECT COUNT(*) FROM solicitudes WHERE estado='rechazado'").fetchone()[0]
-
-    conn.close()
+        activos = conn.execute("SELECT COUNT(*) FROM empleados WHERE estado='activo'").fetchone()[0]
+        asistencias = conn.execute("SELECT COUNT(*) FROM asistencias WHERE fecha=?", (today,)).fetchone()[0]
+        pendientes = conn.execute("SELECT COUNT(*) FROM solicitudes WHERE estado='pendiente'").fetchone()[0]
+        aprobadas = conn.execute("SELECT COUNT(*) FROM solicitudes WHERE estado='aprobado'").fetchone()[0]
+        rechazadas = conn.execute("SELECT COUNT(*) FROM solicitudes WHERE estado='rechazado'").fetchone()[0]
 
     return activos, asistencias, pendientes, aprobadas, rechazadas
 
