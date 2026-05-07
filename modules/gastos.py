@@ -329,7 +329,6 @@ def _render_currency_rate_inputs(
         min_value=0.0001,
         value=float(tasa_actual),
         format="%.4f",
-        key=tasa_key,
         disabled=True,
         help="La tasa se completa automáticamente desde Configuración según la moneda y el método de pago.",
     )
