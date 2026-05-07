@@ -2036,9 +2036,19 @@ def _ensure_security_migration(conn) -> None:
     )
 
 
+def _split_schema_sql() -> tuple[str, str]:
+    """Split tables from indexes so migrations can add columns before indexes run."""
+    marker = "CREATE INDEX IF NOT EXISTS"
+    index_start = SCHEMA_SQL.find(marker)
+    if index_start == -1:
+        return SCHEMA_SQL, ""
+    return SCHEMA_SQL[:index_start], SCHEMA_SQL[index_start:]
+
+
 def init_schema() -> None:
+    schema_tables_sql, schema_indexes_sql = _split_schema_sql()
     with db_transaction() as conn:
-        conn.executescript(SCHEMA_SQL)
+        conn.executescript(schema_tables_sql)
         _ensure_config_defaults(conn)
         _ensure_gastos_migration(conn)
         _ensure_clientes_migration(conn)
@@ -2052,3 +2062,4 @@ def init_schema() -> None:
         _ensure_corte_migration(conn)
         _ensure_sublimacion_migration(conn)
         _ensure_security_migration(conn)
+        conn.executescript(schema_indexes_sql)
