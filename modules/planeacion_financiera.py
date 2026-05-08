@@ -21,6 +21,17 @@ def _placeholder_df(columns: List[str]) -> pd.DataFrame:
     return pd.DataFrame(columns=columns)
 
 
+def _records_to_dataframe(records: object, columns: List[str]) -> pd.DataFrame:
+    """Return a DataFrame for tabular records returned by service helpers."""
+    if isinstance(records, pd.DataFrame):
+        return records.copy()
+    if isinstance(records, list):
+        return pd.DataFrame(records, columns=columns)
+    if isinstance(records, dict):
+        return pd.DataFrame([records], columns=columns)
+    return pd.DataFrame(columns=columns)
+
+
 def _safe_float(value: object) -> float:
     try:
         return float(value)
@@ -182,6 +193,8 @@ def render_planeacion_financiera(usuario: str) -> None:
         st.error(f"Error cargando planeación financiera: {exc}")
         return
 
+    alertas_df = _records_to_dataframe(alertas, ["nivel", "mensaje"])
+
     saldo_actual = _get_horizon_value(flujo, 7, "saldo_actual_usd") if not flujo.empty else 0.0
     flujo_7d = _get_horizon_value(flujo, 7, "flujo_proyectado_usd")
     flujo_15d = _get_horizon_value(flujo, 15, "flujo_proyectado_usd")
@@ -283,7 +296,7 @@ def render_planeacion_financiera(usuario: str) -> None:
             [
                 pd.DataFrame([resumen]),
                 flujo,
-                alertas,
+                alertas_df,
             ],
             ignore_index=True,
             sort=False,
@@ -375,7 +388,7 @@ def render_planeacion_financiera(usuario: str) -> None:
 
         f5, f6 = st.columns(2)
         f5.metric("Horizontes con déficit", str(deficit_horizontes))
-        f6.metric("Alertas de caja", str(len(alertas)))
+        f6.metric("Alertas de caja", str(len(alertas_df)))
 
         st.dataframe(flujo, use_container_width=True, hide_index=True)
 
@@ -455,7 +468,7 @@ def render_planeacion_financiera(usuario: str) -> None:
         if ejecucion_egresos >= 100:
             st.error("Presupuesto agotado o excedido en egresos.")
 
-        st.dataframe(alertas, use_container_width=True, hide_index=True)
+        st.dataframe(alertas_df, use_container_width=True, hide_index=True)
 
     with tabs[7]:
         st.subheader("Bloque 8 · KPIs financieros")
@@ -561,7 +574,7 @@ def render_planeacion_financiera(usuario: str) -> None:
                     [
                         pd.DataFrame([resumen]),
                         flujo,
-                        alertas,
+                        alertas_df,
                         presupuesto if not presupuesto.empty else pd.DataFrame(),
                         comparativos_df,
                     ],
