@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import pandas as pd
 import plotly.express as px
@@ -17,8 +17,38 @@ from services.planeacion_financiera_service import (
 )
 
 
+
 def _placeholder_df(columns: List[str]) -> pd.DataFrame:
     return pd.DataFrame(columns=columns)
+
+
+def _coerce_to_dataframe(value: Any) -> pd.DataFrame:
+    """Convert export payload fragments to DataFrames before concatenating them."""
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+    if isinstance(value, pd.Series):
+        return value.to_frame().T
+    if isinstance(value, dict):
+        return pd.DataFrame([value])
+    if isinstance(value, (list, tuple)):
+        return pd.DataFrame(value)
+    if value is None:
+        return pd.DataFrame()
+    return pd.DataFrame([{"valor": value}])
+
+
+def _concat_for_export(values: List[Any]) -> pd.DataFrame:
+    """Safely concatenate mixed service outputs for CSV exports.
+
+    Pandas only accepts Series/DataFrame objects in ``pd.concat``. Some service
+    helpers can return lists, dictionaries, ``None`` during empty states, or
+    other defensive fallbacks, so normalize every fragment first to keep
+    Streamlit download buttons from crashing while the page renders.
+    """
+    frames = [_coerce_to_dataframe(value) for value in values]
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True, sort=False)
 
 
 def _records_to_dataframe(records: object, columns: List[str]) -> pd.DataFrame:
@@ -332,14 +362,12 @@ def render_planeacion_financiera(usuario: str) -> None:
     quick_d.button("🚨 Ver alertas", use_container_width=True)
     quick_e.download_button(
         "⬇️ Exportar reporte",
-        data=pd.concat(
+        data=_concat_for_export(
             [
-                pd.DataFrame([resumen]),
+                resumen,
                 flujo,
                 alertas_df,
-            ],
-            ignore_index=True,
-            sort=False,
+            ]
         ).to_csv(index=False).encode("utf-8"),
         file_name=f"reporte_financiero_{periodo}.csv",
         mime="text/csv",
@@ -610,19 +638,16 @@ def render_planeacion_financiera(usuario: str) -> None:
 
             st.download_button(
                 "Exportar reporte completo",
-                data=pd.concat(
+                data=_concat_for_export(
                     [
-                        pd.DataFrame([resumen]),
+                        resumen,
                         flujo,
                         alertas_df,
                         presupuesto if not presupuesto.empty else pd.DataFrame(),
                         comparativos_df,
-                    ],
-                    ignore_index=True,
-                    sort=False,
+                    ]
                 ).to_csv(index=False).encode("utf-8"),
                 file_name=f"dashboard_financiero_{periodo}.csv",
                 mime="text/csv",
                 use_container_width=True,
             )
-
