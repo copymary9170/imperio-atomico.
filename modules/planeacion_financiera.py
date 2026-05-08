@@ -22,14 +22,29 @@ def _placeholder_df(columns: List[str]) -> pd.DataFrame:
 
 
 def _records_to_dataframe(records: object, columns: List[str]) -> pd.DataFrame:
-    """Return a DataFrame for tabular records returned by service helpers."""
+    """Return a DataFrame for tabular records returned by service helpers.
+
+    Streamlit evaluates download button payloads while rendering the page. If a
+    service helper unexpectedly returns ``None`` or raw Python records instead
+    of a DataFrame, passing that object directly to ``pd.concat`` raises a
+    TypeError and the entire app page fails to render. Normalize every tabular
+    value at the module boundary so downstream metrics, charts, and exports work
+    with an empty DataFrame fallback.
+    """
     if isinstance(records, pd.DataFrame):
-        return records.copy()
-    if isinstance(records, list):
-        return pd.DataFrame(records, columns=columns)
-    if isinstance(records, dict):
-        return pd.DataFrame([records], columns=columns)
-    return pd.DataFrame(columns=columns)
+        df = records.copy()
+    elif isinstance(records, list):
+        df = pd.DataFrame(records)
+    elif isinstance(records, dict):
+        df = pd.DataFrame([records])
+    else:
+        df = pd.DataFrame()
+
+    for column in columns:
+        if column not in df.columns:
+            df[column] = pd.Series(dtype="object")
+
+    return df
 
 
 def _safe_float(value: object) -> float:
@@ -193,7 +208,32 @@ def render_planeacion_financiera(usuario: str) -> None:
         st.error(f"Error cargando planeación financiera: {exc}")
         return
 
+    flujo = _records_to_dataframe(
+        flujo,
+        [
+            "horizonte_dias",
+            "saldo_actual_usd",
+            "cobros_esperados_usd",
+            "pagos_proximos_usd",
+            "flujo_proyectado_usd",
+        ],
+    )
     alertas_df = _records_to_dataframe(alertas, ["nivel", "mensaje"])
+    presupuesto = _records_to_dataframe(
+        presupuesto,
+        [
+            "id",
+            "periodo",
+            "categoria",
+            "tipo",
+            "monto_presupuestado_usd",
+            "meta_kpi_usd",
+            "notas",
+            "usuario",
+            "created_at",
+            "updated_at",
+        ],
+    )
 
     saldo_actual = _get_horizon_value(flujo, 7, "saldo_actual_usd") if not flujo.empty else 0.0
     flujo_7d = _get_horizon_value(flujo, 7, "flujo_proyectado_usd")
