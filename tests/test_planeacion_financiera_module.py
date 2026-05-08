@@ -1,6 +1,6 @@
 import pandas as pd
 
-from modules.planeacion_financiera import _records_to_dataframe
+from modules.planeacion_financiera import _concat_for_export, _records_to_dataframe
 
 
 def test_records_to_dataframe_normalizes_missing_records_with_columns():
@@ -29,15 +29,31 @@ def test_records_to_dataframe_normalizes_lists_for_concat_exports():
     )
     alertas = _records_to_dataframe([{"nivel": "success", "mensaje": "OK"}], ["nivel", "mensaje"])
 
-    export_df = pd.concat(
+    export_df = _concat_for_export(
         [
-            pd.DataFrame([{"ingresos_reales_usd": 0.0}]),
+            {"ingresos_reales_usd": 0.0},
             flujo,
             alertas,
-        ],
-        ignore_index=True,
-        sort=False,
+        ]
     )
 
     assert len(export_df) == 3
     assert export_df.loc[1, "flujo_proyectado_usd"] == 75.0
+
+
+def test_concat_for_export_normalizes_non_dataframe_fragments():
+    export_df = _concat_for_export(
+        [
+            {"ingresos_reales_usd": 125.0},
+            [{"nivel": "warning", "mensaje": "Revisar caja"}],
+            pd.Series({"comparativo": "base", "variacion_usd": 5.0}),
+            None,
+            "nota manual",
+        ]
+    )
+
+    assert len(export_df) == 4
+    assert export_df.loc[0, "ingresos_reales_usd"] == 125.0
+    assert export_df.loc[1, "mensaje"] == "Revisar caja"
+    assert export_df.loc[2, "variacion_usd"] == 5.0
+    assert export_df.loc[3, "valor"] == "nota manual"
