@@ -120,6 +120,14 @@ def _ensure_mermas_tables() -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(mermas_desperdicio)").fetchall()}
 
         extras = {
+            "modulo_origen": "TEXT NOT NULL DEFAULT 'mermas'",
+            "referencia_id": "INTEGER",
+            "inventario_id": "INTEGER",
+            "costo_unitario_usd": "REAL NOT NULL DEFAULT 0",
+            "costo_total_usd": "REAL NOT NULL DEFAULT 0",
+            "costo_estimado_usd": "REAL NOT NULL DEFAULT 0",
+            "observacion": "TEXT",
+            "observaciones": "TEXT",
             "proceso": "TEXT",
             "orden_produccion": "TEXT",
             "maquina": "TEXT",
@@ -140,18 +148,42 @@ def _ensure_mermas_tables() -> None:
         for col, sql_type in extras.items():
             if col not in cols:
                 conn.execute(f"ALTER TABLE mermas_desperdicio ADD COLUMN {col} {sql_type}")
+                cols.add(col)
 
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mermas_fecha ON mermas_desperdicio(fecha)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mermas_tipo ON mermas_desperdicio(tipo_merma)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mermas_causa ON mermas_desperdicio(causa)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mermas_area ON mermas_desperdicio(area)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mermas_inventario ON mermas_desperdicio(inventario_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mermas_estado ON mermas_desperdicio(estado)")
+        if "observacion" in cols and "observaciones" in cols:
+            conn.execute(
+                """
+                UPDATE mermas_desperdicio
+                SET observacion = COALESCE(NULLIF(observacion, ''), observaciones)
+                WHERE observaciones IS NOT NULL
+                """
+            )
+
+        conn.execute("UPDATE mermas_desperdicio SET modulo_origen = 'mermas' WHERE modulo_origen IS NULL OR modulo_origen = ''")
+        conn.execute("UPDATE mermas_desperdicio SET costo_total_usd = costo_estimado_usd WHERE costo_total_usd = 0 AND costo_estimado_usd > 0")
+        conn.execute("UPDATE mermas_desperdicio SET costo_estimado_usd = costo_total_usd WHERE costo_estimado_usd = 0 AND costo_total_usd > 0")
+
+        index_specs = {
+            "idx_mermas_fecha": ("fecha",),
+            "idx_mermas_tipo": ("tipo_merma",),
+            "idx_mermas_causa": ("causa",),
+            "idx_mermas_area": ("area",),
+            "idx_mermas_inventario": ("inventario_id",),
+            "idx_mermas_estado": ("estado",),
+            "idx_mermas_modulo_ref": ("modulo_origen", "referencia_id"),
+        }
+        for index_name, index_columns in index_specs.items():
+            if set(index_columns).issubset(cols):
+                conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS {index_name} "
+                    f"ON mermas_desperdicio({', '.join(index_columns)})"
+                )
 
 
 # ============================================================
 # HELPERS
 # ============================================================
+
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -209,6 +241,8 @@ def _load_mermas_df() -> pd.DataFrame:
                 id,
                 fecha,
                 usuario,
+                modulo_origen,
+                referencia_id,
                 inventario_id,
                 producto,
                 sku,
@@ -217,6 +251,7 @@ def _load_mermas_df() -> pd.DataFrame:
                 cantidad,
                 costo_unitario_usd,
                 costo_total_usd,
+                costo_estimado_usd,
                 tipo_merma,
                 causa,
                 area,
@@ -227,6 +262,7 @@ def _load_mermas_df() -> pd.DataFrame:
                 lote,
                 cliente,
                 observacion,
+                observaciones,
                 recuperable,
                 cantidad_recuperada,
                 valor_recuperado_usd,
@@ -397,6 +433,8 @@ def registrar_merma(
             """
             INSERT INTO mermas_desperdicio (
                 usuario,
+                modulo_origen,
+                referencia_id,
                 inventario_id,
                 producto,
                 sku,
@@ -405,6 +443,7 @@ def registrar_merma(
                 cantidad,
                 costo_unitario_usd,
                 costo_total_usd,
+                costo_estimado_usd,
                 tipo_merma,
                 causa,
                 area,
@@ -415,6 +454,7 @@ def registrar_merma(
                 lote,
                 cliente,
                 observacion,
+                observaciones,
                 recuperable,
                 cantidad_recuperada,
                 valor_recuperado_usd,
@@ -422,10 +462,12 @@ def registrar_merma(
                 evidencia_url,
                 estado
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')
             """,
             (
                 usuario,
+                "mermas",
+                None,
                 int(inventario_id) if inventario_id is not None else None,
                 clean_text(producto),
                 clean_text(sku),
@@ -433,6 +475,7 @@ def registrar_merma(
                 clean_text(unidad) or "unidad",
                 float(cantidad),
                 float(costo_unitario_usd),
+                float(costo_total_usd),
                 float(costo_total_usd),
                 clean_text(tipo_merma),
                 clean_text(causa),
@@ -443,6 +486,7 @@ def registrar_merma(
                 clean_text(operador),
                 clean_text(lote),
                 clean_text(cliente),
+                clean_text(observacion),
                 clean_text(observacion),
                 1 if bool(recuperable) else 0,
                 float(cantidad_recuperada),
