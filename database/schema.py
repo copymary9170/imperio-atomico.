@@ -1104,15 +1104,34 @@ CREATE TABLE IF NOT EXISTS mermas_desperdicio (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     usuario TEXT NOT NULL,
-    modulo_origen TEXT NOT NULL,
+    modulo_origen TEXT NOT NULL DEFAULT 'mermas',
     referencia_id INTEGER,
-    producto TEXT,
-    tipo_merma TEXT,
-    cantidad REAL NOT NULL DEFAULT 0,
+    inventario_id INTEGER,
+    producto TEXT NOT NULL DEFAULT '',
+    sku TEXT,
+    categoria TEXT,
     unidad TEXT DEFAULT 'unidad',
+    cantidad REAL NOT NULL DEFAULT 0,
+    costo_unitario_usd REAL NOT NULL DEFAULT 0,
+    costo_total_usd REAL NOT NULL DEFAULT 0,
     costo_estimado_usd REAL NOT NULL DEFAULT 0,
-    causa TEXT,
-    observaciones TEXT
+    tipo_merma TEXT NOT NULL DEFAULT 'Otro',
+    causa TEXT NOT NULL DEFAULT 'Otro',
+    area TEXT,
+    proceso TEXT,
+    orden_produccion TEXT,
+    maquina TEXT,
+    operador TEXT,
+    lote TEXT,
+    cliente TEXT,
+    observacion TEXT,
+    observaciones TEXT,
+    recuperable INTEGER NOT NULL DEFAULT 0,
+    cantidad_recuperada REAL NOT NULL DEFAULT 0,
+    valor_recuperado_usd REAL NOT NULL DEFAULT 0,
+    destino_recuperacion TEXT,
+    evidencia_url TEXT,
+    estado TEXT NOT NULL DEFAULT 'activo'
 );
 
 CREATE INDEX IF NOT EXISTS idx_inventario_sku ON inventario(sku);
@@ -1935,18 +1954,87 @@ def _ensure_sublimacion_migration(conn) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             usuario TEXT NOT NULL,
-            modulo_origen TEXT NOT NULL,
+            modulo_origen TEXT NOT NULL DEFAULT 'mermas',
             referencia_id INTEGER,
-            producto TEXT,
-            tipo_merma TEXT,
-            cantidad REAL NOT NULL DEFAULT 0,
+            inventario_id INTEGER,
+            producto TEXT NOT NULL DEFAULT '',
+            sku TEXT,
+            categoria TEXT,
             unidad TEXT DEFAULT 'unidad',
+            cantidad REAL NOT NULL DEFAULT 0,
+            costo_unitario_usd REAL NOT NULL DEFAULT 0,
+            costo_total_usd REAL NOT NULL DEFAULT 0,
             costo_estimado_usd REAL NOT NULL DEFAULT 0,
-            causa TEXT,
-            observaciones TEXT
+            tipo_merma TEXT NOT NULL DEFAULT 'Otro',
+            causa TEXT NOT NULL DEFAULT 'Otro',
+            area TEXT,
+            proceso TEXT,
+            orden_produccion TEXT,
+            maquina TEXT,
+            operador TEXT,
+            lote TEXT,
+            cliente TEXT,
+            observacion TEXT,
+            observaciones TEXT,
+            recuperable INTEGER NOT NULL DEFAULT 0,
+            cantidad_recuperada REAL NOT NULL DEFAULT 0,
+            valor_recuperado_usd REAL NOT NULL DEFAULT 0,
+            destino_recuperacion TEXT,
+            evidencia_url TEXT,
+            estado TEXT NOT NULL DEFAULT 'activo'
         )
         """
     )
+
+
+def _ensure_mermas_desperdicio_migration(conn) -> None:
+    columns = _get_table_columns(conn, "mermas_desperdicio")
+    if not columns:
+        return
+
+    required_columns = {
+        "modulo_origen": "ALTER TABLE mermas_desperdicio ADD COLUMN modulo_origen TEXT NOT NULL DEFAULT 'mermas'",
+        "referencia_id": "ALTER TABLE mermas_desperdicio ADD COLUMN referencia_id INTEGER",
+        "inventario_id": "ALTER TABLE mermas_desperdicio ADD COLUMN inventario_id INTEGER",
+        "sku": "ALTER TABLE mermas_desperdicio ADD COLUMN sku TEXT",
+        "categoria": "ALTER TABLE mermas_desperdicio ADD COLUMN categoria TEXT",
+        "costo_unitario_usd": "ALTER TABLE mermas_desperdicio ADD COLUMN costo_unitario_usd REAL NOT NULL DEFAULT 0",
+        "costo_total_usd": "ALTER TABLE mermas_desperdicio ADD COLUMN costo_total_usd REAL NOT NULL DEFAULT 0",
+        "costo_estimado_usd": "ALTER TABLE mermas_desperdicio ADD COLUMN costo_estimado_usd REAL NOT NULL DEFAULT 0",
+        "area": "ALTER TABLE mermas_desperdicio ADD COLUMN area TEXT",
+        "proceso": "ALTER TABLE mermas_desperdicio ADD COLUMN proceso TEXT",
+        "orden_produccion": "ALTER TABLE mermas_desperdicio ADD COLUMN orden_produccion TEXT",
+        "maquina": "ALTER TABLE mermas_desperdicio ADD COLUMN maquina TEXT",
+        "operador": "ALTER TABLE mermas_desperdicio ADD COLUMN operador TEXT",
+        "lote": "ALTER TABLE mermas_desperdicio ADD COLUMN lote TEXT",
+        "cliente": "ALTER TABLE mermas_desperdicio ADD COLUMN cliente TEXT",
+        "observacion": "ALTER TABLE mermas_desperdicio ADD COLUMN observacion TEXT",
+        "observaciones": "ALTER TABLE mermas_desperdicio ADD COLUMN observaciones TEXT",
+        "recuperable": "ALTER TABLE mermas_desperdicio ADD COLUMN recuperable INTEGER NOT NULL DEFAULT 0",
+        "cantidad_recuperada": "ALTER TABLE mermas_desperdicio ADD COLUMN cantidad_recuperada REAL NOT NULL DEFAULT 0",
+        "valor_recuperado_usd": "ALTER TABLE mermas_desperdicio ADD COLUMN valor_recuperado_usd REAL NOT NULL DEFAULT 0",
+        "destino_recuperacion": "ALTER TABLE mermas_desperdicio ADD COLUMN destino_recuperacion TEXT",
+        "evidencia_url": "ALTER TABLE mermas_desperdicio ADD COLUMN evidencia_url TEXT",
+        "estado": "ALTER TABLE mermas_desperdicio ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo'",
+    }
+
+    for column_name, ddl in required_columns.items():
+        if column_name not in columns:
+            conn.execute(ddl)
+            columns.add(column_name)
+
+    if {"observacion", "observaciones"}.issubset(columns):
+        conn.execute(
+            """
+            UPDATE mermas_desperdicio
+            SET observacion = COALESCE(NULLIF(observacion, ''), observaciones)
+            WHERE observaciones IS NOT NULL
+            """
+        )
+
+    conn.execute("UPDATE mermas_desperdicio SET modulo_origen = 'mermas' WHERE modulo_origen IS NULL OR modulo_origen = ''")
+    conn.execute("UPDATE mermas_desperdicio SET costo_total_usd = costo_estimado_usd WHERE costo_total_usd = 0 AND costo_estimado_usd > 0")
+    conn.execute("UPDATE mermas_desperdicio SET costo_estimado_usd = costo_total_usd WHERE costo_estimado_usd = 0 AND costo_total_usd > 0")
 
 
 def _ensure_security_migration(conn) -> None:
@@ -2061,5 +2149,6 @@ def init_schema() -> None:
         _ensure_rutas_produccion_migration(conn)
         _ensure_corte_migration(conn)
         _ensure_sublimacion_migration(conn)
+        _ensure_mermas_desperdicio_migration(conn)
         _ensure_security_migration(conn)
         conn.executescript(schema_indexes_sql)
