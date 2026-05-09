@@ -14,6 +14,7 @@ SECURITY_PERMISSION_CATALOG = (
     ("activos.view", "Consultar módulo de activos."),
     ("clientes.view", "Consultar módulo de clientes."),
     ("crm.view", "Consultar CRM y marketing."),
+    ("publicaciones.view", "Consultar publicaciones y marketing."),
     ("ventas.view", "Consultar módulo de ventas."),
     ("ventas.create", "Crear ventas."),
     ("ventas.edit", "Editar ventas."),
@@ -35,6 +36,7 @@ SECURITY_PERMISSION_CATALOG = (
     ("caja.close", "Ejecutar cierres de caja."),
     ("tesoreria.view", "Consultar módulo de tesorería."),
     ("tesoreria.edit", "Editar operaciones de tesorería."),
+    ("presupuesto.view", "Consultar presupuesto mensual."),
     ("cxp.view", "Consultar cuentas por pagar."),
     ("contabilidad.view", "Consultar módulo de contabilidad."),
     ("contabilidad.entry", "Registrar asientos contables."),
@@ -46,6 +48,8 @@ SECURITY_PERMISSION_CATALOG = (
     ("costeo_industrial.view", "Consultar costeo industrial."),
     ("auditoria.view", "Consultar auditoría del sistema."),
     ("rrhh.view", "Consultar módulo de RRHH."),
+    ("nomina.view", "Consultar nómina y trabajadores."),
+    ("calendario_operativo.view", "Consultar calendario operativo."),
     ("config.view", "Consultar módulo de configuración."),
     ("config.edit", "Editar configuración del sistema."),
     ("security.view", "Consultar seguridad y roles."),
@@ -66,6 +70,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "activos.view",
         "clientes.view",
         "crm.view",
+        "publicaciones.view",
         "ventas.view",
         "ventas.create",
         "ventas.edit",
@@ -87,6 +92,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "caja.close",
         "tesoreria.view",
         "tesoreria.edit",
+        "presupuesto.view",
         "cxp.view",
         "contabilidad.view",
         "contabilidad.entry",
@@ -98,6 +104,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "costeo_industrial.view",
         "auditoria.view",
         "rrhh.view",
+        "nomina.view",
+        "calendario_operativo.view",
         "config.view",
         "config.edit",
         "security.view",
@@ -113,6 +121,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "inventario.adjust",
         "kardex.view",
         "clientes.view",
+        "publicaciones.view",
         "ventas.view",
         "ventas.create",
         "cotizaciones.view",
@@ -124,10 +133,12 @@ DEFAULT_ROLE_PERMISSIONS = {
         "gastos.view",
         "caja.view",
         "tesoreria.view",
+        "presupuesto.view",
+        "nomina.view",
+        "calendario_operativo.view",
         "costeo.view",
     ),
 }
-
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
 
@@ -2121,6 +2132,24 @@ def _ensure_security_migration(conn) -> None:
         INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
         VALUES ('Operator', 'produccion.scrap')
         """
+    )
+
+    permisos_modulos_operativos = (
+        "nomina.view",
+        "presupuesto.view",
+        "calendario_operativo.view",
+        "publicaciones.view",
+    )
+    conn.executemany(
+        """
+        INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+        VALUES (?, ?)
+        """,
+        [
+            (role, permission)
+            for role in ("Administration", "Operator")
+            for permission in permisos_modulos_operativos
+        ],
     )
 
 
