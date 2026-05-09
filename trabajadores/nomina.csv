@@ -1,0 +1,2 @@
+trabajador_id,nombre,puesto,pago_base,pago_extra,seguro,pension,total_mensual,estado
+TRB-0001,Trabajador Base,Operaciones,0,0,0,0,0,activo
