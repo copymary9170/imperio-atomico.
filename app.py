@@ -292,13 +292,3 @@ menu = st.sidebar.radio(
 
 VISIBLE_MENU[menu]()
 save_session_snapshot()
-
-
-Asegúrate de tener estos archivos creados en `views/`:
-
-```text
-views/nomina_trabajadores.py
-views/presupuesto_mensual.py
-views/calendario_operativo.py
-views/publicaciones_marketing.py
-```
