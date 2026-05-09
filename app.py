@@ -195,11 +195,11 @@ MENU_ROUTES = {
 
     # NUEVAS FINANZAS Y ADMINISTRACION
     "👨‍💼 Nómina y trabajadores": (
-        ("rrhh.view", "tesoreria.view"),
+        "nomina.view",
         lambda: render_nomina_trabajadores(usuario),
     ),
     "💰 Presupuesto mensual": (
-        ("tesoreria.view", "contabilidad.view"),
+        "presupuesto.view",
         lambda: render_presupuesto_mensual(usuario),
     ),
 
@@ -224,11 +224,11 @@ MENU_ROUTES = {
 
     # CALENDARIOS Y MARKETING
     "📅 Calendario operativo": (
-        ("dashboard.view", "produccion.plan", "tesoreria.view"),
+        "calendario_operativo.view",
         lambda: render_calendario_operativo(usuario),
     ),
     "📣 Publicaciones y marketing": (
-        ("crm.view", "clientes.view"),
+        "publicaciones.view",
         lambda: render_publicaciones_marketing(usuario),
     ),
 
