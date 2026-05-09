@@ -1,0 +1,4 @@
+recordatorio_id,tipo,descripcion,fecha,prioridad,estado
+REC-0001,Surtir Material,Comprar papel y tinta,2026-05-12,alta,activo
+REC-0002,Pago,Revisar seguros y pensiones,2026-05-30,alta,activo
+REC-0003,Expo,Ahorrar para expo de impresion,2026-06-15,media,activo
