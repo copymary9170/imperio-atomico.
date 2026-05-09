@@ -1,4 +1,4 @@
-impo=rt streamlit as st
+import streamlit as st
 
 # ==================================================
 # CONFIGURACION DE LA APP
