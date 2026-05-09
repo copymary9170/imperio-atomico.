@@ -292,7 +292,7 @@ menu = st.sidebar.radio(
 
 VISIBLE_MENU[menu]()
 save_session_snapshot()
-```
+
 
 Asegúrate de tener estos archivos creados en `views/`:
 
