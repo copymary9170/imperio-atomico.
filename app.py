@@ -1,6 +1,3 @@
-Aquí tienes tu `app.py` completo listo para copiar y pegar, con los imports y entradas del menú para las vistas nuevas que faltaban:
-
-```python
 import streamlit as st
 
 # ==================================================
