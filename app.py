@@ -1,3 +1,6 @@
+Aquí tienes tu `app.py` completo listo para copiar y pegar, con los imports y entradas del menú para las vistas nuevas que faltaban:
+
+```python
 import streamlit as st
 
 # ==================================================
@@ -52,6 +55,12 @@ from views.manuales_sop import render_manuales_sop
 from views.catalogo import render_catalogo
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
+
+# NUEVAS VISTAS OPERATIVAS
+from views.nomina_trabajadores import render_nomina_trabajadores
+from views.presupuesto_mensual import render_presupuesto_mensual
+from views.calendario_operativo import render_calendario_operativo
+from views.publicaciones_marketing import render_publicaciones_marketing
 
 # CONFIGURACION
 from modules.configuracion import render_sidebar_config_snapshot, render_configuracion
@@ -146,13 +155,34 @@ MENU_ROUTES = {
     "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
 
     # PRODUCCION
-    "✂️ Corte Industrial": (("produccion.execute", "produccion.plan"), lambda: render_corte(usuario)),
-    "🔥 Sublimacion": ("produccion.execute", lambda: render_sublimacion(usuario)),
-    "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
-    "🗓️ Planificación de producción": (("produccion.plan", "produccion.execute"), lambda: render_planificacion_produccion(usuario)),
-    "🧭 Rutas de producción": (("produccion.route", "produccion.execute"), lambda: render_rutas_produccion(usuario)),
-    "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
-    "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
+    "✂️ Corte Industrial": (
+        ("produccion.execute", "produccion.plan"),
+        lambda: render_corte(usuario),
+    ),
+    "🔥 Sublimación": (
+        "produccion.execute",
+        lambda: render_sublimacion(usuario),
+    ),
+    "🎨 Producción Manual": (
+        "produccion.execute",
+        lambda: render_produccion_manual(usuario),
+    ),
+    "🗓️ Planificación de producción": (
+        ("produccion.plan", "produccion.execute"),
+        lambda: render_planificacion_produccion(usuario),
+    ),
+    "🧭 Rutas de producción": (
+        ("produccion.route", "produccion.execute"),
+        lambda: render_rutas_produccion(usuario),
+    ),
+    "✅ Control de calidad": (
+        "produccion.quality",
+        lambda: render_control_calidad(usuario),
+    ),
+    "♻️ Mermas y desperdicio": (
+        "produccion.scrap",
+        lambda: render_mermas_desperdicio(usuario),
+    ),
 
     # FINANZAS
     "📉 Gastos": ("gastos.view", lambda: render_gastos(usuario)),
@@ -160,21 +190,50 @@ MENU_ROUTES = {
     "🏦 Tesorería": ("tesoreria.view", lambda: render_tesoreria(usuario)),
     "💸 Cuentas por pagar": ("cxp.view", lambda: render_cuentas_por_pagar(usuario)),
     "📚 Contabilidad": ("contabilidad.view", lambda: render_contabilidad(usuario)),
-    "🏛️ Conciliación bancaria": ("conciliacion.view", lambda: render_conciliacion_bancaria(usuario)),
+    "🏛️ Conciliación bancaria": (
+        "conciliacion.view",
+        lambda: render_conciliacion_bancaria(usuario),
+    ),
     "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
+
+    # NUEVAS FINANZAS Y ADMINISTRACION
+    "👨‍💼 Nómina y trabajadores": (
+        ("rrhh.view", "tesoreria.view"),
+        lambda: render_nomina_trabajadores(usuario),
+    ),
+    "💰 Presupuesto mensual": (
+        ("tesoreria.view", "contabilidad.view"),
+        lambda: render_presupuesto_mensual(usuario),
+    ),
 
     # ANALITICA
     "📈 Rentabilidad": ("costeo.view", lambda: render_rentabilidad(usuario)),
-    "🔮 Planeación financiera": ("tesoreria.view", lambda: render_planeacion_financiera(usuario)),
+    "🔮 Planeación financiera": (
+        "tesoreria.view",
+        lambda: render_planeacion_financiera(usuario),
+    ),
     "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
 
     # COSTOS
     "🧮 Costeo": ("costeo.view", lambda: render_costeo(usuario)),
-    "🧮 Costeo industrial": ("costeo_industrial.view", lambda: render_costeo_industrial(usuario)),
+    "🧮 Costeo industrial": (
+        "costeo_industrial.view",
+        lambda: render_costeo_industrial(usuario),
+    ),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
 
     # RRHH
     "👨‍💼 RRHH": ("rrhh.view", lambda: render_rrhh(usuario)),
+
+    # CALENDARIOS Y MARKETING
+    "📅 Calendario operativo": (
+        ("dashboard.view", "produccion.plan", "tesoreria.view"),
+        lambda: render_calendario_operativo(usuario),
+    ),
+    "📣 Publicaciones y marketing": (
+        ("crm.view", "clientes.view"),
+        lambda: render_publicaciones_marketing(usuario),
+    ),
 
     # SISTEMA
     "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
@@ -189,7 +248,10 @@ MENU_ROUTES = {
 
     # EXPANSION ERP
     "🧩 Nuevos módulos ERP": ("dashboard.view", lambda: render_portafolio_modulos(usuario)),
-    "🛠️ Mantenimiento": ("mantenimiento.view", lambda: render_mantenimiento_activos(usuario)),
+    "🛠️ Mantenimiento": (
+        "mantenimiento.view",
+        lambda: render_mantenimiento_activos(usuario),
+    ),
 }
 
 # ==================================================
@@ -199,8 +261,10 @@ MENU_ROUTES = {
 def _can_access_menu_route(permission_rule):
     if isinstance(permission_rule, str):
         return has_permission(permission_rule)
+
     if isinstance(permission_rule, (tuple, list, set)):
         return any(has_permission(permission_code) for permission_code in permission_rule)
+
     return False
 
 
@@ -231,3 +295,13 @@ menu = st.sidebar.radio(
 
 VISIBLE_MENU[menu]()
 save_session_snapshot()
+```
+
+Asegúrate de tener estos archivos creados en `views/`:
+
+```text
+views/nomina_trabajadores.py
+views/presupuesto_mensual.py
+views/calendario_operativo.py
+views/publicaciones_marketing.py
+```
