@@ -1,0 +1,2 @@
+pedido_id,cliente_id,producto_servicio,fecha_entrega,estado,total
+PED-0001,CL-0001,Impresion General,2026-05-15,pendiente,0
