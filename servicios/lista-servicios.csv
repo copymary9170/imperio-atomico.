@@ -1,0 +1,4 @@
+servicio_id,nombre,categoria,costo_base,precio_sugerido,estado
+SRV-0001,Impresion General,Impresion,0,0,activo
+SRV-0002,Sublimacion,Sublimacion,0,0,activo
+SRV-0003,Corte Alta Gama,Corte,0,0,activo
