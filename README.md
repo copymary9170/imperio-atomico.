@@ -1,42 +1,69 @@
-# Imperio Atómico
+# Imperio Atomico - Base de Operaciones
 
-Registro y centro de organización para el universo del negocio.
+Menu principal para controlar impresion, papeleria, sublimacion, corte de alta gama, servicios, inventario, produccion, calidad, finanzas, pedidos y marketing.
 
-## Propósito
+## Menu principal
 
-Este repositorio reúne ideas, estructura, documentación y activos relacionados con el proyecto **Imperio Atómico**. La meta es convertir el proyecto en un espacio más claro, ordenado y fácil de mantener.
+### 1. Direccion general
+- [Base de operaciones](operaciones/BASE-DE-OPERACIONES.md)
+- [Sistema conectado](docs/SISTEMA-CONECTADO.md)
+- [Rutas de planificacion](planificacion/rutas-operativas.csv)
 
-## Estructura sugerida
+### 2. Catalogo, servicios y precios
+- [Catalogo de productos](catalogo/productos.csv)
+- [Lista de servicios](servicios/lista-servicios.csv)
+- [Calculadora de precios justos](precios/calculadora-precios.csv)
+- [Cotizaciones](cotizaciones/cotizaciones.csv)
+
+### 3. Produccion
+- [Produccion manual](produccion/produccion-manual.csv)
+- [Procesos generales](procesos/procesos-generales.csv)
+- [Sublimacion](procesos/sublimacion.csv)
+- [Corte de alta gama](procesos/corte-alta-gama.csv)
+- [Otros procesos](procesos/otros-procesos.csv)
+
+### 4. Inventario, compras y materiales
+- [Inventario de stock](inventario/stock.csv)
+- [Materiales y reabastecimiento](compras/materiales.csv)
+
+### 5. Calidad, mermas y desperdicio
+- [Control de calidad](calidad/control-calidad.csv)
+- [Mermas y desperdicio](calidad/mermas-desperdicio.csv)
+
+### 6. Clientes, pedidos y ventas
+- [Clientes](clientes/clientes.csv)
+- [Pedidos de clientes](pedidos/pedidos-clientes.csv)
+- [Ventas](ventas/ventas.csv)
+
+### 7. Finanzas, trabajadores y responsabilidades
+- [Presupuesto mensual](finanzas/presupuesto-mensual.csv)
+- [Nomina y trabajadores](trabajadores/nomina.csv)
+- [Activos del negocio](activos/activos.csv)
+
+### 8. Calendarios y marketing
+- [Calendario de recordatorios](calendario/recordatorios.csv)
+- [Calendario de publicaciones](marketing/calendario-publicaciones.csv)
+
+### 9. Reportes
+- [Resumen del sistema](reportes/resumen.md)
+
+## Como debe fluir el negocio
 
 ```text
-imperio-atomico/
-├── README.md              # Presentación general del proyecto
-├── docs/                  # Documentación, planes y estrategia
-├── ideas/                 # Ideas sueltas, borradores y conceptos
-├── assets/                # Imágenes, logos, recursos visuales
-└── src/                   # Código fuente si el proyecto incluye software
+Cotizacion -> Pedido -> Planificacion -> Inventario -> Produccion -> Calidad -> Entrega -> Venta -> Reporte
 ```
 
-## Cómo trabajar en el repositorio
+## Reglas clave
 
-1. Mantén los nombres de archivos claros y descriptivos.
-2. Agrupa la información por tema en carpetas.
-3. Documenta cada decisión importante en `docs/`.
-4. Usa commits pequeños con mensajes simples y entendibles.
-5. Antes de borrar contenido, confirma si sigue siendo útil para el proyecto.
+- Todo producto usa `producto_id`.
+- Todo servicio usa `servicio_id`.
+- Todo pedido usa `pedido_id`.
+- Toda cotizacion usa `cotizacion_id`.
+- Todo proceso usa `proceso_id`.
+- Toda ruta usa `ruta_id`.
+- Toda merma usa `merma_id`.
+- Todo activo usa `activo_id`.
 
-## Próximos pasos recomendados
+## Objetivo del sistema
 
-- [ ] Crear una carpeta `docs/` para estrategia y planificación.
-- [ ] Crear una carpeta `ideas/` para conceptos del universo del negocio.
-- [ ] Agregar una descripción más detallada de productos, servicios o personajes del proyecto.
-- [ ] Definir objetivos a corto, mediano y largo plazo.
-- [ ] Agregar una guía visual o identidad de marca si aplica.
-
-## Estado del proyecto
-
-En construcción.
-
----
-
-Hecho para organizar y hacer crecer el universo de **Imperio Atómico**.
+Que Imperio Atomico pueda saber que vender, cuanto cobrar, que producir, que material comprar, que pedidos entregar, que revisar en calidad, cuanto se pierde en merma, cuanto pagar, cuanto ahorrar y que publicar.
