@@ -82,7 +82,7 @@ from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
 from views.manuales_sop import render_manuales_sop
-from modules.catalogo_visual import render_catalogo_hub as render_catalogo
+from views.catalogo import render_catalogo
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
 from views.modulos_rescatados import render_modulos_rescatados
@@ -175,16 +175,23 @@ render_sidebar_config_snapshot()
 # ==================================================
 
 MENU_ROUTES = {
+    # CORE
     "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
+
+    # OPERACIONES
     "📦 Inventario": ("inventario.view", lambda: render_inventario(usuario)),
     "📊 Kardex": ("inventario.view", lambda: render_kardex(usuario)),
     "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
+
+    # CLIENTES Y VENTAS
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
     "🤝 CRM": ("crm.view", lambda: render_crm(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing / Ventas": ("crm.view", lambda: render_marketing_ventas(usuario)),
     "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
+
+    # PRODUCCION
     "✂️ Corte Industrial": (("produccion.execute", "produccion.plan"), lambda: render_corte(usuario)),
     "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
     "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
@@ -192,6 +199,8 @@ MENU_ROUTES = {
     "🧭 Rutas de producción": (("produccion.route", "produccion.execute"), lambda: render_rutas_produccion(usuario)),
     "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
     "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
+
+    # FINANZAS
     "📉 Gastos": ("gastos.view", lambda: render_gastos(usuario)),
     "🏦 Caja empresarial": ("caja.view", lambda: render_caja(usuario)),
     "🏦 Tesorería": ("tesoreria.view", lambda: render_tesoreria(usuario)),
@@ -199,24 +208,40 @@ MENU_ROUTES = {
     "📚 Contabilidad": ("contabilidad.view", lambda: render_contabilidad(usuario)),
     "🏛️ Conciliación bancaria": ("conciliacion.view", lambda: render_conciliacion_bancaria(usuario)),
     "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
+
+    # FINANZAS Y ADMINISTRACION
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "💰 Presupuesto mensual": ("presupuesto.view", lambda: render_presupuesto_mensual(usuario)),
+
+    # ANALITICA
     "📈 Rentabilidad": ("costeo.view", lambda: render_rentabilidad(usuario)),
     "🔮 Planeación financiera": ("tesoreria.view", lambda: render_planeacion_financiera(usuario)),
     "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
+
+    # COSTOS
     "🧮 Costeo": ("costeo.view", lambda: render_costeo(usuario)),
     "🧮 Costeo industrial": ("costeo_industrial.view", lambda: render_costeo_industrial(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
+
+    # RRHH
     "👨‍💼 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_rrhh(usuario)),
+
+    # CALENDARIOS Y MARKETING
     "📅 Calendario operativo": ("calendario_operativo.view", lambda: render_calendario_operativo(usuario)),
     "📣 Publicaciones y marketing": ("publicaciones.view", lambda: render_publicaciones_marketing(usuario)),
+
+    # SISTEMA
     "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
     "🔐 Seguridad / Roles": (("security.view", "dashboard.view"), lambda: render_seguridad_roles(usuario)),
     "📘 Manuales / SOP": ("manuales.view", lambda: render_manuales_sop(usuario)),
+
+    # OTROS
     "🎨 CMYK": ("produccion.view", lambda: render_cmyk(usuario)),
     "🧠 Diagnóstico IA": ("dashboard.view", lambda: render_diagnostico(usuario)),
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
     "🛍️ Catálogo": ("inventario.view", lambda: render_catalogo(usuario)),
+
+    # MODULOS ERP INDEPENDIENTES
     "🧩 Módulos rescatados": ("dashboard.view", lambda: render_modulos_rescatados(usuario)),
     "🛠️ Mantenimiento": ("mantenimiento.view", lambda: render_mantenimiento_activos(usuario)),
 }
