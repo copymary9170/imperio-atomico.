@@ -688,9 +688,7 @@ def _render_tab_historial(perm_gastos_edit: bool = False) -> None:
         st.caption("Tendencia de egresos")
         st.line_chart(diaria.set_index("dia")["monto_usd"])
 
-    st.subheader("Gestión de gastos")
-    if not perm_gastos_edit:
-        st.warning("Necesitas permiso `gastos.edit` para editar o cancelar gastos.")
+   st.subheader("Gestión de gastos")
 
     if not df_fil.empty:
         opciones = {f"#{int(r['id'])} · {r['descripcion']}": int(r["id"]) for _, r in df_fil.iterrows()}
@@ -700,6 +698,9 @@ def _render_tab_historial(perm_gastos_edit: bool = False) -> None:
         row = df_fil[df_fil["id"] == gasto_id].iloc[0]
 
         with st.expander("✏️ Editar gasto"):
+            if not perm_gastos_edit:
+                st.warning("Necesitas permiso `gastos.edit` para editar gastos.")
+
             config = _load_config_snapshot()
 
             e1, e2 = st.columns([2, 1])
@@ -857,6 +858,9 @@ def _render_tab_historial(perm_gastos_edit: bool = False) -> None:
                     st.exception(e)
 
         with st.expander("🗑️ Eliminar gasto"):
+            if not perm_gastos_edit:
+                st.warning("Necesitas permiso `gastos.edit` para cancelar gastos.")
+
             confirmar = st.checkbox("Confirmo eliminación", key=f"confirm_gasto_{gasto_id}")
             if st.button(
                 "Eliminar",
@@ -1005,20 +1009,20 @@ def render_gastos(usuario: str) -> None:
         "impuestos o comisiones cuando sí te los cobran."
     )
 
-    tab1, tab2, tab3 = st.tabs([
-        "📝 Registrar gasto",
+    tab_historial, tab_resumen, tab_registro = st.tabs([
         "📜 Historial",
         "📊 Resumen",
+        "📝 Registrar gasto",
     ])
 
-    with tab1:
+    with tab_historial:
+        _render_tab_historial(perm_gastos_edit)
+
+    with tab_resumen:
+        _render_tab_resumen()
+
+    with tab_registro:
         if perm_gastos_create:
             _render_tab_registro(usuario)
         else:
             st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
-
-    with tab2:
-        _render_tab_historial(perm_gastos_edit)
-
-    with tab3:
-        _render_tab_resumen()
