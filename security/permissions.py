@@ -10,6 +10,7 @@ from database.connection import db_transaction
 
 
 SUPERUSER_PERMISSION = "*"
+FOUNDER_USERS = {"copymary9170", "Copy Mary"}
 ADMIN_ROLE_ALIASES = {"admin", "administrador", "administradora", "administrator"}
 ADMINISTRATION_ROLE_ALIASES = {"administration", "administracion", "administración"}
 OPERATOR_ROLE_ALIASES = {"operator", "operador"}
@@ -33,7 +34,16 @@ def get_current_user() -> str:
     return st.session_state.get("usuario", "Sistema")
 
 
+def is_founder_user(usuario: str | None = None) -> bool:
+    current = str(usuario or get_current_user()).strip()
+    return current in FOUNDER_USERS or current.casefold() in {u.casefold() for u in FOUNDER_USERS}
+
+
 def get_current_role() -> str:
+    if is_founder_user():
+        st.session_state["rol"] = "Admin"
+        return "Admin"
+
     return normalize_role_name(st.session_state.get("rol", "Operator"))
 
 
@@ -41,8 +51,25 @@ def set_session_role_from_db() -> str:
     """
     Sincroniza el rol en session_state usando la tabla usuarios.
     Si no encuentra el usuario, conserva el rol actual o usa Operator.
+    La cuenta fundadora siempre se trata como Admin.
     """
     usuario = get_current_user()
+
+    if is_founder_user(usuario):
+        st.session_state["rol"] = "Admin"
+        try:
+            with db_transaction() as conn:
+                conn.execute(
+                    """
+                    UPDATE usuarios
+                    SET rol = 'Admin'
+                    WHERE usuario = ?
+                    """,
+                    (usuario,),
+                )
+        except Exception:
+            pass
+        return "Admin"
 
     with db_transaction() as conn:
         row = conn.execute(
@@ -105,6 +132,10 @@ def get_permissions_for_role(rol: str) -> Set[str]:
 
 
 def get_current_permissions() -> Set[str]:
+    if is_founder_user():
+        st.session_state["rol"] = "Admin"
+        return {SUPERUSER_PERMISSION}
+
     rol = get_current_role()
     return get_permissions_for_role(rol)
 
