@@ -793,7 +793,7 @@ def _render_tab_historial(perm_gastos_edit: bool = False) -> None:
             p1.metric("Subtotal USD", f"$ {subtotal_edit_usd:,.2f}")
             p2.metric("Impuestos USD", f"$ {impuesto_edit_usd:,.2f}")
             p3.metric("Total Bs", f"Bs {monto_edit_bs:,.2f}")
-                p4.metric("Equiv. mensual", f"$ {monto_edit_mensual_usd:,.2f}")
+            p4.metric("Equiv. mensual", f"$ {monto_edit_mensual_usd:,.2f}")
 
             if st.button(
                 "💾 Guardar cambios",
