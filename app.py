@@ -15,7 +15,11 @@ st.set_page_config(
 # ==================================================
 
 from database.schema import init_schema
-from ui.session_persistence import restore_session_snapshot, save_session_snapshot
+from ui.session_persistence import (
+    restore_session_snapshot,
+    save_session_snapshot,
+    clear_session_snapshot,
+)
 from security.permissions import has_permission, set_session_role_from_db
 
 init_schema()
@@ -124,8 +128,15 @@ st.sidebar.title("⚛️ Imperio Atómico ERP")
 st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral.")
 
 if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
-    st.session_state.clear()
-    save_session_snapshot()
+    clear_session_snapshot()
+
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+
+    st.session_state["authentication_status"] = False
+    st.session_state["usuario"] = None
+    st.session_state["rol"] = None
+
     st.rerun()
 
 render_sidebar_config_snapshot()
