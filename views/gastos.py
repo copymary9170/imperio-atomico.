@@ -29,7 +29,4 @@ def render_gastos(usuario: str) -> None:
 
     st.title("💸 Gastos")
 
-    if st.session_state.get("gastos_readonly", False):
-        st.info("Modo solo lectura: puedes consultar gastos, pero no registrar ni editar.")
-
     gastos_module(usuario)
