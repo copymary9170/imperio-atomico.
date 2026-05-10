@@ -138,7 +138,9 @@ DEFAULT_ROLE_PERMISSIONS = {
         "produccion.route",
         "produccion.quality",
         "produccion.scrap",
+        "produccion.scrap",
         "gastos.view",
+        "gastos.create",
         "caja.view",
         "tesoreria.view",
         "presupuesto.view",
@@ -2139,6 +2141,12 @@ def _ensure_security_migration(conn) -> None:
         """
         INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
         VALUES ('Operator', 'produccion.scrap')
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
+        VALUES ('Operator', 'gastos.create')
         """
     )
 
