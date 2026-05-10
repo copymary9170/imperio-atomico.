@@ -52,6 +52,7 @@ from views.manuales_sop import render_manuales_sop
 from views.catalogo import render_catalogo
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
+from views.modulos_rescatados import render_modulos_rescatados
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -245,6 +246,7 @@ MENU_ROUTES = {
 
     # EXPANSION ERP
     "🧩 Nuevos módulos ERP": ("dashboard.view", lambda: render_portafolio_modulos(usuario)),
+    "🧩 Módulos rescatados": ("dashboard.view", lambda: render_modulos_rescatados(usuario)),
     "🛠️ Mantenimiento": (
         "mantenimiento.view",
         lambda: render_mantenimiento_activos(usuario),
