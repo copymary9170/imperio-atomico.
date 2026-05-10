@@ -21,6 +21,38 @@ from security.permissions import has_permission, set_session_role_from_db
 
 init_schema()
 restore_session_snapshot()
+
+# ==================================================
+# LOGIN
+# ==================================================
+
+def _render_login() -> None:
+    st.title("⚛️ Imperio Atómico ERP")
+    st.subheader("Iniciar sesión")
+
+    with st.form("login_form"):
+        login_usuario = st.text_input("Usuario")
+        login_password = st.text_input("Contraseña", type="password")
+        submit_login = st.form_submit_button("Entrar")
+
+    if submit_login:
+        usuario_clean = str(login_usuario or "").strip()
+        if not usuario_clean:
+            st.error("Ingresa tu usuario.")
+            return
+
+        st.session_state["usuario"] = usuario_clean
+        st.session_state["rol"] = "Operator"
+        st.session_state["authentication_status"] = True
+        set_session_role_from_db()
+        save_session_snapshot()
+        st.rerun()
+
+
+if not st.session_state.get("authentication_status"):
+    _render_login()
+    st.stop()
+
 set_session_role_from_db()
 
 # ==================================================
@@ -133,10 +165,6 @@ if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
 
     for key in list(st.session_state.keys()):
         del st.session_state[key]
-
-    st.session_state["authentication_status"] = False
-    st.session_state["usuario"] = None
-    st.session_state["rol"] = None
 
     st.rerun()
 
