@@ -15,6 +15,10 @@ from security.permissions import (
 
 
 def render_seguridad_roles(usuario: str) -> None:
+    st.write("USUARIO PARAMETRO:", usuario)
+    st.write("USUARIO SESSION:", st.session_state.get("usuario"))
+    st.write("ROL SESSION:", st.session_state.get("rol"))
+
     puede_ver = has_permission("security.view") or has_permission("dashboard.view")
     if not puede_ver:
         st.error("🚫 No tienes acceso al módulo Seguridad / Roles.")
