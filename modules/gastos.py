@@ -595,7 +595,7 @@ def _render_tab_registro(usuario: str) -> None:
 # TAB HISTORIAL
 # ============================================================
 
-def _render_tab_historial() -> None:
+def _render_tab_historial(perm_gastos_edit: bool = False) -> None:
     st.subheader("Historial de gastos")
 
     try:
@@ -689,6 +689,8 @@ def _render_tab_historial() -> None:
         st.line_chart(diaria.set_index("dia")["monto_usd"])
 
     st.subheader("Gestión de gastos")
+    if not perm_gastos_edit:
+        st.warning("Necesitas permiso `gastos.edit` para editar o cancelar gastos.")
 
     if not df_fil.empty:
         opciones = {f"#{int(r['id'])} · {r['descripcion']}": int(r["id"]) for _, r in df_fil.iterrows()}
@@ -791,9 +793,14 @@ def _render_tab_historial() -> None:
             p1.metric("Subtotal USD", f"$ {subtotal_edit_usd:,.2f}")
             p2.metric("Impuestos USD", f"$ {impuesto_edit_usd:,.2f}")
             p3.metric("Total Bs", f"Bs {monto_edit_bs:,.2f}")
-            p4.metric("Equiv. mensual", f"$ {monto_edit_mensual_usd:,.2f}")
+                p4.metric("Equiv. mensual", f"$ {monto_edit_mensual_usd:,.2f}")
 
-            if st.button("💾 Guardar cambios", key=f"edit_gasto_{gasto_id}", use_container_width=True):
+            if st.button(
+                "💾 Guardar cambios",
+                key=f"edit_gasto_{gasto_id}",
+                use_container_width=True,
+                disabled=not perm_gastos_edit,
+            ):
                 try:
                     with db_transaction() as conn:
                         conn.execute(
@@ -851,7 +858,12 @@ def _render_tab_historial() -> None:
 
         with st.expander("🗑️ Eliminar gasto"):
             confirmar = st.checkbox("Confirmo eliminación", key=f"confirm_gasto_{gasto_id}")
-            if st.button("Eliminar", key=f"del_gasto_{gasto_id}", use_container_width=True):
+            if st.button(
+                "Eliminar",
+                key=f"del_gasto_{gasto_id}",
+                use_container_width=True,
+                disabled=not perm_gastos_edit,
+            ):
                 if not confirmar:
                     st.warning("Debes confirmar para eliminar")
                 else:
@@ -969,12 +981,23 @@ def _render_tab_resumen() -> None:
         st.success(f"✅ Uso saludable del presupuesto: {uso:,.1f}%")
 
 
-# ============================================================
 # INTERFAZ DE GASTOS
 # ============================================================
 
 def render_gastos(usuario: str) -> None:
     _ensure_gastos_schema()
+
+    perm_gastos_view = st.session_state.get("perm_gastos_view", False)
+    perm_gastos_create = st.session_state.get("perm_gastos_create", False)
+    perm_gastos_edit = st.session_state.get("perm_gastos_edit", False)
+    gastos_readonly = st.session_state.get("gastos_readonly", True)
+
+    if not perm_gastos_view:
+        st.error("🚫 No tienes acceso al módulo Gastos.")
+        return
+
+    if gastos_readonly:
+        st.info("Modo solo lectura: puedes consultar gastos, pero no registrar ni editar.")
 
     st.subheader("📉 Control integral de gastos")
     st.caption(
@@ -989,10 +1012,13 @@ def render_gastos(usuario: str) -> None:
     ])
 
     with tab1:
-        _render_tab_registro(usuario)
+        if perm_gastos_create:
+            _render_tab_registro(usuario)
+        else:
+            st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
 
     with tab2:
-        _render_tab_historial()
+        _render_tab_historial(perm_gastos_edit)
 
     with tab3:
         _render_tab_resumen()
