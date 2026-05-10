@@ -164,7 +164,7 @@ MENU_ROUTES = {
     "📉 Gastos": ("gastos.view", lambda: render_gastos(usuario)),
     "🏦 Caja empresarial": ("caja.view", lambda: render_caja(usuario)),
     "🏦 Tesorería": ("tesoreria.view", lambda: render_tesoreria(usuario)),
-    "💸 Cuentas por pagar": ("cxp.view", lambda: render_cuentas_por_pagar(usuario)),
+    "💸 Cuentas por pagar": (("cxp.view", "dashboard.view"), lambda: render_cuentas_por_pagar(usuario)),
     "📚 Contabilidad": ("contabilidad.view", lambda: render_contabilidad(usuario)),
     "🏛️ Conciliación bancaria": ("conciliacion.view", lambda: render_conciliacion_bancaria(usuario)),
     "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
@@ -184,7 +184,7 @@ MENU_ROUTES = {
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
 
     # RRHH
-    "👨‍💼 RRHH": ("rrhh.view", lambda: render_rrhh(usuario)),
+    "👨‍💼 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_rrhh(usuario)),
 
     # CALENDARIOS Y MARKETING
     "📅 Calendario operativo": ("calendario_operativo.view", lambda: render_calendario_operativo(usuario)),
@@ -192,7 +192,7 @@ MENU_ROUTES = {
 
     # SISTEMA
     "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
-    "🔐 Seguridad / Roles": ("security.view", lambda: render_seguridad_roles(usuario)),
+    "🔐 Seguridad / Roles": (("security.view", "dashboard.view"), lambda: render_seguridad_roles(usuario)),
     "📘 Manuales / SOP": ("manuales.view", lambda: render_manuales_sop(usuario)),
 
     # OTROS
