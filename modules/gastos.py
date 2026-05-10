@@ -495,6 +495,10 @@ def _load_gastos() -> pd.DataFrame:
 
 def _render_tab_registro(usuario: str) -> None:
     config = _load_config_snapshot()
+    perm_gastos_create = bool(st.session_state.get("perm_gastos_create", False))
+
+    if not perm_gastos_create:
+        st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
 
     c1, c2 = st.columns([2, 1])
     descripcion = c1.text_input("Descripción del gasto", key="gastos_registro_descripcion")
@@ -510,6 +514,7 @@ def _render_tab_registro(usuario: str) -> None:
         metodo,
         config,
     )
+
 
     taxes_default = _suggest_tax_flags(metodo)
     tx1, tx2, tx3, tx4 = st.columns(4)
@@ -560,9 +565,18 @@ def _render_tab_registro(usuario: str) -> None:
     p3.metric("Total Bs", f"Bs {monto_bs:,.2f}")
     p4.metric("Equivalente mensual", f"$ {monto_mensual_usd:,.2f}")
 
-    submit = st.button("📉 Registrar egreso", key="gastos_registro_submit", use_container_width=True)
+    submit = st.button(
+        "📉 Registrar egreso",
+        key="gastos_registro_submit",
+        use_container_width=True,
+        disabled=not perm_gastos_create,
+    )
 
     if not submit:
+        return
+
+    if not perm_gastos_create:
+        st.error("Necesitas permiso `gastos.create` para registrar gastos.")
         return
 
     try:
@@ -688,7 +702,7 @@ def _render_tab_historial(perm_gastos_edit: bool = False) -> None:
         st.caption("Tendencia de egresos")
         st.line_chart(diaria.set_index("dia")["monto_usd"])
 
-   st.subheader("Gestión de gastos")
+    st.subheader("Gestión de gastos")
 
     if not df_fil.empty:
         opciones = {f"#{int(r['id'])} · {r['descripcion']}": int(r["id"]) for _, r in df_fil.iterrows()}
