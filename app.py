@@ -1,7 +1,7 @@
+import os
+
 import streamlit as st
 
-# ==================================================
-# CONFIGURACION DE LA APP
 # ==================================================
 
 st.set_page_config(
@@ -270,6 +270,32 @@ VISIBLE_MENU = {
     for label, (permiso, callback) in MENU_ROUTES.items()
     if _can_access_menu_route(permiso)
 }
+
+
+def _menu_debug_enabled() -> bool:
+    env_value = os.getenv("IMPERIO_MENU_DEBUG", "").strip().casefold()
+    return st.session_state.get("debug_menu", False) or env_value in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "debug",
+    }
+
+
+def _render_sidebar_menu_debug() -> None:
+    if not _menu_debug_enabled():
+        return
+
+    st.sidebar.divider()
+    st.sidebar.caption(f"Rol activo: {user_role}")
+    st.sidebar.caption(f"Rutas totales: {len(MENU_ROUTES)}")
+    st.sidebar.caption(f"Rutas visibles: {len(VISIBLE_MENU)}")
+    with st.sidebar.expander("Debug módulos visibles"):
+        st.write(list(VISIBLE_MENU.keys()))
+
+
+_render_sidebar_menu_debug()
 
 if not VISIBLE_MENU:
     st.error("🚫 Tu usuario no tiene acceso a módulos habilitados.")
