@@ -489,16 +489,17 @@ def _load_gastos() -> pd.DataFrame:
         )
 
 
-# ============================================================
+ ============================================================
 # TAB REGISTRO
 # ============================================================
 
 def _render_tab_registro(usuario: str) -> None:
     config = _load_config_snapshot()
     perm_gastos_create = bool(st.session_state.get("perm_gastos_create", False))
+    gastos_readonly = bool(st.session_state.get("gastos_readonly", False))
 
-    if not perm_gastos_create:
-        st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
+    if gastos_readonly or not perm_gastos_create:
+        st.info("Modo solo lectura: puedes consultar gastos, pero no registrar ni editar.")
 
     c1, c2 = st.columns([2, 1])
     descripcion = c1.text_input("Descripción del gasto", key="gastos_registro_descripcion")
@@ -514,6 +515,7 @@ def _render_tab_registro(usuario: str) -> None:
         metodo,
         config,
     )
+
 
 
     taxes_default = _suggest_tax_flags(metodo)
@@ -576,7 +578,7 @@ def _render_tab_registro(usuario: str) -> None:
         return
 
     if not perm_gastos_create:
-        st.error("Necesitas permiso `gastos.create` para registrar gastos.")
+        st.info("Modo solo lectura: puedes consultar gastos, pero no registrar ni editar.")
         return
 
     try:
@@ -1006,7 +1008,6 @@ def render_gastos(usuario: str) -> None:
     _ensure_gastos_schema()
 
     perm_gastos_view = st.session_state.get("perm_gastos_view", False)
-    perm_gastos_create = st.session_state.get("perm_gastos_create", False)
     perm_gastos_edit = st.session_state.get("perm_gastos_edit", False)
     gastos_readonly = st.session_state.get("gastos_readonly", True)
 
@@ -1024,7 +1025,7 @@ def render_gastos(usuario: str) -> None:
     )
 
     tab_historial, tab_resumen, tab_registro = st.tabs([
-        "📜 Historial",
+"📜 Historial",
         "📊 Resumen",
         "📝 Registrar gasto",
     ])
@@ -1036,7 +1037,6 @@ def render_gastos(usuario: str) -> None:
         _render_tab_resumen()
 
     with tab_registro:
-        if perm_gastos_create:
-            _render_tab_registro(usuario)
-        else:
+        _render_tab_registro(usuario)
+
             st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
