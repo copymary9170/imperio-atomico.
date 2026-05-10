@@ -57,6 +57,14 @@ SECURITY_PERMISSION_CATALOG = (
     ("mantenimiento.view", "Consultar mantenimiento de activos."),
 )
 
+OPERATIONAL_MODULE_VIEW_PERMISSIONS = (
+    "nomina.view",
+    "presupuesto.view",
+    "calendario_operativo.view",
+    "publicaciones.view",
+)
+
+
 DEFAULT_ROLE_PERMISSIONS = {
     "Admin": ("*",),
     "Administration": (
@@ -2134,12 +2142,9 @@ def _ensure_security_migration(conn) -> None:
         """
     )
 
-    permisos_modulos_operativos = (
-        "nomina.view",
-        "presupuesto.view",
-        "calendario_operativo.view",
-        "publicaciones.view",
-    )
+    # Autocura bases existentes: versiones anteriores solo cargaban permisos
+    # por defecto cuando el rol no tenía ninguna fila en roles_permisos. Si un
+    # rol ya existía, los módulos agregados después no aparecían en el sidebar.
     conn.executemany(
         """
         INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo)
@@ -2148,7 +2153,7 @@ def _ensure_security_migration(conn) -> None:
         [
             (role, permission)
             for role in ("Administration", "Operator")
-            for permission in permisos_modulos_operativos
+            for permission in OPERATIONAL_MODULE_VIEW_PERMISSIONS
         ],
     )
 
