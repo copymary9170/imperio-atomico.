@@ -44,6 +44,14 @@ def _is_json_serializable(value: Any) -> bool:
         return False
 
 
+def clear_session_snapshot() -> None:
+    """Elimina la sesión persistida en disco."""
+    try:
+        SNAPSHOT_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def restore_session_snapshot() -> None:
     """Restaura el estado persistido, sólo una vez por sesión Streamlit."""
     if st.session_state.get(RESTORE_FLAG):
