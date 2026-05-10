@@ -1,4 +1,4 @@
-impor os
+import os
 
 import streamlit as st
 
