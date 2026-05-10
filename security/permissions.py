@@ -10,7 +10,7 @@ from database.connection import db_transaction
 
 
 SUPERUSER_PERMISSION = "*"
-FOUNDER_USERS = {"copymary9170", "Copy Mary"}
+FOUNDER_USERS = {"copymary9170", "Copy Mary", "copymary9170@gmail.com", "Copy Mary <copymary9170@gmail.com>"}
 ADMIN_ROLE_ALIASES = {"admin", "administrador", "administradora", "administrator"}
 ADMINISTRATION_ROLE_ALIASES = {"administration", "administracion", "administración"}
 OPERATOR_ROLE_ALIASES = {"operator", "operador"}
@@ -36,7 +36,8 @@ def get_current_user() -> str:
 
 def is_founder_user(usuario: str | None = None) -> bool:
     current = str(usuario or get_current_user()).strip()
-    return current in FOUNDER_USERS or current.casefold() in {u.casefold() for u in FOUNDER_USERS}
+    founder_values = {u.casefold() for u in FOUNDER_USERS}
+    return current.casefold() in founder_values
 
 
 def get_current_role() -> str:
