@@ -982,11 +982,6 @@ def render_gastos(usuario: str) -> None:
         "impuestos o comisiones cuando sí te los cobran."
     )
 
-    rol = st.session_state.get("rol", "Admin")
-    if rol not in ["Admin", "Administration", "Administracion"]:
-        st.error("🚫 Solo administración puede gestionar gastos.")
-        return
-
     tab1, tab2, tab3 = st.tabs([
         "📝 Registrar gasto",
         "📜 Historial",
