@@ -63,9 +63,8 @@ from views.publicaciones_marketing import render_publicaciones_marketing
 # CONFIGURACION
 from modules.configuracion import render_sidebar_config_snapshot, render_configuracion
 
-# ERP EXPANDIDO
+# ERP EXPANDIDO INDEPENDIENTE
 from views.erp_nuevos_modulos import (
-    render_portafolio_modulos,
     render_cuentas_por_pagar,
     render_tesoreria,
     render_costeo_industrial,
@@ -153,34 +152,13 @@ MENU_ROUTES = {
     "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
 
     # PRODUCCION
-    "✂️ Corte Industrial": (
-        ("produccion.execute", "produccion.plan"),
-        lambda: render_corte(usuario),
-    ),
-    "🔥 Sublimación": (
-        "produccion.execute",
-        lambda: render_sublimacion(usuario),
-    ),
-    "🎨 Producción Manual": (
-        "produccion.execute",
-        lambda: render_produccion_manual(usuario),
-    ),
-    "🗓️ Planificación de producción": (
-        ("produccion.plan", "produccion.execute"),
-        lambda: render_planificacion_produccion(usuario),
-    ),
-    "🧭 Rutas de producción": (
-        ("produccion.route", "produccion.execute"),
-        lambda: render_rutas_produccion(usuario),
-    ),
-    "✅ Control de calidad": (
-        "produccion.quality",
-        lambda: render_control_calidad(usuario),
-    ),
-    "♻️ Mermas y desperdicio": (
-        "produccion.scrap",
-        lambda: render_mermas_desperdicio(usuario),
-    ),
+    "✂️ Corte Industrial": (("produccion.execute", "produccion.plan"), lambda: render_corte(usuario)),
+    "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
+    "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
+    "🗓️ Planificación de producción": (("produccion.plan", "produccion.execute"), lambda: render_planificacion_produccion(usuario)),
+    "🧭 Rutas de producción": (("produccion.route", "produccion.execute"), lambda: render_rutas_produccion(usuario)),
+    "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
+    "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
 
     # FINANZAS
     "📉 Gastos": ("gastos.view", lambda: render_gastos(usuario)),
@@ -188,50 +166,29 @@ MENU_ROUTES = {
     "🏦 Tesorería": ("tesoreria.view", lambda: render_tesoreria(usuario)),
     "💸 Cuentas por pagar": ("cxp.view", lambda: render_cuentas_por_pagar(usuario)),
     "📚 Contabilidad": ("contabilidad.view", lambda: render_contabilidad(usuario)),
-    "🏛️ Conciliación bancaria": (
-        "conciliacion.view",
-        lambda: render_conciliacion_bancaria(usuario),
-    ),
+    "🏛️ Conciliación bancaria": ("conciliacion.view", lambda: render_conciliacion_bancaria(usuario)),
     "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
 
-    # NUEVAS FINANZAS Y ADMINISTRACION
-    "👨‍💼 Nómina y trabajadores": (
-        "nomina.view",
-        lambda: render_nomina_trabajadores(usuario),
-    ),
-    "💰 Presupuesto mensual": (
-        "presupuesto.view",
-        lambda: render_presupuesto_mensual(usuario),
-    ),
+    # FINANZAS Y ADMINISTRACION
+    "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
+    "💰 Presupuesto mensual": ("presupuesto.view", lambda: render_presupuesto_mensual(usuario)),
 
     # ANALITICA
     "📈 Rentabilidad": ("costeo.view", lambda: render_rentabilidad(usuario)),
-    "🔮 Planeación financiera": (
-        "tesoreria.view",
-        lambda: render_planeacion_financiera(usuario),
-    ),
+    "🔮 Planeación financiera": ("tesoreria.view", lambda: render_planeacion_financiera(usuario)),
     "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
 
     # COSTOS
     "🧮 Costeo": ("costeo.view", lambda: render_costeo(usuario)),
-    "🧮 Costeo industrial": (
-        "costeo_industrial.view",
-        lambda: render_costeo_industrial(usuario),
-    ),
+    "🧮 Costeo industrial": ("costeo_industrial.view", lambda: render_costeo_industrial(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
 
     # RRHH
     "👨‍💼 RRHH": ("rrhh.view", lambda: render_rrhh(usuario)),
 
     # CALENDARIOS Y MARKETING
-    "📅 Calendario operativo": (
-        "calendario_operativo.view",
-        lambda: render_calendario_operativo(usuario),
-    ),
-    "📣 Publicaciones y marketing": (
-        "publicaciones.view",
-        lambda: render_publicaciones_marketing(usuario),
-    ),
+    "📅 Calendario operativo": ("calendario_operativo.view", lambda: render_calendario_operativo(usuario)),
+    "📣 Publicaciones y marketing": ("publicaciones.view", lambda: render_publicaciones_marketing(usuario)),
 
     # SISTEMA
     "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
@@ -244,13 +201,9 @@ MENU_ROUTES = {
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
     "🛍️ Catálogo": ("inventario.view", lambda: render_catalogo(usuario)),
 
-    # EXPANSION ERP
-    "🧩 Nuevos módulos ERP": ("dashboard.view", lambda: render_portafolio_modulos(usuario)),
+    # MODULOS ERP INDEPENDIENTES
     "🧩 Módulos rescatados": ("dashboard.view", lambda: render_modulos_rescatados(usuario)),
-    "🛠️ Mantenimiento": (
-        "mantenimiento.view",
-        lambda: render_mantenimiento_activos(usuario),
-    ),
+    "🛠️ Mantenimiento": ("mantenimiento.view", lambda: render_mantenimiento_activos(usuario)),
 }
 
 # ==================================================
@@ -260,10 +213,8 @@ MENU_ROUTES = {
 def _can_access_menu_route(permission_rule):
     if isinstance(permission_rule, str):
         return has_permission(permission_rule)
-
     if isinstance(permission_rule, (tuple, list, set)):
         return any(has_permission(permission_code) for permission_code in permission_rule)
-
     return False
 
 
@@ -276,19 +227,12 @@ VISIBLE_MENU = {
 
 def _menu_debug_enabled() -> bool:
     env_value = os.getenv("IMPERIO_MENU_DEBUG", "").strip().casefold()
-    return st.session_state.get("debug_menu", False) or env_value in {
-        "1",
-        "true",
-        "yes",
-        "on",
-        "debug",
-    }
+    return st.session_state.get("debug_menu", False) or env_value in {"1", "true", "yes", "on", "debug"}
 
 
 def _render_sidebar_menu_debug() -> None:
     if not _menu_debug_enabled():
         return
-
     st.sidebar.divider()
     st.sidebar.caption(f"Rol activo: {user_role}")
     st.sidebar.caption(f"Rutas totales: {len(MENU_ROUTES)}")
