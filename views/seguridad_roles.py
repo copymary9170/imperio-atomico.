@@ -10,13 +10,14 @@ from security.permissions import (
     get_role_permissions_df,
     get_users_roles_df,
     has_permission,
-    require_permission,
     set_role_permissions,
 )
 
 
 def render_seguridad_roles(usuario: str) -> None:
-    if not require_permission("security.view", "🚫 No tienes acceso al módulo Seguridad / Roles."):
+    puede_ver = has_permission("security.view") or has_permission("dashboard.view")
+    if not puede_ver:
+        st.error("🚫 No tienes acceso al módulo Seguridad / Roles.")
         return
 
     puede_editar = has_permission("security.edit")
@@ -24,8 +25,14 @@ def render_seguridad_roles(usuario: str) -> None:
     st.title("🔐 Seguridad / Roles")
     st.caption("Gestión de roles, permisos y auditoría de seguridad.")
 
+    if not has_permission("security.view"):
+        st.warning(
+            "Vista limitada: puedes ver la estructura general porque tienes acceso al panel, "
+            "pero necesitas `security.view` para auditoría completa y `security.edit` para editar."
+        )
+
     if not puede_editar:
-        st.info("Modo solo lectura: puedes consultar usuarios, permisos y auditoría.")
+        st.info("Modo solo lectura: puedes consultar usuarios, permisos y auditoría. La edición está bloqueada.")
 
     users_df = get_users_roles_df()
     permissions_df = get_permissions_catalog_df()
@@ -75,7 +82,7 @@ def render_seguridad_roles(usuario: str) -> None:
 
         if users_df.empty:
             st.caption("No hay usuarios registrados.")
-        else:
+        elif roles_disponibles:
             selected_user = st.selectbox("Usuario", users_df["usuario"].tolist(), key="seg_user")
             current_role = users_df.loc[users_df["usuario"] == selected_user, "rol"].iloc[0]
             role_index = roles_disponibles.index(current_role) if current_role in roles_disponibles else 0
