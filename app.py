@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import streamlit as st
 
@@ -15,11 +16,7 @@ st.set_page_config(
 # ==================================================
 
 from database.schema import init_schema
-from ui.session_persistence import (
-    restore_session_snapshot,
-    save_session_snapshot,
-    clear_session_snapshot,
-)
+from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
 
 init_schema()
@@ -128,7 +125,11 @@ st.sidebar.title("⚛️ Imperio Atómico ERP")
 st.sidebar.caption("Accede rápido a cada módulo desde el menú lateral.")
 
 if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
-    clear_session_snapshot()
+    snapshot_path = Path(__file__).resolve().parent / "data" / "session_snapshot.json"
+    try:
+        snapshot_path.unlink(missing_ok=True)
+    except Exception:
+        pass
 
     for key in list(st.session_state.keys()):
         del st.session_state[key]
