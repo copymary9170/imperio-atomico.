@@ -1009,6 +1009,7 @@ def render_gastos(usuario: str) -> None:
 
     perm_gastos_view = st.session_state.get("perm_gastos_view", False)
     perm_gastos_edit = st.session_state.get("perm_gastos_edit", False)
+    perm_gastos_create = st.session_state.get("perm_gastos_create", False)
     gastos_readonly = st.session_state.get("gastos_readonly", True)
 
     if not perm_gastos_view:
@@ -1018,6 +1019,9 @@ def render_gastos(usuario: str) -> None:
     if gastos_readonly:
         st.info("Modo solo lectura: puedes consultar gastos, pero no registrar ni editar.")
 
+    if not perm_gastos_create:
+        st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
+
     st.subheader("📉 Control integral de gastos")
     st.caption(
         "Las tasas sugeridas salen de Configuración según método/moneda, y puedes sumar "
@@ -1025,7 +1029,7 @@ def render_gastos(usuario: str) -> None:
     )
 
     tab_historial, tab_resumen, tab_registro = st.tabs([
-"📜 Historial",
+        "📜 Historial",
         "📊 Resumen",
         "📝 Registrar gasto",
     ])
@@ -1038,6 +1042,3 @@ def render_gastos(usuario: str) -> None:
 
     with tab_registro:
         _render_tab_registro(usuario)
-
-     if not perm_gastos_create:
-        st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
