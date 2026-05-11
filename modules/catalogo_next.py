@@ -1024,6 +1024,78 @@ def _render_studio(df: pd.DataFrame, usuario: str) -> None:
             except Exception as exc:
                 st.error(f"No se pudo archivar: {exc}")
 
+def _render_module_dispatcher(df: pd.DataFrame, usuario: str) -> None:
+    st.subheader("Integraciones")
+
+    incoming = render_module_inbox(
+        "catalogo",
+        title="Datos recibidos desde otro módulo",
+        use_button_label="Usar datos",
+        clear_button_label="Limpiar",
+        session_prefill_key="catalogo_prefill",
+    )
+
+    if incoming:
+        st.success("Datos recibidos y disponibles para usar en catálogo.")
+
+    if df.empty:
+        st.info("No hay productos disponibles para enviar a otros módulos.")
+        return
+
+    item_id = st.selectbox(
+        "Producto a enviar",
+        df["id"].tolist(),
+        format_func=lambda x: f"{df[df['id'] == x]['sku'].iloc[0]} · {df[df['id'] == x]['nombre'].iloc[0]}",
+        key="cat_integration_item",
+    )
+
+    row = df[df["id"] == item_id].iloc[0].to_dict()
+
+    target_module = st.selectbox(
+        "Enviar a módulo",
+        ["cotizaciones", "ventas", "produccion", "inventario"],
+        key="cat_integration_target",
+    )
+
+    payload_data = {
+        "catalogo_id": _safe_int(row.get("id")),
+        "sku": row.get("sku"),
+        "nombre": row.get("nombre"),
+        "categoria": row.get("categoria"),
+        "tipo": row.get("tipo"),
+        "descripcion": row.get("descripcion"),
+        "unidad": row.get("unidad"),
+        "precio": _safe_float(row.get("precio")),
+        "costo": _safe_float(row.get("costo")),
+        "precio_mayorista": _safe_float(row.get("precio_mayorista")),
+        "precio_minimo": _safe_float(row.get("precio_minimo")),
+        "tiempo_entrega_dias": _safe_int(row.get("tiempo_entrega_dias")),
+        "lead_time_comercial_dias": _safe_int(row.get("lead_time_comercial_dias")),
+        "ruta_base": row.get("ruta_base"),
+        "notas_tecnicas": row.get("notas_tecnicas"),
+        "imagen_url": row.get("imagen_url"),
+        "imagen_path": row.get("imagen_path"),
+    }
+
+    st.json(payload_data)
+
+    if st.button("Enviar producto", use_container_width=True, key="cat_send_to_module"):
+        payload = build_standard_payload(
+            source_module="catalogo",
+            source_action="send_product",
+            record_id=_safe_int(row.get("id")),
+            referencia=str(row.get("sku") or row.get("nombre") or ""),
+            usuario=usuario,
+            payload_data=payload_data,
+        )
+
+        dispatch_to_module(
+            source_module="catalogo",
+            target_module=target_module,
+            payload=payload,
+            success_message=f"Producto enviado a {target_module}.",
+            session_key=f"{target_module}_prefill",
+        )
 
 def render_catalogo_hub(usuario: str) -> None:
     _ensure_catalogo_schema()
