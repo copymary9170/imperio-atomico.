@@ -13,6 +13,80 @@ from database.connection import db_transaction
 from modules.common import clean_text, money, require_text
 from security.permissions import has_permission
 
+# ============================================================
+# INTEGRACIÓN ENTRE MÓDULOS
+# ============================================================
+
+try:
+    from modules.integration_hub import (
+        build_standard_payload,
+        dispatch_to_module,
+        render_module_inbox,
+    )
+except Exception:
+    def build_standard_payload(
+        source_module: str,
+        source_action: str,
+        record_id: int | None = None,
+        referencia: str | None = None,
+        usuario: str | None = None,
+        payload_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "source_module": source_module,
+            "source_action": source_action,
+            "record_id": record_id,
+            "referencia": referencia,
+            "timestamp": "",
+            "usuario": usuario,
+            "payload_data": payload_data or {},
+        }
+
+    def dispatch_to_module(
+        source_module: str,
+        target_module: str,
+        payload: dict[str, Any],
+        success_message: str | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        if "module_inbox" not in st.session_state:
+            st.session_state["module_inbox"] = {}
+        st.session_state["module_inbox"][target_module] = payload
+        if session_key:
+            st.session_state[session_key] = payload.get("payload_data", {})
+        if success_message:
+            st.success(success_message)
+
+    def render_module_inbox(
+        module_name: str,
+        title: str = "Datos recibidos",
+        use_button_label: str = "Usar datos",
+        clear_button_label: str = "Limpiar",
+        session_prefill_key: str | None = None,
+    ) -> dict[str, Any] | None:
+        inbox = st.session_state.get("module_inbox", {})
+        payload = inbox.get(module_name)
+        if not payload:
+            return None
+
+        with st.container(border=True):
+            st.info(title)
+            st.json(payload.get("payload_data", {}))
+
+            c1, c2 = st.columns(2)
+            if c1.button(use_button_label, key=f"{module_name}_use_inbox"):
+                if session_prefill_key:
+                    st.session_state[session_prefill_key] = payload.get("payload_data", {})
+                st.success("Datos cargados en sesión.")
+                return payload.get("payload_data", {})
+
+            if c2.button(clear_button_label, key=f"{module_name}_clear_inbox"):
+                st.session_state["module_inbox"].pop(module_name, None)
+                st.success("Datos limpiados.")
+                st.rerun()
+
+        return payload.get("payload_data", {})
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CATALOG_IMAGES_DIR = ROOT_DIR / "data" / "catalogo_fotos"
@@ -1112,14 +1186,15 @@ def render_catalogo_hub(usuario: str) -> None:
     df = _load_catalogo_df()
     _render_metrics(df)
 
-    tab_catalog, tab_studio, tab_insights, tab_data = st.tabs(
-        [
-            "🛍️ Catálogo Pro",
-            "✨ Product Studio",
-            "📊 Insights",
-            "⬇️ Datos",
-        ]
-    )
+    tab_catalog, tab_studio, tab_integraciones, tab_insights, tab_data = st.tabs(
+    [
+        "🛍️ Catálogo Pro",
+        "✨ Product Studio",
+        "🔗 Integraciones",
+        "📊 Insights",
+        "⬇️ Datos",
+    ]
+)
 
     with tab_catalog:
         view = _filter_catalog(df)
@@ -1150,6 +1225,9 @@ def render_catalogo_hub(usuario: str) -> None:
 
     with tab_studio:
         _render_studio(df, usuario)
+
+    with tab_integraciones:
+    _render_module_dispatcher(df, usuario)
 
     with tab_insights:
         _render_insights(df)
