@@ -1025,152 +1025,6 @@ def _render_studio(df: pd.DataFrame, usuario: str) -> None:
                 st.error(f"No se pudo archivar: {exc}")
 
 
-def _render_export_import(df: pd.DataFrame, usuario: str) -> None:
-    st.subheader("Importar / Exportar")
-
-    if _can_export() and not df.empty:
-        export_cols = [
-            "sku",
-            "nombre",
-            "categoria",
-            "subcategoria",
-            "tipo",
-            "descripcion",
-            "unidad",
-            "precio",
-            "costo",
-            "precio_mayorista",
-            "precio_minimo",
-            "margen_pct",
-            "tiempo_entrega_dias",
-            "lead_time_comercial_dias",
-            "canal",
-            "estado",
-            "proveedor_sugerido",
-            "tags",
-            "destacado",
-            "visible_catalogo_publico",
-            "prioridad_comercial",
-            "score_comercial",
-            "temporada",
-            "coleccion",
-            "imagen_url",
-            "imagen_path",
-            "imagen_nombre",
-            "ruta_base",
-            "notas_tecnicas",
-        ]
-        csv = df[export_cols].to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "⬇️ Exportar catálogo CSV",
-            data=csv,
-            file_name="catalogo_imperio_atomico.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-    else:
-        st.info("Necesitas catalogo.export o inventario.view para exportar.")
-
-    st.divider()
-    st.markdown("#### Importación rápida CSV")
-    st.caption("Columnas mínimas: sku, nombre, categoria, precio, costo. Las demás son opcionales.")
-    uploaded = st.file_uploader("Subir CSV", type=["csv"], key="cat_import_csv")
-
-    if uploaded is not None:
-        try:
-            import_df = pd.read_csv(uploaded)
-            st.dataframe(import_df.head(20), use_container_width=True, hide_index=True)
-
-            if st.button("Importar filas nuevas", disabled=not _can_create(), use_container_width=True):
-                created = 0
-                errors: list[str] = []
-
-                with db_transaction() as conn:
-                    for idx, raw in import_df.iterrows():
-                        data = raw.to_dict()
-                        sku = _safe_text(data.get("sku")).upper()
-
-                        if not sku:
-                            errors.append(f"Fila {idx + 1}: SKU vacío")
-                            continue
-
-                        exists = conn.execute(
-                            "SELECT id FROM catalogo_items WHERE upper(sku)=? AND COALESCE(activo,1)=1",
-                            (sku,),
-                        ).fetchone()
-
-                        if exists:
-                            errors.append(f"Fila {idx + 1}: SKU duplicado {sku}")
-                            continue
-
-                        try:
-                            _insert_catalog_item(conn, usuario, data)
-                            created += 1
-                        except Exception as exc:
-                            errors.append(f"Fila {idx + 1}: {exc}")
-
-                st.success(f"Importación completada. Creados: {created}")
-
-                if errors:
-                    st.warning("Algunas filas no se importaron.")
-                    st.write(errors[:20])
-
-                st.rerun()
-        except Exception as exc:
-            st.error(f"No se pudo leer el CSV: {exc}")
-
-
-def _render_insights(df: pd.DataFrame) -> None:
-    st.subheader("Insights comerciales")
-
-    if df.empty:
-        st.info("No hay datos suficientes.")
-        return
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-        por_categoria = df.groupby("categoria", as_index=False).agg(
-            items=("id", "count"),
-            ticket=("precio", "mean"),
-            margen=("margen_pct", "mean"),
-        )
-        st.caption("Categorías por cantidad")
-        st.bar_chart(por_categoria.set_index("categoria")["items"])
-        st.dataframe(por_categoria.round(2), use_container_width=True, hide_index=True)
-
-    with c2:
-        top_score = df.sort_values("score_comercial", ascending=False).head(10)[
-            ["sku", "nombre", "score_comercial", "margen_pct", "precio"]
-        ]
-        st.caption("Top productos por score comercial")
-        st.dataframe(top_score, use_container_width=True, hide_index=True)
-
-    alertas = df[
-        (df["margen_pct"] < 25)
-        | (df["precio"] <= df["costo"])
-        | (df["visible_catalogo_publico"] == 0)
-    ].copy()
-
-    if not alertas.empty:
-        st.warning("Productos que requieren revisión de precio, margen o visibilidad.")
-        st.dataframe(
-            alertas[
-                [
-                    "sku",
-                    "nombre",
-                    "precio",
-                    "costo",
-                    "margen_pct",
-                    "visible_catalogo_publico",
-                    "estado",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-
-
 def render_catalogo_hub(usuario: str) -> None:
     _ensure_catalogo_schema()
 
@@ -1178,7 +1032,10 @@ def render_catalogo_hub(usuario: str) -> None:
         st.error("🚫 No tienes acceso al Catálogo.")
         return
 
-    st.caption("Catálogo comercial avanzado: productos, servicios, precios, rutas, fotos, canales y readiness para ventas.")
+    st.caption(
+        "Catálogo comercial avanzado: productos, servicios, precios, rutas, fotos, "
+        "canales y readiness para ventas."
+    )
 
     if not (_can_create() or _can_edit()):
         st.info("Modo solo lectura: puedes consultar y exportar, pero no crear ni editar productos.")
@@ -1187,18 +1044,23 @@ def render_catalogo_hub(usuario: str) -> None:
     _render_metrics(df)
 
     tab_catalog, tab_studio, tab_integraciones, tab_insights, tab_data = st.tabs(
-    [
-        "🛍️ Catálogo Pro",
-        "✨ Product Studio",
-        "🔗 Integraciones",
-        "📊 Insights",
-        "⬇️ Datos",
-    ]
-)
+        [
+            "🛍️ Catálogo Pro",
+            "✨ Product Studio",
+            "🔗 Integraciones",
+            "📊 Insights",
+            "⬇️ Datos",
+        ]
+    )
 
     with tab_catalog:
         view = _filter_catalog(df)
-        view_mode = st.radio("Vista", ["Tarjetas", "Tabla ejecutiva"], horizontal=True, key="cat_next_view_mode")
+        view_mode = st.radio(
+            "Vista",
+            ["Tarjetas", "Tabla ejecutiva"],
+            horizontal=True,
+            key="cat_next_view_mode",
+        )
 
         if view_mode == "Tarjetas":
             _render_cards(view)
@@ -1227,7 +1089,7 @@ def render_catalogo_hub(usuario: str) -> None:
         _render_studio(df, usuario)
 
     with tab_integraciones:
-    _render_module_dispatcher(df, usuario)
+        _render_module_dispatcher(df, usuario)
 
     with tab_insights:
         _render_insights(df)
