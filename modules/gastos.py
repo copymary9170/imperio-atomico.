@@ -1039,4 +1039,5 @@ def render_gastos(usuario: str) -> None:
     with tab_registro:
         _render_tab_registro(usuario)
 
-            st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
+     if not perm_gastos_create:
+        st.warning("Necesitas permiso `gastos.create` para registrar gastos.")
