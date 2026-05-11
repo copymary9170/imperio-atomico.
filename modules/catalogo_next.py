@@ -27,15 +27,15 @@ except Exception:
     def build_standard_payload(
         source_module: str,
         source_action: str,
-        record_id: int | None = None,
+        payload_data: dict[str, Any] | None = None,
+        record_id: int | str | None = None,
         referencia: str | None = None,
         usuario: str | None = None,
-        payload_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "source_module": source_module,
             "source_action": source_action,
-            "record_id": record_id,
+            "record_id": str(record_id) if record_id is not None else None,
             "referencia": referencia,
             "timestamp": "",
             "usuario": usuario,
@@ -58,34 +58,32 @@ except Exception:
             st.success(success_message)
 
     def render_module_inbox(
-        module_name: str,
-        title: str = "Datos recibidos",
-        use_button_label: str = "Usar datos",
-        clear_button_label: str = "Limpiar",
-        session_prefill_key: str | None = None,
+        target_module: str,
+        apply_callback: Any = None,
+        clear_after_apply: bool = False,
     ) -> dict[str, Any] | None:
         inbox = st.session_state.get("module_inbox", {})
-        payload = inbox.get(module_name)
+        payload = inbox.get(str(target_module).strip().lower()) or inbox.get(target_module)
         if not payload:
             return None
 
-        with st.container(border=True):
-            st.info(title)
-            st.json(payload.get("payload_data", {}))
+        st.info(f"Datos recibidos desde {payload.get('source_module', 'origen')}")
+        st.json(payload.get("payload_data", {}))
 
-            c1, c2 = st.columns(2)
-            if c1.button(use_button_label, key=f"{module_name}_use_inbox"):
-                if session_prefill_key:
-                    st.session_state[session_prefill_key] = payload.get("payload_data", {})
-                st.success("Datos cargados en sesión.")
-                return payload.get("payload_data", {})
+        c1, c2 = st.columns(2)
+        if c1.button("Usar datos recibidos", key=f"inbox_apply::{target_module}", use_container_width=True):
+            if apply_callback:
+                apply_callback(payload)
+            st.success("Datos cargados en sesión.")
+            if clear_after_apply:
+                st.session_state["module_inbox"].pop(target_module, None)
+            st.rerun()
 
-            if c2.button(clear_button_label, key=f"{module_name}_clear_inbox"):
-                st.session_state["module_inbox"].pop(module_name, None)
-                st.success("Datos limpiados.")
-                st.rerun()
+        if c2.button("Limpiar datos recibidos", key=f"inbox_clear::{target_module}", use_container_width=True):
+            st.session_state["module_inbox"].pop(target_module, None)
+            st.rerun()
 
-        return payload.get("payload_data", {})
+        return payload
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -1024,15 +1022,17 @@ def _render_studio(df: pd.DataFrame, usuario: str) -> None:
             except Exception as exc:
                 st.error(f"No se pudo archivar: {exc}")
 
+
 def _render_module_dispatcher(df: pd.DataFrame, usuario: str) -> None:
     st.subheader("Integraciones")
 
+    def _apply_catalogo_inbox(inbox: dict[str, Any]) -> None:
+        st.session_state["catalogo_prefill"] = inbox.get("payload_data", {})
+
     incoming = render_module_inbox(
         "catalogo",
-        title="Datos recibidos desde otro módulo",
-        use_button_label="Usar datos",
-        clear_button_label="Limpiar",
-        session_prefill_key="catalogo_prefill",
+        apply_callback=_apply_catalogo_inbox,
+        clear_after_apply=False,
     )
 
     if incoming:
@@ -1059,9 +1059,13 @@ def _render_module_dispatcher(df: pd.DataFrame, usuario: str) -> None:
 
     payload_data = {
         "catalogo_id": _safe_int(row.get("id")),
+        "id": _safe_int(row.get("id")),
+        "record_id": _safe_int(row.get("id")),
+        "referencia": str(row.get("sku") or row.get("nombre") or ""),
         "sku": row.get("sku"),
         "nombre": row.get("nombre"),
         "categoria": row.get("categoria"),
+        "subcategoria": row.get("subcategoria"),
         "tipo": row.get("tipo"),
         "descripcion": row.get("descripcion"),
         "unidad": row.get("unidad"),
@@ -1075,6 +1079,7 @@ def _render_module_dispatcher(df: pd.DataFrame, usuario: str) -> None:
         "notas_tecnicas": row.get("notas_tecnicas"),
         "imagen_url": row.get("imagen_url"),
         "imagen_path": row.get("imagen_path"),
+        "usuario": usuario,
     }
 
     st.json(payload_data)
@@ -1083,10 +1088,10 @@ def _render_module_dispatcher(df: pd.DataFrame, usuario: str) -> None:
         payload = build_standard_payload(
             source_module="catalogo",
             source_action="send_product",
+            payload_data=payload_data,
             record_id=_safe_int(row.get("id")),
             referencia=str(row.get("sku") or row.get("nombre") or ""),
             usuario=usuario,
-            payload_data=payload_data,
         )
 
         dispatch_to_module(
@@ -1096,6 +1101,140 @@ def _render_module_dispatcher(df: pd.DataFrame, usuario: str) -> None:
             success_message=f"Producto enviado a {target_module}.",
             session_key=f"{target_module}_prefill",
         )
+
+
+def _render_insights(df: pd.DataFrame) -> None:
+    st.subheader("Insights comerciales")
+
+    if df.empty:
+        st.info("No hay datos para analizar.")
+        return
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        by_category = (
+            df.groupby("categoria", dropna=False)
+            .agg(
+                items=("id", "count"),
+                precio_promedio=("precio", "mean"),
+                margen_promedio=("margen_pct", "mean"),
+                score_promedio=("score_comercial", "mean"),
+            )
+            .reset_index()
+            .sort_values("items", ascending=False)
+        )
+        st.markdown("#### Por categoría")
+        st.dataframe(by_category, use_container_width=True, hide_index=True)
+
+    with c2:
+        by_channel = (
+            df.groupby("canal", dropna=False)
+            .agg(
+                items=("id", "count"),
+                precio_promedio=("precio", "mean"),
+                margen_promedio=("margen_pct", "mean"),
+                score_promedio=("score_comercial", "mean"),
+            )
+            .reset_index()
+            .sort_values("items", ascending=False)
+        )
+        st.markdown("#### Por canal")
+        st.dataframe(by_channel, use_container_width=True, hide_index=True)
+
+    st.markdown("#### Top productos por score comercial")
+    cols = [
+        "sku",
+        "nombre",
+        "categoria",
+        "tipo",
+        "estado",
+        "precio",
+        "costo",
+        "margen_pct",
+        "score_comercial",
+        "prioridad_comercial",
+    ]
+    st.dataframe(
+        df.sort_values("score_comercial", ascending=False)[cols].head(20),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def _render_export_import(df: pd.DataFrame, usuario: str) -> None:
+    st.subheader("Datos")
+
+    if not df.empty and _can_export():
+        export_df = df.copy()
+        csv = export_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Descargar catálogo CSV",
+            data=csv,
+            file_name=f"catalogo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            export_df.to_excel(writer, index=False, sheet_name="catalogo")
+
+        st.download_button(
+            "⬇️ Descargar catálogo Excel",
+            data=buffer.getvalue(),
+            file_name=f"catalogo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    elif not _can_export():
+        st.info("No tienes permiso para exportar el catálogo.")
+
+    st.markdown("#### Importar CSV")
+    st.caption("La importación crea productos nuevos. Si el SKU ya existe activo, se omite.")
+
+    uploaded_csv = st.file_uploader(
+        "Subir CSV de catálogo",
+        type=["csv"],
+        key="cat_import_csv",
+        disabled=not _can_create(),
+    )
+
+    if uploaded_csv is not None and _can_create():
+        try:
+            import_df = pd.read_csv(uploaded_csv)
+            st.dataframe(import_df.head(20), use_container_width=True, hide_index=True)
+
+            if st.button("Importar productos", use_container_width=True, key="cat_import_submit"):
+                created = 0
+                skipped = 0
+
+                with db_transaction() as conn:
+                    for _, row in import_df.iterrows():
+                        data = row.to_dict()
+                        sku = _safe_text(data.get("sku")).upper()
+                        if not sku:
+                            skipped += 1
+                            continue
+
+                        exists = conn.execute(
+                            "SELECT id FROM catalogo_items WHERE upper(sku)=? AND COALESCE(activo,1)=1",
+                            (sku,),
+                        ).fetchone()
+
+                        if exists:
+                            skipped += 1
+                            continue
+
+                        _insert_catalog_item(conn, usuario, data)
+                        created += 1
+
+                st.success(f"Importación completada. Creados: {created}. Omitidos: {skipped}.")
+                st.rerun()
+
+        except Exception as exc:
+            st.error(f"No se pudo importar el CSV: {exc}")
+
 
 def render_catalogo_hub(usuario: str) -> None:
     _ensure_catalogo_schema()
@@ -1155,7 +1294,8 @@ def render_catalogo_hub(usuario: str) -> None:
                 "imagen_path",
                 "ruta_base",
             ]
-            st.dataframe(view[cols], use_container_width=True, hide_index=True)
+            existing_cols = [col for col in cols if col in view.columns]
+            st.dataframe(view[existing_cols], use_container_width=True, hide_index=True)
 
     with tab_studio:
         _render_studio(df, usuario)
