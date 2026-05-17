@@ -9,8 +9,6 @@ from database.connection import db_transaction
 from models.operacion_industrial import MaintenanceOrderInput, TraceabilityEvent
 
 
-
-
 def _table_exists(conn, table_name: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
@@ -18,9 +16,55 @@ def _table_exists(conn, table_name: str) -> bool:
     ).fetchone()
     return row is not None
 
+
+def _table_columns(conn, table_name: str) -> set[str]:
+    if not _table_exists(conn, table_name):
+        return set()
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _ensure_column(conn, table_name: str, column_name: str, ddl: str) -> None:
+    columns = _table_columns(conn, table_name)
+    if columns and column_name not in columns:
+        conn.execute(ddl)
+
+
+def _ensure_activos_industrial_columns(conn) -> None:
+    if not _table_exists(conn, "activos"):
+        return
+
+    required = {
+        "tipo_detalle": "ALTER TABLE activos ADD COLUMN tipo_detalle TEXT",
+        "clase_registro": "ALTER TABLE activos ADD COLUMN clase_registro TEXT NOT NULL DEFAULT 'equipo_principal'",
+        "activo_padre_id": "ALTER TABLE activos ADD COLUMN activo_padre_id INTEGER",
+        "activo": "ALTER TABLE activos ADD COLUMN activo INTEGER NOT NULL DEFAULT 1",
+        "inversion": "ALTER TABLE activos ADD COLUMN inversion REAL NOT NULL DEFAULT 0",
+        "uso_acumulado": "ALTER TABLE activos ADD COLUMN uso_acumulado REAL NOT NULL DEFAULT 0",
+        "vida_util_valor": "ALTER TABLE activos ADD COLUMN vida_util_valor REAL NOT NULL DEFAULT 0",
+        "vida_util_unidad": "ALTER TABLE activos ADD COLUMN vida_util_unidad TEXT NOT NULL DEFAULT 'usos'",
+        "estado": "ALTER TABLE activos ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo'",
+    }
+    for column_name, ddl in required.items():
+        _ensure_column(conn, "activos", column_name, ddl)
+
+    conn.execute(
+        """
+        UPDATE activos
+        SET clase_registro = COALESCE(NULLIF(clase_registro, ''), 'equipo_principal'),
+            activo = COALESCE(activo, 1),
+            inversion = COALESCE(inversion, 0),
+            uso_acumulado = COALESCE(uso_acumulado, 0),
+            vida_util_valor = COALESCE(vida_util_valor, 0),
+            vida_util_unidad = COALESCE(NULLIF(vida_util_unidad, ''), 'usos'),
+            estado = COALESCE(NULLIF(estado, ''), 'activo')
+        """
+    )
+
+
 class OperacionIndustrialRepository:
     def ensure_schema(self) -> None:
         with db_transaction() as conn:
+            _ensure_activos_industrial_columns(conn)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS industrial_maintenance_orders (
@@ -60,6 +104,7 @@ class OperacionIndustrialRepository:
             )
 
     def create_maintenance_order(self, payload: MaintenanceOrderInput, usuario: str) -> int:
+        self.ensure_schema()
         with db_transaction() as conn:
             cur = conn.execute(
                 """
@@ -85,6 +130,7 @@ class OperacionIndustrialRepository:
         return order_id
 
     def log_traceability(self, event: TraceabilityEvent) -> None:
+        self.ensure_schema()
         with db_transaction() as conn:
             conn.execute(
                 """
@@ -105,6 +151,7 @@ class OperacionIndustrialRepository:
             )
 
     def list_assets_catalog(self) -> list[dict[str, Any]]:
+        self.ensure_schema()
         with db_transaction() as conn:
             if not _table_exists(conn, "activos"):
                 return []
@@ -136,6 +183,7 @@ class OperacionIndustrialRepository:
             return [dict(row) for row in rows]
 
     def list_open_maintenance_orders(self) -> list[dict[str, Any]]:
+        self.ensure_schema()
         with db_transaction() as conn:
             if not _table_exists(conn, "industrial_maintenance_orders"):
                 return []
@@ -162,6 +210,7 @@ class OperacionIndustrialRepository:
             return [dict(row) for row in rows]
 
     def list_recent_diagnostics(self, limit: int = 50) -> list[dict[str, Any]]:
+        self.ensure_schema()
         with db_transaction() as conn:
             if not _table_exists(conn, "printer_diagnostics"):
                 return []
@@ -187,6 +236,7 @@ class OperacionIndustrialRepository:
             return [dict(row) for row in rows]
 
     def get_overview_metrics(self) -> dict[str, Any]:
+        self.ensure_schema()
         with db_transaction() as conn:
             if not _table_exists(conn, "activos"):
                 return {
@@ -204,7 +254,7 @@ class OperacionIndustrialRepository:
                 SELECT
                     COUNT(*) AS total,
                     COALESCE(SUM(inversion), 0) AS inversion,
-                    SUM(CASE WHEN clase_registro = 'equipo_principal' THEN 1 ELSE 0 END) AS equipos,
+                    SUM(CASE WHEN COALESCE(clase_registro, 'equipo_principal') = 'equipo_principal' THEN 1 ELSE 0 END) AS equipos,
                     SUM(CASE WHEN clase_registro = 'componente' THEN 1 ELSE 0 END) AS componentes,
                     SUM(CASE WHEN clase_registro = 'herramienta' THEN 1 ELSE 0 END) AS herramientas
                 FROM activos
@@ -253,6 +303,7 @@ class OperacionIndustrialRepository:
         }
 
     def list_unified_history(self, limit: int = 200) -> list[dict[str, Any]]:
+        self.ensure_schema()
         cap = max(1, int(limit))
         with db_transaction() as conn:
             queries: list[str] = []
