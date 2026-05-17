@@ -3,13 +3,13 @@ from __future__ import annotations
 import streamlit as st
 
 from security.permissions import has_permission, require_permission
+from views.pos_rapido import render_pos_rapido
 
 
 def render_ventas(usuario: str) -> None:
     if not require_permission("ventas.view", "🚫 No tienes acceso al módulo Ventas."):
         return
 
-    # Permisos disponibles dentro del módulo
     st.session_state["perm_ventas_view"] = True
     st.session_state["perm_ventas_create"] = has_permission("ventas.create")
     st.session_state["perm_ventas_edit"] = has_permission("ventas.edit")
@@ -37,4 +37,13 @@ def render_ventas(usuario: str) -> None:
     if st.session_state.get("ventas_readonly", False):
         st.info("Modo solo lectura: puedes consultar ventas, pero no registrar, editar ni anular.")
 
-    ventas_module(usuario)
+    tab_ventas, tab_pos = st.tabs([
+        "Ventas operativas",
+        "🖥️ POS rápido",
+    ])
+
+    with tab_ventas:
+        ventas_module(usuario)
+
+    with tab_pos:
+        render_pos_rapido(usuario)
