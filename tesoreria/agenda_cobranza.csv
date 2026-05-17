@@ -1,0 +1,2 @@
+fecha_accion,cliente_id,cliente,pedido_id,monto_pendiente,medio_contacto,responsable,accion,resultado,proxima_accion,fecha_proxima_accion,estado,observaciones
+2026-05-02,CLI001,Cliente Ejemplo,PED001,150.00,WhatsApp,Administracion,Enviar recordatorio,Pendiente respuesta,Llamar cliente,2026-05-03,en seguimiento,Ejemplo inicial
