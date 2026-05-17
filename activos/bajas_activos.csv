@@ -1,0 +1,2 @@
+baja_id,activo_id,activo,fecha_baja,motivo,valor_en_libros,valor_recuperado,responsable,autorizado_por,estado,observaciones
+BAJ-001,1,Activo ejemplo,2026-05-17,obsoleto,0,0,Usuario demo,Administracion,borrador,Baja pendiente de aprobacion
