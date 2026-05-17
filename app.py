@@ -91,6 +91,7 @@ from views.areas_empresariales import render_area_combinada, render_area_empresa
 from views.almacen_avanzado import render_almacen_avanzado
 from views.activos_patrimonial import render_activos_patrimonial
 from views.proveedores_compras import render_compras_suministro, render_proveedores
+from views.despacho_entregas import render_despacho_entregas
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -154,6 +155,20 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
         render_proveedores(usuario)
     with tab_archivos:
         render_area_empresarial("Almacén", usuario, show_title=False)
+
+
+def render_produccion_unificada(usuario: str) -> None:
+    tab_plan, tab_area, tab_despacho = st.tabs([
+        "Planificación producción",
+        "Archivos de producción",
+        "🚚 Despacho / Entregas",
+    ])
+    with tab_plan:
+        render_planificacion_produccion(usuario)
+    with tab_area:
+        render_area_empresarial("Producción", usuario, show_title=False)
+    with tab_despacho:
+        render_despacho_entregas(usuario)
 
 
 def render_activos_unificado(usuario: str) -> None:
@@ -239,7 +254,7 @@ MENU_ROUTES = {
     "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
 
     # PRODUCCION
-    "🏭 Producción": (("produccion.plan", "produccion.execute"), lambda: render_area_combinada("Producción", render_planificacion_produccion, usuario)),
+    "🏭 Producción": (("produccion.plan", "produccion.execute"), lambda: render_produccion_unificada(usuario)),
     "✂️ Corte Industrial": (("produccion.execute", "produccion.plan"), lambda: render_corte(usuario)),
     "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
     "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
