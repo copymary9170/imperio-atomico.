@@ -87,6 +87,7 @@ from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
 from views.modulos_rescatados import render_modulos_rescatados
 from views.areas_empresariales import render_area_combinada, render_area_empresarial
+from views.almacen_avanzado import render_almacen_avanzado
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -181,6 +182,7 @@ MENU_ROUTES = {
 
     # OPERACIONES
     "📦 Inventario / Almacén": ("inventario.view", lambda: render_area_combinada("Almacén", render_inventario, usuario)),
+    "📦 Almacén avanzado": ("inventario.view", lambda: render_almacen_avanzado(usuario)),
     "📊 Kardex": ("inventario.view", lambda: render_kardex(usuario)),
     "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
 
