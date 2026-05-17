@@ -1,0 +1,3 @@
+fecha,tipo,concepto,categoria,entrada,salida,metodo_pago,cuenta,saldo_estimado,relacionado_con,observaciones
+2026-05-01,entrada,Venta de pedido,Pago cliente,150.00,0.00,transferencia,cuenta negocio,150.00,pedido_001,Ejemplo de ingreso
+2026-05-02,salida,Compra de material,Materiales,0.00,45.00,efectivo,caja,105.00,material_002,Ejemplo de gasto
