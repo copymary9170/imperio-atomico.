@@ -1,0 +1,2 @@
+cliente_id,cliente,pedido_id,factura_o_recibo,monto_total,monto_pagado,saldo_pendiente,fecha_venta,fecha_vencimiento,dias_vencidos,estado,proxima_accion,observaciones
+CLI001,Cliente Ejemplo,PED001,REC001,300.00,150.00,150.00,2026-05-01,2026-05-10,0,parcial,Llamar al cliente,Anticipo recibido
