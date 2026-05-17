@@ -1,0 +1,2 @@
+asignacion_id,activo_id,activo,responsable,area,fecha_asignacion,fecha_devolucion,estado,condicion_entrega,condicion_devolucion,observaciones
+ASG-001,1,Activo ejemplo,Usuario demo,Produccion,2026-05-17,,asignado,Buen estado,,Asignacion inicial
