@@ -1,0 +1,3 @@
+fecha,movimiento,material_id,material,entrada,salida,existencia,unidad,costo_unitario,costo_total,documento_origen,responsable,observaciones
+2026-05-01,entrada,MAT001,Vinilo adhesivo,10,0,10,metros,2.50,25.00,COMPRA001,Almacen,Ejemplo inicial de entrada
+2026-05-02,salida,MAT001,Vinilo adhesivo,0,2,8,metros,2.50,20.00,PED001,Almacen,Ejemplo inicial de salida
