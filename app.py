@@ -86,7 +86,7 @@ from views.catalogo import render_catalogo
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
 from views.modulos_rescatados import render_modulos_rescatados
-from views.areas_empresariales import render_area_combinada
+from views.areas_empresariales import render_area_combinada, render_area_empresarial
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -212,7 +212,7 @@ MENU_ROUTES = {
     "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
 
     # ADMINISTRACION Y RRHH
-    "🗂️ Administración": (("dashboard.view", "config.view"), lambda: render_area_combinada("Administración", render_dashboard, usuario)),
+    "🗂️ Administración": (("dashboard.view", "config.view"), lambda: render_area_empresarial("Administración", usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "💰 Presupuesto mensual": ("presupuesto.view", lambda: render_presupuesto_mensual(usuario)),
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
