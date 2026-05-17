@@ -90,6 +90,7 @@ from views.modulos_rescatados import render_modulos_rescatados
 from views.areas_empresariales import render_area_combinada, render_area_empresarial
 from views.almacen_avanzado import render_almacen_avanzado
 from views.activos_patrimonial import render_activos_patrimonial
+from views.proveedores_compras import render_compras_suministro, render_proveedores
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -136,15 +137,21 @@ def render_dashboard_unificado(usuario: str) -> None:
 
 
 def render_inventario_almacen_unificado(usuario: str) -> None:
-    tab_inventario, tab_almacen, tab_archivos = st.tabs([
+    tab_inventario, tab_almacen, tab_compras, tab_proveedores, tab_archivos = st.tabs([
         "Inventario operativo",
         "Almacén avanzado",
+        "🛒 Compras",
+        "👥 Proveedores",
         "Archivos de almacén",
     ])
     with tab_inventario:
         render_inventario(usuario)
     with tab_almacen:
         render_almacen_avanzado(usuario)
+    with tab_compras:
+        render_compras_suministro(usuario)
+    with tab_proveedores:
+        render_proveedores(usuario)
     with tab_archivos:
         render_area_empresarial("Almacén", usuario, show_title=False)
 
