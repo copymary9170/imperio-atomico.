@@ -1,0 +1,2 @@
+garantia_id,activo_id,activo,proveedor,fecha_compra,fecha_inicio,fecha_fin,cobertura,estado,documento_garantia,observaciones
+GAR-001,1,Activo ejemplo,Proveedor ejemplo,2026-05-17,2026-05-17,2027-05-17,Garantia limitada,activa,,Garantia inicial registrada
