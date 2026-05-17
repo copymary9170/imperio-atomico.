@@ -83,11 +83,14 @@ def _render_archivo(path: Path) -> None:
             st.write(path.name)
 
 
-def render_area_empresarial(nombre_area: str, usuario: str = "Sistema") -> None:
+def render_area_empresarial(nombre_area: str, usuario: str = "Sistema", *, show_title: bool = True) -> None:
     area = AREAS_EMPRESARIALES[nombre_area]
     carpeta = BASE_DIR / area["carpeta"]
 
-    st.title(f"{area['icono']} {nombre_area}")
+    if show_title:
+        st.title(f"{area['icono']} {nombre_area}")
+    else:
+        st.subheader(f"{area['icono']} Archivos y controles nuevos")
     st.caption(area["descripcion"])
 
     col1, col2, col3 = st.columns(3)
@@ -128,3 +131,11 @@ def render_area_empresarial(nombre_area: str, usuario: str = "Sistema") -> None:
     st.subheader("Contenido")
     for path in archivos:
         _render_archivo(path)
+
+
+def render_area_combinada(nombre_area: str, render_existente, usuario: str = "Sistema") -> None:
+    tab_sistema, tab_archivos = st.tabs(["Sistema operativo", "Archivos nuevos"])
+    with tab_sistema:
+        render_existente(usuario)
+    with tab_archivos:
+        render_area_empresarial(nombre_area, usuario, show_title=False)
