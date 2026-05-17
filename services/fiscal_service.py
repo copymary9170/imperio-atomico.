@@ -30,7 +30,74 @@ def _table_exists(conn: Any, table_name: str) -> bool:
     return row is not None
 
 
+def _table_columns(conn: Any, table_name: str) -> set[str]:
+    if not _table_exists(conn, table_name):
+        return set()
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _ensure_column(conn: Any, table_name: str, column_name: str, ddl: str) -> None:
+    columns = _table_columns(conn, table_name)
+    if columns and column_name not in columns:
+        conn.execute(ddl)
+
+
+def _ensure_fiscal_columns(conn: Any) -> None:
+    """Add missing fiscal columns to older SQLite databases.
+
+    Streamlit Cloud can keep an existing database created before the tax module
+    existed. This migration is intentionally local and idempotent: it only adds
+    missing columns and does not delete or rewrite user data.
+    """
+    if _table_exists(conn, "ventas"):
+        _ensure_column(conn, "ventas", "fiscal_tipo", "ALTER TABLE ventas ADD COLUMN fiscal_tipo TEXT NOT NULL DEFAULT 'gravada'")
+        _ensure_column(conn, "ventas", "fiscal_iva_debito_usd", "ALTER TABLE ventas ADD COLUMN fiscal_iva_debito_usd REAL NOT NULL DEFAULT 0")
+        conn.execute(
+            """
+            UPDATE ventas
+            SET fiscal_tipo = COALESCE(NULLIF(fiscal_tipo, ''), 'gravada'),
+                fiscal_iva_debito_usd = CASE
+                    WHEN COALESCE(fiscal_iva_debito_usd, 0) <= 0 THEN COALESCE(impuesto_usd, 0)
+                    ELSE fiscal_iva_debito_usd
+                END
+            """
+        )
+
+    if _table_exists(conn, "gastos"):
+        _ensure_column(conn, "gastos", "fiscal_tipo", "ALTER TABLE gastos ADD COLUMN fiscal_tipo TEXT NOT NULL DEFAULT 'gravada'")
+        _ensure_column(conn, "gastos", "fiscal_iva_credito_usd", "ALTER TABLE gastos ADD COLUMN fiscal_iva_credito_usd REAL NOT NULL DEFAULT 0")
+        _ensure_column(conn, "gastos", "fiscal_credito_iva_deducible", "ALTER TABLE gastos ADD COLUMN fiscal_credito_iva_deducible INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            """
+            UPDATE gastos
+            SET fiscal_tipo = COALESCE(NULLIF(fiscal_tipo, ''), 'gravada'),
+                fiscal_credito_iva_deducible = COALESCE(fiscal_credito_iva_deducible, 1),
+                fiscal_iva_credito_usd = CASE
+                    WHEN COALESCE(fiscal_iva_credito_usd, 0) <= 0 THEN COALESCE(impuesto_usd, 0)
+                    ELSE fiscal_iva_credito_usd
+                END
+            """
+        )
+
+    if _table_exists(conn, "historial_compras"):
+        _ensure_column(conn, "historial_compras", "fiscal_tipo", "ALTER TABLE historial_compras ADD COLUMN fiscal_tipo TEXT NOT NULL DEFAULT 'gravada'")
+        _ensure_column(conn, "historial_compras", "fiscal_iva_credito_usd", "ALTER TABLE historial_compras ADD COLUMN fiscal_iva_credito_usd REAL NOT NULL DEFAULT 0")
+        _ensure_column(conn, "historial_compras", "fiscal_credito_iva_deducible", "ALTER TABLE historial_compras ADD COLUMN fiscal_credito_iva_deducible INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            """
+            UPDATE historial_compras
+            SET fiscal_tipo = COALESCE(NULLIF(fiscal_tipo, ''), 'gravada'),
+                fiscal_credito_iva_deducible = COALESCE(fiscal_credito_iva_deducible, 1),
+                fiscal_iva_credito_usd = CASE
+                    WHEN COALESCE(fiscal_iva_credito_usd, 0) <= 0 THEN COALESCE(impuestos, 0)
+                    ELSE fiscal_iva_credito_usd
+                END
+            """
+        )
+
+
 def obtener_resumen_fiscal_periodo(conn: Any, *, periodo: str) -> dict[str, float | int | str | bool]:
+    _ensure_fiscal_columns(conn)
     fecha_desde, fecha_hasta = _periodo_a_rango(periodo)
 
     ventas = conn.execute(
