@@ -1,0 +1,2 @@
+orden_produccion_id,pedido_id,cliente,producto_o_servicio,cantidad,fecha_inicio,fecha_entrega,prioridad,responsable,estado,observaciones
+OP001,PED001,Cliente Ejemplo,Sublimacion Premium,10,2026-05-01,2026-05-03,alta,Produccion,pendiente,Orden inicial de ejemplo
