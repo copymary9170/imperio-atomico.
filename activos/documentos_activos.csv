@@ -1,0 +1,2 @@
+documento_id,activo_id,activo,tipo_documento,nombre_documento,archivo_o_url,fecha_documento,responsable,estado,observaciones
+DOC-ACT-001,1,Activo ejemplo,factura,Factura de compra,,2026-05-17,Administracion,pendiente,Registro inicial de control documental
