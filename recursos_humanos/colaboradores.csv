@@ -1,0 +1,2 @@
+colaborador_id,nombre,puesto,area,telefono,email,fecha_ingreso,tipo_contrato,sueldo_base,estado,contacto_emergencia,observaciones
+COL001,Colaborador Ejemplo,Produccion,Operaciones,000-000-0000,ejemplo@correo.com,2026-05-01,tiempo parcial,0.00,activo,Contacto Ejemplo,Registro inicial de ejemplo
