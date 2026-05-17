@@ -88,6 +88,7 @@ from views.planificacion_produccion import render_planificacion_produccion
 from views.modulos_rescatados import render_modulos_rescatados
 from views.areas_empresariales import render_area_combinada, render_area_empresarial
 from views.almacen_avanzado import render_almacen_avanzado
+from views.activos_patrimonial import render_activos_patrimonial
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -134,6 +135,17 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
         render_almacen_avanzado(usuario)
     with tab_archivos:
         render_area_empresarial("Almacén", usuario, show_title=False)
+
+
+def render_activos_unificado(usuario: str) -> None:
+    tab_operacion, tab_patrimonial = st.tabs([
+        "Operación de activos",
+        "Control patrimonial",
+    ])
+    with tab_operacion:
+        render_activos(usuario)
+    with tab_patrimonial:
+        render_activos_patrimonial(usuario)
 
 # ==================================================
 # ESTILOS SIDEBAR
@@ -197,7 +209,7 @@ MENU_ROUTES = {
     # OPERACIONES
     "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
     "📊 Kardex": ("inventario.view", lambda: render_kardex(usuario)),
-    "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
+    "🏗️ Activos": ("activos.view", lambda: render_activos_unificado(usuario)),
 
     # CLIENTES Y VENTAS
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
