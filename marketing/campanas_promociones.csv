@@ -1,0 +1,2 @@
+campana_id,nombre_campana,fecha_inicio,fecha_fin,canal,presupuesto,oferta,producto_o_servicio,objetivo,ventas_generadas,costo_total,utilidad_estimada,resultado,aprendizaje
+CAMP001,Promo Lanzamiento,2026-05-01,2026-05-15,Instagram,100.00,10% descuento,Sublimacion Premium,ventas,0,0,0,en progreso,Ejemplo inicial
