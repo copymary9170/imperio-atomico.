@@ -121,6 +121,20 @@ from views.erp_nuevos_modulos import (
 usuario = st.session_state.get("usuario", "Sistema")
 user_role = st.session_state.get("rol", "Operator")
 
+
+def render_inventario_almacen_unificado(usuario: str) -> None:
+    tab_inventario, tab_almacen, tab_archivos = st.tabs([
+        "Inventario operativo",
+        "Almacén avanzado",
+        "Archivos de almacén",
+    ])
+    with tab_inventario:
+        render_inventario(usuario)
+    with tab_almacen:
+        render_almacen_avanzado(usuario)
+    with tab_archivos:
+        render_area_empresarial("Almacén", usuario, show_title=False)
+
 # ==================================================
 # ESTILOS SIDEBAR
 # ==================================================
@@ -181,8 +195,7 @@ MENU_ROUTES = {
     "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
 
     # OPERACIONES
-    "📦 Inventario / Almacén": ("inventario.view", lambda: render_area_combinada("Almacén", render_inventario, usuario)),
-    "📦 Almacén avanzado": ("inventario.view", lambda: render_almacen_avanzado(usuario)),
+    "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
     "📊 Kardex": ("inventario.view", lambda: render_kardex(usuario)),
     "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
 
