@@ -1,0 +1,6 @@
+cuenta_id,nombre_cuenta,tipo_cuenta,categoria,descripcion,estado,observaciones
+1000,Caja,activo,efectivo,Dinero disponible en caja,activa,Cuenta inicial de ejemplo
+1100,Bancos,activo,bancos,Dinero disponible en cuentas bancarias,activa,Cuenta inicial de ejemplo
+4000,Ventas,ingreso,ventas,Ingresos por ventas de productos y servicios,activa,Cuenta inicial de ejemplo
+5000,Costo de materiales,costo,produccion,Costo directo de materiales usados,activa,Cuenta inicial de ejemplo
+6000,Gastos administrativos,gasto,administracion,Gastos generales del negocio,activa,Cuenta inicial de ejemplo
