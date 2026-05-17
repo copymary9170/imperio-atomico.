@@ -60,6 +60,7 @@ set_session_role_from_db()
 # ==================================================
 
 from views.dashboard import render_dashboard
+from views.panel_ejecutivo import render_panel_ejecutivo
 from views.inventario import render_inventario
 from views.kardex import render_kardex
 from views.clientes import render_clientes
@@ -121,6 +122,17 @@ from views.erp_nuevos_modulos import (
 
 usuario = st.session_state.get("usuario", "Sistema")
 user_role = st.session_state.get("rol", "Operator")
+
+
+def render_dashboard_unificado(usuario: str) -> None:
+    tab_operativo, tab_ejecutivo = st.tabs([
+        "Dashboard operativo",
+        "📊 Panel ejecutivo",
+    ])
+    with tab_operativo:
+        render_dashboard()
+    with tab_ejecutivo:
+        render_panel_ejecutivo(usuario)
 
 
 def render_inventario_almacen_unificado(usuario: str) -> None:
@@ -204,7 +216,7 @@ render_sidebar_config_snapshot()
 
 MENU_ROUTES = {
     # CORE
-    "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
+    "📊 Panel de control": ("dashboard.view", lambda: render_dashboard_unificado(usuario)),
 
     # OPERACIONES
     "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
