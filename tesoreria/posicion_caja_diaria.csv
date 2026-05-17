@@ -1,0 +1,2 @@
+fecha,caja_efectivo,banco_1,banco_2,plataformas_pago,total_disponible,pagos_programados,cobros_esperados,saldo_proyectado,alerta,observaciones
+2026-05-01,100.00,500.00,0.00,150.00,750.00,200.00,300.00,850.00,sin alerta,Ejemplo inicial
