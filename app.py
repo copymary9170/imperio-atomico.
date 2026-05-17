@@ -86,7 +86,7 @@ from views.catalogo import render_catalogo
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
 from views.modulos_rescatados import render_modulos_rescatados
-from views.areas_empresariales import render_area_empresarial
+from views.areas_empresariales import render_area_combinada
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -180,63 +180,54 @@ MENU_ROUTES = {
     "📊 Panel de control": ("dashboard.view", lambda: render_dashboard()),
 
     # OPERACIONES
-    "📦 Inventario": ("inventario.view", lambda: render_inventario(usuario)),
+    "📦 Inventario / Almacén": ("inventario.view", lambda: render_area_combinada("Almacén", render_inventario, usuario)),
     "📊 Kardex": ("inventario.view", lambda: render_kardex(usuario)),
     "🏗️ Activos": ("activos.view", lambda: render_activos(usuario)),
-    "📦 Almacén empresarial": ("inventario.view", lambda: render_area_empresarial("Almacén", usuario)),
 
     # CLIENTES Y VENTAS
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
     "🤝 CRM": ("crm.view", lambda: render_crm(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
-    "📣 Marketing / Ventas": ("crm.view", lambda: render_marketing_ventas(usuario)),
-    "📣 Marketing empresarial": ("crm.view", lambda: render_area_empresarial("Marketing", usuario)),
+    "📣 Marketing / Ventas": ("crm.view", lambda: render_area_combinada("Marketing", render_marketing_ventas, usuario)),
     "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
 
     # PRODUCCION
-    "🏭 Producción empresarial": (("produccion.plan", "produccion.execute"), lambda: render_area_empresarial("Producción", usuario)),
+    "🏭 Producción": (("produccion.plan", "produccion.execute"), lambda: render_area_combinada("Producción", render_planificacion_produccion, usuario)),
     "✂️ Corte Industrial": (("produccion.execute", "produccion.plan"), lambda: render_corte(usuario)),
     "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
     "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
-    "🗓️ Planificación de producción": (("produccion.plan", "produccion.execute"), lambda: render_planificacion_produccion(usuario)),
     "🧭 Rutas de producción": (("produccion.route", "produccion.execute"), lambda: render_rutas_produccion(usuario)),
     "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
     "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
 
     # FINANZAS
-    "💼 Finanzas empresariales": (("tesoreria.view", "dashboard.view"), lambda: render_area_empresarial("Finanzas", usuario)),
+    "💼 Finanzas": (("tesoreria.view", "dashboard.view"), lambda: render_area_combinada("Finanzas", render_planeacion_financiera, usuario)),
     "📉 Gastos": ("gastos.view", lambda: render_gastos(usuario)),
-    "🏦 Caja empresarial": ("caja.view", lambda: render_caja(usuario)),
-    "🏦 Tesorería": ("tesoreria.view", lambda: render_tesoreria(usuario)),
-    "🏦 Tesorería y cobranza empresarial": ("tesoreria.view", lambda: render_area_empresarial("Tesorería y Cobranza", usuario)),
+    "🏦 Caja": ("caja.view", lambda: render_caja(usuario)),
+    "🏦 Tesorería y cobranza": ("tesoreria.view", lambda: render_area_combinada("Tesorería y Cobranza", render_tesoreria, usuario)),
     "💸 Cuentas por pagar": (("cxp.view", "dashboard.view"), lambda: render_cuentas_por_pagar(usuario)),
-    "📚 Contabilidad": ("contabilidad.view", lambda: render_contabilidad(usuario)),
-    "📚 Contabilidad empresarial": ("contabilidad.view", lambda: render_area_empresarial("Contabilidad", usuario)),
+    "📚 Contabilidad": ("contabilidad.view", lambda: render_area_combinada("Contabilidad", render_contabilidad, usuario)),
     "🏛️ Conciliación bancaria": ("conciliacion.view", lambda: render_conciliacion_bancaria(usuario)),
     "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
 
-    # FINANZAS Y ADMINISTRACION
-    "🗂️ Administración empresarial": (("dashboard.view", "config.view"), lambda: render_area_empresarial("Administración", usuario)),
+    # ADMINISTRACION Y RRHH
+    "🗂️ Administración": (("dashboard.view", "config.view"), lambda: render_area_combinada("Administración", render_dashboard, usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "💰 Presupuesto mensual": ("presupuesto.view", lambda: render_presupuesto_mensual(usuario)),
+    "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
+
+    # LEGAL
+    "⚖️ Legal": (("dashboard.view", "config.view"), lambda: render_area_combinada("Legal", render_manuales_sop, usuario)),
 
     # ANALITICA
     "📈 Rentabilidad": ("costeo.view", lambda: render_rentabilidad(usuario)),
-    "🔮 Planeación financiera": ("tesoreria.view", lambda: render_planeacion_financiera(usuario)),
     "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
 
     # COSTOS
     "🧮 Costeo": ("costeo.view", lambda: render_costeo(usuario)),
     "🧮 Costeo industrial": ("costeo_industrial.view", lambda: render_costeo_industrial(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
-
-    # RRHH
-    "👨‍💼 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_rrhh(usuario)),
-    "👥 Recursos humanos empresarial": (("rrhh.view", "dashboard.view"), lambda: render_area_empresarial("Recursos Humanos", usuario)),
-
-    # LEGAL
-    "⚖️ Legal empresarial": (("dashboard.view", "config.view"), lambda: render_area_empresarial("Legal", usuario)),
 
     # CALENDARIOS Y MARKETING
     "📅 Calendario operativo": ("calendario_operativo.view", lambda: render_calendario_operativo(usuario)),
