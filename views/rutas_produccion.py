@@ -4,6 +4,7 @@ import streamlit as st
 
 from security.permissions import require_any_permission
 from modules.rutas_produccion import render_rutas_produccion as rutas_module
+from views.rutas_produccion_analisis import render_rutas_produccion_analisis
 
 
 def render_rutas_produccion(usuario: str) -> None:
@@ -14,5 +15,14 @@ def render_rutas_produccion(usuario: str) -> None:
         return
 
     st.title("🧭 Rutas de producción")
-    rutas_module(usuario)
 
+    tab_operativo, tab_analisis = st.tabs([
+        "Rutas operativas",
+        "🧠 Análisis de ruta",
+    ])
+
+    with tab_operativo:
+        rutas_module(usuario)
+
+    with tab_analisis:
+        render_rutas_produccion_analisis(usuario)
