@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from security.permissions import has_permission, require_any_permission
 
 METODOS = ["efectivo", "transferencia", "zelle", "binance", "mixto"]
 TIPOS = ["Ticket", "Factura rápida", "Nota de entrega", "Recibo"]
@@ -154,8 +155,15 @@ def _save_comprobante(data: dict[str, Any], items: list[dict[str, Any]]) -> int:
 
 
 def render_ticket_pos(usuario: str = "Sistema") -> None:
+    if not require_any_permission(["pos.view", "pos.ticket"], "🚫 No tienes acceso a tickets/comprobantes POS."):
+        return
+
+    puede_emitir = has_permission("pos.ticket")
+
     st.subheader("🧾 Ticket / comprobante POS")
     st.caption("Genera comprobantes rápidos para imprimir, copiar o enviar al cliente por WhatsApp/correo.")
+    if not puede_emitir:
+        st.info("Modo consulta: puedes ver historial y plantilla, pero no emitir nuevos comprobantes.")
     _ensure_tables()
 
     tab_nuevo, tab_historial, tab_plantilla = st.tabs(["Nuevo comprobante", "Historial", "Plantilla"])
@@ -165,19 +173,20 @@ def render_ticket_pos(usuario: str = "Sistema") -> None:
             {"descripcion": "Impresión / producto", "cantidad": 1.0, "precio_unitario_usd": 0.0},
         ])
         a, b, c = st.columns(3)
-        tipo = a.selectbox("Tipo", TIPOS)
-        cliente = b.text_input("Cliente", value="Cliente General")
-        telefono = c.text_input("Teléfono")
+        tipo = a.selectbox("Tipo", TIPOS, disabled=not puede_emitir)
+        cliente = b.text_input("Cliente", value="Cliente General", disabled=not puede_emitir)
+        telefono = c.text_input("Teléfono", disabled=not puede_emitir)
         d, e, f = st.columns(3)
-        venta_id = d.number_input("Venta ID opcional", min_value=0, value=0, step=1)
-        referencia = e.text_input("Referencia")
-        metodo = f.selectbox("Método pago", METODOS)
+        venta_id = d.number_input("Venta ID opcional", min_value=0, value=0, step=1, disabled=not puede_emitir)
+        referencia = e.text_input("Referencia", disabled=not puede_emitir)
+        metodo = f.selectbox("Método pago", METODOS, disabled=not puede_emitir)
 
         st.markdown("#### Items")
         items_df = st.data_editor(
             base_items,
             num_rows="dynamic",
             use_container_width=True,
+            disabled=not puede_emitir,
             column_config={
                 "descripcion": st.column_config.TextColumn("Descripción"),
                 "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=1.0),
@@ -187,12 +196,12 @@ def render_ticket_pos(usuario: str = "Sistema") -> None:
         items = _safe_items_from_editor(items_df)
         subtotal = sum(item["total_usd"] for item in items)
         g, h, i = st.columns(3)
-        descuento = g.number_input("Descuento USD", min_value=0.0, value=0.0, step=0.01)
-        impuesto = h.number_input("Impuesto USD", min_value=0.0, value=0.0, step=0.01)
+        descuento = g.number_input("Descuento USD", min_value=0.0, value=0.0, step=0.01, disabled=not puede_emitir)
+        impuesto = h.number_input("Impuesto USD", min_value=0.0, value=0.0, step=0.01, disabled=not puede_emitir)
         total = max(subtotal - descuento + impuesto, 0.0)
-        recibido = i.number_input("Monto recibido USD", min_value=0.0, value=float(total), step=0.01)
+        recibido = i.number_input("Monto recibido USD", min_value=0.0, value=float(total), step=0.01, disabled=not puede_emitir)
         vuelto = max(recibido - total, 0.0)
-        notas = st.text_area("Notas")
+        notas = st.text_area("Notas", disabled=not puede_emitir)
 
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Subtotal", f"${subtotal:,.2f}")
@@ -220,7 +229,7 @@ def render_ticket_pos(usuario: str = "Sistema") -> None:
         st.code(cuerpo, language="text")
 
         col_a, col_b = st.columns(2)
-        if col_a.button("Guardar comprobante", type="primary"):
+        if col_a.button("Guardar comprobante", type="primary", disabled=not puede_emitir):
             if not items:
                 st.error("Agrega al menos un item con cantidad válida.")
             elif recibido < total and metodo in {"efectivo", "mixto"}:
