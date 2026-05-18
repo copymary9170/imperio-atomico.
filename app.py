@@ -92,6 +92,7 @@ from views.activos_patrimonial import render_activos_patrimonial
 from views.proveedores_compras import render_compras_suministro, render_proveedores
 from views.despacho_entregas import render_despacho_entregas
 from views.unidades_fraccionadas import render_unidades_fraccionadas
+from views.disenos_aprobaciones import render_disenos_aprobaciones
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -160,13 +161,16 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
 
 
 def render_produccion_unificada(usuario: str) -> None:
-    tab_plan, tab_area, tab_despacho = st.tabs([
+    tab_plan, tab_disenos, tab_area, tab_despacho = st.tabs([
         "Planificación producción",
+        "📁 Diseños y aprobaciones",
         "Archivos de producción",
         "🚚 Despacho / Entregas",
     ])
     with tab_plan:
         render_planificacion_produccion(usuario)
+    with tab_disenos:
+        render_disenos_aprobaciones(usuario)
     with tab_area:
         render_area_empresarial("Producción", usuario, show_title=False)
     with tab_despacho:
