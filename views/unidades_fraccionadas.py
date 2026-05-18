@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from security.permissions import has_permission, require_any_permission
 
 UNIDADES_COMPRA = ["rollo", "resma", "caja", "paquete", "litro", "galon", "kg", "metro", "unidad"]
 UNIDADES_CONSUMO = ["cm", "metro", "hoja", "unidad", "pieza", "ml", "g", "kg"]
@@ -105,8 +106,14 @@ def _update_stock(unit_id: int, stock_compra: float, costo_compra: float) -> Non
 
 
 def render_unidades_fraccionadas(usuario: str = "Sistema") -> None:
+    if not require_any_permission(["unidades_fraccionadas.view", "unidades_fraccionadas.edit", "inventario.view"], "🚫 No tienes acceso a unidades fraccionadas."):
+        return
+    puede_editar = has_permission("unidades_fraccionadas.edit")
+
     st.subheader("📏 Unidades fraccionadas")
     st.caption("Convierte compras grandes en consumo real: rollo→cm, resma→hoja, litro→ml, kg→g, caja→unidad.")
+    if not puede_editar:
+        st.info("Modo consulta: puedes ver y simular, pero no crear ni actualizar conversiones.")
     _ensure_tables()
 
     df = _load_units()
@@ -126,28 +133,28 @@ def render_unidades_fraccionadas(usuario: str = "Sistema") -> None:
     ])
 
     with tab_nueva:
-        preset = st.selectbox("Plantilla rápida", ["Personalizada"] + list(PRESETS.keys()))
+        preset = st.selectbox("Plantilla rápida", ["Personalizada"] + list(PRESETS.keys()), disabled=not puede_editar)
         preset_compra, preset_consumo, preset_factor = ("rollo", "cm", 1.0)
         if preset != "Personalizada":
             preset_compra, preset_consumo, preset_factor = PRESETS[preset]
 
         with st.form("form_unidad_fraccionada"):
             a, b, c = st.columns(3)
-            material = a.text_input("Material")
-            tipo = b.selectbox("Tipo material", TIPOS_MATERIAL)
-            inventario_id = c.number_input("Inventario ID opcional", min_value=0, value=0, step=1)
+            material = a.text_input("Material", disabled=not puede_editar)
+            tipo = b.selectbox("Tipo material", TIPOS_MATERIAL, disabled=not puede_editar)
+            inventario_id = c.number_input("Inventario ID opcional", min_value=0, value=0, step=1, disabled=not puede_editar)
             d, e, f = st.columns(3)
-            unidad_compra = d.selectbox("Unidad compra", UNIDADES_COMPRA, index=UNIDADES_COMPRA.index(preset_compra) if preset_compra in UNIDADES_COMPRA else 0)
-            unidad_consumo = e.selectbox("Unidad consumo", UNIDADES_CONSUMO, index=UNIDADES_CONSUMO.index(preset_consumo) if preset_consumo in UNIDADES_CONSUMO else 0)
-            factor = f.number_input("Factor conversión", min_value=0.0001, value=float(preset_factor), step=1.0)
+            unidad_compra = d.selectbox("Unidad compra", UNIDADES_COMPRA, index=UNIDADES_COMPRA.index(preset_compra) if preset_compra in UNIDADES_COMPRA else 0, disabled=not puede_editar)
+            unidad_consumo = e.selectbox("Unidad consumo", UNIDADES_CONSUMO, index=UNIDADES_CONSUMO.index(preset_consumo) if preset_consumo in UNIDADES_CONSUMO else 0, disabled=not puede_editar)
+            factor = f.number_input("Factor conversión", min_value=0.0001, value=float(preset_factor), step=1.0, disabled=not puede_editar)
             g, h, i = st.columns(3)
-            costo_compra = g.number_input("Costo por unidad compra USD", min_value=0.0, value=0.0, step=0.01)
-            stock_compra = h.number_input("Stock en unidad compra", min_value=0.0, value=0.0, step=1.0)
-            merma = i.number_input("Merma estándar %", min_value=0.0, value=0.0, step=0.5)
-            observaciones = st.text_area("Observaciones")
+            costo_compra = g.number_input("Costo por unidad compra USD", min_value=0.0, value=0.0, step=0.01, disabled=not puede_editar)
+            stock_compra = h.number_input("Stock en unidad compra", min_value=0.0, value=0.0, step=1.0, disabled=not puede_editar)
+            merma = i.number_input("Merma estándar %", min_value=0.0, value=0.0, step=0.5, disabled=not puede_editar)
+            observaciones = st.text_area("Observaciones", disabled=not puede_editar)
             st.metric("Costo por unidad consumo", f"${(costo_compra / factor) if factor else 0:,.6f}")
             st.metric("Stock equivalente consumo", f"{stock_compra * factor:,.2f} {unidad_consumo}")
-            guardar = st.form_submit_button("Guardar conversión")
+            guardar = st.form_submit_button("Guardar conversión", disabled=not puede_editar)
         if guardar:
             if not material.strip():
                 st.error("El material es obligatorio.")
@@ -205,12 +212,12 @@ def render_unidades_fraccionadas(usuario: str = "Sistema") -> None:
         if df.empty:
             st.info("No hay conversiones para actualizar.")
         else:
-            unit_id = st.selectbox("Conversión", df["id"].astype(int).tolist(), key="upd_unidad")
+            unit_id = st.selectbox("Conversión", df["id"].astype(int).tolist(), key="upd_unidad", disabled=not puede_editar)
             row = df[df["id"].eq(unit_id)].iloc[0]
             with st.form("form_actualizar_unidad"):
-                stock = st.number_input("Nuevo stock compra", min_value=0.0, value=float(row.get("stock_compra") or 0), step=1.0)
-                costo = st.number_input("Nuevo costo compra USD", min_value=0.0, value=float(row.get("costo_compra_usd") or 0), step=0.01)
-                actualizar = st.form_submit_button("Actualizar")
+                stock = st.number_input("Nuevo stock compra", min_value=0.0, value=float(row.get("stock_compra") or 0), step=1.0, disabled=not puede_editar)
+                costo = st.number_input("Nuevo costo compra USD", min_value=0.0, value=float(row.get("costo_compra_usd") or 0), step=0.01, disabled=not puede_editar)
+                actualizar = st.form_submit_button("Actualizar", disabled=not puede_editar)
             if actualizar:
                 _update_stock(int(unit_id), stock, costo)
                 st.success("Stock/costo actualizado.")
