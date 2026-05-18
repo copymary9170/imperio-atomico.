@@ -196,6 +196,18 @@ def render_costeo_margenes_unificado(usuario: str) -> None:
         render_rentabilidad(usuario)
 
 
+def render_marketing_unificado(usuario: str) -> None:
+    st.title("📣 Marketing")
+    tab_campanas, tab_publicaciones = st.tabs([
+        "Campañas / Ventas",
+        "Publicaciones y calendario",
+    ])
+    with tab_campanas:
+        render_area_combinada("Marketing", render_marketing_ventas, usuario)
+    with tab_publicaciones:
+        render_publicaciones_marketing(usuario)
+
+
 def render_activos_unificado(usuario: str) -> None:
     tab_operacion, tab_patrimonial = st.tabs([
         "Operación de activos",
@@ -274,7 +286,7 @@ MENU_ROUTES = {
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
-    "📣 Marketing / Ventas": ("crm.view", lambda: render_area_combinada("Marketing", render_marketing_ventas, usuario)),
+    "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
 
     # PRODUCCION
     "🏭 Producción": (("produccion.plan", "produccion.execute"), lambda: render_produccion_unificada(usuario)),
@@ -309,9 +321,8 @@ MENU_ROUTES = {
     "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
 
-    # CALENDARIOS Y MARKETING
+    # CALENDARIO
     "📅 Calendario operativo": ("calendario_operativo.view", lambda: render_calendario_operativo(usuario)),
-    "📣 Publicaciones y marketing": ("publicaciones.view", lambda: render_publicaciones_marketing(usuario)),
 
     # SISTEMA
     "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
