@@ -7,11 +7,9 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from security.permissions import has_permission, require_any_permission
 
-ESTADOS = [
-    "En diseño", "Enviado a cliente", "Modificar", "Aprobado por cliente",
-    "Listo para imprimir", "Listo para sublimar", "Listo para cortar", "Archivado", "Cancelado",
-]
+ESTADOS = ["En diseño", "Enviado a cliente", "Modificar", "Aprobado por cliente", "Listo para imprimir", "Listo para sublimar", "Listo para cortar", "Archivado", "Cancelado"]
 TIPOS_TRABAJO = ["Impresión", "Sublimación", "Corte", "Papelería creativa", "Diseño digital", "Otro"]
 ORIGENES = ["Cotización", "Venta", "POS", "WhatsApp", "Mostrador", "Otro"]
 ESTADOS_LIBERADOS = {"Aprobado por cliente", "Listo para imprimir", "Listo para sublimar", "Listo para cortar", "Archivado"}
@@ -100,27 +98,25 @@ def _update_state(diseno_id: int, estado: str, usuario: str, comentario: str, ar
     with db_transaction() as conn:
         bloquea = _blocked(estado)
         if estado == "Enviado a cliente":
-            conn.execute(
-                "UPDATE disenos_aprobaciones SET estado=?, bloqueo_produccion=?, fecha_enviado_cliente=COALESCE(fecha_enviado_cliente, CURRENT_TIMESTAMP) WHERE id=?",
-                (estado, bloquea, diseno_id),
-            )
+            conn.execute("UPDATE disenos_aprobaciones SET estado=?, bloqueo_produccion=?, fecha_enviado_cliente=COALESCE(fecha_enviado_cliente, CURRENT_TIMESTAMP) WHERE id=?", (estado, bloquea, diseno_id))
         elif estado in ESTADOS_LIBERADOS:
-            conn.execute(
-                "UPDATE disenos_aprobaciones SET estado=?, bloqueo_produccion=?, fecha_aprobacion_cliente=COALESCE(fecha_aprobacion_cliente, CURRENT_TIMESTAMP), aprobado_por=COALESCE(NULLIF(?, ''), aprobado_por) WHERE id=?",
-                (estado, bloquea, aprobado_por, diseno_id),
-            )
+            conn.execute("UPDATE disenos_aprobaciones SET estado=?, bloqueo_produccion=?, fecha_aprobacion_cliente=COALESCE(fecha_aprobacion_cliente, CURRENT_TIMESTAMP), aprobado_por=COALESCE(NULLIF(?, ''), aprobado_por) WHERE id=?", (estado, bloquea, aprobado_por, diseno_id))
         else:
             conn.execute("UPDATE disenos_aprobaciones SET estado=?, bloqueo_produccion=? WHERE id=?", (estado, bloquea, diseno_id))
-        conn.execute(
-            "INSERT INTO disenos_aprobaciones_eventos(diseno_id, usuario, estado, comentario, archivo_referencia) VALUES (?, ?, ?, ?, ?)",
-            (diseno_id, usuario, estado, comentario, archivo),
-        )
+        conn.execute("INSERT INTO disenos_aprobaciones_eventos(diseno_id, usuario, estado, comentario, archivo_referencia) VALUES (?, ?, ?, ?, ?)", (diseno_id, usuario, estado, comentario, archivo))
 
 
 def render_disenos_aprobaciones(usuario: str = "Sistema") -> None:
+    if not require_any_permission(["disenos.view", "disenos.edit", "produccion.plan", "produccion.execute"], "🚫 No tienes acceso a diseños y aprobaciones."):
+        return
+    puede_editar = has_permission("disenos.edit")
+
     st.subheader("📁 Diseños y aprobaciones")
     st.caption("Control de archivos, versiones, aprobación del cliente y bloqueo antes de imprimir, sublimar o cortar.")
+    if not puede_editar:
+        st.info("Modo consulta: puedes revisar diseños y eventos, pero no crear ni cambiar estados.")
     _ensure_tables()
+
     df = _load("disenos_aprobaciones")
     eventos = _load("disenos_aprobaciones_eventos")
     bloqueados = df[df["bloqueo_produccion"].eq(1)] if not df.empty else pd.DataFrame()
@@ -136,52 +132,31 @@ def render_disenos_aprobaciones(usuario: str = "Sistema") -> None:
 
     with tab_nuevo:
         with st.form("form_diseno_aprobacion"):
-            a, b, c = st.columns(3)
-            cliente = a.text_input("Cliente")
-            telefono = b.text_input("Teléfono")
-            referencia = c.text_input("Referencia / pedido")
-            d, e, f = st.columns(3)
-            origen = d.selectbox("Origen", ORIGENES)
-            tipo = e.selectbox("Tipo de trabajo", TIPOS_TRABAJO)
-            responsable = f.text_input("Responsable diseño", value=usuario)
-            g, h, i = st.columns(3)
-            cotizacion_id = g.number_input("Cotización ID", min_value=0, value=0, step=1)
-            venta_id = h.number_input("Venta ID", min_value=0, value=0, step=1)
-            orden_id = i.number_input("Orden producción ID", min_value=0, value=0, step=1)
-            nombre_diseno = st.text_input("Nombre del diseño")
-            archivo_editable = st.text_input("Archivo editable / ruta / URL")
-            archivo_final = st.text_input("Archivo final / PDF / plantilla / URL")
-            j, k, l = st.columns(3)
-            version = j.text_input("Versión", value="1.0")
-            estado = k.selectbox("Estado inicial", ESTADOS)
-            aprobado_por = l.text_input("Aprobado por")
-            obs = st.text_area("Observaciones")
-            guardar = st.form_submit_button("Guardar diseño")
+            cliente = st.text_input("Cliente", disabled=not puede_editar)
+            nombre_diseno = st.text_input("Nombre del diseño", disabled=not puede_editar)
+            col1, col2, col3 = st.columns(3)
+            telefono = col1.text_input("Teléfono", disabled=not puede_editar)
+            referencia = col2.text_input("Referencia / pedido", disabled=not puede_editar)
+            origen = col3.selectbox("Origen", ORIGENES, disabled=not puede_editar)
+            col4, col5, col6 = st.columns(3)
+            tipo = col4.selectbox("Tipo de trabajo", TIPOS_TRABAJO, disabled=not puede_editar)
+            responsable = col5.text_input("Responsable diseño", value=usuario, disabled=not puede_editar)
+            version = col6.text_input("Versión", value="1.0", disabled=not puede_editar)
+            col7, col8, col9 = st.columns(3)
+            cotizacion_id = col7.number_input("Cotización ID", min_value=0, value=0, step=1, disabled=not puede_editar)
+            venta_id = col8.number_input("Venta ID", min_value=0, value=0, step=1, disabled=not puede_editar)
+            orden_id = col9.number_input("Orden producción ID", min_value=0, value=0, step=1, disabled=not puede_editar)
+            archivo_editable = st.text_input("Archivo editable / ruta / URL", disabled=not puede_editar)
+            archivo_final = st.text_input("Archivo final / PDF / plantilla / URL", disabled=not puede_editar)
+            estado = st.selectbox("Estado inicial", ESTADOS, disabled=not puede_editar)
+            aprobado_por = st.text_input("Aprobado por", disabled=not puede_editar)
+            obs = st.text_area("Observaciones", disabled=not puede_editar)
+            guardar = st.form_submit_button("Guardar diseño", disabled=not puede_editar)
         if guardar:
             if not cliente.strip() or not nombre_diseno.strip():
                 st.error("Cliente y nombre del diseño son obligatorios.")
             else:
-                diseno_id = _create_design({
-                    "usuario": usuario,
-                    "cliente": cliente.strip(),
-                    "telefono": telefono.strip(),
-                    "referencia": referencia.strip(),
-                    "origen": origen,
-                    "cotizacion_id": int(cotizacion_id) or None,
-                    "venta_id": int(venta_id) or None,
-                    "orden_produccion_id": int(orden_id) or None,
-                    "tipo_trabajo": tipo,
-                    "nombre_diseno": nombre_diseno.strip(),
-                    "archivo_editable": archivo_editable.strip(),
-                    "archivo_final": archivo_final.strip(),
-                    "version": version.strip() or "1.0",
-                    "responsable_diseno": responsable.strip(),
-                    "estado": estado,
-                    "fecha_enviado_cliente": date.today().isoformat() if estado == "Enviado a cliente" else None,
-                    "fecha_aprobacion_cliente": date.today().isoformat() if estado in ESTADOS_LIBERADOS else None,
-                    "aprobado_por": aprobado_por.strip(),
-                    "observaciones": obs.strip(),
-                })
+                diseno_id = _create_design({"usuario": usuario, "cliente": cliente.strip(), "telefono": telefono.strip(), "referencia": referencia.strip(), "origen": origen, "cotizacion_id": int(cotizacion_id) or None, "venta_id": int(venta_id) or None, "orden_produccion_id": int(orden_id) or None, "tipo_trabajo": tipo, "nombre_diseno": nombre_diseno.strip(), "archivo_editable": archivo_editable.strip(), "archivo_final": archivo_final.strip(), "version": version.strip() or "1.0", "responsable_diseno": responsable.strip(), "estado": estado, "fecha_enviado_cliente": date.today().isoformat() if estado == "Enviado a cliente" else None, "fecha_aprobacion_cliente": date.today().isoformat() if estado in ESTADOS_LIBERADOS else None, "aprobado_por": aprobado_por.strip(), "observaciones": obs.strip()})
                 st.success(f"Diseño #{diseno_id} guardado.")
                 st.rerun()
 
@@ -202,12 +177,12 @@ def render_disenos_aprobaciones(usuario: str = "Sistema") -> None:
             st.info("No hay diseños para actualizar.")
         else:
             ids = df["id"].astype(int).tolist()
-            diseno_id = st.selectbox("Diseño", ids, format_func=lambda x: f"#{x} · {df.loc[df['id'].eq(x), 'cliente'].iloc[0]} · {df.loc[df['id'].eq(x), 'estado'].iloc[0]}")
-            nuevo_estado = st.selectbox("Nuevo estado", ESTADOS)
-            aprobado_por = st.text_input("Aprobado por cliente / responsable")
-            archivo_ref = st.text_input("Archivo referencia actualizado")
-            comentario = st.text_area("Comentario")
-            if st.button("Actualizar diseño", type="primary"):
+            diseno_id = st.selectbox("Diseño", ids, format_func=lambda x: f"#{x} · {df.loc[df['id'].eq(x), 'cliente'].iloc[0]} · {df.loc[df['id'].eq(x), 'estado'].iloc[0]}", disabled=not puede_editar)
+            nuevo_estado = st.selectbox("Nuevo estado", ESTADOS, disabled=not puede_editar)
+            aprobado_por = st.text_input("Aprobado por cliente / responsable", disabled=not puede_editar)
+            archivo_ref = st.text_input("Archivo referencia actualizado", disabled=not puede_editar)
+            comentario = st.text_area("Comentario", disabled=not puede_editar)
+            if st.button("Actualizar diseño", type="primary", disabled=not puede_editar):
                 _update_state(int(diseno_id), nuevo_estado, usuario, comentario.strip(), archivo_ref.strip(), aprobado_por.strip())
                 st.success("Estado de diseño actualizado.")
                 st.rerun()
