@@ -112,7 +112,6 @@ from views.erp_nuevos_modulos import (
     render_impuestos,
     render_conciliacion_bancaria,
     render_marketing_ventas,
-    render_fidelizacion,
     render_rrhh,
     render_seguridad_roles,
 )
@@ -249,7 +248,6 @@ MENU_ROUTES = {
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing / Ventas": ("crm.view", lambda: render_area_combinada("Marketing", render_marketing_ventas, usuario)),
-    "⭐ Fidelización": ("clientes.view", lambda: render_fidelizacion(usuario)),
 
     # PRODUCCION
     "🏭 Producción": (("produccion.plan", "produccion.execute"), lambda: render_produccion_unificada(usuario)),
