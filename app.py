@@ -93,6 +93,7 @@ from views.proveedores_compras import render_compras_suministro, render_proveedo
 from views.despacho_entregas import render_despacho_entregas
 from views.unidades_fraccionadas import render_unidades_fraccionadas
 from views.disenos_aprobaciones import render_disenos_aprobaciones
+from views.fichas_tecnicas_bom import render_fichas_tecnicas_bom
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -175,6 +176,24 @@ def render_produccion_unificada(usuario: str) -> None:
         render_area_empresarial("Producción", usuario, show_title=False)
     with tab_despacho:
         render_despacho_entregas(usuario)
+
+
+def render_costeo_margenes_unificado(usuario: str) -> None:
+    st.title("🧮 Costeo y Márgenes")
+    tab_simple, tab_industrial, tab_bom, tab_rentabilidad = st.tabs([
+        "Costeo simple",
+        "Costeo industrial",
+        "📝 BOM / Recetas",
+        "📈 Rentabilidad",
+    ])
+    with tab_simple:
+        render_costeo(usuario)
+    with tab_industrial:
+        render_costeo_industrial(usuario)
+    with tab_bom:
+        render_fichas_tecnicas_bom(usuario)
+    with tab_rentabilidad:
+        render_rentabilidad(usuario)
 
 
 def render_activos_unificado(usuario: str) -> None:
@@ -285,13 +304,9 @@ MENU_ROUTES = {
     # LEGAL
     "⚖️ Legal": (("dashboard.view", "config.view"), lambda: render_area_combinada("Legal", render_manuales_sop, usuario)),
 
-    # ANALITICA
-    "📈 Rentabilidad": ("costeo.view", lambda: render_rentabilidad(usuario)),
+    # ANALITICA Y COSTOS
+    "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
     "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
-
-    # COSTOS
-    "🧮 Costeo": ("costeo.view", lambda: render_costeo(usuario)),
-    "🧮 Costeo industrial": ("costeo_industrial.view", lambda: render_costeo_industrial(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
 
     # CALENDARIOS Y MARKETING
