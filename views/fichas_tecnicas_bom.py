@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from security.permissions import has_permission, require_any_permission
 
 UNIDADES = ["unidad", "hoja", "metro", "cm", "ml", "litro", "kg", "g", "minuto", "hora", "pieza", "rollo", "resma", "caja"]
 TIPOS_COMPONENTE = ["material", "mano_obra", "maquina", "servicio", "empaque", "otro"]
@@ -159,8 +160,14 @@ def _delete_component(component_id: int, ficha_id: int) -> None:
 
 
 def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
+    if not require_any_permission(["bom.view", "bom.edit", "produccion.route", "costeo.view"], "🚫 No tienes acceso a fichas técnicas / BOM."):
+        return
+    puede_editar = has_permission("bom.edit")
+
     st.subheader("📝 Fichas técnicas / BOM")
     st.caption("Recetas de producto: materiales, unidades fraccionadas, mano de obra, merma estándar, costo y precio sugerido.")
+    if not puede_editar:
+        st.info("Modo consulta: puedes ver y simular recetas, pero no crear ni modificar fichas/componentes.")
     _ensure_tables()
 
     fichas = _read_fichas()
@@ -182,20 +189,20 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
     with tab_nueva:
         with st.form("form_nueva_bom"):
             a, b, c = st.columns(3)
-            codigo = a.text_input("Código ficha")
-            producto = b.text_input("Producto")
-            categoria = c.text_input("Categoría")
+            codigo = a.text_input("Código ficha", disabled=not puede_editar)
+            producto = b.text_input("Producto", disabled=not puede_editar)
+            categoria = c.text_input("Categoría", disabled=not puede_editar)
             d, e, f = st.columns(3)
-            version = d.text_input("Versión", value="1.0")
-            cantidad_base = e.number_input("Cantidad base", min_value=0.01, value=1.0, step=1.0)
-            unidad_base = f.selectbox("Unidad base", UNIDADES)
+            version = d.text_input("Versión", value="1.0", disabled=not puede_editar)
+            cantidad_base = e.number_input("Cantidad base", min_value=0.01, value=1.0, step=1.0, disabled=not puede_editar)
+            unidad_base = f.selectbox("Unidad base", UNIDADES, disabled=not puede_editar)
             g, h, i = st.columns(3)
-            tiempo = g.number_input("Tiempo estándar min", min_value=0.0, value=0.0, step=1.0)
-            merma = h.number_input("Merma estándar %", min_value=0.0, value=0.0, step=0.5)
-            margen = i.number_input("Margen sugerido %", min_value=0.0, value=30.0, step=1.0)
-            estado = st.selectbox("Estado", ESTADOS)
-            observaciones = st.text_area("Observaciones")
-            guardar = st.form_submit_button("Crear ficha")
+            tiempo = g.number_input("Tiempo estándar min", min_value=0.0, value=0.0, step=1.0, disabled=not puede_editar)
+            merma = h.number_input("Merma estándar %", min_value=0.0, value=0.0, step=0.5, disabled=not puede_editar)
+            margen = i.number_input("Margen sugerido %", min_value=0.0, value=30.0, step=1.0, disabled=not puede_editar)
+            estado = st.selectbox("Estado", ESTADOS, disabled=not puede_editar)
+            observaciones = st.text_area("Observaciones", disabled=not puede_editar)
+            guardar = st.form_submit_button("Crear ficha", disabled=not puede_editar)
         if guardar:
             if not codigo.strip() or not producto.strip():
                 st.error("Código y producto son obligatorios.")
@@ -229,17 +236,17 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
             )
             with st.form("form_componente_bom"):
                 a, b, c = st.columns(3)
-                tipo = a.selectbox("Tipo", TIPOS_COMPONENTE)
-                item = b.text_input("Item / material / recurso")
-                unidad = c.selectbox("Unidad consumo", UNIDADES)
+                tipo = a.selectbox("Tipo", TIPOS_COMPONENTE, disabled=not puede_editar)
+                item = b.text_input("Item / material / recurso", disabled=not puede_editar)
+                unidad = c.selectbox("Unidad consumo", UNIDADES, disabled=not puede_editar)
                 d, e, f, g = st.columns(4)
-                cantidad = d.number_input("Cantidad por base", min_value=0.0, value=1.0, step=0.1)
-                costo_unit = e.number_input("Costo unitario USD", min_value=0.0, value=0.0, step=0.01)
-                merma_comp = f.number_input("Merma %", min_value=0.0, value=0.0, step=0.5)
-                orden = g.number_input("Orden", min_value=1, value=1, step=1)
-                inventario_id = st.number_input("Inventario ID opcional", min_value=0, value=0, step=1)
-                notas = st.text_area("Notas del componente")
-                agregar = st.form_submit_button("Agregar componente")
+                cantidad = d.number_input("Cantidad por base", min_value=0.0, value=1.0, step=0.1, disabled=not puede_editar)
+                costo_unit = e.number_input("Costo unitario USD", min_value=0.0, value=0.0, step=0.01, disabled=not puede_editar)
+                merma_comp = f.number_input("Merma %", min_value=0.0, value=0.0, step=0.5, disabled=not puede_editar)
+                orden = g.number_input("Orden", min_value=1, value=1, step=1, disabled=not puede_editar)
+                inventario_id = st.number_input("Inventario ID opcional", min_value=0, value=0, step=1, disabled=not puede_editar)
+                notas = st.text_area("Notas del componente", disabled=not puede_editar)
+                agregar = st.form_submit_button("Agregar componente", disabled=not puede_editar)
             if agregar:
                 if not item.strip():
                     st.error("El item es obligatorio.")
@@ -264,8 +271,8 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
                 st.info("Esta ficha todavía no tiene componentes.")
             else:
                 st.dataframe(comps, use_container_width=True, hide_index=True)
-                eliminar = st.selectbox("Eliminar componente", [0] + comps["id"].astype(int).tolist(), format_func=lambda x: "No eliminar" if x == 0 else f"Componente #{x}")
-                if eliminar and st.button("Eliminar componente seleccionado"):
+                eliminar = st.selectbox("Eliminar componente", [0] + comps["id"].astype(int).tolist(), format_func=lambda x: "No eliminar" if x == 0 else f"Componente #{x}", disabled=not puede_editar)
+                if eliminar and st.button("Eliminar componente seleccionado", disabled=not puede_editar):
                     _delete_component(int(eliminar), int(ficha_id))
                     st.success("Componente eliminado.")
                     st.rerun()
