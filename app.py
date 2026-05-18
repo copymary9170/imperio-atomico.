@@ -91,6 +91,7 @@ from views.almacen_avanzado import render_almacen_avanzado
 from views.activos_patrimonial import render_activos_patrimonial
 from views.proveedores_compras import render_compras_suministro, render_proveedores
 from views.despacho_entregas import render_despacho_entregas
+from views.unidades_fraccionadas import render_unidades_fraccionadas
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -136,11 +137,12 @@ def render_dashboard_unificado(usuario: str) -> None:
 
 
 def render_inventario_almacen_unificado(usuario: str) -> None:
-    tab_inventario, tab_almacen, tab_compras, tab_proveedores, tab_archivos = st.tabs([
+    tab_inventario, tab_almacen, tab_compras, tab_proveedores, tab_unidades, tab_archivos = st.tabs([
         "Inventario operativo",
         "Almacén avanzado",
         "🛒 Compras",
         "👥 Proveedores",
+        "📏 Unidades fraccionadas",
         "Archivos de almacén",
     ])
     with tab_inventario:
@@ -151,6 +153,8 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
         render_compras_suministro(usuario)
     with tab_proveedores:
         render_proveedores(usuario)
+    with tab_unidades:
+        render_unidades_fraccionadas(usuario)
     with tab_archivos:
         render_area_empresarial("Almacén", usuario, show_title=False)
 
