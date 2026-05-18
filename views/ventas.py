@@ -5,6 +5,7 @@ import streamlit as st
 from security.permissions import has_permission, require_permission
 from views.pos_rapido import render_pos_rapido
 from views.cola_impresion import render_cola_impresion
+from views.ticket_pos import render_ticket_pos
 
 
 def render_ventas(usuario: str) -> None:
@@ -38,9 +39,10 @@ def render_ventas(usuario: str) -> None:
     if st.session_state.get("ventas_readonly", False):
         st.info("Modo solo lectura: puedes consultar ventas, pero no registrar, editar ni anular.")
 
-    tab_ventas, tab_pos, tab_cola = st.tabs([
+    tab_ventas, tab_pos, tab_ticket, tab_cola = st.tabs([
         "Ventas operativas",
         "🖥️ POS rápido",
+        "🧾 Ticket / comprobante",
         "🗂️ Cola impresión",
     ])
 
@@ -49,6 +51,9 @@ def render_ventas(usuario: str) -> None:
 
     with tab_pos:
         render_pos_rapido(usuario)
+
+    with tab_ticket:
+        render_ticket_pos(usuario)
 
     with tab_cola:
         render_cola_impresion(usuario)
