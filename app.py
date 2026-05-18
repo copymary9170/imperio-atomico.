@@ -16,10 +16,12 @@ st.set_page_config(
 # ==================================================
 
 from database.schema import init_schema
+from security.permission_extensions import ensure_extended_permissions
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
 
 init_schema()
+ensure_extended_permissions()
 restore_session_snapshot()
 
 # ==================================================
