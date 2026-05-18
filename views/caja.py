@@ -5,6 +5,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from security.permissions import has_permission, require_permission
+from views.cierre_caja_turnos import render_cierre_caja_turnos
 
 
 METODOS_PAGO = ["efectivo", "transferencia", "zelle", "binance"]
@@ -185,7 +186,6 @@ def _guardar_cierre_caja(
             ),
         )
 
-    # Tu schema exige monto_usd > 0
     _registrar_movimiento_tesoreria(
         tipo="egreso",
         origen="cierre_caja",
@@ -259,11 +259,12 @@ def render_caja(usuario: str) -> None:
 
     st.divider()
 
-    tab1, tab2, tab3 = st.tabs(
+    tab1, tab2, tab3, tab4 = st.tabs(
         [
             "💵 Registrar cobro",
             "💸 Registrar pago",
             "🔒 Cierre de caja",
+            "🧾 Cierre por turno",
         ]
     )
 
@@ -446,6 +447,9 @@ def render_caja(usuario: str) -> None:
             except Exception as e:
                 st.error("No se pudo registrar el cierre de caja.")
                 st.exception(e)
+
+    with tab4:
+        render_cierre_caja_turnos(usuario)
 
     st.divider()
 
