@@ -64,7 +64,6 @@ from views.panel_ejecutivo import render_panel_ejecutivo
 from views.inventario import render_inventario
 from views.kardex import render_kardex
 from views.clientes import render_clientes
-from views.crm import render_crm
 from views.cmyk import render_cmyk
 from views.activos import render_activos
 from views.diagnostico import render_diagnostico
@@ -247,7 +246,6 @@ MENU_ROUTES = {
 
     # CLIENTES Y VENTAS
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
-    "🤝 CRM": ("crm.view", lambda: render_crm(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing / Ventas": ("crm.view", lambda: render_area_combinada("Marketing", render_marketing_ventas, usuario)),
