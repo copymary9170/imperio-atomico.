@@ -7,6 +7,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from security.permissions import has_permission, require_any_permission
+from services.audit_service import log_audit_event
 
 UNIDADES = ["unidad", "hoja", "metro", "cm", "ml", "litro", "kg", "g", "minuto", "hora", "pieza", "rollo", "resma", "caja"]
 TIPOS_COMPONENTE = ["material", "mano_obra", "maquina", "servicio", "empaque", "otro"]
@@ -179,12 +180,7 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
     c3.metric("Componentes", len(componentes))
     c4.metric("Costo recetas", f"${float(pd.to_numeric(fichas.get('costo_total_usd', pd.Series(dtype=float)), errors='coerce').fillna(0).sum()) if not fichas.empty else 0:,.2f}")
 
-    tab_nueva, tab_componentes, tab_listado, tab_simulador = st.tabs([
-        "Nueva ficha",
-        "Componentes",
-        "Listado",
-        "Simulador",
-    ])
+    tab_nueva, tab_componentes, tab_listado, tab_simulador = st.tabs(["Nueva ficha", "Componentes", "Listado", "Simulador"])
 
     with tab_nueva:
         with st.form("form_nueva_bom"):
@@ -207,20 +203,9 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
             if not codigo.strip() or not producto.strip():
                 st.error("Código y producto son obligatorios.")
             else:
-                ficha_id = _create_ficha({
-                    "usuario": usuario,
-                    "codigo": codigo.strip(),
-                    "producto": producto.strip(),
-                    "categoria": categoria.strip(),
-                    "version": version.strip() or "1.0",
-                    "cantidad_base": cantidad_base,
-                    "unidad_base": unidad_base,
-                    "tiempo_estandar_min": tiempo,
-                    "merma_estandar_pct": merma,
-                    "margen_sugerido_pct": margen,
-                    "estado": estado,
-                    "observaciones": observaciones.strip(),
-                })
+                payload = {"usuario": usuario, "codigo": codigo.strip(), "producto": producto.strip(), "categoria": categoria.strip(), "version": version.strip() or "1.0", "cantidad_base": cantidad_base, "unidad_base": unidad_base, "tiempo_estandar_min": tiempo, "merma_estandar_pct": merma, "margen_sugerido_pct": margen, "estado": estado, "observaciones": observaciones.strip()}
+                ficha_id = _create_ficha(payload)
+                log_audit_event(usuario=usuario, modulo="BOM", accion="crear_ficha_tecnica", entidad="fichas_tecnicas_bom", entidad_id=ficha_id, detalle=f"Ficha creada: {codigo.strip()} - {producto.strip()}", metadata={"codigo": codigo.strip(), "producto": producto.strip(), "estado": estado, "margen_sugerido_pct": margen})
                 st.success(f"Ficha técnica #{ficha_id} creada.")
                 st.rerun()
 
@@ -229,11 +214,7 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
             st.info("Primero crea una ficha técnica.")
         else:
             opciones = fichas["id"].astype(int).tolist()
-            ficha_id = st.selectbox(
-                "Ficha",
-                opciones,
-                format_func=lambda x: f"#{x} · {fichas.loc[fichas['id'].eq(x), 'codigo'].iloc[0]} · {fichas.loc[fichas['id'].eq(x), 'producto'].iloc[0]}",
-            )
+            ficha_id = st.selectbox("Ficha", opciones, format_func=lambda x: f"#{x} · {fichas.loc[fichas['id'].eq(x), 'codigo'].iloc[0]} · {fichas.loc[fichas['id'].eq(x), 'producto'].iloc[0]}")
             with st.form("form_componente_bom"):
                 a, b, c = st.columns(3)
                 tipo = a.selectbox("Tipo", TIPOS_COMPONENTE, disabled=not puede_editar)
@@ -251,18 +232,9 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
                 if not item.strip():
                     st.error("El item es obligatorio.")
                 else:
-                    _add_component({
-                        "ficha_id": int(ficha_id),
-                        "tipo": tipo,
-                        "item": item.strip(),
-                        "inventario_id": int(inventario_id) or None,
-                        "cantidad": cantidad,
-                        "unidad": unidad,
-                        "costo_unitario_usd": costo_unit,
-                        "merma_pct": merma_comp,
-                        "orden": int(orden),
-                        "notas": notas.strip(),
-                    })
+                    componente_payload = {"ficha_id": int(ficha_id), "tipo": tipo, "item": item.strip(), "inventario_id": int(inventario_id) or None, "cantidad": cantidad, "unidad": unidad, "costo_unitario_usd": costo_unit, "merma_pct": merma_comp, "orden": int(orden), "notas": notas.strip()}
+                    _add_component(componente_payload)
+                    log_audit_event(usuario=usuario, modulo="BOM", accion="agregar_componente", entidad="fichas_tecnicas_bom", entidad_id=ficha_id, detalle=f"Componente agregado: {item.strip()}", metadata={"tipo": tipo, "item": item.strip(), "cantidad": cantidad, "unidad": unidad, "costo_unitario_usd": costo_unit, "merma_pct": merma_comp})
                     st.success("Componente agregado y costo recalculado.")
                     st.rerun()
 
@@ -273,7 +245,9 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
                 st.dataframe(comps, use_container_width=True, hide_index=True)
                 eliminar = st.selectbox("Eliminar componente", [0] + comps["id"].astype(int).tolist(), format_func=lambda x: "No eliminar" if x == 0 else f"Componente #{x}", disabled=not puede_editar)
                 if eliminar and st.button("Eliminar componente seleccionado", disabled=not puede_editar):
+                    componente_row = comps[comps["id"].eq(int(eliminar))].iloc[0].to_dict() if not comps[comps["id"].eq(int(eliminar))].empty else {}
                     _delete_component(int(eliminar), int(ficha_id))
+                    log_audit_event(usuario=usuario, modulo="BOM", accion="eliminar_componente", entidad="fichas_tecnicas_bom_componentes", entidad_id=eliminar, detalle=f"Componente eliminado de ficha #{ficha_id}", metadata={"ficha_id": int(ficha_id), "componente": componente_row})
                     st.success("Componente eliminado.")
                     st.rerun()
 
@@ -295,12 +269,7 @@ def render_fichas_tecnicas_bom(usuario: str = "Sistema") -> None:
         if fichas.empty:
             st.info("Crea fichas para simular costos por cantidad.")
         else:
-            ficha_id_sim = st.selectbox(
-                "Ficha a simular",
-                fichas["id"].astype(int).tolist(),
-                key="sim_bom_ficha",
-                format_func=lambda x: f"#{x} · {fichas.loc[fichas['id'].eq(x), 'codigo'].iloc[0]} · {fichas.loc[fichas['id'].eq(x), 'producto'].iloc[0]}",
-            )
+            ficha_id_sim = st.selectbox("Ficha a simular", fichas["id"].astype(int).tolist(), key="sim_bom_ficha", format_func=lambda x: f"#{x} · {fichas.loc[fichas['id'].eq(x), 'codigo'].iloc[0]} · {fichas.loc[fichas['id'].eq(x), 'producto'].iloc[0]}")
             cantidad_sim = st.number_input("Cantidad a producir", min_value=1.0, value=1.0, step=1.0)
             ficha = fichas[fichas["id"].eq(ficha_id_sim)].iloc[0]
             costo_unit = float(ficha.get("costo_total_usd") or 0)
