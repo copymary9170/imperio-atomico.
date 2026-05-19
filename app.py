@@ -20,6 +20,7 @@ from database.auto_migrations import run_auto_migrations
 from security.permission_extensions import ensure_extended_permissions
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
+from services.alert_service import get_alert_summary
 
 init_schema()
 run_auto_migrations()
@@ -277,6 +278,14 @@ if st.sidebar.button("🚪 Cerrar sesión", use_container_width=True):
     st.rerun()
 
 render_sidebar_config_snapshot()
+
+alert_summary = get_alert_summary()
+if alert_summary.total:
+    st.sidebar.warning(
+        f"🚨 Alertas: 🔴 {alert_summary.criticas} · 🟠 {alert_summary.medias} · 🔵 {alert_summary.informativas}"
+    )
+else:
+    st.sidebar.success("✅ Sin alertas activas")
 
 # ==================================================
 # MENU PRINCIPAL
