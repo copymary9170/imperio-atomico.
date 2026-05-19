@@ -28,7 +28,7 @@ COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("activo", "ALTER TABLE historial_compras ADD COLUMN activo INTEGER NOT NULL DEFAULT 1"),
     ],
     "movimientos_tesoreria": [
-        ("fecha", "ALTER TABLE movimientos_tesoreria ADD COLUMN fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+        ("fecha", "ALTER TABLE movimientos_tesoreria ADD COLUMN fecha TEXT"),
         ("tipo", "ALTER TABLE movimientos_tesoreria ADD COLUMN tipo TEXT NOT NULL DEFAULT 'ingreso'"),
         ("origen", "ALTER TABLE movimientos_tesoreria ADD COLUMN origen TEXT"),
         ("referencia_id", "ALTER TABLE movimientos_tesoreria ADD COLUMN referencia_id INTEGER"),
@@ -43,7 +43,7 @@ COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("metadata", "ALTER TABLE movimientos_tesoreria ADD COLUMN metadata TEXT"),
     ],
     "cierres_caja": [
-        ("fecha", "ALTER TABLE cierres_caja ADD COLUMN fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+        ("fecha", "ALTER TABLE cierres_caja ADD COLUMN fecha TEXT"),
         ("usuario", "ALTER TABLE cierres_caja ADD COLUMN usuario TEXT NOT NULL DEFAULT 'Sistema'"),
         ("estado", "ALTER TABLE cierres_caja ADD COLUMN estado TEXT NOT NULL DEFAULT 'cerrado'"),
         ("cash_start", "ALTER TABLE cierres_caja ADD COLUMN cash_start REAL NOT NULL DEFAULT 0"),
@@ -103,6 +103,15 @@ def _ensure_columns(conn, table_name: str, column_specs: Iterable[tuple[str, str
             columns.add(column_name)
 
 
+def _backfill_timestamps(conn) -> None:
+    for table_name, column_name in (
+        ("movimientos_tesoreria", "fecha"),
+        ("cierres_caja", "fecha"),
+    ):
+        if _table_exists(conn, table_name) and column_name in _table_columns(conn, table_name):
+            conn.execute(f"UPDATE {table_name} SET {column_name}=CURRENT_TIMESTAMP WHERE {column_name} IS NULL OR {column_name}='' ")
+
+
 def _backfill_fiscal_values(conn) -> None:
     if _table_exists(conn, "ventas"):
         columns = _table_columns(conn, "ventas")
@@ -155,4 +164,5 @@ def run_auto_migrations() -> None:
     with db_transaction() as conn:
         for table_name, column_specs in COLUMN_MIGRATIONS.items():
             _ensure_columns(conn, table_name, column_specs)
+        _backfill_timestamps(conn)
         _backfill_fiscal_values(conn)
