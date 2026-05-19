@@ -7,6 +7,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from security.permissions import has_permission, require_any_permission
+from services.audit_service import log_audit_event
 
 UNIDADES_COMPRA = ["rollo", "resma", "caja", "paquete", "litro", "galon", "kg", "metro", "unidad"]
 UNIDADES_CONSUMO = ["cm", "metro", "hoja", "unidad", "pieza", "ml", "g", "kg"]
@@ -125,12 +126,7 @@ def render_unidades_fraccionadas(usuario: str = "Sistema") -> None:
     c3.metric("Stock consumo", f"{float(pd.to_numeric(df.get('stock_consumo', pd.Series(dtype=float)), errors='coerce').fillna(0).sum()) if not df.empty else 0:,.2f}")
     c4.metric("Valor estimado", f"${float((pd.to_numeric(df.get('stock_consumo', pd.Series(dtype=float)), errors='coerce').fillna(0) * pd.to_numeric(df.get('costo_consumo_usd', pd.Series(dtype=float)), errors='coerce').fillna(0)).sum()) if not df.empty else 0:,.2f}")
 
-    tab_nueva, tab_listado, tab_simulador, tab_actualizar = st.tabs([
-        "Nueva conversión",
-        "Listado",
-        "Simulador consumo",
-        "Actualizar stock/costo",
-    ])
+    tab_nueva, tab_listado, tab_simulador, tab_actualizar = st.tabs(["Nueva conversión", "Listado", "Simulador consumo", "Actualizar stock/costo"])
 
     with tab_nueva:
         preset = st.selectbox("Plantilla rápida", ["Personalizada"] + list(PRESETS.keys()), disabled=not puede_editar)
@@ -159,19 +155,9 @@ def render_unidades_fraccionadas(usuario: str = "Sistema") -> None:
             if not material.strip():
                 st.error("El material es obligatorio.")
             else:
-                unit_id = _create_unit({
-                    "usuario": usuario,
-                    "material": material.strip(),
-                    "tipo_material": tipo,
-                    "inventario_id": int(inventario_id) or None,
-                    "unidad_compra": unidad_compra,
-                    "unidad_consumo": unidad_consumo,
-                    "factor_conversion": factor,
-                    "costo_compra_usd": costo_compra,
-                    "stock_compra": stock_compra,
-                    "merma_estandar_pct": merma,
-                    "observaciones": observaciones.strip(),
-                })
+                payload = {"usuario": usuario, "material": material.strip(), "tipo_material": tipo, "inventario_id": int(inventario_id) or None, "unidad_compra": unidad_compra, "unidad_consumo": unidad_consumo, "factor_conversion": factor, "costo_compra_usd": costo_compra, "stock_compra": stock_compra, "merma_estandar_pct": merma, "observaciones": observaciones.strip()}
+                unit_id = _create_unit(payload)
+                log_audit_event(usuario=usuario, modulo="Inventario", accion="crear_unidad_fraccionada", entidad="unidades_fraccionadas", entidad_id=unit_id, detalle=f"Conversión creada: {material.strip()} {unidad_compra}->{unidad_consumo}", metadata={"material": material.strip(), "tipo_material": tipo, "unidad_compra": unidad_compra, "unidad_consumo": unidad_consumo, "factor_conversion": factor, "costo_compra_usd": costo_compra, "stock_compra": stock_compra})
                 st.success(f"Conversión #{unit_id} creada.")
                 st.rerun()
 
@@ -190,11 +176,7 @@ def render_unidades_fraccionadas(usuario: str = "Sistema") -> None:
         if df.empty:
             st.info("Crea conversiones para simular consumo.")
         else:
-            unit_id = st.selectbox(
-                "Material",
-                df["id"].astype(int).tolist(),
-                format_func=lambda x: f"#{x} · {df.loc[df['id'].eq(x), 'material'].iloc[0]} ({df.loc[df['id'].eq(x), 'unidad_compra'].iloc[0]}→{df.loc[df['id'].eq(x), 'unidad_consumo'].iloc[0]})",
-            )
+            unit_id = st.selectbox("Material", df["id"].astype(int).tolist(), format_func=lambda x: f"#{x} · {df.loc[df['id'].eq(x), 'material'].iloc[0]} ({df.loc[df['id'].eq(x), 'unidad_compra'].iloc[0]}→{df.loc[df['id'].eq(x), 'unidad_consumo'].iloc[0]})")
             row = df[df["id"].eq(unit_id)].iloc[0]
             consumo = st.number_input(f"Consumo en {row['unidad_consumo']}", min_value=0.0, value=1.0, step=1.0)
             merma_pct = float(row.get("merma_estandar_pct") or 0)
@@ -219,6 +201,9 @@ def render_unidades_fraccionadas(usuario: str = "Sistema") -> None:
                 costo = st.number_input("Nuevo costo compra USD", min_value=0.0, value=float(row.get("costo_compra_usd") or 0), step=0.01, disabled=not puede_editar)
                 actualizar = st.form_submit_button("Actualizar", disabled=not puede_editar)
             if actualizar:
+                old_stock = float(row.get("stock_compra") or 0)
+                old_costo = float(row.get("costo_compra_usd") or 0)
                 _update_stock(int(unit_id), stock, costo)
+                log_audit_event(usuario=usuario, modulo="Inventario", accion="actualizar_stock_unidad_fraccionada", entidad="unidades_fraccionadas", entidad_id=unit_id, detalle=f"Stock/costo actualizado para {row.get('material')}", metadata={"material": row.get("material"), "stock_anterior": old_stock, "stock_nuevo": stock, "costo_anterior": old_costo, "costo_nuevo": costo})
                 st.success("Stock/costo actualizado.")
                 st.rerun()
