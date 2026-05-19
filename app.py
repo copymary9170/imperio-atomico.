@@ -65,6 +65,7 @@ set_session_role_from_db()
 
 from views.dashboard import render_dashboard
 from views.panel_ejecutivo import render_panel_ejecutivo
+from views.centro_alertas import render_centro_alertas
 from views.inventario import render_inventario
 from views.kardex import render_kardex
 from views.clientes import render_clientes
@@ -132,10 +133,13 @@ user_role = st.session_state.get("rol", "Operator")
 
 
 def render_dashboard_unificado(usuario: str) -> None:
-    tab_operativo, tab_ejecutivo = st.tabs([
+    tab_alertas, tab_operativo, tab_ejecutivo = st.tabs([
+        "🚨 Alertas operativas",
         "Dashboard operativo",
         "📊 Panel ejecutivo",
     ])
+    with tab_alertas:
+        render_centro_alertas(usuario)
     with tab_operativo:
         render_dashboard()
     with tab_ejecutivo:
