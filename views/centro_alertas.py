@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pandas as pd
 import streamlit as st
 
@@ -11,6 +13,23 @@ ALERTA_CONFIG = {
     "media": "🟠 Media",
     "info": "🔵 Info",
 }
+
+
+def _csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8-sig")
+
+
+def _download_csv(label: str, df: pd.DataFrame, filename_prefix: str) -> None:
+    if df.empty:
+        return
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    st.download_button(
+        label=f"⬇️ Descargar CSV · {label}",
+        data=_csv_bytes(df),
+        file_name=f"{filename_prefix}_{stamp}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
 
 def _table_exists(conn, table_name: str) -> bool:
@@ -158,7 +177,9 @@ def render_centro_alertas(usuario: str = "Sistema") -> None:
     else:
         st.success("No hay alertas críticas detectadas.")
 
-    st.dataframe(alerts[["nivel_label", "modulo", "alerta", "cantidad", "accion"]], use_container_width=True, hide_index=True)
+    alert_view = alerts[["nivel_label", "modulo", "alerta", "cantidad", "accion"]]
+    st.dataframe(alert_view, use_container_width=True, hide_index=True)
+    _download_csv("alertas", alert_view, "alertas_operativas")
 
     tab_disenos, tab_despacho, tab_caja, tab_sistema, tab_compras, tab_auditoria = st.tabs([
         "Diseños bloqueados",
@@ -171,28 +192,56 @@ def render_centro_alertas(usuario: str = "Sistema") -> None:
 
     with tab_disenos:
         df = _safe_df("disenos_aprobaciones", ["id", "fecha_creacion", "cliente", "nombre_diseno", "estado", "bloqueo_produccion", "aprobado_por"], "bloqueo_produccion=1", ["bloqueo_produccion"])
-        st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("No hay diseños bloqueando producción.")
+        if not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            _download_csv("diseños bloqueados", df, "disenos_bloqueados")
+        else:
+            st.success("No hay diseños bloqueando producción.")
 
     with tab_despacho:
         df = _safe_df("despachos_entregas", ["id", "fecha_creacion", "cliente", "tipo_entrega", "estado", "agencia_envio", "numero_guia", "costo_envio_usd"], "estado NOT IN ('Entregado', 'Devuelto')", ["estado"])
-        st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("No hay despachos abiertos.")
+        if not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            _download_csv("despachos abiertos", df, "despachos_abiertos")
+        else:
+            st.success("No hay despachos abiertos.")
 
     with tab_caja:
         df = _safe_df("cierres_caja_turnos", ["id", "fecha_operativa", "turno", "cajero", "efectivo_esperado_usd", "efectivo_contado_usd", "diferencia_efectivo_usd", "diferencia_total_usd", "estado", "observaciones"], "estado='Con diferencia'", ["estado"])
-        st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("No hay cierres con diferencia.")
+        if not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            _download_csv("diferencias caja", df, "diferencias_caja")
+        else:
+            st.success("No hay cierres con diferencia.")
 
     with tab_sistema:
         df = _safe_df("migration_errors", ["id", "fecha", "area", "tabla", "columna", "operacion", "error"], None, None, 200)
-        st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("No hay errores de migración registrados.")
+        if not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            _download_csv("errores sistema", df, "errores_migracion")
+        else:
+            st.success("No hay errores de migración registrados.")
 
     with tab_compras:
         ordenes = _safe_df("ordenes_compra", ["id", "fecha", "proveedor", "estado", "total_usd", "observaciones"], "estado NOT IN ('Recibida', 'Cerrada', 'Cancelada')", ["estado"], 150)
         proveedores = _safe_df("proveedores", ["id", "nombre", "rif", "telefono", "email", "dias_credito", "banco", "cuenta"], "COALESCE(rif, '')='' OR COALESCE(telefono, '')=''", ["rif", "telefono"], 150)
         st.markdown("#### Órdenes pendientes")
-        st.dataframe(ordenes, use_container_width=True, hide_index=True) if not ordenes.empty else st.success("No hay órdenes de compra pendientes.")
+        if not ordenes.empty:
+            st.dataframe(ordenes, use_container_width=True, hide_index=True)
+            _download_csv("órdenes pendientes", ordenes, "ordenes_compra_pendientes")
+        else:
+            st.success("No hay órdenes de compra pendientes.")
         st.markdown("#### Proveedores incompletos")
-        st.dataframe(proveedores, use_container_width=True, hide_index=True) if not proveedores.empty else st.success("No hay proveedores incompletos detectados.")
+        if not proveedores.empty:
+            st.dataframe(proveedores, use_container_width=True, hide_index=True)
+            _download_csv("proveedores incompletos", proveedores, "proveedores_incompletos")
+        else:
+            st.success("No hay proveedores incompletos detectados.")
 
     with tab_auditoria:
         df = _safe_df("audit_log", ["id", "fecha", "usuario", "modulo", "accion", "entidad", "entidad_id", "detalle"], None, None, 200)
-        st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.info("Todavía no hay eventos recientes de auditoría.")
+        if not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            _download_csv("auditoría reciente", df, "auditoria_reciente")
+        else:
+            st.info("Todavía no hay eventos recientes de auditoría.")
