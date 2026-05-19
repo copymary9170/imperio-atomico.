@@ -21,6 +21,7 @@ class CheckResult:
 REQUIRED_TABLES: dict[str, list[str]] = {
     "permisos": ["codigo", "descripcion"],
     "roles_permisos": ["rol", "permiso_codigo"],
+    "migration_errors": ["fecha", "area", "tabla", "columna", "operacion", "error"],
     "movimientos_tesoreria": ["fecha", "tipo", "metodo_pago", "monto_usd", "estado"],
     "cierres_caja": ["fecha", "usuario", "cash_start", "cash_end"],
     "cierres_caja_turnos": ["fecha_operativa", "turno", "cajero", "efectivo_esperado_usd", "efectivo_contado_usd"],
@@ -39,6 +40,7 @@ REQUIRED_TABLES: dict[str, list[str]] = {
 REQUIRED_IMPORTS = [
     "app",
     "database.schema",
+    "database.auto_migrations",
     "security.permissions",
     "security.permission_extensions",
     "views.ventas",
@@ -132,16 +134,33 @@ def _check_permissions() -> list[CheckResult]:
     return results
 
 
+def _migration_errors_df() -> pd.DataFrame:
+    if not _table_exists("migration_errors"):
+        return pd.DataFrame()
+    with db_transaction() as conn:
+        return pd.read_sql_query(
+            "SELECT * FROM migration_errors ORDER BY id DESC LIMIT 200",
+            conn,
+        )
+
+
+def _check_migration_errors() -> list[CheckResult]:
+    df = _migration_errors_df()
+    if df.empty:
+        return [CheckResult("Migraciones", "migration_errors", "OK", "No hay errores de migración registrados.")]
+    return [CheckResult("Migraciones", "migration_errors", "Revisar", f"Hay {len(df)} error(es) de migración registrados. Ver detalle abajo.")]
+
+
 def _to_df(results: Iterable[CheckResult]) -> pd.DataFrame:
     return pd.DataFrame([r.__dict__ for r in results])
 
 
 def render_diagnostico_tecnico(usuario: str = "Sistema") -> None:
     st.subheader("🛠️ Diagnóstico técnico del ERP")
-    st.caption("Verifica tablas, columnas críticas, imports y permisos para detectar errores antes de abrir los módulos.")
+    st.caption("Verifica tablas, columnas críticas, imports, permisos y migraciones para detectar errores antes de abrir los módulos.")
 
     if st.button("Ejecutar diagnóstico técnico", type="primary"):
-        results = _check_tables() + _check_imports() + _check_permissions()
+        results = _check_tables() + _check_imports() + _check_permissions() + _check_migration_errors()
         df = _to_df(results)
         total = len(df)
         ok = int(df["estado"].eq("OK").sum()) if not df.empty else 0
@@ -167,5 +186,12 @@ def render_diagnostico_tecnico(usuario: str = "Sistema") -> None:
                 st.success("No hay problemas detectados.")
             else:
                 st.dataframe(problemas, use_container_width=True, hide_index=True)
+
+        with st.expander("Errores de migración registrados"):
+            migraciones = _migration_errors_df()
+            if migraciones.empty:
+                st.success("No hay errores de migración registrados.")
+            else:
+                st.dataframe(migraciones, use_container_width=True, hide_index=True)
     else:
         st.info("Pulsa el botón para ejecutar las verificaciones técnicas.")
