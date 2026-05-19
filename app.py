@@ -66,6 +66,7 @@ set_session_role_from_db()
 from views.dashboard import render_dashboard
 from views.panel_ejecutivo import render_panel_ejecutivo
 from views.centro_alertas import render_centro_alertas
+from views.respaldo_datos import render_respaldo_datos
 from views.inventario import render_inventario
 from views.kardex import render_kardex
 from views.clientes import render_clientes
@@ -335,6 +336,7 @@ MENU_ROUTES = {
     # SISTEMA
     "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
     "🔐 Seguridad / Roles": (("security.view", "dashboard.view"), lambda: render_seguridad_roles(usuario)),
+    "🧰 Respaldo / Exportación": (("reportes.export", "config.view", "dashboard.view"), lambda: render_respaldo_datos(usuario)),
     "📘 Manuales / SOP": ("manuales.view", lambda: render_manuales_sop(usuario)),
 
     # OTROS
