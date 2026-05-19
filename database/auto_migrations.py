@@ -93,76 +93,108 @@ def _table_columns(conn, table_name: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
 
+def _ensure_migration_log_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS migration_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            area TEXT NOT NULL,
+            tabla TEXT,
+            columna TEXT,
+            operacion TEXT,
+            error TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _log_migration_error(conn, *, area: str, tabla: str | None, columna: str | None, operacion: str, error: Exception | str) -> None:
+    _ensure_migration_log_table(conn)
+    conn.execute(
+        """
+        INSERT INTO migration_errors(area, tabla, columna, operacion, error)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (area, tabla, columna, operacion, str(error)[:1000]),
+    )
+
+
 def _ensure_columns(conn, table_name: str, column_specs: Iterable[tuple[str, str]]) -> None:
     columns = _table_columns(conn, table_name)
     if not columns:
         return
     for column_name, ddl in column_specs:
-        if column_name not in columns:
+        if column_name in columns:
+            continue
+        try:
             conn.execute(ddl)
             columns.add(column_name)
+        except Exception as exc:
+            _log_migration_error(
+                conn,
+                area="column_migration",
+                tabla=table_name,
+                columna=column_name,
+                operacion=ddl,
+                error=exc,
+            )
 
 
 def _backfill_timestamps(conn) -> None:
-    for table_name, column_name in (
-        ("movimientos_tesoreria", "fecha"),
-        ("cierres_caja", "fecha"),
-    ):
-        if _table_exists(conn, table_name) and column_name in _table_columns(conn, table_name):
-            conn.execute(f"UPDATE {table_name} SET {column_name}=CURRENT_TIMESTAMP WHERE {column_name} IS NULL OR {column_name}='' ")
+    for table_name, column_name in (("movimientos_tesoreria", "fecha"), ("cierres_caja", "fecha")):
+        try:
+            if _table_exists(conn, table_name) and column_name in _table_columns(conn, table_name):
+                conn.execute(f"UPDATE {table_name} SET {column_name}=CURRENT_TIMESTAMP WHERE {column_name} IS NULL OR {column_name}='' ")
+        except Exception as exc:
+            _log_migration_error(conn, area="timestamp_backfill", tabla=table_name, columna=column_name, operacion="backfill timestamp", error=exc)
 
 
 def _backfill_fiscal_values(conn) -> None:
-    if _table_exists(conn, "ventas"):
-        columns = _table_columns(conn, "ventas")
-        if {"fiscal_tipo", "fiscal_iva_debito_usd"}.issubset(columns):
-            impuesto_expr = "COALESCE(impuesto_usd, 0)" if "impuesto_usd" in columns else "0"
-            conn.execute(
-                f"""
-                UPDATE ventas
-                SET fiscal_tipo = COALESCE(NULLIF(fiscal_tipo, ''), 'gravada'),
-                    fiscal_iva_debito_usd = CASE
-                        WHEN COALESCE(fiscal_iva_debito_usd, 0) <= 0 THEN {impuesto_expr}
-                        ELSE fiscal_iva_debito_usd
-                    END
-                """
-            )
-    if _table_exists(conn, "gastos"):
-        columns = _table_columns(conn, "gastos")
-        if {"fiscal_tipo", "fiscal_iva_credito_usd", "fiscal_credito_iva_deducible"}.issubset(columns):
-            impuesto_expr = "COALESCE(impuesto_usd, 0)" if "impuesto_usd" in columns else "0"
-            conn.execute(
-                f"""
-                UPDATE gastos
-                SET fiscal_tipo = COALESCE(NULLIF(fiscal_tipo, ''), 'gravada'),
-                    fiscal_credito_iva_deducible = COALESCE(fiscal_credito_iva_deducible, 1),
-                    fiscal_iva_credito_usd = CASE
-                        WHEN COALESCE(fiscal_iva_credito_usd, 0) <= 0 THEN {impuesto_expr}
-                        ELSE fiscal_iva_credito_usd
-                    END
-                """
-            )
-    if _table_exists(conn, "historial_compras"):
-        columns = _table_columns(conn, "historial_compras")
-        if {"fiscal_tipo", "fiscal_iva_credito_usd", "fiscal_credito_iva_deducible"}.issubset(columns):
-            impuesto_expr = "COALESCE(impuestos, 0)" if "impuestos" in columns else "0"
-            conn.execute(
-                f"""
-                UPDATE historial_compras
-                SET fiscal_tipo = COALESCE(NULLIF(fiscal_tipo, ''), 'gravada'),
-                    fiscal_credito_iva_deducible = COALESCE(fiscal_credito_iva_deducible, 1),
-                    fiscal_iva_credito_usd = CASE
-                        WHEN COALESCE(fiscal_iva_credito_usd, 0) <= 0 THEN {impuesto_expr}
-                        ELSE fiscal_iva_credito_usd
-                    END
-                """
-            )
+    fiscal_tables = ("ventas", "gastos", "historial_compras")
+    for table_name in fiscal_tables:
+        if not _table_exists(conn, table_name):
+            continue
+        try:
+            columns = _table_columns(conn, table_name)
+            if table_name == "ventas" and {"fiscal_tipo", "fiscal_iva_debito_usd"}.issubset(columns):
+                impuesto_expr = "COALESCE(impuesto_usd, 0)" if "impuesto_usd" in columns else "0"
+                conn.execute(
+                    f"""
+                    UPDATE ventas
+                    SET fiscal_tipo = COALESCE(NULLIF(fiscal_tipo, ''), 'gravada'),
+                        fiscal_iva_debito_usd = CASE
+                            WHEN COALESCE(fiscal_iva_debito_usd, 0) <= 0 THEN {impuesto_expr}
+                            ELSE fiscal_iva_debito_usd
+                        END
+                    """
+                )
+            elif table_name in {"gastos", "historial_compras"} and {"fiscal_tipo", "fiscal_iva_credito_usd", "fiscal_credito_iva_deducible"}.issubset(columns):
+                impuesto_col = "impuesto_usd" if table_name == "gastos" else "impuestos"
+                impuesto_expr = f"COALESCE({impuesto_col}, 0)" if impuesto_col in columns else "0"
+                conn.execute(
+                    f"""
+                    UPDATE {table_name}
+                    SET fiscal_tipo = COALESCE(NULLIF(fiscal_tipo, ''), 'gravada'),
+                        fiscal_credito_iva_deducible = COALESCE(fiscal_credito_iva_deducible, 1),
+                        fiscal_iva_credito_usd = CASE
+                            WHEN COALESCE(fiscal_iva_credito_usd, 0) <= 0 THEN {impuesto_expr}
+                            ELSE fiscal_iva_credito_usd
+                        END
+                    """
+                )
+        except Exception as exc:
+            _log_migration_error(conn, area="fiscal_backfill", tabla=table_name, columna=None, operacion="backfill fiscal", error=exc)
 
 
 def run_auto_migrations() -> None:
     """Ejecuta migraciones idempotentes y seguras para bases SQLite existentes."""
     with db_transaction() as conn:
+        _ensure_migration_log_table(conn)
         for table_name, column_specs in COLUMN_MIGRATIONS.items():
-            _ensure_columns(conn, table_name, column_specs)
+            try:
+                _ensure_columns(conn, table_name, column_specs)
+            except Exception as exc:
+                _log_migration_error(conn, area="table_migration", tabla=table_name, columna=None, operacion="ensure columns", error=exc)
         _backfill_timestamps(conn)
         _backfill_fiscal_values(conn)
