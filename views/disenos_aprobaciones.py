@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from security.permissions import has_permission, require_any_permission
+from services.audit_service import log_audit_event
 
 ESTADOS = ["En diseño", "Enviado a cliente", "Modificar", "Aprobado por cliente", "Listo para imprimir", "Listo para sublimar", "Listo para cortar", "Archivado", "Cancelado"]
 TIPOS_TRABAJO = ["Impresión", "Sublimación", "Corte", "Papelería creativa", "Diseño digital", "Otro"]
@@ -156,7 +157,9 @@ def render_disenos_aprobaciones(usuario: str = "Sistema") -> None:
             if not cliente.strip() or not nombre_diseno.strip():
                 st.error("Cliente y nombre del diseño son obligatorios.")
             else:
-                diseno_id = _create_design({"usuario": usuario, "cliente": cliente.strip(), "telefono": telefono.strip(), "referencia": referencia.strip(), "origen": origen, "cotizacion_id": int(cotizacion_id) or None, "venta_id": int(venta_id) or None, "orden_produccion_id": int(orden_id) or None, "tipo_trabajo": tipo, "nombre_diseno": nombre_diseno.strip(), "archivo_editable": archivo_editable.strip(), "archivo_final": archivo_final.strip(), "version": version.strip() or "1.0", "responsable_diseno": responsable.strip(), "estado": estado, "fecha_enviado_cliente": date.today().isoformat() if estado == "Enviado a cliente" else None, "fecha_aprobacion_cliente": date.today().isoformat() if estado in ESTADOS_LIBERADOS else None, "aprobado_por": aprobado_por.strip(), "observaciones": obs.strip()})
+                payload = {"usuario": usuario, "cliente": cliente.strip(), "telefono": telefono.strip(), "referencia": referencia.strip(), "origen": origen, "cotizacion_id": int(cotizacion_id) or None, "venta_id": int(venta_id) or None, "orden_produccion_id": int(orden_id) or None, "tipo_trabajo": tipo, "nombre_diseno": nombre_diseno.strip(), "archivo_editable": archivo_editable.strip(), "archivo_final": archivo_final.strip(), "version": version.strip() or "1.0", "responsable_diseno": responsable.strip(), "estado": estado, "fecha_enviado_cliente": date.today().isoformat() if estado == "Enviado a cliente" else None, "fecha_aprobacion_cliente": date.today().isoformat() if estado in ESTADOS_LIBERADOS else None, "aprobado_por": aprobado_por.strip(), "observaciones": obs.strip()}
+                diseno_id = _create_design(payload)
+                log_audit_event(usuario=usuario, modulo="Diseños", accion="crear_diseno", entidad="disenos_aprobaciones", entidad_id=diseno_id, detalle=f"Diseño creado para {cliente.strip()} - {estado}", metadata={"cliente": cliente.strip(), "nombre_diseno": nombre_diseno.strip(), "estado": estado, "tipo_trabajo": tipo})
                 st.success(f"Diseño #{diseno_id} guardado.")
                 st.rerun()
 
@@ -184,6 +187,7 @@ def render_disenos_aprobaciones(usuario: str = "Sistema") -> None:
             comentario = st.text_area("Comentario", disabled=not puede_editar)
             if st.button("Actualizar diseño", type="primary", disabled=not puede_editar):
                 _update_state(int(diseno_id), nuevo_estado, usuario, comentario.strip(), archivo_ref.strip(), aprobado_por.strip())
+                log_audit_event(usuario=usuario, modulo="Diseños", accion="actualizar_estado_diseno", entidad="disenos_aprobaciones", entidad_id=diseno_id, detalle=f"Estado actualizado a {nuevo_estado}", metadata={"estado": nuevo_estado, "aprobado_por": aprobado_por.strip(), "bloqueo_produccion": _blocked(nuevo_estado), "comentario": comentario.strip()})
                 st.success("Estado de diseño actualizado.")
                 st.rerun()
 
