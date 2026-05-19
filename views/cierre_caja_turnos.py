@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from security.permissions import has_permission, require_any_permission
+from services.audit_service import log_audit_event
 
 TURNOS = ["Mañana", "Tarde", "Noche", "Completo", "Otro"]
 METODOS = ["efectivo", "transferencia", "zelle", "binance"]
@@ -163,6 +164,7 @@ def render_cierre_caja_turnos(usuario: str = "Sistema") -> None:
                 st.error("El cajero es obligatorio.")
             else:
                 cierre_id = _save_cierre({"fecha_operativa": fecha_op.isoformat(), "turno": turno, "cajero": cajero.strip(), "usuario": usuario, "hora_inicio": hora_inicio.isoformat(), "hora_fin": hora_fin.isoformat(), "efectivo_inicial_usd": efectivo_inicial, "efectivo_ingresos_usd": resumen["ing_efectivo"], "efectivo_egresos_usd": resumen["egr_efectivo"], "efectivo_esperado_usd": efectivo_esperado, "efectivo_contado_usd": efectivo_contado, "diferencia_efectivo_usd": diferencia_efectivo, "transferencia_usd": transferencia_decl, "zelle_usd": zelle_decl, "binance_usd": binance_decl, "total_sistema_usd": total_sistema, "total_declarado_usd": total_declarado, "diferencia_total_usd": diferencia_total, "estado": estado, "observaciones": obs.strip()})
+                log_audit_event(usuario=usuario, modulo="Caja", accion="cierre_turno", entidad="cierres_caja_turnos", entidad_id=cierre_id, detalle=f"Cierre de turno {turno} - {estado}", metadata={"cajero": cajero, "fecha_operativa": fecha_op.isoformat(), "diferencia_efectivo_usd": diferencia_efectivo, "diferencia_total_usd": diferencia_total})
                 if estado == "Con diferencia":
                     st.warning(f"Cierre #{cierre_id} registrado con diferencia.")
                 else:
