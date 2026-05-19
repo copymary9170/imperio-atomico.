@@ -7,6 +7,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from security.permissions import has_permission, require_any_permission
+from services.audit_service import log_audit_event
 
 ESTADOS = ["Por empaquetar", "Listo para despacho", "En ruta", "Entregado", "Devuelto", "Incidencia"]
 TIPOS_ENTREGA = ["Retiro en tienda", "Delivery propio", "Agencia de envios"]
@@ -153,6 +154,7 @@ def render_despacho_entregas(usuario: str = "Sistema") -> None:
                 st.error("El cliente es obligatorio.")
             else:
                 despacho_id = _crear_despacho({"usuario": usuario, "cliente": cliente.strip(), "telefono": telefono.strip(), "venta_id": int(venta_id) or None, "orden_produccion_id": int(orden_id) or None, "referencia": referencia.strip(), "tipo_entrega": tipo, "direccion_entrega": direccion.strip(), "persona_recibe": persona_recibe.strip(), "telefono_recibe": telefono_recibe.strip(), "agencia_envio": agencia, "numero_guia": guia.strip(), "motorizado": motorizado.strip(), "costo_envio_usd": costo, "cobrado_cliente_usd": cobrado, "estado": estado, "observaciones": obs.strip()})
+                log_audit_event(usuario=usuario, modulo="Despacho", accion="crear_despacho", entidad="despachos_entregas", entidad_id=despacho_id, detalle=f"Despacho creado para {cliente.strip()} - {tipo}", metadata={"cliente": cliente.strip(), "estado": estado, "tipo_entrega": tipo, "agencia": agencia, "numero_guia": guia.strip(), "costo_envio_usd": costo})
                 st.success(f"Despacho #{despacho_id} creado.")
                 st.rerun()
 
@@ -176,6 +178,7 @@ def render_despacho_entregas(usuario: str = "Sistema") -> None:
             comentario = st.text_area("Comentario de actualización", disabled=not puede_editar)
             if st.button("Actualizar estado", type="primary", disabled=not puede_editar):
                 _actualizar_estado(int(despacho_id), nuevo_estado, usuario, comentario.strip())
+                log_audit_event(usuario=usuario, modulo="Despacho", accion="actualizar_estado_despacho", entidad="despachos_entregas", entidad_id=despacho_id, detalle=f"Despacho actualizado a {nuevo_estado}", metadata={"estado": nuevo_estado, "comentario": comentario.strip()})
                 st.success("Estado actualizado.")
                 st.rerun()
 
