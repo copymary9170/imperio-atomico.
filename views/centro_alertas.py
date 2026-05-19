@@ -14,62 +14,93 @@ ALERTA_CONFIG = {
 
 
 def _table_exists(conn, table_name: str) -> bool:
-    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
+    try:
+        return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
+    except Exception:
+        return False
 
 
-def _safe_count(table: str, where: str | None = None) -> int:
-    with db_transaction() as conn:
-        if not _table_exists(conn, table):
-            return 0
-        sql = f"SELECT COUNT(*) AS total FROM {table}"
-        if where:
-            sql += f" WHERE {where}"
-        row = conn.execute(sql).fetchone()
-    return int(row["total"] if row and "total" in row.keys() else (row[0] if row else 0))
+def _table_columns(conn, table_name: str) -> set[str]:
+    try:
+        if not _table_exists(conn, table_name):
+            return set()
+        return {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    except Exception:
+        return set()
 
 
-def _safe_sum(table: str, column: str, where: str | None = None) -> float:
-    with db_transaction() as conn:
-        if not _table_exists(conn, table):
-            return 0.0
-        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        if column not in cols:
-            return 0.0
-        sql = f"SELECT SUM({column}) AS total FROM {table}"
-        if where:
-            sql += f" WHERE {where}"
-        row = conn.execute(sql).fetchone()
-    return float(row["total"] or 0) if row else 0.0
+def _where_columns_available(existing: set[str], where_columns: list[str] | None) -> bool:
+    return all(col in existing for col in (where_columns or []))
 
 
-def _safe_df(table: str, columns: list[str], where: str | None = None, limit: int = 100) -> pd.DataFrame:
-    with db_transaction() as conn:
-        if not _table_exists(conn, table):
-            return pd.DataFrame()
-        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        selected = [c for c in columns if c in existing]
-        if not selected:
-            return pd.DataFrame()
-        sql = f"SELECT {', '.join(selected)} FROM {table}"
-        if where:
-            sql += f" WHERE {where}"
-        sql += f" ORDER BY id DESC LIMIT {int(limit)}"
-        return pd.read_sql_query(sql, conn)
+def _safe_count(table: str, where: str | None = None, where_columns: list[str] | None = None) -> int:
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, table):
+                return 0
+            existing = _table_columns(conn, table)
+            if not _where_columns_available(existing, where_columns):
+                return 0
+            sql = f"SELECT COUNT(*) AS total FROM {table}"
+            if where:
+                sql += f" WHERE {where}"
+            row = conn.execute(sql).fetchone()
+        return int(row["total"] if row and "total" in row.keys() else (row[0] if row else 0))
+    except Exception:
+        return 0
+
+
+def _safe_sum(table: str, column: str, where: str | None = None, where_columns: list[str] | None = None) -> float:
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, table):
+                return 0.0
+            existing = _table_columns(conn, table)
+            if column not in existing or not _where_columns_available(existing, where_columns):
+                return 0.0
+            sql = f"SELECT SUM({column}) AS total FROM {table}"
+            if where:
+                sql += f" WHERE {where}"
+            row = conn.execute(sql).fetchone()
+        return float(row["total"] or 0) if row else 0.0
+    except Exception:
+        return 0.0
+
+
+def _safe_df(table: str, columns: list[str], where: str | None = None, where_columns: list[str] | None = None, limit: int = 100) -> pd.DataFrame:
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, table):
+                return pd.DataFrame()
+            existing = _table_columns(conn, table)
+            if not _where_columns_available(existing, where_columns):
+                return pd.DataFrame()
+            selected = [c for c in columns if c in existing]
+            if not selected:
+                return pd.DataFrame()
+            sql = f"SELECT {', '.join(selected)} FROM {table}"
+            if where:
+                sql += f" WHERE {where}"
+            order_col = "id" if "id" in existing else selected[0]
+            sql += f" ORDER BY {order_col} DESC LIMIT {int(limit)}"
+            return pd.read_sql_query(sql, conn)
+    except Exception:
+        return pd.DataFrame()
 
 
 def _build_alerts() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
 
-    disenos_bloqueados = _safe_count("disenos_aprobaciones", "bloqueo_produccion=1")
+    disenos_bloqueados = _safe_count("disenos_aprobaciones", "bloqueo_produccion=1", ["bloqueo_produccion"])
     if disenos_bloqueados:
         rows.append({"nivel": "critica", "modulo": "Diseños", "alerta": "Diseños bloqueando producción", "cantidad": disenos_bloqueados, "accion": "Revisar aprobación del cliente y cambiar estado a aprobado/listo."})
 
-    despachos_abiertos = _safe_count("despachos_entregas", "estado NOT IN ('Entregado', 'Devuelto')")
+    despachos_abiertos = _safe_count("despachos_entregas", "estado NOT IN ('Entregado', 'Devuelto')", ["estado"])
     if despachos_abiertos:
         rows.append({"nivel": "media", "modulo": "Despacho", "alerta": "Despachos abiertos", "cantidad": despachos_abiertos, "accion": "Actualizar estados: por empaquetar, listo, en ruta o entregado."})
 
-    cierres_diferencia = _safe_count("cierres_caja_turnos", "estado='Con diferencia'")
-    diferencia_total = _safe_sum("cierres_caja_turnos", "diferencia_total_usd", "estado='Con diferencia'")
+    cierres_diferencia = _safe_count("cierres_caja_turnos", "estado='Con diferencia'", ["estado"])
+    diferencia_total = _safe_sum("cierres_caja_turnos", "diferencia_total_usd", "estado='Con diferencia'", ["estado"])
     if cierres_diferencia:
         rows.append({"nivel": "critica", "modulo": "Caja", "alerta": f"Cierres con diferencia (${diferencia_total:,.2f})", "cantidad": cierres_diferencia, "accion": "Revisar efectivo contado, métodos declarados y observaciones del cajero."})
 
@@ -77,17 +108,25 @@ def _build_alerts() -> pd.DataFrame:
     if migration_errors:
         rows.append({"nivel": "critica", "modulo": "Sistema", "alerta": "Errores de migración registrados", "cantidad": migration_errors, "accion": "Abrir Diagnóstico técnico y revisar la tabla migration_errors."})
 
-    cola_pendiente = _safe_count("cola_impresion", "estado NOT IN ('Completado', 'Cancelado', 'Entregado')")
+    cola_pendiente = _safe_count("cola_impresion", "estado NOT IN ('Completado', 'Cancelado', 'Entregado')", ["estado"])
     if cola_pendiente:
         rows.append({"nivel": "media", "modulo": "Cola impresión", "alerta": "Trabajos pendientes en cola", "cantidad": cola_pendiente, "accion": "Procesar archivos por prioridad y verificar especificaciones de impresión."})
 
-    contadores_abiertos = _safe_count("contadores_impresion", "estado NOT IN ('Cuadrado', 'Cerrado')")
+    contadores_abiertos = _safe_count("contadores_impresion", "estado NOT IN ('Cuadrado', 'Cerrado')", ["estado"])
     if contadores_abiertos:
         rows.append({"nivel": "media", "modulo": "Contadores", "alerta": "Registros de contadores pendientes", "cantidad": contadores_abiertos, "accion": "Cuadrar contador inicial/final contra copias cobradas."})
 
-    bom_borrador = _safe_count("fichas_tecnicas_bom", "estado IN ('Borrador', 'En revisión')")
+    bom_borrador = _safe_count("fichas_tecnicas_bom", "estado IN ('Borrador', 'En revisión')", ["estado"])
     if bom_borrador:
         rows.append({"nivel": "info", "modulo": "BOM", "alerta": "Fichas técnicas no activas", "cantidad": bom_borrador, "accion": "Completar componentes, costos y activar recetas listas."})
+
+    compras_pendientes = _safe_count("ordenes_compra", "estado NOT IN ('Recibida', 'Cerrada', 'Cancelada')", ["estado"])
+    if compras_pendientes:
+        rows.append({"nivel": "media", "modulo": "Compras", "alerta": "Órdenes de compra pendientes", "cantidad": compras_pendientes, "accion": "Revisar proveedor, recepción de mercancía y cuentas por pagar."})
+
+    proveedores_incompletos = _safe_count("proveedores", "COALESCE(rif, '')='' OR COALESCE(telefono, '')=''", ["rif", "telefono"])
+    if proveedores_incompletos:
+        rows.append({"nivel": "info", "modulo": "Proveedores", "alerta": "Proveedores con ficha incompleta", "cantidad": proveedores_incompletos, "accion": "Completar RIF, teléfono, datos bancarios y condiciones de crédito."})
 
     if not rows:
         rows.append({"nivel": "info", "modulo": "ERP", "alerta": "Sin alertas críticas detectadas", "cantidad": 0, "accion": "Operación estable según las tablas revisadas."})
@@ -119,31 +158,41 @@ def render_centro_alertas(usuario: str = "Sistema") -> None:
     else:
         st.success("No hay alertas críticas detectadas.")
 
-    st.dataframe(
-        alerts[["nivel_label", "modulo", "alerta", "cantidad", "accion"]],
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(alerts[["nivel_label", "modulo", "alerta", "cantidad", "accion"]], use_container_width=True, hide_index=True)
 
-    tab_disenos, tab_despacho, tab_caja, tab_sistema = st.tabs([
+    tab_disenos, tab_despacho, tab_caja, tab_sistema, tab_compras, tab_auditoria = st.tabs([
         "Diseños bloqueados",
         "Despachos abiertos",
         "Diferencias caja",
         "Sistema",
+        "Compras / Proveedores",
+        "Auditoría reciente",
     ])
 
     with tab_disenos:
-        df = _safe_df("disenos_aprobaciones", ["id", "fecha_creacion", "cliente", "nombre_diseno", "estado", "bloqueo_produccion", "aprobado_por"], "bloqueo_produccion=1")
+        df = _safe_df("disenos_aprobaciones", ["id", "fecha_creacion", "cliente", "nombre_diseno", "estado", "bloqueo_produccion", "aprobado_por"], "bloqueo_produccion=1", ["bloqueo_produccion"])
         st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("No hay diseños bloqueando producción.")
 
     with tab_despacho:
-        df = _safe_df("despachos_entregas", ["id", "fecha_creacion", "cliente", "tipo_entrega", "estado", "agencia_envio", "numero_guia", "costo_envio_usd"], "estado NOT IN ('Entregado', 'Devuelto')")
+        df = _safe_df("despachos_entregas", ["id", "fecha_creacion", "cliente", "tipo_entrega", "estado", "agencia_envio", "numero_guia", "costo_envio_usd"], "estado NOT IN ('Entregado', 'Devuelto')", ["estado"])
         st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("No hay despachos abiertos.")
 
     with tab_caja:
-        df = _safe_df("cierres_caja_turnos", ["id", "fecha_operativa", "turno", "cajero", "efectivo_esperado_usd", "efectivo_contado_usd", "diferencia_efectivo_usd", "diferencia_total_usd", "estado", "observaciones"], "estado='Con diferencia'")
+        df = _safe_df("cierres_caja_turnos", ["id", "fecha_operativa", "turno", "cajero", "efectivo_esperado_usd", "efectivo_contado_usd", "diferencia_efectivo_usd", "diferencia_total_usd", "estado", "observaciones"], "estado='Con diferencia'", ["estado"])
         st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("No hay cierres con diferencia.")
 
     with tab_sistema:
-        df = _safe_df("migration_errors", ["id", "fecha", "area", "tabla", "columna", "operacion", "error"], None, 200)
+        df = _safe_df("migration_errors", ["id", "fecha", "area", "tabla", "columna", "operacion", "error"], None, None, 200)
         st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("No hay errores de migración registrados.")
+
+    with tab_compras:
+        ordenes = _safe_df("ordenes_compra", ["id", "fecha", "proveedor", "estado", "total_usd", "observaciones"], "estado NOT IN ('Recibida', 'Cerrada', 'Cancelada')", ["estado"], 150)
+        proveedores = _safe_df("proveedores", ["id", "nombre", "rif", "telefono", "email", "dias_credito", "banco", "cuenta"], "COALESCE(rif, '')='' OR COALESCE(telefono, '')=''", ["rif", "telefono"], 150)
+        st.markdown("#### Órdenes pendientes")
+        st.dataframe(ordenes, use_container_width=True, hide_index=True) if not ordenes.empty else st.success("No hay órdenes de compra pendientes.")
+        st.markdown("#### Proveedores incompletos")
+        st.dataframe(proveedores, use_container_width=True, hide_index=True) if not proveedores.empty else st.success("No hay proveedores incompletos detectados.")
+
+    with tab_auditoria:
+        df = _safe_df("audit_log", ["id", "fecha", "usuario", "modulo", "accion", "entidad", "entidad_id", "detalle"], None, None, 200)
+        st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.info("Todavía no hay eventos recientes de auditoría.")
