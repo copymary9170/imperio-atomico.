@@ -52,6 +52,8 @@ EXPECTED_MIN_COLUMNS = {
     "migration_errors": ["fecha", "area", "error"],
 }
 
+PRIORITY_ORDER = {"Alta": 0, "Media": 1, "Baja": 2, "OK": 3}
+
 
 def _table_exists(conn, table_name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
@@ -88,9 +90,8 @@ def _table_columns(table_name: str) -> pd.DataFrame:
             if not _table_exists(conn, table_name):
                 return pd.DataFrame()
             rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        data = []
-        for row in rows:
-            data.append(
+        return pd.DataFrame(
+            [
                 {
                     "tabla": table_name,
                     "columna": row[1],
@@ -99,8 +100,9 @@ def _table_columns(table_name: str) -> pd.DataFrame:
                     "default": row[4],
                     "pk": bool(row[5]),
                 }
-            )
-        return pd.DataFrame(data)
+                for row in rows
+            ]
+        )
     except Exception:
         return pd.DataFrame()
 
@@ -127,33 +129,28 @@ def _csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8-sig")
 
 
-def _zip_tables(tables: list[str], limit: int | None = None, include_dictionary: bool = True, include_health: bool = True) -> bytes:
-    buffer = BytesIO()
-    with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as zf:
-        manifest_rows = []
-        for table in tables:
-            df = _read_table(table, limit=limit)
-            if df.empty and _table_row_count(table) == 0:
-                csv_data = pd.DataFrame().to_csv(index=False).encode("utf-8-sig")
-            else:
-                csv_data = _csv_bytes(df)
-            zf.writestr(f"tablas/{table}.csv", csv_data)
-            manifest_rows.append({"tabla": table, "filas_exportadas": len(df), "filas_totales": _table_row_count(table)})
-        manifest = pd.DataFrame(manifest_rows)
-        zf.writestr("manifest.csv", _csv_bytes(manifest))
-        if include_dictionary:
-            diccionario = _data_dictionary(tables)
-            zf.writestr("diccionario_datos.csv", _csv_bytes(diccionario))
-        if include_health:
-            salud = _data_health_report(_list_tables())
-            zf.writestr("salud_datos.csv", _csv_bytes(salud))
-    return buffer.getvalue()
+def _problem_priority(*, table: str, exists: bool, row_count: int, missing: list[str], migration_errors_count: int) -> str:
+    if not exists and table in CRITICAL_TABLES:
+        return "Alta"
+    if table == "migration_errors" and migration_errors_count > 0:
+        return "Alta"
+    if missing and table in CRITICAL_TABLES:
+        return "Alta"
+    if exists and table in CRITICAL_TABLES and row_count == 0:
+        return "Media"
+    if missing:
+        return "Media"
+    if table == "audit_log" and row_count == 0:
+        return "Baja"
+    return "OK"
 
 
 def _data_health_report(existing_tables: list[str]) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     existing_set = set(existing_tables)
     all_tables = sorted(existing_set.union(CRITICAL_TABLES))
+    migration_errors_count = _table_row_count("migration_errors") if "migration_errors" in existing_set else 0
+
     for table in all_tables:
         exists = table in existing_set
         row_count = _table_row_count(table) if exists else 0
@@ -162,6 +159,7 @@ def _data_health_report(existing_tables: list[str]) -> pd.DataFrame:
         expected = EXPECTED_MIN_COLUMNS.get(table, [])
         missing = [col for col in expected if col not in columns]
         problems: list[str] = []
+
         if not exists:
             problems.append("tabla faltante")
         if exists and table in CRITICAL_TABLES and row_count == 0:
@@ -172,22 +170,61 @@ def _data_health_report(existing_tables: list[str]) -> pd.DataFrame:
             problems.append("hay errores de migración registrados")
         if table == "audit_log" and row_count == 0:
             problems.append("sin eventos de auditoría")
-        if problems:
-            status = "Revisar" if exists else "Falta"
-        else:
-            status = "OK"
+
+        prioridad = _problem_priority(table=table, exists=exists, row_count=row_count, missing=missing, migration_errors_count=migration_errors_count)
+        estado = "OK" if prioridad == "OK" else ("Falta" if not exists else "Revisar")
+
         rows.append(
             {
+                "prioridad": prioridad,
+                "estado": estado,
                 "tabla": table,
                 "critica": "Sí" if table in CRITICAL_TABLES else "No",
                 "existe": "Sí" if exists else "No",
                 "filas": row_count,
                 "columnas": len(columns),
-                "estado": status,
-                "problemas": "; ".join(problems) if problems else "",
+                "problemas": "; ".join(problems),
+                "accion_sugerida": _suggest_action(table, prioridad, problems),
             }
         )
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df["prioridad_orden"] = df["prioridad"].map(PRIORITY_ORDER).fillna(9)
+    return df.sort_values(["prioridad_orden", "critica", "filas"], ascending=[True, False, True]).drop(columns=["prioridad_orden"])
+
+
+def _suggest_action(table: str, priority: str, problems: list[str]) -> str:
+    if priority == "OK":
+        return "Sin acción requerida."
+    if "tabla faltante" in problems:
+        return "Ejecutar diagnóstico técnico y revisar migraciones/esquema inicial."
+    if any("columnas mínimas" in p for p in problems):
+        return "Reiniciar app para correr migraciones y revisar database/auto_migrations.py."
+    if table == "migration_errors":
+        return "Abrir Diagnóstico técnico y revisar el detalle de migration_errors."
+    if table == "audit_log":
+        return "Usar módulos auditados para generar eventos o revisar permisos de auditoría."
+    if "tabla crítica sin registros" in problems:
+        return "Validar si es normal por arranque nuevo o cargar datos operativos iniciales."
+    return "Revisar la tabla y completar datos faltantes."
+
+
+def _zip_tables(tables: list[str], limit: int | None = None, include_dictionary: bool = True, include_health: bool = True) -> bytes:
+    buffer = BytesIO()
+    with ZipFile(buffer, mode="w", compression=ZIP_DEFLATED) as zf:
+        manifest_rows = []
+        for table in tables:
+            df = _read_table(table, limit=limit)
+            csv_data = _csv_bytes(df) if not (df.empty and _table_row_count(table) == 0) else pd.DataFrame().to_csv(index=False).encode("utf-8-sig")
+            zf.writestr(f"tablas/{table}.csv", csv_data)
+            manifest_rows.append({"tabla": table, "filas_exportadas": len(df), "filas_totales": _table_row_count(table)})
+        zf.writestr("manifest.csv", _csv_bytes(pd.DataFrame(manifest_rows)))
+        if include_dictionary:
+            zf.writestr("diccionario_datos.csv", _csv_bytes(_data_dictionary(tables)))
+        if include_health:
+            zf.writestr("salud_datos.csv", _csv_bytes(_data_health_report(_list_tables())))
+    return buffer.getvalue()
 
 
 def render_respaldo_datos(usuario: str = "Sistema") -> None:
@@ -212,12 +249,15 @@ def render_respaldo_datos(usuario: str = "Sistema") -> None:
         for table in tables
     ])
     salud = _data_health_report(tables)
+    problemas = salud[~salud["estado"].eq("OK")]
+    alta = int(salud["prioridad"].eq("Alta").sum()) if not salud.empty else 0
+    media = int(salud["prioridad"].eq("Media").sum()) if not salud.empty else 0
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Tablas", len(tables))
     c2.metric("Tablas críticas", int(resumen["critica"].eq("Sí").sum()))
     c3.metric("Filas totales", int(resumen["filas"].sum()))
-    c4.metric("Problemas", int(~salud["estado"].eq("OK").sum()) if False else int(salud[~salud["estado"].eq("OK")].shape[0]))
+    c4.metric("Problemas", len(problemas), delta=f"Alta: {alta} · Media: {media}")
 
     tab_resumen, tab_salud, tab_zip, tab_individual, tab_diccionario = st.tabs([
         "Resumen",
@@ -230,43 +270,32 @@ def render_respaldo_datos(usuario: str = "Sistema") -> None:
     with tab_resumen:
         resumen_vista = resumen.sort_values(["critica", "filas"], ascending=[False, False])
         st.dataframe(resumen_vista, use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇️ Descargar resumen CSV",
-            data=_csv_bytes(resumen_vista),
-            file_name=f"resumen_tablas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-            disabled=not puede_exportar,
-        )
+        st.download_button("⬇️ Descargar resumen CSV", data=_csv_bytes(resumen_vista), file_name=f"resumen_tablas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True, disabled=not puede_exportar)
 
     with tab_salud:
-        problemas = salud[~salud["estado"].eq("OK")]
         if problemas.empty:
             st.success("Salud de datos sin problemas detectados en tablas críticas y estructura mínima.")
         else:
-            st.warning(f"Hay {len(problemas)} tabla(s) con elementos para revisar.")
-        st.dataframe(salud.sort_values(["estado", "critica", "filas"], ascending=[False, False, False]), use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇️ Descargar salud de datos CSV",
-            data=_csv_bytes(salud),
-            file_name=f"salud_datos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-            disabled=not puede_exportar,
-        )
+            st.warning(f"Hay {len(problemas)} tabla(s) con elementos para revisar. Prioridad alta: {alta}.")
+
+        prioridad_filter = st.selectbox("Filtrar prioridad", ["Todas", "Alta", "Media", "Baja", "OK"])
+        salud_vista = salud if prioridad_filter == "Todas" else salud[salud["prioridad"].eq(prioridad_filter)]
+        st.dataframe(salud_vista, use_container_width=True, hide_index=True)
+        st.download_button("⬇️ Descargar salud de datos CSV", data=_csv_bytes(salud), file_name=f"salud_datos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True, disabled=not puede_exportar)
+
+        with st.expander("Matriz de criticidad"):
+            matriz = salud.groupby(["prioridad", "critica"], as_index=False).agg(tablas=("tabla", "count"), filas=("filas", "sum"))
+            matriz["prioridad_orden"] = matriz["prioridad"].map(PRIORITY_ORDER).fillna(9)
+            matriz = matriz.sort_values(["prioridad_orden", "critica"], ascending=[True, False]).drop(columns=["prioridad_orden"])
+            st.dataframe(matriz, use_container_width=True, hide_index=True)
+            st.download_button("⬇️ Descargar matriz CSV", data=_csv_bytes(matriz), file_name=f"matriz_criticidad_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True, disabled=not puede_exportar)
+
         with st.expander("Solo problemas"):
             if problemas.empty:
                 st.success("No hay problemas detectados.")
             else:
                 st.dataframe(problemas, use_container_width=True, hide_index=True)
-                st.download_button(
-                    "⬇️ Descargar problemas CSV",
-                    data=_csv_bytes(problemas),
-                    file_name=f"problemas_salud_datos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                    disabled=not puede_exportar,
-                )
+                st.download_button("⬇️ Descargar problemas CSV", data=_csv_bytes(problemas), file_name=f"problemas_salud_datos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True, disabled=not puede_exportar)
 
     with tab_zip:
         modo = st.radio("Qué respaldar", ["Tablas críticas", "Todas las tablas", "Seleccionar tablas"], horizontal=True, disabled=not puede_exportar)
@@ -294,26 +323,11 @@ def render_respaldo_datos(usuario: str = "Sistema") -> None:
                 stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 st.session_state["backup_zip_data"] = _zip_tables(selected, limit=int(limite) if limitar else None, include_dictionary=incluir_diccionario, include_health=incluir_salud)
                 st.session_state["backup_zip_name"] = f"respaldo_erp_{stamp}.zip"
-                log_audit_event(
-                    usuario=usuario,
-                    modulo="Sistema",
-                    accion="preparar_respaldo_zip",
-                    entidad="database",
-                    entidad_id=stamp,
-                    detalle=f"Respaldo ZIP preparado con {len(selected)} tabla(s).",
-                    metadata={"tablas": selected, "limitado": limitar, "limite": int(limite) if limitar else None, "diccionario": incluir_diccionario, "salud_datos": incluir_salud},
-                )
+                log_audit_event(usuario=usuario, modulo="Sistema", accion="preparar_respaldo_zip", entidad="database", entidad_id=stamp, detalle=f"Respaldo ZIP preparado con {len(selected)} tabla(s).", metadata={"tablas": selected, "limitado": limitar, "limite": int(limite) if limitar else None, "diccionario": incluir_diccionario, "salud_datos": incluir_salud})
                 st.success("Respaldo preparado. Ya puedes descargarlo abajo.")
 
             if st.session_state.get("backup_zip_data"):
-                st.download_button(
-                    "⬇️ Descargar respaldo ZIP preparado",
-                    data=st.session_state["backup_zip_data"],
-                    file_name=st.session_state.get("backup_zip_name", "respaldo_erp.zip"),
-                    mime="application/zip",
-                    use_container_width=True,
-                    disabled=not puede_exportar,
-                )
+                st.download_button("⬇️ Descargar respaldo ZIP preparado", data=st.session_state["backup_zip_data"], file_name=st.session_state.get("backup_zip_name", "respaldo_erp.zip"), mime="application/zip", use_container_width=True, disabled=not puede_exportar)
         else:
             st.info("Selecciona al menos una tabla.")
 
@@ -324,23 +338,9 @@ def render_respaldo_datos(usuario: str = "Sistema") -> None:
         st.dataframe(df_preview, use_container_width=True, hide_index=True)
         full_df = _read_table(selected_table)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        st.download_button(
-            "⬇️ Descargar CSV de tabla",
-            data=_csv_bytes(full_df),
-            file_name=f"{selected_table}_{stamp}.csv",
-            mime="text/csv",
-            use_container_width=True,
-            disabled=not puede_exportar,
-        )
+        st.download_button("⬇️ Descargar CSV de tabla", data=_csv_bytes(full_df), file_name=f"{selected_table}_{stamp}.csv", mime="text/csv", use_container_width=True, disabled=not puede_exportar)
 
     with tab_diccionario:
         diccionario = _data_dictionary(tables)
         st.dataframe(diccionario, use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇️ Descargar diccionario CSV",
-            data=_csv_bytes(diccionario),
-            file_name=f"diccionario_datos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-            disabled=not puede_exportar,
-        )
+        st.download_button("⬇️ Descargar diccionario CSV", data=_csv_bytes(diccionario), file_name=f"diccionario_datos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True, disabled=not puede_exportar)
