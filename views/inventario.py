@@ -1,8 +1,36 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from typing import Any
+
 import streamlit as st
 
 from security.permissions import has_permission, require_permission
+
+
+@contextmanager
+def _clean_inventory_inner_navigation():
+    """Oculta textos heredados del módulo interno cuando vive dentro del hub de Inventario / Almacén."""
+    original_title = st.title
+    original_selectbox = st.selectbox
+
+    def patched_title(body: Any, *args: Any, **kwargs: Any):
+        if str(body).strip() == "📦 Centro de Control de Inventario":
+            return st.caption("Inventario operativo: productos, existencias, compras, movimientos y reportes.")
+        return original_title(body, *args, **kwargs)
+
+    def patched_selectbox(label: str, options, *args: Any, **kwargs: Any):
+        if str(label).strip() == "Navegación del módulo de inventario":
+            label = "Sección de inventario operativo"
+        return original_selectbox(label, options, *args, **kwargs)
+
+    st.title = patched_title
+    st.selectbox = patched_selectbox
+    try:
+        yield
+    finally:
+        st.title = original_title
+        st.selectbox = original_selectbox
 
 
 def _render_inventario_original(usuario: str) -> None:
@@ -32,16 +60,12 @@ def _render_inventario_original(usuario: str) -> None:
     except Exception:
         tasa_binance = tasa_binance_default
 
-    inventario_module(usuario, tasa_bcv=tasa_bcv, tasa_binance=tasa_binance)
+    with _clean_inventory_inner_navigation():
+        inventario_module(usuario, tasa_bcv=tasa_bcv, tasa_binance=tasa_binance)
 
 
 def render_inventario(usuario: str) -> None:
-    """Inventario operativo puro, sin pestañas anidadas duplicadas.
-
-    El módulo 📦 Inventario / Almacén ya organiza las pestañas superiores desde app.py.
-    Stock mínimo se conserva dentro de Almacén físico / históricos para evitar que
-    aparezca Inventario operativo dos veces.
-    """
+    """Inventario operativo puro, sin pestañas anidadas duplicadas."""
     if not require_permission("inventario.view", "🚫 No tienes acceso al módulo Inventario."):
         return
 
