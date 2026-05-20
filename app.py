@@ -290,11 +290,12 @@ def _render_alertas_produccion(usuario: str) -> None:
 
 def render_produccion_unificada(usuario: str) -> None:
     st.title("🏭 Producción")
-    st.caption("Hub productivo: OT, planificación, diseños, rutas, corte, sublimación, producción manual, calidad, mermas, despacho y archivos.")
+    st.caption("Hub productivo: OT, planificación, diseños, impresiones CMYK, rutas, corte, sublimación, producción manual, calidad, mermas, despacho y archivos.")
 
     (
         tab_plan,
         tab_disenos,
+        tab_impresiones,
         tab_rutas,
         tab_corte,
         tab_sublimacion,
@@ -307,6 +308,7 @@ def render_produccion_unificada(usuario: str) -> None:
     ) = st.tabs([
         "🧾 OT / Planificación",
         "📁 Diseños y aprobaciones",
+        "🖨️ Impresiones / CMYK",
         "🧭 Rutas / BOM",
         "✂️ Corte",
         "🔥 Sublimación",
@@ -321,6 +323,8 @@ def render_produccion_unificada(usuario: str) -> None:
         render_planificacion_produccion(usuario)
     with tab_disenos:
         render_disenos_aprobaciones(usuario)
+    with tab_impresiones:
+        render_cmyk(usuario)
     with tab_rutas:
         render_rutas_produccion(usuario)
     with tab_corte:
@@ -495,7 +499,6 @@ MENU_ROUTES = {
     "📘 Manuales / SOP": ("manuales.view", lambda: render_manuales_sop(usuario)),
 
     # OTROS
-    "🎨 CMYK": ("produccion.view", lambda: render_cmyk(usuario)),
     "🧠 Diagnóstico IA": ("dashboard.view", lambda: render_diagnostico(usuario)),
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
 
