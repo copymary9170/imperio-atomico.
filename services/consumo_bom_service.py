@@ -61,6 +61,43 @@ def _stock_column(conn) -> str | None:
     return None
 
 
+def _stock_status(actual: float, minimo: float, critico: float, maximo: float) -> str:
+    actual = float(actual or 0)
+    minimo = float(minimo or 0)
+    critico = float(critico or 0)
+    maximo = float(maximo or 0)
+    if actual <= 0:
+        return "Agotado"
+    if critico > 0 and actual <= critico:
+        return "Crítico"
+    if minimo > 0 and actual <= minimo:
+        return "Reponer pronto"
+    if maximo > 0 and actual > maximo:
+        return "Sobrestock"
+    return "OK"
+
+
+def _sync_stock_minimo(conn, inventario_id: Any, nuevo_stock: float) -> str:
+    if not inventario_id or not _table_exists(conn, "stock_minimo_config"):
+        return "stock mínimo no configurado"
+    cols = _columns(conn, "stock_minimo_config")
+    required = {"inventario_id", "stock_actual", "stock_minimo", "stock_critico", "stock_maximo", "estado_reposicion"}
+    if not required.issubset(cols):
+        return "stock mínimo sin columnas requeridas"
+    row = conn.execute(
+        "SELECT stock_minimo, stock_critico, stock_maximo FROM stock_minimo_config WHERE inventario_id=? AND COALESCE(activo,1)=1 ORDER BY id DESC LIMIT 1",
+        (int(inventario_id),),
+    ).fetchone()
+    if not row:
+        return "sin regla de stock mínimo asociada"
+    estado = _stock_status(nuevo_stock, float(row[0] or 0), float(row[1] or 0), float(row[2] or 0))
+    conn.execute(
+        "UPDATE stock_minimo_config SET stock_actual=?, estado_reposicion=? WHERE inventario_id=? AND COALESCE(activo,1)=1",
+        (float(nuevo_stock), estado, int(inventario_id)),
+    )
+    return f"stock mínimo sincronizado: {estado}"
+
+
 def _maybe_discount_inventory(conn, inventario_id: Any, cantidad: float) -> str:
     if not inventario_id or not _table_exists(conn, "inventario"):
         return "sin inventario asociado"
@@ -76,7 +113,8 @@ def _maybe_discount_inventory(conn, inventario_id: Any, cantidad: float) -> str:
     actual = float(row[0] or 0)
     nuevo = max(actual - float(cantidad or 0), 0.0)
     conn.execute(f"UPDATE inventario SET {stock_col}=? WHERE id=?", (nuevo, int(inventario_id)))
-    return f"stock descontado {actual:,.4f}->{nuevo:,.4f}"
+    sync_note = _sync_stock_minimo(conn, inventario_id, nuevo)
+    return f"stock descontado {actual:,.4f}->{nuevo:,.4f}; {sync_note}"
 
 
 def consume_bom_for_order(orden_id: int, usuario: str = "Sistema") -> ConsumptionResult:
