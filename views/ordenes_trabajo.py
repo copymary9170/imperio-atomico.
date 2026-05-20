@@ -9,6 +9,7 @@ import streamlit as st
 from database.connection import db_transaction
 from security.permissions import has_permission, require_any_permission
 from services.audit_service import log_audit_event
+from services.consumo_bom_service import consume_bom_for_order
 
 ESTADOS_OT = ["Nueva", "Archivo recibido", "Diseño pendiente", "Diseño aprobado", "En producción", "Calidad", "Listo para despacho", "Despachado", "Entregado", "Cancelado"]
 TIPOS_TRABAJO = ["Impresión", "Copias", "Sublimación", "Corte", "Papelería creativa", "Diseño", "Bazar", "Otro"]
@@ -16,10 +17,15 @@ PRIORIDADES = ["Normal", "Alta", "Urgente", "Baja"]
 METODOS_PAGO = ["efectivo", "transferencia", "zelle", "binance", "mixto", "otro"]
 ESTADOS_FINALES = {"Entregado", "Cancelado"}
 ESTADOS_BLOQUEO_DISENO = {"Nueva", "Archivo recibido", "Diseño pendiente"}
+ESTADOS_CONSUMO_BOM = {"En producción", "Entregado"}
 
 
 def _table_columns(conn, table: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
 
 
 def _ensure_extra_columns(conn) -> None:
@@ -173,6 +179,16 @@ def _read_pagos(orden_id: int | None = None) -> pd.DataFrame:
         return pd.read_sql_query("SELECT * FROM ordenes_trabajo_pagos ORDER BY id DESC LIMIT 500", conn)
 
 
+def _read_consumos(orden_id: int | None = None) -> pd.DataFrame:
+    _ensure_tables()
+    with db_transaction() as conn:
+        if not _table_exists(conn, "ordenes_trabajo_consumos"):
+            return pd.DataFrame()
+        if orden_id:
+            return pd.read_sql_query("SELECT * FROM ordenes_trabajo_consumos WHERE orden_id=? ORDER BY id DESC", conn, params=(int(orden_id),))
+        return pd.read_sql_query("SELECT * FROM ordenes_trabajo_consumos ORDER BY id DESC LIMIT 500", conn)
+
+
 def _create_orden(data: dict[str, Any]) -> int:
     _ensure_tables()
     estado = data.get("estado", "Nueva")
@@ -261,7 +277,7 @@ def render_ordenes_trabajo(usuario: str = "Sistema") -> None:
         return
     puede_editar = has_permission("produccion.plan") or has_permission("produccion.execute")
     st.subheader("🧾 Órdenes de trabajo")
-    st.caption("Centro operativo: venta/cotización, archivos, diseño, producción, despacho, pagos, costos y estado.")
+    st.caption("Centro operativo: venta/cotización, archivos, diseño, producción, despacho, pagos, costos, consumo BOM y estado.")
     _ensure_tables()
     ordenes = _read_ordenes()
     if not ordenes.empty:
@@ -275,7 +291,7 @@ def render_ordenes_trabajo(usuario: str = "Sistema") -> None:
     c2.metric("Abiertas", len(abiertas))
     c3.metric("Bloqueadas", len(bloqueadas))
     c4.metric("Saldo pendiente", f"${saldo_total:,.2f}")
-    tab_nueva, tab_tablero, tab_pagos, tab_estado, tab_eventos = st.tabs(["Nueva OT", "Tablero", "Pagos / anticipos", "Actualizar estado", "Eventos"])
+    tab_nueva, tab_tablero, tab_pagos, tab_estado, tab_consumos, tab_eventos = st.tabs(["Nueva OT", "Tablero", "Pagos / anticipos", "Actualizar estado", "Consumos BOM", "Eventos"])
     with tab_nueva:
         with st.form("form_nueva_ot"):
             a, b, c = st.columns(3)
@@ -317,6 +333,12 @@ def render_ordenes_trabajo(usuario: str = "Sistema") -> None:
                 payload = {"usuario_creacion": usuario, "codigo": codigo.strip() or _next_code(), "cliente": cliente.strip(), "telefono": telefono.strip(), "venta_id": int(venta_id) or None, "cotizacion_id": int(cotizacion_id) or None, "comprobante_id": int(comprobante_id) or None, "diseno_id": int(diseno_id) or None, "despacho_id": int(despacho_id) or None, "bom_id": int(bom_id) or None, "tipo_trabajo": tipo, "prioridad": prioridad, "descripcion": descripcion.strip(), "especificaciones": especificaciones.strip(), "archivo_origen": archivo_origen.strip(), "archivo_final": archivo_final.strip(), "cantidad": cantidad, "fecha_promesa": fecha_promesa.isoformat() if fecha_promesa else None, "responsable": responsable.strip(), "estado": estado, "costo_estimado_usd": costo_estimado, "precio_venta_usd": precio_venta, "anticipo_usd": anticipo, "metodo_anticipo": metodo_anticipo, "referencia_anticipo": referencia_anticipo.strip(), "observaciones": observaciones.strip()}
                 orden_id = _create_orden(payload)
                 log_audit_event(usuario=usuario, modulo="Producción", accion="crear_orden_trabajo", entidad="ordenes_trabajo", entidad_id=orden_id, detalle=f"OT creada: {payload['codigo']} - {cliente.strip()}", metadata=payload)
+                if estado in ESTADOS_CONSUMO_BOM and int(bom_id) > 0:
+                    result = consume_bom_for_order(orden_id, usuario)
+                    if result.ok:
+                        st.info(f"Consumo BOM: {result.message} Costo: ${result.total_cost_usd:,.2f}")
+                    else:
+                        st.warning(f"OT creada, pero no se consumió BOM: {result.message}")
                 st.success(f"Orden de trabajo #{orden_id} creada.")
                 st.rerun()
     with tab_tablero:
@@ -375,14 +397,32 @@ def render_ordenes_trabajo(usuario: str = "Sistema") -> None:
             costo_real = col2.number_input("Costo real USD opcional", min_value=0.0, value=0.0, step=0.01, disabled=not puede_editar)
             archivo_ref = st.text_input("Archivo / referencia", disabled=not puede_editar)
             comentario = st.text_area("Comentario", disabled=not puede_editar)
+            consumo_auto = st.checkbox("Consumir BOM automáticamente si aplica", value=True, disabled=not puede_editar)
             if st.button("Actualizar orden", type="primary", disabled=not puede_editar):
                 ok, msg = _update_estado(int(orden_id), nuevo_estado, usuario, comentario.strip(), costo_real, archivo_ref.strip())
                 if ok:
                     log_audit_event(usuario=usuario, modulo="Producción", accion="actualizar_orden_trabajo", entidad="ordenes_trabajo", entidad_id=orden_id, detalle=f"OT actualizada a {nuevo_estado}", metadata={"estado": nuevo_estado, "costo_real_usd": costo_real, "comentario": comentario.strip()})
+                    if consumo_auto and nuevo_estado in ESTADOS_CONSUMO_BOM:
+                        result = consume_bom_for_order(int(orden_id), usuario)
+                        if result.ok:
+                            st.info(f"Consumo BOM: {result.message} Componentes: {result.consumed_rows}. Costo: ${result.total_cost_usd:,.2f}")
+                        else:
+                            st.warning(f"Estado actualizado, pero no se consumió BOM: {result.message}")
                     st.success(msg)
                     st.rerun()
                 else:
                     st.error(msg)
+    with tab_consumos:
+        consumos = _read_consumos()
+        if consumos.empty:
+            st.info("No hay consumos BOM registrados todavía.")
+        else:
+            orden_filter = st.selectbox("Filtrar OT", [0] + sorted(consumos["orden_id"].dropna().astype(int).unique().tolist()), format_func=lambda x: "Todas" if x == 0 else f"OT #{x}")
+            vista = consumos if orden_filter == 0 else consumos[consumos["orden_id"].astype(int).eq(int(orden_filter))]
+            total = float(pd.to_numeric(vista.get("costo_total_usd", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if not vista.empty else 0.0
+            st.metric("Costo consumido", f"${total:,.2f}")
+            st.dataframe(vista, use_container_width=True, hide_index=True)
+            st.download_button("⬇️ Descargar consumos BOM CSV", data=vista.to_csv(index=False).encode("utf-8-sig"), file_name="consumos_bom_ot.csv", mime="text/csv", use_container_width=True)
     with tab_eventos:
         eventos = _read_eventos()
         pagos = _read_pagos()
