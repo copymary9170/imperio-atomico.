@@ -243,14 +243,23 @@ def render_marketing_unificado(usuario: str) -> None:
 
 
 def render_activos_unificado(usuario: str) -> None:
-    tab_operacion, tab_patrimonial = st.tabs([
-        "Operación de activos",
-        "Control patrimonial",
+    st.title("🏗️ Activos")
+    st.caption("Equipos, componentes, diagnóstico, mantenimiento, documentos, garantías, depreciación y archivos patrimoniales.")
+
+    tab_operacion, tab_mantenimiento, tab_patrimonial, tab_documentos = st.tabs([
+        "🖥️ Equipos / Operación",
+        "🛠️ Mantenimiento operativo",
+        "🧾 Patrimonio / Históricos CSV",
+        "📁 Documentos de activos",
     ])
     with tab_operacion:
         render_activos(usuario)
+    with tab_mantenimiento:
+        render_mantenimiento_activos(usuario)
     with tab_patrimonial:
         render_activos_patrimonial(usuario)
+    with tab_documentos:
+        render_area_empresarial("Activos", usuario, show_title=False)
 
 # ==================================================
 # ESTILOS SIDEBAR
@@ -321,7 +330,7 @@ MENU_ROUTES = {
 
     # OPERACIONES
     "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
-    "🏗️ Activos": ("activos.view", lambda: render_activos_unificado(usuario)),
+    "🏗️ Activos": (("activos.view", "mantenimiento.view"), lambda: render_activos_unificado(usuario)),
 
     # CLIENTES Y VENTAS
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
@@ -378,7 +387,6 @@ MENU_ROUTES = {
 
     # MODULOS ERP INDEPENDIENTES
     "🧩 Módulos rescatados": ("dashboard.view", lambda: render_modulos_rescatados(usuario)),
-    "🛠️ Mantenimiento": ("mantenimiento.view", lambda: render_mantenimiento_activos(usuario)),
 }
 
 # ==================================================
