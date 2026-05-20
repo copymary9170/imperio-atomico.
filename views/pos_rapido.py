@@ -59,8 +59,102 @@ def _ensure_pos_tables() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS comprobantes_pos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                usuario TEXT NOT NULL,
+                tipo TEXT NOT NULL DEFAULT 'Ticket',
+                cliente TEXT NOT NULL DEFAULT 'Cliente General',
+                telefono TEXT,
+                venta_id INTEGER,
+                referencia TEXT,
+                metodo_pago TEXT NOT NULL DEFAULT 'efectivo',
+                subtotal_usd REAL NOT NULL DEFAULT 0,
+                descuento_usd REAL NOT NULL DEFAULT 0,
+                impuesto_usd REAL NOT NULL DEFAULT 0,
+                total_usd REAL NOT NULL DEFAULT 0,
+                monto_recibido_usd REAL NOT NULL DEFAULT 0,
+                vuelto_usd REAL NOT NULL DEFAULT 0,
+                estado TEXT NOT NULL DEFAULT 'Emitido',
+                notas TEXT,
+                cuerpo TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS comprobantes_pos_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                comprobante_id INTEGER NOT NULL,
+                descripcion TEXT NOT NULL,
+                cantidad REAL NOT NULL DEFAULT 1,
+                precio_unitario_usd REAL NOT NULL DEFAULT 0,
+                total_usd REAL NOT NULL DEFAULT 0,
+                FOREIGN KEY (comprobante_id) REFERENCES comprobantes_pos(id)
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pos_ventas_fecha ON pos_ventas(fecha)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pos_detalle_venta ON pos_venta_detalle(venta_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_comprobantes_pos_fecha ON comprobantes_pos(fecha)")
+
+
+def _build_comprobante_body(*, comprobante_id: int | None, cliente: str, metodo: str, items: list[dict[str, Any]], subtotal: float, descuento: float, total: float, recibido: float, vuelto: float, referencia: str, notas: str) -> str:
+    numero = f"#{comprobante_id:06d}" if comprobante_id else "BORRADOR"
+    lines = [
+        "⚛️ IMPERIO ATÓMICO",
+        f"TICKET POS {numero}",
+        f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"Cliente: {cliente or 'Cliente General'}",
+        f"Referencia: {referencia}",
+        "-" * 34,
+    ]
+    for item in items:
+        desc = str(item.get("descripcion") or "Item")
+        cantidad = float(item.get("cantidad") or 0)
+        precio = float(item.get("precio") or 0)
+        total_item = float(item.get("total_usd") or 0)
+        lines.append(desc)
+        lines.append(f"  {cantidad:,.2f} x ${precio:,.2f} = ${total_item:,.2f}")
+    lines.extend([
+        "-" * 34,
+        f"Subtotal: ${subtotal:,.2f}",
+        f"Descuento: ${descuento:,.2f}",
+        f"TOTAL: ${total:,.2f}",
+        f"Método: {metodo}",
+        f"Recibido: ${recibido:,.2f}",
+        f"Vuelto: ${vuelto:,.2f}",
+    ])
+    if notas:
+        lines.extend(["-" * 34, f"Notas: {notas}"])
+    lines.extend(["-" * 34, "Gracias por su compra."])
+    return "\n".join(lines)
+
+
+def _create_pos_comprobante(conn, *, usuario: str, pos_id: int, cliente: str, items: list[dict[str, Any]], subtotal: float, descuento: float, total: float, efectivo: float, vuelto: float, metodo: str, notas: str) -> int:
+    referencia = f"POS-{pos_id}"
+    existing = conn.execute("SELECT id FROM comprobantes_pos WHERE referencia=?", (referencia,)).fetchone()
+    if existing:
+        return int(existing[0])
+    cuerpo = _build_comprobante_body(comprobante_id=None, cliente=cliente, metodo=metodo, items=items, subtotal=subtotal, descuento=descuento, total=total, recibido=efectivo, vuelto=vuelto, referencia=referencia, notas=notas)
+    cur = conn.execute(
+        """
+        INSERT INTO comprobantes_pos(usuario, tipo, cliente, venta_id, referencia, metodo_pago, subtotal_usd, descuento_usd, impuesto_usd, total_usd, monto_recibido_usd, vuelto_usd, estado, notas, cuerpo)
+        VALUES (?, 'Ticket', ?, NULL, ?, ?, ?, ?, 0, ?, ?, ?, 'Emitido', ?, ?)
+        """,
+        (usuario, cliente or "Cliente General", referencia, metodo, float(subtotal), float(descuento or 0), float(total), float(efectivo or 0), float(vuelto or 0), notas, cuerpo),
+    )
+    comp_id = int(cur.lastrowid)
+    cuerpo_final = _build_comprobante_body(comprobante_id=comp_id, cliente=cliente, metodo=metodo, items=items, subtotal=subtotal, descuento=descuento, total=total, recibido=efectivo, vuelto=vuelto, referencia=referencia, notas=notas)
+    conn.execute("UPDATE comprobantes_pos SET cuerpo=? WHERE id=?", (cuerpo_final, comp_id))
+    for item in items:
+        conn.execute(
+            "INSERT INTO comprobantes_pos_items(comprobante_id, descripcion, cantidad, precio_unitario_usd, total_usd) VALUES (?, ?, ?, ?, ?)",
+            (comp_id, item.get("descripcion", ""), float(item.get("cantidad", 1)), float(item.get("precio", 0)), float(item.get("total_usd", 0))),
+        )
+    return comp_id
 
 
 def _load_pos_history() -> pd.DataFrame:
@@ -68,16 +162,18 @@ def _load_pos_history() -> pd.DataFrame:
     with db_transaction() as conn:
         return pd.read_sql_query(
             """
-            SELECT id, fecha, usuario, cliente, total_usd, metodo_pago, efectivo_recibido_usd, vuelto_usd, estado
-            FROM pos_ventas
-            ORDER BY id DESC
+            SELECT p.id, p.fecha, p.usuario, p.cliente, p.total_usd, p.metodo_pago, p.efectivo_recibido_usd, p.vuelto_usd, p.estado,
+                   c.id AS comprobante_id
+            FROM pos_ventas p
+            LEFT JOIN comprobantes_pos c ON c.referencia = ('POS-' || p.id)
+            ORDER BY p.id DESC
             LIMIT 200
             """,
             conn,
         )
 
 
-def _save_sale(usuario: str, cliente: str, items: list[dict[str, Any]], descuento: float, efectivo: float, metodo: str, moneda: str, notas: str) -> int:
+def _save_sale(usuario: str, cliente: str, items: list[dict[str, Any]], descuento: float, efectivo: float, metodo: str, moneda: str, notas: str, generar_comprobante: bool = True) -> tuple[int, int | None]:
     subtotal = sum(float(i["total_usd"]) for i in items)
     total = max(0.0, subtotal - float(descuento or 0))
     vuelto = max(0.0, float(efectivo or 0) - total) if metodo == "efectivo" else 0.0
@@ -108,12 +204,13 @@ def _save_sale(usuario: str, cliente: str, items: list[dict[str, Any]], descuent
                     int(item.get("clics_cobrados", 0)),
                 ),
             )
-    return venta_id
+        comp_id = _create_pos_comprobante(conn, usuario=usuario, pos_id=venta_id, cliente=cliente, items=items, subtotal=subtotal, descuento=float(descuento or 0), total=total, efectivo=float(efectivo or 0), vuelto=vuelto, metodo=metodo, notas=notas) if generar_comprobante else None
+    return venta_id, comp_id
 
 
 def render_pos_rapido(usuario: str = "Sistema") -> None:
     st.subheader("🖥️ POS / Facturación rápida")
-    st.caption("Venta de mostrador con Cliente General, cobro rápido, vuelto y clics cobrados para control de fugas.")
+    st.caption("Venta de mostrador con Cliente General, cobro rápido, vuelto, clics cobrados y comprobante automático.")
     _ensure_pos_tables()
 
     if "pos_items" not in st.session_state:
@@ -123,15 +220,7 @@ def render_pos_rapido(usuario: str = "Sistema") -> None:
     servicio = col_a.selectbox("Servicio rápido", SERVICIOS_RAPIDOS, format_func=lambda x: f"{x['codigo']} · {x['nombre']} · ${x['precio']:.2f}")
     cantidad = col_b.number_input("Cantidad", min_value=1.0, value=1.0, step=1.0)
     if col_c.button("Agregar", use_container_width=True):
-        st.session_state["pos_items"].append({
-            "codigo": servicio["codigo"],
-            "descripcion": servicio["nombre"],
-            "tipo": servicio["tipo"],
-            "cantidad": float(cantidad),
-            "precio": float(servicio["precio"]),
-            "total_usd": float(cantidad) * float(servicio["precio"]),
-            "clics_cobrados": int(float(cantidad) * int(servicio.get("clics", 0))),
-        })
+        st.session_state["pos_items"].append({"codigo": servicio["codigo"], "descripcion": servicio["nombre"], "tipo": servicio["tipo"], "cantidad": float(cantidad), "precio": float(servicio["precio"]), "total_usd": float(cantidad) * float(servicio["precio"]), "clics_cobrados": int(float(cantidad) * int(servicio.get("clics", 0)))})
         st.rerun()
 
     with st.expander("Agregar item libre"):
@@ -142,15 +231,7 @@ def render_pos_rapido(usuario: str = "Sistema") -> None:
         clics = l4.number_input("Clics", min_value=0, value=0, step=1)
         if st.button("Agregar item libre", use_container_width=True):
             if desc.strip():
-                st.session_state["pos_items"].append({
-                    "codigo": "LIBRE",
-                    "descripcion": desc.strip(),
-                    "tipo": "servicio",
-                    "cantidad": float(qty),
-                    "precio": float(price),
-                    "total_usd": float(qty) * float(price),
-                    "clics_cobrados": int(clics),
-                })
+                st.session_state["pos_items"].append({"codigo": "LIBRE", "descripcion": desc.strip(), "tipo": "servicio", "cantidad": float(qty), "precio": float(price), "total_usd": float(qty) * float(price), "clics_cobrados": int(clics)})
                 st.rerun()
 
     items = st.session_state.get("pos_items", [])
@@ -173,6 +254,7 @@ def render_pos_rapido(usuario: str = "Sistema") -> None:
     metodo = p2.selectbox("Método", ["efectivo", "transferencia", "tarjeta", "mixto"])
     moneda = p3.selectbox("Moneda", ["USD", "VES", "COP", "EUR"])
     efectivo = p4.number_input("Efectivo recibido USD", min_value=0.0, value=max(0.0, subtotal - descuento), step=0.05)
+    generar_comprobante = st.checkbox("Generar comprobante automático", value=True)
     total = max(0.0, subtotal - descuento)
     vuelto = max(0.0, efectivo - total) if metodo == "efectivo" else 0.0
     st.metric("Total a cobrar", f"${total:,.2f}", f"Vuelto: ${vuelto:,.2f}")
@@ -180,9 +262,10 @@ def render_pos_rapido(usuario: str = "Sistema") -> None:
 
     b1, b2 = st.columns(2)
     if b1.button("Cobrar venta", type="primary", use_container_width=True, disabled=not bool(items)):
-        venta_id = _save_sale(usuario, cliente, items, descuento, efectivo, metodo, moneda, notas)
+        venta_id, comp_id = _save_sale(usuario, cliente, items, descuento, efectivo, metodo, moneda, notas, generar_comprobante=generar_comprobante)
         st.session_state["pos_items"] = []
-        st.success(f"Venta POS #{venta_id} cobrada. Total: ${total:,.2f}. Vuelto: ${vuelto:,.2f}")
+        comp_msg = f" · Comprobante #{comp_id:06d}" if comp_id else ""
+        st.success(f"Venta POS #{venta_id} cobrada{comp_msg}. Total: ${total:,.2f}. Vuelto: ${vuelto:,.2f}")
         st.rerun()
     if b2.button("Vaciar ticket", use_container_width=True):
         st.session_state["pos_items"] = []
