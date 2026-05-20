@@ -246,11 +246,10 @@ def render_activos_unificado(usuario: str) -> None:
     st.title("🏗️ Activos")
     st.caption("Equipos, componentes, diagnóstico, mantenimiento, documentos, garantías, depreciación y archivos patrimoniales.")
 
-    tab_operacion, tab_mantenimiento, tab_patrimonial, tab_documentos = st.tabs([
+    tab_operacion, tab_mantenimiento, tab_patrimonial = st.tabs([
         "🖥️ Equipos / Operación",
         "🛠️ Mantenimiento operativo",
         "🧾 Patrimonio / Históricos CSV",
-        "📁 Documentos de activos",
     ])
     with tab_operacion:
         render_activos(usuario)
@@ -258,8 +257,6 @@ def render_activos_unificado(usuario: str) -> None:
         render_mantenimiento_activos(usuario)
     with tab_patrimonial:
         render_activos_patrimonial(usuario)
-    with tab_documentos:
-        render_area_empresarial("Activos", usuario, show_title=False)
 
 # ==================================================
 # ESTILOS SIDEBAR
