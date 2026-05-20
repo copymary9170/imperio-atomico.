@@ -6,8 +6,6 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
-from services.audit_service import log_audit_event
-
 
 ESTADOS_FINALES = {"Entregado", "Devuelto", "Cancelado", "Completado", "Cerrado"}
 
@@ -32,10 +30,7 @@ def _safe_scalar(sql: str, params: tuple = (), default: float = 0.0) -> float:
     try:
         with db_transaction() as conn:
             row = conn.execute(sql, params).fetchone()
-        if not row:
-            return default
-        value = row[0]
-        return float(value or 0)
+        return float((row[0] if row else default) or 0)
     except Exception:
         return default
 
@@ -78,18 +73,10 @@ def _safe_df(table: str, columns: list[str], where: str | None = None, needed: s
 
 
 def _today_sales(today: str) -> tuple[float, int]:
-    total = _safe_scalar(
-        "SELECT SUM(total_usd) FROM ventas WHERE date(fecha)=date(?)",
-        (today,),
-        0.0,
-    )
+    total = _safe_scalar("SELECT SUM(total_usd) FROM ventas WHERE date(fecha)=date(?)", (today,), 0.0)
     count = _safe_count("ventas", "date(fecha)=date('now')", {"fecha"})
     if total == 0:
-        total = _safe_scalar(
-            "SELECT SUM(total_usd) FROM comprobantes_pos WHERE date(fecha)=date(?)",
-            (today,),
-            0.0,
-        )
+        total = _safe_scalar("SELECT SUM(total_usd) FROM comprobantes_pos WHERE date(fecha)=date(?)", (today,), 0.0)
         count = max(count, _safe_count("comprobantes_pos", "date(fecha)=date('now')", {"fecha"}))
     return total, count
 
@@ -104,156 +91,119 @@ def _cash_today(today: str) -> dict[str, float]:
     }
 
 
-def _stage_label(row: dict[str, object]) -> str:
-    if str(row.get("despacho_estado") or "") in {"Entregado", "Devuelto"}:
-        return "Entrega finalizada"
-    if row.get("despacho_estado"):
-        return "En despacho"
-    if str(row.get("diseno_estado") or "") in {"Aprobado por cliente", "Listo para imprimir", "Listo para sublimar", "Listo para cortar"}:
-        return "Diseño aprobado / producción"
-    if row.get("diseno_estado"):
-        return "Diseño pendiente"
-    if row.get("cola_estado"):
-        return "Cola impresión"
-    if row.get("ticket_id"):
-        return "Vendido / comprobante"
-    return "Registrado"
+def _ot_stage(row: pd.Series) -> str:
+    estado = str(row.get("estado") or "")
+    if estado in ESTADOS_FINALES:
+        return estado
+    if int(row.get("bloqueo_entrega") or 0) and estado in {"Listo para despacho", "Despachado"}:
+        return "Bloqueada por saldo"
+    if int(row.get("bloqueo_produccion") or 0):
+        return "Bloqueada por diseño"
+    if estado in {"Diseño aprobado", "En producción", "Calidad"}:
+        return "Producción"
+    if estado in {"Listo para despacho", "Despachado"}:
+        return "Entrega"
+    return "Activa"
 
 
 def _global_order_status() -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-    tickets = _safe_df("comprobantes_pos", ["id", "fecha", "cliente", "telefono", "venta_id", "referencia", "total_usd", "estado"], None, None, 250)
-    ventas = _safe_df("ventas", ["id", "fecha", "cliente", "cliente_nombre", "total_usd", "estado"], None, None, 250)
-    disenos = _safe_df("disenos_aprobaciones", ["id", "fecha_creacion", "cliente", "venta_id", "referencia", "nombre_diseno", "estado", "bloqueo_produccion"], None, None, 250)
-    despachos = _safe_df("despachos_entregas", ["id", "fecha_creacion", "cliente", "venta_id", "referencia", "tipo_entrega", "estado", "numero_guia"], None, None, 250)
-    cola = _safe_df("cola_impresion", ["id", "fecha_creacion", "cliente", "venta_id", "referencia", "archivo_nombre", "estado"], None, None, 250)
+    ots = _safe_df(
+        "ordenes_trabajo",
+        [
+            "id", "fecha_creacion", "codigo", "cliente", "tipo_trabajo", "prioridad", "descripcion",
+            "estado", "estado_pago", "precio_venta_usd", "anticipo_usd", "saldo_pendiente_usd",
+            "bloqueo_produccion", "bloqueo_entrega", "costo_real_usd", "margen_real_usd", "fecha_promesa",
+            "responsable", "despacho_id", "diseno_id", "bom_id",
+        ],
+        None,
+        None,
+        250,
+    )
+    if not ots.empty:
+        out = ots.copy()
+        out["pedido"] = out.get("codigo", pd.Series(dtype=str)).fillna("").astype(str)
+        out["fecha"] = out.get("fecha_creacion", "")
+        out["etapa"] = out.apply(_ot_stage, axis=1)
+        return out[
+            [
+                "pedido", "fecha", "cliente", "tipo_trabajo", "prioridad", "estado", "etapa",
+                "estado_pago", "precio_venta_usd", "anticipo_usd", "saldo_pendiente_usd",
+                "costo_real_usd", "margen_real_usd", "fecha_promesa", "responsable",
+            ]
+        ].head(200)
 
-    if not tickets.empty:
-        for _, t in tickets.iterrows():
-            venta_id = t.get("venta_id")
-            referencia = str(t.get("referencia") or "")
-            cliente = str(t.get("cliente") or "Cliente General")
-            related_diseno = pd.DataFrame()
-            related_despacho = pd.DataFrame()
-            related_cola = pd.DataFrame()
-            if not disenos.empty:
-                mask = disenos.get("cliente", pd.Series(dtype=str)).astype(str).eq(cliente)
-                if venta_id and "venta_id" in disenos.columns:
-                    mask = mask | disenos["venta_id"].fillna(0).astype(int).eq(int(venta_id))
-                if referencia and "referencia" in disenos.columns:
-                    mask = mask | disenos["referencia"].astype(str).eq(referencia)
-                related_diseno = disenos[mask]
-            if not despachos.empty:
-                mask = despachos.get("cliente", pd.Series(dtype=str)).astype(str).eq(cliente)
-                if venta_id and "venta_id" in despachos.columns:
-                    mask = mask | despachos["venta_id"].fillna(0).astype(int).eq(int(venta_id))
-                if referencia and "referencia" in despachos.columns:
-                    mask = mask | despachos["referencia"].astype(str).eq(referencia)
-                related_despacho = despachos[mask]
-            if not cola.empty:
-                mask = cola.get("cliente", pd.Series(dtype=str)).astype(str).eq(cliente)
-                if venta_id and "venta_id" in cola.columns:
-                    mask = mask | cola["venta_id"].fillna(0).astype(int).eq(int(venta_id))
-                if referencia and "referencia" in cola.columns:
-                    mask = mask | cola["referencia"].astype(str).eq(referencia)
-                related_cola = cola[mask]
-
-            row = {
-                "pedido": f"TICKET-{int(t['id'])}",
-                "fecha": t.get("fecha"),
-                "cliente": cliente,
-                "total_usd": float(t.get("total_usd") or 0),
-                "ticket_id": int(t["id"]),
-                "venta_id": venta_id,
-                "cola_estado": related_cola.iloc[0].get("estado") if not related_cola.empty else "",
-                "diseno_estado": related_diseno.iloc[0].get("estado") if not related_diseno.empty else "",
-                "bloqueo_diseno": int(related_diseno.iloc[0].get("bloqueo_produccion") or 0) if not related_diseno.empty else 0,
-                "despacho_estado": related_despacho.iloc[0].get("estado") if not related_despacho.empty else "",
-                "guia": related_despacho.iloc[0].get("numero_guia") if not related_despacho.empty else "",
-            }
-            row["etapa"] = _stage_label(row)
-            rows.append(row)
-
-    if not rows and not ventas.empty:
-        for _, v in ventas.iterrows():
-            cliente = str(v.get("cliente_nombre") or v.get("cliente") or "Cliente")
-            row = {
-                "pedido": f"VENTA-{int(v['id'])}",
-                "fecha": v.get("fecha"),
-                "cliente": cliente,
-                "total_usd": float(v.get("total_usd") or 0),
-                "ticket_id": "",
-                "venta_id": int(v["id"]),
-                "cola_estado": "",
-                "diseno_estado": "",
-                "bloqueo_diseno": 0,
-                "despacho_estado": "",
-                "guia": "",
-                "etapa": "Vendido",
-            }
-            rows.append(row)
-
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
-    return df.head(200)
+    tickets = _safe_df("comprobantes_pos", ["id", "fecha", "cliente", "venta_id", "referencia", "total_usd", "estado"], None, None, 200)
+    if tickets.empty:
+        return pd.DataFrame()
+    rows = []
+    for _, t in tickets.iterrows():
+        rows.append({
+            "pedido": f"TICKET-{int(t['id'])}",
+            "fecha": t.get("fecha"),
+            "cliente": str(t.get("cliente") or "Cliente General"),
+            "tipo_trabajo": "POS",
+            "prioridad": "Normal",
+            "estado": t.get("estado") or "Registrado",
+            "etapa": "Vendido / comprobante",
+            "estado_pago": "",
+            "precio_venta_usd": float(t.get("total_usd") or 0),
+            "anticipo_usd": "",
+            "saldo_pendiente_usd": "",
+            "costo_real_usd": "",
+            "margen_real_usd": "",
+            "fecha_promesa": "",
+            "responsable": "",
+        })
+    return pd.DataFrame(rows)
 
 
 def _download_csv(label: str, df: pd.DataFrame, prefix: str) -> None:
     if df.empty:
         return
-    st.download_button(
-        label,
-        data=df.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"{prefix}_{date.today().isoformat()}.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+    st.download_button(label, data=df.to_csv(index=False).encode("utf-8-sig"), file_name=f"{prefix}_{date.today().isoformat()}.csv", mime="text/csv", use_container_width=True)
 
 
 def render_modo_supervisor(usuario: str = "Sistema") -> None:
     st.title("🧑‍💼 Modo Supervisor")
-    st.caption("Vista ejecutiva diaria: ventas, caja, producción, alertas, pedidos y auditoría reciente.")
+    st.caption("Vista diaria basada en Órdenes de Trabajo, caja, pendientes y auditoría reciente.")
 
     today = date.today().isoformat()
     ventas_total, ventas_count = _today_sales(today)
     caja = _cash_today(today)
     neto_caja = caja["efectivo"] + caja["transferencia"] + caja["zelle"] + caja["binance"] - caja["egresos"]
 
+    ot_abiertas = _safe_count("ordenes_trabajo", "estado NOT IN ('Entregado','Cancelado')", {"estado"})
+    ot_saldo = _safe_count("ordenes_trabajo", "saldo_pendiente_usd > 0", {"saldo_pendiente_usd"})
+    ot_diseno = _safe_count("ordenes_trabajo", "bloqueo_produccion=1", {"bloqueo_produccion"})
+    ot_sin_bom = _safe_count("ordenes_trabajo", "COALESCE(bom_id,0)=0 AND tipo_trabajo NOT IN ('Bazar','Copias')", {"bom_id", "tipo_trabajo"})
     disenos_bloqueados = _safe_count("disenos_aprobaciones", "bloqueo_produccion=1", {"bloqueo_produccion"})
     despachos_abiertos = _safe_count("despachos_entregas", "estado NOT IN ('Entregado', 'Devuelto')", {"estado"})
-    cola_pendiente = _safe_count("cola_impresion", "estado NOT IN ('Completado', 'Cancelado', 'Entregado')", {"estado"})
     caja_diferencias = _safe_count("cierres_caja_turnos", "estado='Con diferencia'", {"estado"})
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Ventas hoy", f"${ventas_total:,.2f}", delta=f"{ventas_count} registro(s)")
     m2.metric("Caja neta hoy", f"${neto_caja:,.2f}")
-    m3.metric("Producción pendiente", cola_pendiente + disenos_bloqueados, delta=f"Diseños bloqueados: {disenos_bloqueados}")
-    m4.metric("Despachos abiertos", despachos_abiertos, delta=f"Cierres con diferencia: {caja_diferencias}")
+    m3.metric("OT abiertas", ot_abiertas, delta=f"Saldo pendiente: {ot_saldo}")
+    m4.metric("Bloqueos", ot_diseno + disenos_bloqueados + caja_diferencias, delta=f"Sin BOM: {ot_sin_bom}")
 
-    if disenos_bloqueados or caja_diferencias:
-        st.error("Hay bloqueos críticos: revisa diseños sin aprobación o cierres con diferencia.")
-    elif cola_pendiente or despachos_abiertos:
-        st.warning("Hay pendientes operativos por atender hoy.")
+    if ot_saldo or ot_diseno or disenos_bloqueados or caja_diferencias:
+        st.error("Hay bloqueos críticos: saldo pendiente, diseño sin aprobar, diferencia de caja o producción bloqueada.")
+    elif despachos_abiertos:
+        st.warning("Hay despachos abiertos pendientes de seguimiento.")
     else:
         st.success("Operación sin bloqueos críticos detectados.")
 
-    tab_pedidos, tab_caja, tab_pendientes, tab_auditoria = st.tabs([
-        "Estado global de pedidos",
-        "Caja del día",
-        "Pendientes por área",
-        "Auditoría reciente",
-    ])
+    tab_pedidos, tab_caja, tab_pendientes, tab_auditoria = st.tabs(["Estado global OT", "Caja del día", "Pendientes por área", "Auditoría reciente"])
 
     with tab_pedidos:
         pedidos = _global_order_status()
         if pedidos.empty:
-            st.info("No hay pedidos/ventas recientes para construir estado global.")
+            st.info("No hay órdenes/tickets recientes para construir estado global.")
         else:
             etapa_filter = st.selectbox("Filtrar etapa", ["Todas"] + sorted(pedidos["etapa"].dropna().astype(str).unique().tolist()))
             vista = pedidos if etapa_filter == "Todas" else pedidos[pedidos["etapa"].astype(str).eq(etapa_filter)]
             st.dataframe(vista, use_container_width=True, hide_index=True)
-            _download_csv("⬇️ Descargar estado global CSV", vista, "estado_global_pedidos")
+            _download_csv("⬇️ Descargar estado global CSV", vista, "estado_global_ot")
 
     with tab_caja:
         caja_df = pd.DataFrame([
@@ -271,12 +221,12 @@ def render_modo_supervisor(usuario: str = "Sistema") -> None:
     with tab_pendientes:
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("#### Diseños bloqueados")
-            df = _safe_df("disenos_aprobaciones", ["id", "fecha_creacion", "cliente", "nombre_diseno", "estado", "bloqueo_produccion"], "bloqueo_produccion=1", {"bloqueo_produccion"}, 100)
-            st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("Sin diseños bloqueados.")
-            st.markdown("#### Cola impresión")
-            df = _safe_df("cola_impresion", ["id", "fecha_creacion", "cliente", "archivo_nombre", "estado"], "estado NOT IN ('Completado', 'Cancelado', 'Entregado')", {"estado"}, 100)
-            st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("Sin cola pendiente.")
+            st.markdown("#### OT con saldo pendiente")
+            df = _safe_df("ordenes_trabajo", ["id", "codigo", "cliente", "estado", "estado_pago", "saldo_pendiente_usd"], "saldo_pendiente_usd > 0", {"saldo_pendiente_usd"}, 100)
+            st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("Sin OT con saldo pendiente.")
+            st.markdown("#### OT bloqueadas por diseño")
+            df = _safe_df("ordenes_trabajo", ["id", "codigo", "cliente", "estado", "bloqueo_produccion"], "bloqueo_produccion=1", {"bloqueo_produccion"}, 100)
+            st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.success("Sin OT bloqueadas por diseño.")
         with col2:
             st.markdown("#### Despachos abiertos")
             df = _safe_df("despachos_entregas", ["id", "fecha_creacion", "cliente", "tipo_entrega", "estado", "numero_guia"], "estado NOT IN ('Entregado', 'Devuelto')", {"estado"}, 100)
@@ -292,5 +242,3 @@ def render_modo_supervisor(usuario: str = "Sistema") -> None:
         else:
             st.dataframe(audit, use_container_width=True, hide_index=True)
             _download_csv("⬇️ Descargar auditoría reciente CSV", audit, "auditoria_supervisor")
-
-    log_audit_event(usuario=usuario, modulo="Supervisor", accion="ver_modo_supervisor", entidad="dashboard", detalle="Modo Supervisor consultado")
