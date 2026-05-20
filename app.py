@@ -194,21 +194,151 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
         render_area_empresarial("Almacén", usuario, show_title=False)
 
 
+def _render_alertas_produccion(usuario: str) -> None:
+    import pandas as pd
+    from database.connection import db_transaction
+
+    st.subheader("🚨 Alertas de producción")
+    st.caption("Detecta diseños bloqueados, OT pendientes, despachos abiertos, incidencias y trabajos sin cierre.")
+
+    def _table_exists(conn, table_name: str) -> bool:
+        return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
+
+    def _read_table(table_name: str) -> pd.DataFrame:
+        try:
+            with db_transaction() as conn:
+                if not _table_exists(conn, table_name):
+                    return pd.DataFrame()
+                return pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT 1000", conn)
+        except Exception:
+            return pd.DataFrame()
+
+    disenos = _read_table("disenos_aprobaciones")
+    despachos = _read_table("despachos_entregas")
+    ordenes = _read_table("ordenes_trabajo")
+
+    disenos_bloqueados = disenos[disenos.get("bloqueo_produccion", pd.Series(dtype=int)).eq(1)] if not disenos.empty else pd.DataFrame()
+    disenos_modificar = disenos[disenos.get("estado", pd.Series(dtype=str)).fillna("").eq("Modificar")] if not disenos.empty else pd.DataFrame()
+
+    ot_abiertas = pd.DataFrame()
+    ot_sin_responsable = pd.DataFrame()
+    ot_sin_ruta = pd.DataFrame()
+    if not ordenes.empty:
+        estado_ot = ordenes.get("estado", pd.Series(dtype=str)).fillna("").astype(str)
+        ot_abiertas = ordenes[~estado_ot.isin(["Finalizada", "Cerrada", "Cancelada", "Entregada"])]
+        if "responsable" in ordenes.columns:
+            ot_sin_responsable = ordenes[ordenes["responsable"].fillna("").astype(str).str.strip().eq("")]
+        if "ruta_id" in ordenes.columns:
+            ot_sin_ruta = ordenes[pd.to_numeric(ordenes["ruta_id"], errors="coerce").fillna(0).le(0)]
+
+    despachos_abiertos = pd.DataFrame()
+    despachos_incidencia = pd.DataFrame()
+    if not despachos.empty:
+        estado_desp = despachos.get("estado", pd.Series(dtype=str)).fillna("").astype(str)
+        despachos_abiertos = despachos[~estado_desp.isin(["Entregado", "Devuelto"])]
+        despachos_incidencia = despachos[estado_desp.eq("Incidencia")]
+
+    alertas = []
+    for nivel, nombre, df, accion in [
+        ("Alta", "Diseños bloqueando producción", disenos_bloqueados, "Aprobar diseño o solicitar modificación antes de producir."),
+        ("Media", "Diseños en modificación", disenos_modificar, "Corregir archivo y reenviar a cliente."),
+        ("Media", "OT abiertas", ot_abiertas, "Revisar avance, responsable y fecha compromiso."),
+        ("Media", "OT sin responsable", ot_sin_responsable, "Asignar responsable de producción."),
+        ("Media", "OT sin ruta/BOM", ot_sin_ruta, "Asignar ruta productiva o ficha técnica."),
+        ("Media", "Despachos abiertos", despachos_abiertos, "Completar entrega o actualizar estado."),
+        ("Alta", "Despachos con incidencia", despachos_incidencia, "Resolver incidencia con cliente, agencia o motorizado."),
+    ]:
+        if not df.empty:
+            alertas.append({"nivel": nivel, "alerta": nombre, "cantidad": len(df), "acción": accion})
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Diseños bloqueados", len(disenos_bloqueados))
+    c2.metric("OT abiertas", len(ot_abiertas))
+    c3.metric("Despachos abiertos", len(despachos_abiertos))
+    c4.metric("Incidencias", len(despachos_incidencia))
+
+    if alertas:
+        st.dataframe(pd.DataFrame(alertas), use_container_width=True, hide_index=True)
+    else:
+        st.success("Sin alertas críticas de producción con la información disponible.")
+
+    tabs = st.tabs([
+        "Diseños bloqueados",
+        "OT abiertas",
+        "OT sin responsable/ruta",
+        "Despachos abiertos",
+        "Incidencias",
+    ])
+    with tabs[0]:
+        st.dataframe(disenos_bloqueados, use_container_width=True, hide_index=True) if not disenos_bloqueados.empty else st.success("Sin diseños bloqueados.")
+    with tabs[1]:
+        st.dataframe(ot_abiertas, use_container_width=True, hide_index=True) if not ot_abiertas.empty else st.success("Sin OT abiertas detectadas.")
+    with tabs[2]:
+        if not ot_sin_responsable.empty:
+            st.markdown("#### Sin responsable")
+            st.dataframe(ot_sin_responsable, use_container_width=True, hide_index=True)
+        if not ot_sin_ruta.empty:
+            st.markdown("#### Sin ruta/BOM")
+            st.dataframe(ot_sin_ruta, use_container_width=True, hide_index=True)
+        if ot_sin_responsable.empty and ot_sin_ruta.empty:
+            st.success("Sin OT pendientes de responsable/ruta.")
+    with tabs[3]:
+        st.dataframe(despachos_abiertos, use_container_width=True, hide_index=True) if not despachos_abiertos.empty else st.success("Sin despachos abiertos.")
+    with tabs[4]:
+        st.dataframe(despachos_incidencia, use_container_width=True, hide_index=True) if not despachos_incidencia.empty else st.success("Sin incidencias de despacho.")
+
+
 def render_produccion_unificada(usuario: str) -> None:
-    tab_plan, tab_disenos, tab_area, tab_despacho = st.tabs([
-        "Planificación producción",
+    st.title("🏭 Producción")
+    st.caption("Hub productivo: OT, planificación, diseños, rutas, corte, sublimación, producción manual, calidad, mermas, despacho y archivos.")
+
+    (
+        tab_plan,
+        tab_disenos,
+        tab_rutas,
+        tab_corte,
+        tab_sublimacion,
+        tab_manual,
+        tab_calidad,
+        tab_mermas,
+        tab_despacho,
+        tab_area,
+        tab_alertas,
+    ) = st.tabs([
+        "🧾 OT / Planificación",
         "📁 Diseños y aprobaciones",
-        "Archivos de producción",
+        "🧭 Rutas / BOM",
+        "✂️ Corte",
+        "🔥 Sublimación",
+        "🎨 Producción manual",
+        "✅ Calidad",
+        "♻️ Mermas / Reprocesos",
         "🚚 Despacho / Entregas",
+        "📁 Archivos de producción",
+        "🚨 Alertas producción",
     ])
     with tab_plan:
         render_planificacion_produccion(usuario)
     with tab_disenos:
         render_disenos_aprobaciones(usuario)
-    with tab_area:
-        render_area_empresarial("Producción", usuario, show_title=False)
+    with tab_rutas:
+        render_rutas_produccion(usuario)
+    with tab_corte:
+        render_corte(usuario)
+    with tab_sublimacion:
+        render_sublimacion(usuario)
+    with tab_manual:
+        render_produccion_manual(usuario)
+    with tab_calidad:
+        render_control_calidad(usuario)
+    with tab_mermas:
+        render_mermas_desperdicio(usuario)
     with tab_despacho:
         render_despacho_entregas(usuario)
+    with tab_area:
+        render_area_empresarial("Producción", usuario, show_title=False)
+    with tab_alertas:
+        _render_alertas_produccion(usuario)
 
 
 def render_costeo_margenes_unificado(usuario: str) -> None:
@@ -329,13 +459,7 @@ MENU_ROUTES = {
     "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
 
     # PRODUCCION
-    "🏭 Producción": (("produccion.plan", "produccion.execute"), lambda: render_produccion_unificada(usuario)),
-    "✂️ Corte Industrial": (("produccion.execute", "produccion.plan"), lambda: render_corte(usuario)),
-    "🔥 Sublimación": ("produccion.execute", lambda: render_sublimacion(usuario)),
-    "🎨 Producción Manual": ("produccion.execute", lambda: render_produccion_manual(usuario)),
-    "🧭 Rutas de producción": (("produccion.route", "produccion.execute"), lambda: render_rutas_produccion(usuario)),
-    "✅ Control de calidad": ("produccion.quality", lambda: render_control_calidad(usuario)),
-    "♻️ Mermas y desperdicio": ("produccion.scrap", lambda: render_mermas_desperdicio(usuario)),
+    "🏭 Producción": (("produccion.plan", "produccion.execute", "produccion.route", "produccion.quality", "produccion.scrap"), lambda: render_produccion_unificada(usuario)),
 
     # FINANZAS
     "💼 Finanzas": (("tesoreria.view", "dashboard.view"), lambda: render_area_combinada("Finanzas", render_planeacion_financiera, usuario)),
