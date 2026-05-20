@@ -3,8 +3,6 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from views.stock_minimo import render_stock_minimo
-
 BASE_DIR = Path(__file__).resolve().parents[1]
 ALMACEN_DIR = BASE_DIR / "almacen"
 
@@ -78,7 +76,7 @@ def render_almacen_avanzado(usuario: str = "Sistema") -> None:
     _ensure_archivos()
 
     st.title("🏬 Almacén físico / Históricos CSV")
-    st.caption("Conserva ubicaciones, conteos, reservas, mermas, entradas, salidas y plantillas CSV. Stock mínimo real vive en SQLite.")
+    st.caption("Conserva ubicaciones, conteos, reservas, mermas, entradas, salidas y plantillas CSV. Stock mínimo real vive en la pestaña principal 📉 Stock mínimo / Reposición.")
 
     stock_df = _read_csv("stock_minimo_maximo.csv")
     reservas_df = _read_csv("material_reservado_pedidos.csv")
@@ -103,10 +101,9 @@ def render_almacen_avanzado(usuario: str = "Sistema") -> None:
     col6.metric("Merma CSV", round(_metric_sum(mermas_df, "cantidad_perdida"), 2))
     col7.metric("Costo merma CSV", f"${_metric_sum(mermas_df, 'costo_estimado'):,.2f}")
 
-    st.info("Se salvaron los archivos CSV valiosos como históricos/plantillas. Para alertas operativas usa la pestaña Stock mínimo / Reposición.")
+    st.info("Se salvaron los archivos CSV valiosos como históricos/plantillas. Para alertas operativas usa la pestaña principal 📉 Stock mínimo / Reposición.")
 
     tabs = st.tabs([
-        "📉 Stock mínimo / Reposición",
         "Ubicaciones CSV",
         "Reservas CSV",
         "Conteo físico CSV",
@@ -115,16 +112,15 @@ def render_almacen_avanzado(usuario: str = "Sistema") -> None:
         "Salidas CSV",
         "Mermas CSV",
         "Herramientas CSV",
+        "Stock mínimo legado CSV",
         "Plantillas guardadas",
     ])
 
     with tabs[0]:
-        render_stock_minimo(usuario)
-    with tabs[1]:
         _render_df("Ubicaciones físicas", "ubicaciones_almacen.csv")
-    with tabs[2]:
+    with tabs[1]:
         _render_df("Material reservado para pedidos", "material_reservado_pedidos.csv")
-    with tabs[3]:
+    with tabs[2]:
         conteo = _read_csv("inventario_fisico.csv")
         st.subheader("Inventario físico CSV")
         st.caption("Histórico/plantilla para conteos físicos. No reemplaza el inventario operativo.")
@@ -136,16 +132,18 @@ def render_almacen_avanzado(usuario: str = "Sistema") -> None:
                 df["diferencia_calculada"] = pd.to_numeric(df["conteo_fisico"], errors="coerce").fillna(0) - pd.to_numeric(df["existencia_sistema"], errors="coerce").fillna(0)
             st.dataframe(df, use_container_width=True, hide_index=True)
             st.download_button("⬇️ Descargar inventario_fisico.csv", data=df.to_csv(index=False).encode("utf-8-sig"), file_name="inventario_fisico.csv", mime="text/csv", use_container_width=True)
-    with tabs[4]:
+    with tabs[3]:
         _render_df("Kardex histórico de materiales", "kardex_materiales.csv")
-    with tabs[5]:
+    with tabs[4]:
         _render_df("Entradas históricas de almacén", "entradas_almacen.csv")
-    with tabs[6]:
+    with tabs[5]:
         _render_df("Salidas históricas de almacén", "salidas_almacen.csv")
-    with tabs[7]:
+    with tabs[6]:
         _render_df("Mermas históricas de almacén", "mermas_almacen.csv")
-    with tabs[8]:
+    with tabs[7]:
         _render_df("Herramientas y equipo menor", "herramientas_equipo_menor.csv")
+    with tabs[8]:
+        _render_df("Stock mínimo/máximo legado CSV", "stock_minimo_maximo.csv")
     with tabs[9]:
         resumen = pd.DataFrame([
             {"nombre": nombre, "archivo": archivo, "ruta": f"almacen/{archivo}"}
