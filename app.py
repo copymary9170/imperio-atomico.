@@ -122,7 +122,6 @@ from views.erp_nuevos_modulos import (
     render_control_calidad,
     render_impuestos,
     render_conciliacion_bancaria,
-    render_marketing_ventas,
     render_rrhh,
     render_seguridad_roles,
 )
@@ -232,14 +231,8 @@ def render_costeo_margenes_unificado(usuario: str) -> None:
 
 def render_marketing_unificado(usuario: str) -> None:
     st.title("📣 Marketing")
-    tab_campanas, tab_publicaciones = st.tabs([
-        "Campañas / Ventas",
-        "Publicaciones y calendario",
-    ])
-    with tab_campanas:
-        render_area_combinada("Marketing", render_marketing_ventas, usuario)
-    with tab_publicaciones:
-        render_publicaciones_marketing(usuario)
+    st.caption("Campañas, calendario de publicaciones, segmentos CRM, ROI y alertas. Sin blueprint: solo operación funcional.")
+    render_publicaciones_marketing(usuario)
 
 
 def render_activos_unificado(usuario: str) -> None:
