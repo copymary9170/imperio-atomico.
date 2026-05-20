@@ -1,46 +1,15 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import Any
-
 import streamlit as st
 
 from security.permissions import has_permission, require_permission
 
 
-@contextmanager
-def _clean_inventory_inner_navigation():
-    """Oculta textos heredados del módulo interno cuando vive dentro del hub de Inventario / Almacén."""
-    original_title = st.title
-    original_selectbox = st.selectbox
-
-    def patched_title(body: Any, *args: Any, **kwargs: Any):
-        if str(body).strip() == "📦 Centro de Control de Inventario":
-            return st.caption("Inventario operativo: productos, existencias, compras, movimientos y reportes.")
-        return original_title(body, *args, **kwargs)
-
-    def patched_selectbox(label: str, options, *args: Any, **kwargs: Any):
-        if str(label).strip() == "Navegación del módulo de inventario":
-            label = "Sección de inventario operativo"
-        return original_selectbox(label, options, *args, **kwargs)
-
-    st.title = patched_title
-    st.selectbox = patched_selectbox
-    try:
-        yield
-    finally:
-        st.title = original_title
-        st.selectbox = original_selectbox
-
-
-def _render_inventario_original(usuario: str) -> None:
+def _get_rates() -> tuple[float, float]:
     try:
         from modules.configuracion import DEFAULT_CONFIG, get_current_config
-        from modules.inventario import render_inventario as inventario_module
-    except Exception as exc:
-        st.error("No se pudo cargar el módulo de Inventario.")
-        st.exception(exc)
-        return
+    except Exception:
+        return 36.5, 38.0
 
     tasa_bcv_default = float(DEFAULT_CONFIG.get("tasa_bcv", 36.5))
     tasa_binance_default = float(DEFAULT_CONFIG.get("tasa_binance", 38.0))
@@ -60,12 +29,36 @@ def _render_inventario_original(usuario: str) -> None:
     except Exception:
         tasa_binance = tasa_binance_default
 
-    with _clean_inventory_inner_navigation():
-        inventario_module(usuario, tasa_bcv=tasa_bcv, tasa_binance=tasa_binance)
+    return tasa_bcv, tasa_binance
+
+
+def _load_inventory_module():
+    try:
+        from modules import inventario as inv_module
+        inv_module._ensure_inventory_support_tables()
+        inv_module._ensure_config_defaults()
+        return inv_module
+    except Exception as exc:
+        st.error("No se pudo cargar el módulo interno de Inventario.")
+        st.exception(exc)
+        return None
+
+
+def _render_safe(section_name: str, callback, *args, **kwargs) -> None:
+    try:
+        callback(*args, **kwargs)
+    except Exception as exc:
+        st.error(f"No se pudo cargar la sección {section_name}.")
+        st.exception(exc)
 
 
 def render_inventario(usuario: str) -> None:
-    """Inventario operativo puro, sin pestañas anidadas duplicadas."""
+    """Inventario operativo rescatado y organizado sin selector duplicado.
+
+    Aquí solo quedan las secciones propias del inventario. Compras, proveedores,
+    catálogo, kardex y documentos viven como pestañas principales del hub
+    📦 Inventario / Almacén.
+    """
     if not require_permission("inventario.view", "🚫 No tienes acceso al módulo Inventario."):
         return
 
@@ -84,4 +77,40 @@ def render_inventario(usuario: str) -> None:
     if st.session_state.get("inventario_readonly", False):
         st.info("Modo solo lectura: puedes consultar inventario, pero no crear, editar, mover ni ajustar.")
 
-    _render_inventario_original(usuario)
+    inv_module = _load_inventory_module()
+    if inv_module is None:
+        return
+
+    st.caption("Inventario operativo: existencias, productos, variantes, movimientos, reposición básica, ajustes y reportes.")
+    df = inv_module._load_inventory_df()
+
+    tabs = st.tabs([
+        "Resumen",
+        "Existencias",
+        "Productos",
+        "Variantes",
+        "Movimientos",
+        "Reposición básica",
+        "Ajustes",
+        "Reportes",
+        "Integración",
+    ])
+
+    with tabs[0]:
+        _render_safe("Resumen", inv_module._render_inventario_dashboard, df)
+    with tabs[1]:
+        _render_safe("Existencias", inv_module._render_existencias, df)
+    with tabs[2]:
+        _render_safe("Productos", inv_module._render_productos, usuario)
+    with tabs[3]:
+        _render_safe("Variantes", inv_module._render_variantes)
+    with tabs[4]:
+        _render_safe("Movimientos", inv_module._render_movimientos)
+    with tabs[5]:
+        _render_safe("Reposición básica", inv_module._render_reposicion, df)
+    with tabs[6]:
+        _render_safe("Ajustes", inv_module._render_ajustes, usuario)
+    with tabs[7]:
+        _render_safe("Reportes", inv_module._render_reportes, df)
+    with tabs[8]:
+        _render_safe("Integración", inv_module._render_integridad_e_integraciones)
