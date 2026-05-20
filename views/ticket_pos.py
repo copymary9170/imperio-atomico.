@@ -132,24 +132,24 @@ def render_ticket_pos(usuario: str = "Sistema") -> None:
     with tab_nuevo:
         base_items = pd.DataFrame([{ "descripcion": "Impresión / producto", "cantidad": 1.0, "precio_unitario_usd": 0.0 }])
         a, b, c = st.columns(3)
-        tipo = a.selectbox("Tipo", TIPOS, disabled=not puede_emitir)
-        cliente = b.text_input("Cliente", value="Cliente General", disabled=not puede_emitir)
-        telefono = c.text_input("Teléfono", disabled=not puede_emitir)
+        tipo = a.selectbox("Tipo", TIPOS, disabled=not puede_emitir, key="ticket_pos_tipo")
+        cliente = b.text_input("Cliente", value="Cliente General", disabled=not puede_emitir, key="ticket_pos_cliente")
+        telefono = c.text_input("Teléfono", disabled=not puede_emitir, key="ticket_pos_telefono")
         d, e, f = st.columns(3)
-        venta_id = d.number_input("Venta ID opcional", min_value=0, value=0, step=1, disabled=not puede_emitir)
-        referencia = e.text_input("Referencia", disabled=not puede_emitir)
-        metodo = f.selectbox("Método pago", METODOS, disabled=not puede_emitir)
+        venta_id = d.number_input("Venta ID opcional", min_value=0, value=0, step=1, disabled=not puede_emitir, key="ticket_pos_venta_id")
+        referencia = e.text_input("Referencia", disabled=not puede_emitir, key="ticket_pos_referencia")
+        metodo = f.selectbox("Método pago", METODOS, disabled=not puede_emitir, key="ticket_pos_metodo")
         st.markdown("#### Items")
-        items_df = st.data_editor(base_items, num_rows="dynamic", use_container_width=True, disabled=not puede_emitir, column_config={"descripcion": st.column_config.TextColumn("Descripción"), "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=1.0), "precio_unitario_usd": st.column_config.NumberColumn("Precio unitario USD", min_value=0.0, step=0.01, format="$%.2f")})
+        items_df = st.data_editor(base_items, num_rows="dynamic", use_container_width=True, disabled=not puede_emitir, key="ticket_pos_items_editor", column_config={"descripcion": st.column_config.TextColumn("Descripción"), "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=1.0), "precio_unitario_usd": st.column_config.NumberColumn("Precio unitario USD", min_value=0.0, step=0.01, format="$%.2f")})
         items = _safe_items_from_editor(items_df)
         subtotal = sum(item["total_usd"] for item in items)
         g, h, i = st.columns(3)
-        descuento = g.number_input("Descuento USD", min_value=0.0, value=0.0, step=0.01, disabled=not puede_emitir)
-        impuesto = h.number_input("Impuesto USD", min_value=0.0, value=0.0, step=0.01, disabled=not puede_emitir)
+        descuento = g.number_input("Descuento USD", min_value=0.0, value=0.0, step=0.01, disabled=not puede_emitir, key="ticket_pos_descuento")
+        impuesto = h.number_input("Impuesto USD", min_value=0.0, value=0.0, step=0.01, disabled=not puede_emitir, key="ticket_pos_impuesto")
         total = max(subtotal - descuento + impuesto, 0.0)
-        recibido = i.number_input("Monto recibido USD", min_value=0.0, value=float(total), step=0.01, disabled=not puede_emitir)
+        recibido = i.number_input("Monto recibido USD", min_value=0.0, value=float(total), step=0.01, disabled=not puede_emitir, key="ticket_pos_recibido")
         vuelto = max(recibido - total, 0.0)
-        notas = st.text_area("Notas", disabled=not puede_emitir)
+        notas = st.text_area("Notas", disabled=not puede_emitir, key="ticket_pos_notas")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Subtotal", f"${subtotal:,.2f}")
         m2.metric("Total", f"${total:,.2f}")
@@ -159,7 +159,7 @@ def render_ticket_pos(usuario: str = "Sistema") -> None:
         st.markdown("#### Vista previa")
         st.code(cuerpo, language="text")
         col_a, col_b = st.columns(2)
-        if col_a.button("Guardar comprobante", type="primary", disabled=not puede_emitir):
+        if col_a.button("Guardar comprobante", type="primary", disabled=not puede_emitir, key="ticket_pos_guardar"):
             if not items:
                 st.error("Agrega al menos un item con cantidad válida.")
             elif recibido < total and metodo in {"efectivo", "mixto"}:
@@ -178,7 +178,7 @@ def render_ticket_pos(usuario: str = "Sistema") -> None:
             st.info("No hay comprobantes emitidos.")
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
-            elegido = st.selectbox("Ver comprobante", df["id"].astype(int).tolist(), format_func=lambda x: f"#{x:06d}")
+            elegido = st.selectbox("Ver comprobante", df["id"].astype(int).tolist(), format_func=lambda x: f"#{x:06d}", key="ticket_pos_ver_comprobante")
             cuerpo_hist = df.loc[df["id"].eq(elegido), "cuerpo"].iloc[0]
             st.code(cuerpo_hist, language="text")
 
