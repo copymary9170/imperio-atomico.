@@ -7,15 +7,15 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 ACTIVOS_DIR = BASE_DIR / "activos"
 
 ARCHIVOS_ACTIVOS = {
-    "Documentos": "documentos_activos.csv",
-    "Garantías": "garantias_activos.csv",
-    "Asignaciones": "asignaciones_activos.csv",
-    "Ubicaciones": "ubicaciones_activos.csv",
-    "Bajas": "bajas_activos.csv",
-    "Depreciación": "depreciacion_activos.csv",
-    "Seguros": "seguros_activos.csv",
-    "Plan preventivo": "plan_mantenimiento_preventivo.csv",
-    "Costos mantenimiento": "costos_mantenimiento_activos.csv",
+    "Documentos CSV": "documentos_activos.csv",
+    "Garantías CSV": "garantias_activos.csv",
+    "Asignaciones CSV": "asignaciones_activos.csv",
+    "Ubicaciones CSV": "ubicaciones_activos.csv",
+    "Bajas CSV": "bajas_activos.csv",
+    "Depreciación CSV": "depreciacion_activos.csv",
+    "Seguros CSV": "seguros_activos.csv",
+    "Plan preventivo CSV": "plan_mantenimiento_preventivo.csv",
+    "Costos mantenimiento CSV": "costos_mantenimiento_activos.csv",
 }
 
 PLANTILLAS = {
@@ -58,18 +58,26 @@ def _sum_column(df: pd.DataFrame, column: str) -> float:
 def _render_table(title: str, filename: str) -> None:
     df = _read_csv(filename)
     st.subheader(title)
+    st.caption("Histórico/plantilla CSV. La operación principal de activos vive en Equipos / Operación y Mantenimiento operativo.")
     if df.empty:
         st.info("Sin registros todavía.")
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
+        st.download_button(
+            f"⬇️ Descargar {filename}",
+            data=df.to_csv(index=False).encode("utf-8-sig"),
+            file_name=filename,
+            mime="text/csv",
+            use_container_width=True,
+        )
     st.caption(f"Archivo: activos/{filename}")
 
 
 def render_activos_patrimonial(usuario: str = "Sistema") -> None:
     _ensure_archivos()
 
-    st.title("🏗️ Control patrimonial de activos")
-    st.caption("Documentos, garantías, responsables, ubicaciones, bajas, depreciación, seguros y costos acumulados.")
+    st.title("🧾 Patrimonio / Históricos CSV de activos")
+    st.caption("Documentos, garantías, responsables, ubicaciones, bajas, depreciación, seguros y costos conservados como archivos históricos/plantillas.")
 
     documentos = _read_csv("documentos_activos.csv")
     garantias = _read_csv("garantias_activos.csv")
@@ -81,52 +89,53 @@ def render_activos_patrimonial(usuario: str = "Sistema") -> None:
     costos = _read_csv("costos_mantenimiento_activos.csv")
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Documentos", len(documentos) if not documentos.empty else 0)
-    col2.metric("Garantías", len(garantias) if not garantias.empty else 0)
-    col3.metric("Asignaciones", len(asignaciones) if not asignaciones.empty else 0)
-    col4.metric("Ubicaciones", len(ubicaciones) if not ubicaciones.empty else 0)
+    col1.metric("Documentos CSV", len(documentos) if not documentos.empty else 0)
+    col2.metric("Garantías CSV", len(garantias) if not garantias.empty else 0)
+    col3.metric("Asignaciones CSV", len(asignaciones) if not asignaciones.empty else 0)
+    col4.metric("Ubicaciones CSV", len(ubicaciones) if not ubicaciones.empty else 0)
 
     col5, col6, col7, col8 = st.columns(4)
-    col5.metric("Bajas", len(bajas) if not bajas.empty else 0)
-    col6.metric("Valor en libros", f"${_sum_column(depreciacion, 'valor_en_libros'):,.2f}")
-    col7.metric("Monto asegurado", f"${_sum_column(seguros, 'monto_asegurado'):,.2f}")
-    col8.metric("Costo mantenimiento", f"${_sum_column(costos, 'total_mantenimiento'):,.2f}")
+    col5.metric("Bajas CSV", len(bajas) if not bajas.empty else 0)
+    col6.metric("Valor en libros CSV", f"${_sum_column(depreciacion, 'valor_en_libros'):,.2f}")
+    col7.metric("Monto asegurado CSV", f"${_sum_column(seguros, 'monto_asegurado'):,.2f}")
+    col8.metric("Costo mant. CSV", f"${_sum_column(costos, 'total_mantenimiento'):,.2f}")
 
-    st.divider()
+    st.info("Se salvaron estos archivos como históricos/plantillas. El mantenimiento operativo ahora está en la pestaña 🛠️ Mantenimiento operativo.")
 
     alertas = []
     if not garantias.empty and "estado" in garantias.columns:
         vencidas = garantias[garantias["estado"].fillna("").astype(str).str.lower().isin(["vencida", "vencido", "expirada", "expirado"])]
         if not vencidas.empty:
-            alertas.append(f"Garantías vencidas: {len(vencidas)}")
+            alertas.append(f"Garantías vencidas en CSV: {len(vencidas)}")
     if not documentos.empty and "estado" in documentos.columns:
         pendientes = documentos[documentos["estado"].fillna("").astype(str).str.lower().isin(["pendiente", "faltante", "por subir"])]
         if not pendientes.empty:
-            alertas.append(f"Documentos pendientes: {len(pendientes)}")
+            alertas.append(f"Documentos pendientes en CSV: {len(pendientes)}")
     if not asignaciones.empty and "estado" in asignaciones.columns:
         asignados = asignaciones[asignaciones["estado"].fillna("").astype(str).str.lower().eq("asignado")]
         if not asignados.empty:
-            alertas.append(f"Activos asignados: {len(asignados)}")
+            alertas.append(f"Activos asignados en CSV: {len(asignados)}")
     if not bajas.empty and "estado" in bajas.columns:
         borradores = bajas[bajas["estado"].fillna("").astype(str).str.lower().isin(["borrador", "pendiente", "por aprobar"])]
         if not borradores.empty:
-            alertas.append(f"Bajas pendientes: {len(borradores)}")
+            alertas.append(f"Bajas pendientes en CSV: {len(borradores)}")
 
     if alertas:
         st.warning(" · ".join(alertas))
     else:
-        st.success("Sin alertas patrimoniales críticas registradas.")
+        st.success("Sin alertas patrimoniales críticas registradas en CSV.")
 
     tabs = st.tabs([
-        "Documentos",
-        "Garantías",
-        "Asignaciones",
-        "Ubicaciones",
-        "Bajas",
-        "Depreciación",
-        "Seguros",
-        "Plan preventivo",
-        "Costos",
+        "Documentos CSV",
+        "Garantías CSV",
+        "Asignaciones CSV",
+        "Ubicaciones CSV",
+        "Bajas CSV",
+        "Depreciación CSV",
+        "Seguros CSV",
+        "Plan preventivo CSV",
+        "Costos mant. CSV",
+        "Plantillas guardadas",
     ])
 
     with tabs[0]:
@@ -144,6 +153,19 @@ def render_activos_patrimonial(usuario: str = "Sistema") -> None:
     with tabs[6]:
         _render_table("Seguros de activos", "seguros_activos.csv")
     with tabs[7]:
-        _render_table("Plan de mantenimiento preventivo", "plan_mantenimiento_preventivo.csv")
+        _render_table("Plan de mantenimiento preventivo legado", "plan_mantenimiento_preventivo.csv")
     with tabs[8]:
-        _render_table("Costos acumulados de mantenimiento", "costos_mantenimiento_activos.csv")
+        _render_table("Costos acumulados de mantenimiento legado", "costos_mantenimiento_activos.csv")
+    with tabs[9]:
+        resumen = pd.DataFrame([
+            {"nombre": nombre, "archivo": archivo, "ruta": f"activos/{archivo}"}
+            for nombre, archivo in ARCHIVOS_ACTIVOS.items()
+        ])
+        st.dataframe(resumen, use_container_width=True, hide_index=True)
+        st.download_button(
+            "⬇️ Descargar índice de plantillas de activos",
+            data=resumen.to_csv(index=False).encode("utf-8-sig"),
+            file_name="indice_plantillas_activos.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
