@@ -91,12 +91,13 @@ def _render_internal(section: str, callback_name: str, *args) -> None:
 
 def render_proveedores(usuario: str = "Sistema") -> None:
     st.subheader("👥 Proveedores")
-    st.caption("Ficha maestra, historial, relación proveedor-producto, documentos, evaluación y pagos relacionados.")
+    st.caption("Ficha maestra, relación proveedor-producto, documentos, evaluación y pagos relacionados.")
 
     proveedores = _read_table("proveedores", "id DESC", 1000)
     compras = _read_table("historial_compras", "id DESC", 1000)
     docs = _read_table("proveedor_documentos", "id DESC", 500)
     evaluaciones = _read_table("evaluaciones_proveedor", "id DESC", 500)
+    cxp = _read_table("cuentas_por_pagar_proveedores", "id DESC", 500)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Proveedores", len(proveedores))
@@ -112,7 +113,7 @@ def render_proveedores(usuario: str = "Sistema") -> None:
         "Historial de compras",
         "Documentos",
         "Evaluaciones",
-        "CxP",
+        "CxP resumen",
         "Pagos",
     ])
 
@@ -178,8 +179,7 @@ def render_proveedores(usuario: str = "Sistema") -> None:
             st.info("No hay historial de compras.")
         else:
             st.dataframe(compras, use_container_width=True, hide_index=True)
-        with st.expander("Historial avanzado"):
-            _render_internal("Historial avanzado de compras", "_render_historial_compras")
+        st.caption("La gestión avanzada del historial vive en 🛒 Compras → Historial compras para evitar formularios duplicados.")
 
     with tabs[5]:
         if docs.empty:
@@ -198,7 +198,11 @@ def render_proveedores(usuario: str = "Sistema") -> None:
             _render_internal("Evaluación de proveedores", "_render_evaluacion_proveedores", usuario)
 
     with tabs[7]:
-        _render_internal("Cuentas por pagar de proveedores", "_render_cuentas_por_pagar")
+        if cxp.empty:
+            st.info("No hay cuentas por pagar de proveedores.")
+        else:
+            st.dataframe(cxp, use_container_width=True, hide_index=True)
+        st.caption("La gestión avanzada de CxP vive en 🛒 Compras → CxP proveedores.")
 
     with tabs[8]:
         _render_internal("Pagos a proveedores", "_render_pagos_proveedores", usuario)
