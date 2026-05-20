@@ -69,6 +69,7 @@ from views.panel_ejecutivo import render_panel_ejecutivo
 from views.centro_alertas import render_centro_alertas
 from views.respaldo_datos import render_respaldo_datos
 from views.inventario import render_inventario
+from views.stock_minimo import render_stock_minimo
 from views.kardex import render_kardex
 from views.clientes import render_clientes
 from views.cmyk import render_cmyk
@@ -149,25 +150,48 @@ def render_dashboard_unificado(usuario: str) -> None:
 
 
 def render_inventario_almacen_unificado(usuario: str) -> None:
-    tab_inventario, tab_almacen, tab_compras, tab_proveedores, tab_unidades, tab_archivos = st.tabs([
-        "Inventario operativo",
-        "Almacén avanzado",
+    st.title("📦 Inventario / Almacén")
+    st.caption("Navegación unificada para inventario operativo, reposición, movimientos, compras, proveedores y archivos físicos.")
+
+    (
+        tab_inventario,
+        tab_stock,
+        tab_unidades,
+        tab_kardex,
+        tab_compras,
+        tab_proveedores,
+        tab_almacen_fisico,
+        tab_catalogo,
+        tab_documentos,
+    ) = st.tabs([
+        "📦 Inventario operativo",
+        "📉 Stock mínimo / Reposición",
+        "📏 Unidades fraccionadas",
+        "🧾 Kardex / Movimientos",
         "🛒 Compras",
         "👥 Proveedores",
-        "📏 Unidades fraccionadas",
-        "Archivos de almacén",
+        "🏬 Almacén físico / Históricos CSV",
+        "🛍️ Catálogo",
+        "📁 Documentos de almacén",
     ])
+
     with tab_inventario:
         render_inventario(usuario)
-    with tab_almacen:
-        render_almacen_avanzado(usuario)
+    with tab_stock:
+        render_stock_minimo(usuario)
+    with tab_unidades:
+        render_unidades_fraccionadas(usuario)
+    with tab_kardex:
+        render_kardex(usuario)
     with tab_compras:
         render_compras_suministro(usuario)
     with tab_proveedores:
         render_proveedores(usuario)
-    with tab_unidades:
-        render_unidades_fraccionadas(usuario)
-    with tab_archivos:
+    with tab_almacen_fisico:
+        render_almacen_avanzado(usuario)
+    with tab_catalogo:
+        render_catalogo(usuario)
+    with tab_documentos:
         render_area_empresarial("Almacén", usuario, show_title=False)
 
 
@@ -297,7 +321,6 @@ MENU_ROUTES = {
 
     # OPERACIONES
     "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
-    "📊 Kardex": ("inventario.view", lambda: render_kardex(usuario)),
     "🏗️ Activos": ("activos.view", lambda: render_activos_unificado(usuario)),
 
     # CLIENTES Y VENTAS
@@ -352,7 +375,6 @@ MENU_ROUTES = {
     "🎨 CMYK": ("produccion.view", lambda: render_cmyk(usuario)),
     "🧠 Diagnóstico IA": ("dashboard.view", lambda: render_diagnostico(usuario)),
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
-    "🛍️ Catálogo": ("inventario.view", lambda: render_catalogo(usuario)),
 
     # MODULOS ERP INDEPENDIENTES
     "🧩 Módulos rescatados": ("dashboard.view", lambda: render_modulos_rescatados(usuario)),
