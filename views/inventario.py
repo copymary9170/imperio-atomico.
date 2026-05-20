@@ -3,7 +3,6 @@ from __future__ import annotations
 import streamlit as st
 
 from security.permissions import has_permission, require_permission
-from views.stock_minimo import render_stock_minimo
 
 
 def _render_inventario_original(usuario: str) -> None:
@@ -37,7 +36,12 @@ def _render_inventario_original(usuario: str) -> None:
 
 
 def render_inventario(usuario: str) -> None:
-    """Render wrapper que carga Inventario de forma diferida y aplica permisos."""
+    """Inventario operativo puro, sin pestañas anidadas duplicadas.
+
+    El módulo 📦 Inventario / Almacén ya organiza las pestañas superiores desde app.py.
+    Stock mínimo se conserva dentro de Almacén físico / históricos para evitar que
+    aparezca Inventario operativo dos veces.
+    """
     if not require_permission("inventario.view", "🚫 No tienes acceso al módulo Inventario."):
         return
 
@@ -56,11 +60,4 @@ def render_inventario(usuario: str) -> None:
     if st.session_state.get("inventario_readonly", False):
         st.info("Modo solo lectura: puedes consultar inventario, pero no crear, editar, mover ni ajustar.")
 
-    tab_inv, tab_stock = st.tabs([
-        "Inventario operativo",
-        "📉 Stock mínimo / Reposición",
-    ])
-    with tab_inv:
-        _render_inventario_original(usuario)
-    with tab_stock:
-        render_stock_minimo(usuario)
+    _render_inventario_original(usuario)
