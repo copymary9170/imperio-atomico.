@@ -6,19 +6,25 @@ from views.contadores_clics import render_contadores_clics
 
 
 def render_cmyk(usuario):
-    st.title("🎨 CMYK")
+    st.title("🖨️ Impresiones / CMYK")
+    st.caption("Análisis funcional de PDF, Word DOCX, JPG/JPEG y PNG, con costo por página, tinta, papel, desgaste, inventario, control y contadores.")
 
-    tab_motor, tab_control, tab_contadores = st.tabs([
-        "Motor CMYK",
-        "📊 Control CMYK",
-        "🖨️ Contadores y clics",
-    ])
+    seccion = st.radio(
+        "Sección CMYK",
+        [
+            "📤 Analizar archivo",
+            "📊 Control CMYK",
+            "🖨️ Contadores y clics",
+        ],
+        horizontal=True,
+        key="cmyk_seccion_activa",
+    )
 
-    with tab_motor:
+    st.divider()
+
+    if seccion == "📤 Analizar archivo":
         render_cmyk_modulo(usuario)
-
-    with tab_control:
+    elif seccion == "📊 Control CMYK":
         render_cmyk_control(usuario)
-
-    with tab_contadores:
+    else:
         render_contadores_clics(usuario)
