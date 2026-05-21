@@ -41,6 +41,15 @@ PERFILES_DRIVER = {
     },
 }
 
+IMPRESORA_GENERICA = {
+    "id": None,
+    "nombre": "Impresora genérica CMYK",
+    "label": "Impresora genérica CMYK",
+    "modelo": "Genérica",
+    "unidad": "Impresión",
+    "categoria": "Impresora",
+}
+
 
 def _column_match(df: pd.DataFrame, candidates: list[str]) -> str | None:
     return next((c for c in candidates if c in df.columns), None)
@@ -165,11 +174,11 @@ def render_cmyk(usuario):
     df_inv, df_act, df_hist = _load_contexto_cmyk()
     opciones_imp = _impresoras_disponibles(df_act)
     if not opciones_imp:
-        st.warning("No hay impresoras registradas en Activos. Registra al menos una para continuar.")
-        return
+        st.info("No hay impresoras registradas en Activos. Se usará una impresora genérica para que puedas analizar archivos ahora mismo.")
+        opciones_imp = [IMPRESORA_GENERICA]
 
     c1, c2, c3 = st.columns(3)
-    impresora = c1.selectbox("Impresora (desde Activos)", opciones_imp, format_func=lambda x: x["label"], key="cmyk_impresora")
+    impresora = c1.selectbox("Impresora", opciones_imp, format_func=lambda x: x["label"], key="cmyk_impresora")
     marca_default = _detectar_marca(impresora)
     marca = c2.selectbox("Marca / Driver", ["HP", "Epson"], index=0 if marca_default == "HP" else 1, key="cmyk_marca")
     calidad = c3.selectbox("Calidad", list(PERFILES_CALIDAD.keys()), index=1, key="cmyk_calidad")
@@ -200,12 +209,14 @@ def render_cmyk(usuario):
 
     materiales = _materiales_papel_disponibles(df_inv)
     costo_material = 0.0
-    material_papel = "Sin material"
+    material_papel = "Sin material de inventario"
     if not materiales.empty:
         idx = st.selectbox("Material de papel (inventario)", range(len(materiales)), format_func=lambda i: materiales.iloc[i]["_material_label"], key="cmyk_material")
         material = materiales.iloc[idx]
         costo_material = float(material["_costo_hoja"])
         material_papel = str(material.get("nombre", material.get("item", "Papel")))
+    else:
+        st.info("No hay papel detectado en Inventario. El análisis seguirá con costo de papel $0. Puedes registrar papel luego para mejorar el costo.")
 
     st.subheader("📤 Analizar archivo")
     st.info("Formatos soportados: PDF, Word .docx, JPG/JPEG y PNG. Los .doc antiguos deben guardarse como .docx o PDF.")
@@ -255,7 +266,6 @@ def render_cmyk(usuario):
 
     total_paginas = int(analisis["total_paginas"])
     totales = analisis["totales"]
-    costos = analisis["costos"]
     costo_total = float(analisis["costo_total"])
     precio = analisis["precio"]
     detalle = analisis.get("detalle_paginas", pd.DataFrame())
