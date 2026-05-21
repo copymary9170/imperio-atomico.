@@ -9,22 +9,10 @@ def render_cmyk(usuario):
     st.title("🖨️ Impresiones / CMYK")
     st.caption("Análisis funcional de PDF, Word DOCX, JPG/JPEG y PNG, con costo por página, tinta, papel, desgaste, inventario, control y contadores.")
 
-    seccion = st.radio(
-        "Sección CMYK",
-        [
-            "📤 Analizar archivo",
-            "📊 Control CMYK",
-            "🖨️ Contadores y clics",
-        ],
-        horizontal=True,
-        key="cmyk_seccion_activa",
-    )
+    render_cmyk_modulo(usuario)
 
-    st.divider()
-
-    if seccion == "📤 Analizar archivo":
-        render_cmyk_modulo(usuario)
-    elif seccion == "📊 Control CMYK":
+    with st.expander("📊 Control CMYK", expanded=False):
         render_cmyk_control(usuario)
-    else:
+
+    with st.expander("🖨️ Contadores y clics", expanded=False):
         render_contadores_clics(usuario)
