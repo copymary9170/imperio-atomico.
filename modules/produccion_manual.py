@@ -2,31 +2,42 @@
 # PRODUCCIÓN MANUAL
 # ============================================================
 
-import streamlit as st
+import uuid
+
 import pandas as pd
+import streamlit as st
+
+
+def _instance_prefix() -> str:
+    """Prefijo único por instancia para evitar choques si Streamlit renderiza el módulo más de una vez."""
+    if "prod_manual_instance_prefix" not in st.session_state:
+        st.session_state["prod_manual_instance_prefix"] = f"prod_manual_{uuid.uuid4().hex[:8]}"
+    return st.session_state["prod_manual_instance_prefix"]
 
 
 def render_produccion_manual(usuario: str):
 
+    prefix = _instance_prefix()
+
     st.title("🎨 Producción Manual")
 
-    producto = st.text_input("Producto", key="prod_manual_producto")
+    producto = st.text_input("Producto", key=f"{prefix}_producto")
 
-    descripcion = st.text_area("Descripción del trabajo", key="prod_manual_descripcion")
+    descripcion = st.text_area("Descripción del trabajo", key=f"{prefix}_descripcion")
 
     cantidad = st.number_input(
         "Cantidad",
         min_value=1,
-        key="prod_manual_cantidad",
+        key=f"{prefix}_cantidad",
     )
 
     costo_unitario = st.number_input(
         "Costo unitario USD",
         min_value=0.0,
-        key="prod_manual_costo_unitario",
+        key=f"{prefix}_costo_unitario",
     )
 
-    if st.button("Registrar producción", key="prod_manual_registrar"):
+    if st.button("Registrar producción", key=f"{prefix}_registrar"):
 
         total = cantidad * costo_unitario
 
@@ -62,7 +73,7 @@ def render_produccion_manual(usuario: str):
 
     e1, e2, e3, e4 = st.columns(4)
 
-    if e1.button("📝 Enviar a Cotizaciones", use_container_width=True, key="prod_manual_enviar_cotizaciones"):
+    if e1.button("📝 Enviar a Cotizaciones", use_container_width=True, key=f"{prefix}_enviar_cotizaciones"):
         st.session_state["datos_pre_cotizacion"] = {
             "trabajo": datos_prod["producto"],
             "descripcion": datos_prod.get("descripcion") or datos_prod["producto"],
@@ -72,7 +83,7 @@ def render_produccion_manual(usuario: str):
         }
         st.success("Producción enviada a Cotizaciones.")
 
-    if e2.button("🔥 Enviar a Sublimación", use_container_width=True, key="prod_manual_enviar_sublimacion"):
+    if e2.button("🔥 Enviar a Sublimación", use_container_width=True, key=f"{prefix}_enviar_sublimacion"):
         cola = list(st.session_state.get("cola_sublimacion", []))
         cola.append(
             {
@@ -86,7 +97,7 @@ def render_produccion_manual(usuario: str):
         st.session_state["cola_sublimacion"] = cola
         st.success("Producción agregada a la cola de Sublimación.")
 
-    if e3.button("✂️ Enviar a Corte", use_container_width=True, key="prod_manual_enviar_corte"):
+    if e3.button("✂️ Enviar a Corte", use_container_width=True, key=f"{prefix}_enviar_corte"):
         st.session_state["datos_corte_desde_cmyk"] = {
             "trabajo": datos_prod["producto"],
             "cantidad": int(datos_prod["cantidad"]),
@@ -96,7 +107,7 @@ def render_produccion_manual(usuario: str):
         }
         st.success("Producción enviada al módulo de Corte.")
 
-    if e4.button("🛠️ Enviar a Otros Procesos", use_container_width=True, key="prod_manual_enviar_otros_procesos"):
+    if e4.button("🛠️ Enviar a Otros Procesos", use_container_width=True, key=f"{prefix}_enviar_otros_procesos"):
         st.session_state["datos_proceso_desde_cmyk"] = {
             "trabajo": datos_prod["producto"],
             "unidades": int(datos_prod["cantidad"]),
