@@ -9,6 +9,7 @@ from modules.cmyk.inventory_engine import descontar_inventario, filtrar_tintas, 
 from modules.cmyk.page_size import ajustar_consumo_por_tamano
 from modules.integration_hub import render_send_buttons
 
+
 def _config_base_imprenta(tamano_pagina: str):
     base_por_tamano = {
         "A5": {"costo_desgaste": 0.012, "ml_base": 0.09, "factor_general": 0.90},
@@ -145,71 +146,71 @@ def _impresoras_disponibles(df_act: pd.DataFrame) -> list[dict]:
 
 
 def _detectar_marca_impresora(impresora: dict) -> str:
-    texto = " ".join(
-        [
-            str(impresora.get("nombre", "")),
-            str(impresora.get("modelo", "")),
-            str(impresora.get("label", "")),
-        ]
-    ).lower()
+    texto = " ".join([str(impresora.get("nombre", "")), str(impresora.get("modelo", "")), str(impresora.get("label", ""))]).lower()
     if "epson" in texto:
         return "Epson"
     return "HP"
 
 
 def _sistema_tinta_recomendado(impresora: dict) -> str:
-    texto = " ".join(
-        [
-            str(impresora.get("nombre", "")),
-            str(impresora.get("modelo", "")),
-            str(impresora.get("unidad", "")),
-        ]
-    ).lower()
+    texto = " ".join([str(impresora.get("nombre", "")), str(impresora.get("modelo", "")), str(impresora.get("unidad", ""))]).lower()
     if any(k in texto for k in ["tank", "ecotank", "tanque", "l3", "l5", "l8"]):
         return "Tanque CMYK (4 tintas)"
     return "Cartucho (Color + Negro)"
 
 
-def _precio_sugerido(
-    costo_total: float,
-    paginas: int,
-    margen_utilidad: float,
-    comision_pasarela: float,
-    impuesto_venta: float,
-    redondeo: float,
-) -> dict:
+def _precio_sugerido(costo_total: float, paginas: int, margen_utilidad: float, comision_pasarela: float, impuesto_venta: float, redondeo: float) -> dict:
     if paginas <= 0:
-        return {
-            "base": 0.0,
-            "subtotal": 0.0,
-            "comision": 0.0,
-            "impuesto": 0.0,
-            "precio_final": 0.0,
-            "precio_unitario": 0.0,
-        }
-
+        return {"base": 0.0, "subtotal": 0.0, "comision": 0.0, "impuesto": 0.0, "precio_final": 0.0, "precio_unitario": 0.0}
     base = float(costo_total)
     subtotal = base * (1.0 + (margen_utilidad / 100.0))
     comision = subtotal * (comision_pasarela / 100.0)
     impuesto = (subtotal + comision) * (impuesto_venta / 100.0)
     precio = subtotal + comision + impuesto
-
     if redondeo > 0:
         precio = round(precio / redondeo) * redondeo
+    return {"base": base, "subtotal": subtotal, "comision": comision, "impuesto": impuesto, "precio_final": precio, "precio_unitario": precio / paginas}
 
-    return {
-        "base": base,
-        "subtotal": subtotal,
-        "comision": comision,
-        "impuesto": impuesto,
-        "precio_final": precio,
-        "precio_unitario": precio / paginas,
-    }
+
+def _enriquecer_resultados_por_pagina(resultados: list[dict], precio_tinta_ml: float, costo_material: float, costo_desgaste_pagina: float, desperdicio_factor: float, precio_unitario: float) -> pd.DataFrame:
+    df = pd.DataFrame(resultados)
+    if df.empty:
+        return df
+    for col in ["C (ml)", "M (ml)", "Y (ml)", "K (ml)", "K extra auto (ml)"]:
+        if col not in df.columns:
+            df[col] = 0.0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    df["Tinta total página (ml)"] = df[["C (ml)", "M (ml)", "Y (ml)", "K (ml)"]].sum(axis=1)
+    df["Costo tinta página"] = df["Tinta total página (ml)"] * float(precio_tinta_ml) * float(desperdicio_factor)
+    df["Costo papel página"] = float(costo_material)
+    df["Costo desgaste página"] = float(costo_desgaste_pagina)
+    df["Costo total página"] = df["Costo tinta página"] + df["Costo papel página"] + df["Costo desgaste página"]
+    df["Precio sugerido página"] = float(precio_unitario)
+    df["Utilidad estimada página"] = df["Precio sugerido página"] - df["Costo total página"]
+    orden = [
+        "archivo",
+        "Tipo diseño",
+        "Densidad total",
+        "Factor consumo auto",
+        "C (ml)",
+        "M (ml)",
+        "Y (ml)",
+        "K (ml)",
+        "K extra auto (ml)",
+        "Tinta total página (ml)",
+        "Costo tinta página",
+        "Costo papel página",
+        "Costo desgaste página",
+        "Costo total página",
+        "Precio sugerido página",
+        "Utilidad estimada página",
+    ]
+    return df[[c for c in orden if c in df.columns]]
 
 
 def render_cmyk(usuario):
-    st.title("🖨️ Motor CMYK")
-    st.caption("Analiza consumo de tinta y costo por lote usando inventario/activos.")
+    st.title("🖨️ Impresiones / Motor CMYK")
+    st.caption("Analiza PDF, PNG o JPG página por página: consumo CMYK, tinta, papel, desgaste, costo por página, precio sugerido e inventario.")
 
     df_inv, df_act, df_hist = _load_contexto_cmyk()
     opciones_imp = _impresoras_disponibles(df_act)
@@ -219,71 +220,62 @@ def render_cmyk(usuario):
         return
 
     c1, c2, c3 = st.columns(3)
-    impresora_op = c1.selectbox("Impresora (desde Activos)", opciones_imp, format_func=lambda x: x["label"])
+    impresora_op = c1.selectbox("Impresora (desde Activos)", opciones_imp, format_func=lambda x: x["label"], key="cmyk_impresora")
     marca_default = _detectar_marca_impresora(impresora_op)
-    marca = c2.selectbox("Marca / Driver", ["HP", "Epson"], index=0 if marca_default == "HP" else 1)
-    calidad = c3.selectbox("Calidad", list(PERFILES_CALIDAD.keys()), index=1)
+    marca = c2.selectbox("Marca / Driver", ["HP", "Epson"], index=0 if marca_default == "HP" else 1, key="cmyk_marca")
+    calidad = c3.selectbox("Calidad", list(PERFILES_CALIDAD.keys()), index=1, key="cmyk_calidad")
 
-    st.caption(
-        f"Activo seleccionado: ID #{impresora_op.get('id') or 'N/A'} | "
-        f"Categoría: {impresora_op.get('categoria') or 'N/D'} | "
-        f"Unidad: {impresora_op.get('unidad') or 'N/D'}"
-    )
+    st.caption(f"Activo seleccionado: ID #{impresora_op.get('id') or 'N/A'} | Categoría: {impresora_op.get('categoria') or 'N/D'} | Unidad: {impresora_op.get('unidad') or 'N/D'}")
 
     perfiles_driver = _obtener_perfiles_driver(marca)
     c4, c5, c6 = st.columns(3)
-    tipo_papel_driver = c4.selectbox("Perfil de papel (driver)", list(perfiles_driver.keys()))
-    tamano = c5.selectbox("Tamaño", ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide", "Personalizado"], index=1)
+    tipo_papel_driver = c4.selectbox("Perfil de papel (driver)", list(perfiles_driver.keys()), key="cmyk_papel_driver")
+    tamano = c5.selectbox("Tamaño", ["A5", "A4", "Carta", "Oficio", "A3", "Tabloide", "Personalizado"], index=1, key="cmyk_tamano")
     sistema_default = _sistema_tinta_recomendado(impresora_op)
-    sistema_tinta = c6.selectbox(
-        "Sistema de tinta",
-        ["Tanque CMYK (4 tintas)", "Cartucho (Color + Negro)"],
-        index=0 if sistema_default.startswith("Tanque") else 1,
-    )
+    sistema_tinta = c6.selectbox("Sistema de tinta", ["Tanque CMYK (4 tintas)", "Cartucho (Color + Negro)"], index=0 if sistema_default.startswith("Tanque") else 1, key="cmyk_sistema_tinta")
 
-    with st.expander("⚙️ Modo Pro CMYK", expanded=False):
+    with st.expander("⚙️ Modo Pro CMYK", expanded=True):
         p1, p2, p3 = st.columns(3)
-        refuerzo_negro = p1.slider("Refuerzo de negro (K)", min_value=0.0, max_value=0.40, value=0.12, step=0.01)
-        desperdicio_factor = p2.slider("Factor de desperdicio", min_value=1.0, max_value=1.4, value=1.0, step=0.01)
-        redondeo_precio = p3.number_input("Redondeo precio sugerido", min_value=0.0, value=0.05, step=0.05)
-
+        refuerzo_negro = p1.slider("Refuerzo de negro (K)", min_value=0.0, max_value=0.40, value=0.12, step=0.01, key="cmyk_refuerzo_k")
+        desperdicio_factor = p2.slider("Factor de desperdicio", min_value=1.0, max_value=1.4, value=1.0, step=0.01, key="cmyk_desperdicio")
+        redondeo_precio = p3.number_input("Redondeo precio sugerido", min_value=0.0, value=0.05, step=0.05, key="cmyk_redondeo")
         pr1, pr2, pr3 = st.columns(3)
-        margen_utilidad = pr1.slider("Margen de utilidad (%)", min_value=5, max_value=200, value=55, step=1)
-        comision_pasarela = pr2.slider("Comisión cobro (%)", min_value=0.0, max_value=12.0, value=0.0, step=0.1)
-        impuesto_venta = pr3.slider("Impuesto (%)", min_value=0.0, max_value=20.0, value=0.0, step=0.1)
+        margen_utilidad = pr1.slider("Margen de utilidad (%)", min_value=5, max_value=200, value=55, step=1, key="cmyk_margen")
+        comision_pasarela = pr2.slider("Comisión cobro (%)", min_value=0.0, max_value=12.0, value=0.0, step=0.1, key="cmyk_comision")
+        impuesto_venta = pr3.slider("Impuesto (%)", min_value=0.0, max_value=20.0, value=0.0, step=0.1, key="cmyk_impuesto")
 
     factor_area = 1.0
     if tamano == "Personalizado":
         a1, a2 = st.columns(2)
-        ancho = a1.number_input("Ancho (mm)", min_value=50.0, value=210.0, step=1.0)
-        alto = a2.number_input("Alto (mm)", min_value=50.0, value=297.0, step=1.0)
+        ancho = a1.number_input("Ancho (mm)", min_value=50.0, value=210.0, step=1.0, key="cmyk_ancho")
+        alto = a2.number_input("Alto (mm)", min_value=50.0, value=297.0, step=1.0, key="cmyk_alto")
         factor_area = _factor_area_personalizada(ancho, alto)
 
     materiales = _materiales_papel_disponibles(df_inv)
     costo_material = 0.0
     material_papel = "Sin material"
     if not materiales.empty:
-        idx = st.selectbox("Material de papel (inventario)", range(len(materiales)), format_func=lambda i: materiales.iloc[i]["_material_label"])
+        idx = st.selectbox("Material de papel (inventario)", range(len(materiales)), format_func=lambda i: materiales.iloc[i]["_material_label"], key="cmyk_material")
         material = materiales.iloc[idx]
         costo_material = float(material["_costo_hoja"])
         material_papel = str(material.get("nombre", material.get("item", "Papel")))
 
-    archivos = st.file_uploader("Archivos (PDF/PNG/JPG)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-    ejecutar = st.button("Analizar lote", type="primary", use_container_width=True)
+    archivos = st.file_uploader("Archivos para analizar página por página (PDF/PNG/JPG)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="cmyk_archivos")
+    ejecutar = st.button("🔍 Analizar CMYK y costo por página", type="primary", use_container_width=True, key="cmyk_analizar_lote")
     resultado_key = "cmyk_resultado_actual"
 
     if ejecutar:
         if not archivos:
             st.error("Carga al menos un archivo para analizar.")
             return
-
         paginas = []
+        nombres_archivos = []
         for archivo in archivos:
+            nombres_archivos.append(getattr(archivo, "name", ""))
             try:
                 paginas.extend(normalizar_imagenes(archivo))
             except Exception as exc:
                 st.warning(f"No se pudo procesar {archivo.name}: {exc}")
-
         if not paginas:
             st.error("No se pudieron procesar páginas válidas.")
             return
@@ -295,67 +287,18 @@ def render_cmyk(usuario):
         if tamano != "Personalizado":
             ml_base = ajustar_consumo_por_tamano(ml_base, tamano)
 
-        resultados, totales = analizar_lote(
-            paginas,
-            {
-                "ml_base_pagina": ml_base,
-                "factor_general": float(base["factor_general"]),
-                "factor_calidad": factor_calidad,
-                "factor_papel": factor_driver,
-                "factor_k": 1.0,
-                "auto_negro_inteligente": True,
-                "refuerzo_negro": float(refuerzo_negro),
-            },
-        )
-
+        resultados, totales = analizar_lote(paginas, {"ml_base_pagina": ml_base, "factor_general": float(base["factor_general"]), "factor_calidad": factor_calidad, "factor_papel": factor_driver, "factor_k": 1.0, "auto_negro_inteligente": True, "refuerzo_negro": float(refuerzo_negro)})
         total_paginas = len(resultados)
         precio_tinta = costo_tinta_ml(filtrar_tintas(df_inv), fallback=0.035)
-        costos = calcular_costo_lote(
-            totales_cmyk=totales,
-            precio_tinta_ml=precio_tinta,
-            paginas=total_paginas,
-            costo_desgaste_pagina=float(base["costo_desgaste"]),
-            desperdicio_factor=float(desperdicio_factor),
-            desgaste_head_ml=0.005,
-            costo_limpieza=0.0,
-        )
-
+        costos = calcular_costo_lote(totales_cmyk=totales, precio_tinta_ml=precio_tinta, paginas=total_paginas, costo_desgaste_pagina=float(base["costo_desgaste"]), desperdicio_factor=float(desperdicio_factor), desgaste_head_ml=0.005, costo_limpieza=0.0)
         costo_papel_total = total_paginas * costo_material
         costo_total = float(costos["costo_total"]) + float(costo_papel_total)
-        precio = _precio_sugerido(
-            costo_total=costo_total,
-            paginas=total_paginas,
-            margen_utilidad=float(margen_utilidad),
-            comision_pasarela=float(comision_pasarela),
-            impuesto_venta=float(impuesto_venta),
-            redondeo=float(redondeo_precio),
-        )
-        consumos_ids = mapear_consumo_ids(
-            filtrar_tintas(df_inv),
-            totales,
-            sistema_tinta=sistema_tinta,
-            impresora=impresora_op["nombre"],
-        )
+        precio = _precio_sugerido(costo_total=costo_total, paginas=total_paginas, margen_utilidad=float(margen_utilidad), comision_pasarela=float(comision_pasarela), impuesto_venta=float(impuesto_venta), redondeo=float(redondeo_precio))
+        detalle_paginas = _enriquecer_resultados_por_pagina(resultados, precio_tinta_ml=precio_tinta, costo_material=costo_material, costo_desgaste_pagina=float(base["costo_desgaste"]), desperdicio_factor=float(desperdicio_factor), precio_unitario=float(precio["precio_unitario"]))
+        consumos_ids = mapear_consumo_ids(filtrar_tintas(df_inv), totales, sistema_tinta=sistema_tinta, impresora=impresora_op["nombre"])
         alertas = validar_stock(df_inv, consumos_ids)
 
-        st.session_state[resultado_key] = {
-            "impresora_label": impresora_op["label"],
-            "impresora_nombre": impresora_op["nombre"],
-            "total_paginas": total_paginas,
-            "resultados": resultados,
-            "totales": totales,
-            "costos": costos,
-            "costo_total": costo_total,
-            "costo_papel_total": costo_papel_total,
-            "precio": precio,
-            "consumos_ids": consumos_ids,
-            "alertas": alertas,
-            "margen_utilidad": float(margen_utilidad),
-            "comision_pasarela": float(comision_pasarela),
-            "impuesto_venta": float(impuesto_venta),
-            "material_papel": material_papel,
-            "costo_material": float(costo_material),
-        }
+        st.session_state[resultado_key] = {"impresora_label": impresora_op["label"], "impresora_nombre": impresora_op["nombre"], "nombres_archivos": nombres_archivos, "total_paginas": total_paginas, "resultados": resultados, "detalle_paginas": detalle_paginas, "totales": totales, "costos": costos, "costo_total": costo_total, "costo_papel_total": costo_papel_total, "precio_tinta_ml": float(precio_tinta), "precio": precio, "consumos_ids": consumos_ids, "alertas": alertas, "margen_utilidad": float(margen_utilidad), "comision_pasarela": float(comision_pasarela), "impuesto_venta": float(impuesto_venta), "material_papel": material_papel, "costo_material": float(costo_material)}
 
     analisis = st.session_state.get(resultado_key)
     if not analisis:
@@ -371,6 +314,7 @@ def render_cmyk(usuario):
     precio = analisis["precio"]
     alertas = analisis["alertas"]
     consumos_ids = analisis["consumos_ids"]
+    detalle_paginas = analisis.get("detalle_paginas", pd.DataFrame())
 
     st.success(f"Análisis completado para {total_paginas} páginas.")
     m1, m2, m3, m4 = st.columns(4)
@@ -379,92 +323,55 @@ def render_cmyk(usuario):
     m3.metric("Y (ml)", f"{totales['Y']:.2f}")
     m4.metric("K (ml)", f"{totales['K']:.2f}")
 
-    st.metric("Costo total estimado", f"$ {costo_total:.2f}")
+    st.subheader("💵 Costos y precio")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Costo total", f"$ {costo_total:.2f}")
+    c2.metric("Costo / página", f"$ {(costo_total / max(total_paginas, 1)):.4f}")
+    c3.metric("Precio sugerido", f"$ {precio['precio_final']:.2f}")
+    c4.metric("Precio / página", f"$ {precio['precio_unitario']:.4f}")
 
-    st.subheader("💹 Precio sugerido")
-    p1, p2, p3 = st.columns(3)
-    p1.metric("Precio final recomendado", f"$ {precio['precio_final']:.2f}")
-    p2.metric("Precio recomendado / página", f"$ {precio['precio_unitario']:.4f}")
     utilidad_estimada = max(0.0, precio["precio_final"] - costo_total)
-    p3.metric("Utilidad bruta estimada", f"$ {utilidad_estimada:.2f}")
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Utilidad bruta estimada", f"$ {utilidad_estimada:.2f}")
+    p2.metric("Costo tinta", f"$ {float(costos['costo_tinta']):.2f}")
+    p3.metric("Costo papel", f"$ {float(costo_papel_total):.2f}")
 
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"Concepto": "Costo base", "Monto": precio["base"]},
-                {"Concepto": f"Subtotal con margen ({analisis['margen_utilidad']}%)", "Monto": precio["subtotal"]},
-                {"Concepto": f"Comisión ({analisis['comision_pasarela']}%)", "Monto": precio["comision"]},
-                {"Concepto": f"Impuesto ({analisis['impuesto_venta']}%)", "Monto": precio["impuesto"]},
-                {"Concepto": "Precio final", "Monto": precio["precio_final"]},
-            ]
-        ),
-        hide_index=True,
-        use_container_width=True,
-    )
+    st.caption(f"Material usado: {analisis['material_papel']} | $ / hoja: {float(analisis['costo_material']):.4f} | $ tinta/ml: {float(analisis.get('precio_tinta_ml', 0.0)):.4f}")
 
-    b1, b2, b3 = st.columns(3)
-    b1.metric("Costo tinta", f"$ {float(costos['costo_tinta']):.2f}")
-    b2.metric("Costo desgaste", f"$ {float(costos['costo_desgaste']):.2f}")
-    b3.metric("Costo papel", f"$ {float(costo_papel_total):.2f}")
-    st.caption(
-        f"Material usado: {analisis['material_papel']} | "
-        f"$ / hoja: {float(analisis['costo_material']):.4f}"
-    )
-
-    if total_paginas > 0:
-        st.caption(f"Costo unitario aproximado: $ {(costo_total / total_paginas):.4f} por página")
-    st.dataframe(pd.DataFrame(analisis["resultados"]), use_container_width=True)
-
-    for alerta in alertas:
-        st.warning(alerta)
-
-    if st.button("Guardar historial", use_container_width=True):
-        guardar_historial(impresora=analisis["impresora_label"], paginas=total_paginas, costo=costo_total, consumos=totales)
-        st.success("Historial guardado.")
-
-    if not alertas and st.button("Descontar inventario", use_container_width=True):
-        ok, msg = descontar_inventario(consumos_ids)
-        if ok:
-            st.success(msg)
+    tabs = st.tabs(["📄 Análisis por página", "💹 Desglose precio", "🧪 Consumo total", "📜 Historial / Acciones"])
+    with tabs[0]:
+        st.markdown("#### CMYK, tinta y costo de cada página")
+        if isinstance(detalle_paginas, pd.DataFrame) and not detalle_paginas.empty:
+            st.dataframe(detalle_paginas, use_container_width=True, hide_index=True)
+            st.download_button("⬇️ Descargar análisis por página CSV", data=detalle_paginas.to_csv(index=False).encode("utf-8-sig"), file_name="analisis_cmyk_por_pagina.csv", mime="text/csv", use_container_width=True, key="cmyk_descargar_paginas")
         else:
-            st.error(msg)
-
-    if st.button("Limpiar análisis actual", use_container_width=True):
-        st.session_state.pop(resultado_key, None)
-        st.info("Análisis limpiado. Puedes cargar nuevos archivos.")
+            st.dataframe(pd.DataFrame(analisis["resultados"]), use_container_width=True)
+    with tabs[1]:
+        st.dataframe(pd.DataFrame([{"Concepto": "Costo base", "Monto": precio["base"]}, {"Concepto": f"Subtotal con margen ({analisis['margen_utilidad']}%)", "Monto": precio["subtotal"]}, {"Concepto": f"Comisión ({analisis['comision_pasarela']}%)", "Monto": precio["comision"]}, {"Concepto": f"Impuesto ({analisis['impuesto_venta']}%)", "Monto": precio["impuesto"]}, {"Concepto": "Precio final", "Monto": precio["precio_final"]}]), hide_index=True, use_container_width=True)
+    with tabs[2]:
+        st.dataframe(pd.DataFrame([{"Color": "C", "ml": totales["C"]}, {"Color": "M", "ml": totales["M"]}, {"Color": "Y", "ml": totales["Y"]}, {"Color": "K", "ml": totales["K"]}]), hide_index=True, use_container_width=True)
+        for alerta in alertas:
+            st.warning(alerta)
+    with tabs[3]:
+        if st.button("Guardar historial", use_container_width=True, key="cmyk_guardar_historial"):
+            guardar_historial(impresora=analisis["impresora_label"], paginas=total_paginas, costo=costo_total, consumos=totales)
+            st.success("Historial guardado.")
+        if not alertas and st.button("Descontar inventario", use_container_width=True, key="cmyk_descontar_inventario"):
+            ok, msg = descontar_inventario(consumos_ids)
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
+        if st.button("Limpiar análisis actual", use_container_width=True, key="cmyk_limpiar"):
+            st.session_state.pop(resultado_key, None)
+            st.info("Análisis limpiado. Puedes cargar nuevos archivos.")
 
     st.markdown("### 🔗 Enviar a otros módulos")
 
     def _build_cmyk_to_corte():
-        return (
-            "analisis_cmyk",
-            {
-                "archivo": ", ".join([getattr(a, "name", "") for a in (archivos or []) if getattr(a, "name", "")]),
-                "trabajo": f"Impresión {total_paginas} páginas",
-                "cantidad": total_paginas,
-                "costo_base": round(float(costo_total), 2),
-                "material": analisis.get("material_papel", ""),
-                "observaciones": f"Impresora: {analisis.get('impresora_nombre', 'N/D')}",
-                "referencia": f"CMYK-{analisis.get('impresora_nombre', 'N/D')}",
-            },
-        )
-        
-    def _build_cmyk_to_cotizaciones():
-        return (
-            "cotizacion_preliminar",
-            {
-                "costo_base": round(float(costo_total), 2),
-                "tiempo_estimado": round(float(total_paginas) * 0.15, 2),
-                "tipo_produccion": "cmyk",
-                "archivo": ", ".join([getattr(a, "name", "") for a in (archivos or []) if getattr(a, "name", "")]),
-                "referencia": f"CMYK-{analisis.get('impresora_nombre', 'N/D')}",
-            },
-        )
+        return ("analisis_cmyk", {"archivo": ", ".join(analisis.get("nombres_archivos", [])), "trabajo": f"Impresión {total_paginas} páginas", "cantidad": total_paginas, "costo_base": round(float(costo_total), 2), "material": analisis.get("material_papel", ""), "observaciones": f"Impresora: {analisis.get('impresora_nombre', 'N/D')}", "referencia": f"CMYK-{analisis.get('impresora_nombre', 'N/D')}"})
 
-    render_send_buttons(
-        source_module="cmyk",
-        payload_builders={
-            "corte industrial": _build_cmyk_to_corte,
-            "cotizaciones": _build_cmyk_to_cotizaciones,
-        },
-    )
+    def _build_cmyk_to_cotizaciones():
+        return ("cotizacion_preliminar", {"costo_base": round(float(costo_total), 2), "tiempo_estimado": round(float(total_paginas) * 0.15, 2), "tipo_produccion": "cmyk", "archivo": ", ".join(analisis.get("nombres_archivos", [])), "referencia": f"CMYK-{analisis.get('impresora_nombre', 'N/D')}"})
+
+    render_send_buttons(source_module="cmyk", payload_builders={"corte industrial": _build_cmyk_to_corte, "cotizaciones": _build_cmyk_to_cotizaciones})
