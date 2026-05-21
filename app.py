@@ -292,57 +292,29 @@ def render_produccion_unificada(usuario: str) -> None:
     st.title("🏭 Producción")
     st.caption("Hub productivo: OT, planificación, diseños, impresiones CMYK, rutas, corte, sublimación, producción manual, calidad, mermas, despacho y archivos.")
 
-    (
-        tab_plan,
-        tab_disenos,
-        tab_impresiones,
-        tab_rutas,
-        tab_corte,
-        tab_sublimacion,
-        tab_manual,
-        tab_calidad,
-        tab_mermas,
-        tab_despacho,
-        tab_area,
-        tab_alertas,
-    ) = st.tabs([
-        "🧾 OT / Planificación",
-        "📁 Diseños y aprobaciones",
-        "🖨️ Impresiones / CMYK",
-        "🧭 Rutas / BOM",
-        "✂️ Corte",
-        "🔥 Sublimación",
-        "🎨 Producción manual",
-        "✅ Calidad",
-        "♻️ Mermas / Reprocesos",
-        "🚚 Despacho / Entregas",
-        "📁 Archivos de producción",
-        "🚨 Alertas producción",
-    ])
-    with tab_plan:
-        render_planificacion_produccion(usuario)
-    with tab_disenos:
-        render_disenos_aprobaciones(usuario)
-    with tab_impresiones:
-        render_cmyk(usuario)
-    with tab_rutas:
-        render_rutas_produccion(usuario)
-    with tab_corte:
-        render_corte(usuario)
-    with tab_sublimacion:
-        render_sublimacion(usuario)
-    with tab_manual:
-        render_produccion_manual(usuario)
-    with tab_calidad:
-        render_control_calidad(usuario)
-    with tab_mermas:
-        render_mermas_desperdicio(usuario)
-    with tab_despacho:
-        render_despacho_entregas(usuario)
-    with tab_area:
-        render_area_empresarial("Producción", usuario, show_title=False)
-    with tab_alertas:
-        _render_alertas_produccion(usuario)
+    secciones = {
+        "🧾 OT / Planificación": lambda: render_planificacion_produccion(usuario),
+        "📁 Diseños y aprobaciones": lambda: render_disenos_aprobaciones(usuario),
+        "🖨️ Impresiones / CMYK": lambda: render_cmyk(usuario),
+        "🧭 Rutas / BOM": lambda: render_rutas_produccion(usuario),
+        "✂️ Corte": lambda: render_corte(usuario),
+        "🔥 Sublimación": lambda: render_sublimacion(usuario),
+        "🎨 Producción manual": lambda: render_produccion_manual(usuario),
+        "✅ Calidad": lambda: render_control_calidad(usuario),
+        "♻️ Mermas / Reprocesos": lambda: render_mermas_desperdicio(usuario),
+        "🚚 Despacho / Entregas": lambda: render_despacho_entregas(usuario),
+        "📁 Archivos de producción": lambda: render_area_empresarial("Producción", usuario, show_title=False),
+        "🚨 Alertas producción": lambda: _render_alertas_produccion(usuario),
+    }
+
+    seccion = st.radio(
+        "Sección de producción",
+        list(secciones.keys()),
+        horizontal=True,
+        key="produccion_seccion_activa",
+    )
+    st.divider()
+    secciones[seccion]()
 
 
 def render_costeo_margenes_unificado(usuario: str) -> None:
