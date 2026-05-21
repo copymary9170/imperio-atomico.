@@ -169,7 +169,7 @@ def _detalle_por_pagina(resultados: list[dict], precio_tinta_ml: float, costo_ma
 
 def render_cmyk(usuario):
     st.title("🖨️ Impresiones / Motor CMYK")
-    st.caption("Analiza PDF, Word DOCX, JPG/JPEG y PNG página por página: CMYK, tinta, papel, desgaste, costo y precio sugerido.")
+    st.caption("Analiza PDF, Word DOCX, PowerPoint PPTX, Excel XLSX, JPG/JPEG y PNG página por página: CMYK, tinta, papel, desgaste, costo y precio sugerido.")
 
     df_inv, df_act, df_hist = _load_contexto_cmyk()
     opciones_imp = _impresoras_disponibles(df_act)
@@ -219,9 +219,9 @@ def render_cmyk(usuario):
         st.info("No hay papel detectado en Inventario. El análisis seguirá con costo de papel $0. Puedes registrar papel luego para mejorar el costo.")
 
     st.subheader("📤 Analizar archivo")
-    st.info("Formatos soportados: PDF, Word .docx, JPG/JPEG y PNG. Los .doc antiguos deben guardarse como .docx o PDF.")
-    archivos = st.file_uploader("Sube archivos para analizar página por página", type=["pdf", "docx", "png", "jpg", "jpeg"], accept_multiple_files=True, key="cmyk_archivos")
-    ejecutar = st.button("🔍 Analizar PDF / Word / JPG / PNG", type="primary", use_container_width=True, key="cmyk_analizar_lote")
+    st.info("Formatos soportados: PDF, Word .docx, PowerPoint .pptx, Excel .xlsx, JPG/JPEG y PNG. Los .doc/.ppt/.xls antiguos deben guardarse como formato moderno o PDF.")
+    archivos = st.file_uploader("Sube archivos para analizar página por página", type=["pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"], accept_multiple_files=True, key="cmyk_archivos")
+    ejecutar = st.button("🔍 Analizar PDF / Word / PowerPoint / Excel / JPG / PNG", type="primary", use_container_width=True, key="cmyk_analizar_lote")
     resultado_key = "cmyk_resultado_actual"
 
     if ejecutar:
