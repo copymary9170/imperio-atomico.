@@ -6,7 +6,13 @@ from security.permissions import has_permission, require_permission
 
 
 def render_costeo(usuario: str) -> None:
-    """Wrapper del módulo Costeo con control de permisos y carga segura"""
+    """Wrapper del módulo Costeo con control de permisos y carga segura."""
+
+    if not st.session_state.get("_costeo_hub_inner", False):
+        from views.costeo_margenes_hub import render_costeo_margenes_hub
+
+        render_costeo_margenes_hub(usuario)
+        st.stop()
 
     if not require_permission("costeo.view", "🚫 No tienes acceso al módulo Costeo."):
         return
