@@ -441,7 +441,7 @@ MENU_ROUTES = {
     "💼 Finanzas": (("tesoreria.view", "dashboard.view", "gastos.view", "caja.view", "cxp.view", "contabilidad.view", "conciliacion.view", "impuestos.view", "presupuesto.view"), lambda: render_planeacion_financiera(usuario)),
 
     # ADMINISTRACION Y RRHH
-    "🗂️ Administración": (("dashboard.view", "config.view"), lambda: render_area_empresarial("Administración", usuario)),
+    "🗂️ Administración": (("dashboard.view", "config.view", "security.view", "reportes.export", "manuales.view", "auditoria.view", "calendario_operativo.view"), lambda: render_area_empresarial("Administración", usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
 
@@ -450,25 +450,26 @@ MENU_ROUTES = {
 
     # ANALITICA Y COSTOS
     "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
-    "📊 Auditoría": ("auditoria.view", lambda: render_auditoria(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
 
-    # CALENDARIO
-    "📅 Calendario operativo": ("calendario_operativo.view", lambda: render_calendario_operativo(usuario)),
-
-    # SISTEMA
-    "⚙️ Configuración": ("config.view", lambda: render_configuracion(usuario)),
-    "🔐 Seguridad / Roles": (("security.view", "dashboard.view"), lambda: render_seguridad_roles(usuario)),
-    "🧰 Respaldo / Exportación": (("reportes.export", "config.view", "dashboard.view"), lambda: render_respaldo_datos(usuario)),
-    "📘 Manuales / SOP": ("manuales.view", lambda: render_manuales_sop(usuario)),
-
     # OTROS
-    "🧠 Diagnóstico IA": ("dashboard.view", lambda: render_diagnostico(usuario)),
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
-
-    # MODULOS ERP INDEPENDIENTES
-    "🧩 Módulos rescatados": ("dashboard.view", lambda: render_modulos_rescatados(usuario)),
 }
+
+# Rutas movidas al hub de Administración. Se conservan sus funciones dentro de
+# 🗂️ Administración, pero se ocultan del menú principal para evitar duplicados.
+ADMIN_MENU_MOVED = {
+    "📊 Auditoría",
+    "📅 Calendario operativo",
+    "⚙️ Configuración",
+    "🔐 Seguridad / Roles",
+    "🧰 Respaldo / Exportación",
+    "📘 Manuales / SOP",
+    "🧠 Diagnóstico IA",
+    "🧩 Módulos rescatados",
+}
+for _moved_label in ADMIN_MENU_MOVED:
+    MENU_ROUTES.pop(_moved_label, None)
 
 # ==================================================
 # FILTRAR POR PERMISOS
