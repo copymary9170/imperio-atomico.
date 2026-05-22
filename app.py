@@ -102,6 +102,7 @@ from views.despacho_entregas import render_despacho_entregas
 from views.unidades_fraccionadas import render_unidades_fraccionadas
 from views.disenos_aprobaciones import render_disenos_aprobaciones
 from views.fichas_tecnicas_bom import render_fichas_tecnicas_bom
+from views.legal_hub import render_legal_hub
 
 # NUEVAS VISTAS OPERATIVAS
 from views.nomina_trabajadores import render_nomina_trabajadores
@@ -446,7 +447,7 @@ MENU_ROUTES = {
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
 
     # LEGAL
-    "⚖️ Legal": (("dashboard.view", "config.view"), lambda: render_area_combinada("Legal", render_manuales_sop, usuario)),
+    "⚖️ Legal": (("dashboard.view", "config.view"), lambda: render_legal_hub(usuario)),
 
     # ANALITICA Y COSTOS
     "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
