@@ -30,6 +30,14 @@ def _metric_sum(df: pd.DataFrame, column: str) -> float:
     return float(pd.to_numeric(df[column], errors="coerce").fillna(0.0).sum())
 
 
+def _render_costeo_rapido(usuario: str) -> None:
+    st.session_state["_costeo_hub_inner"] = True
+    try:
+        render_costeo(usuario)
+    finally:
+        st.session_state["_costeo_hub_inner"] = False
+
+
 def _render_resumen_costos(usuario: str) -> None:
     st.subheader("📊 Resumen de costos y márgenes")
     st.caption("Vista ejecutiva de costeos, recetas/BOM, cierres reales, precios sugeridos y desviaciones.")
@@ -72,14 +80,7 @@ def _render_desviaciones(usuario: str) -> None:
         return
 
     df = costeos.copy()
-    numeric_cols = [
-        "costo_total_usd",
-        "costo_real_usd",
-        "precio_sugerido_usd",
-        "precio_vendido_usd",
-        "diferencia_vs_estimado_usd",
-        "margen_real_pct",
-    ]
+    numeric_cols = ["costo_total_usd", "costo_real_usd", "precio_sugerido_usd", "precio_vendido_usd", "diferencia_vs_estimado_usd", "margen_real_pct"]
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
@@ -90,8 +91,7 @@ def _render_desviaciones(usuario: str) -> None:
         else:
             df["diferencia_vs_estimado_usd"] = 0.0
 
-    desviadas = df[df["diferencia_vs_estimado_usd"].abs() > 0].copy()
-    desviadas = desviadas.sort_values("diferencia_vs_estimado_usd", ascending=False)
+    desviadas = df[df["diferencia_vs_estimado_usd"].abs() > 0].copy().sort_values("diferencia_vs_estimado_usd", ascending=False)
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Costeos con desviación", len(desviadas))
@@ -102,13 +102,7 @@ def _render_desviaciones(usuario: str) -> None:
         st.success("No hay desviaciones registradas con la información disponible.")
     else:
         st.dataframe(desviadas, use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇️ Exportar desviaciones CSV",
-            data=desviadas.to_csv(index=False).encode("utf-8-sig"),
-            file_name="desviaciones_costeo.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+        st.download_button("⬇️ Exportar desviaciones CSV", data=desviadas.to_csv(index=False).encode("utf-8-sig"), file_name="desviaciones_costeo.csv", mime="text/csv", use_container_width=True)
 
 
 def _render_alertas_margen(usuario: str) -> None:
@@ -126,25 +120,21 @@ def _render_alertas_margen(usuario: str) -> None:
         for col in ["costo_total_usd", "costo_real_usd", "precio_vendido_usd", "precio_sugerido_usd", "margen_real_pct", "diferencia_vs_estimado_usd"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-
         if "estado" in df.columns:
             sin_cerrar = df[~df["estado"].astype(str).str.lower().isin(["cerrado", "finalizado", "completado"])]
             datasets["Costeos sin cerrar"] = sin_cerrar
             if not sin_cerrar.empty:
                 alertas.append({"nivel": "Media", "alerta": "Costeos sin cerrar", "cantidad": len(sin_cerrar), "acción": "Registrar costo real y cerrar el trabajo."})
-
         if {"precio_vendido_usd", "costo_real_usd"}.issubset(df.columns):
             precio_bajo = df[(df["precio_vendido_usd"] > 0) & (df["costo_real_usd"] > 0) & (df["precio_vendido_usd"] < df["costo_real_usd"])]
             datasets["Precio vendido menor al costo"] = precio_bajo
             if not precio_bajo.empty:
                 alertas.append({"nivel": "Alta", "alerta": "Precio vendido menor al costo real", "cantidad": len(precio_bajo), "acción": "Revisar precio, descuentos y costos reales."})
-
         if "margen_real_pct" in df.columns:
             margen_negativo = df[df["margen_real_pct"] < 0]
             datasets["Margen negativo"] = margen_negativo
             if not margen_negativo.empty:
                 alertas.append({"nivel": "Alta", "alerta": "Costeos con margen negativo", "cantidad": len(margen_negativo), "acción": "Corregir precio o estructura de costos."})
-
         if "diferencia_vs_estimado_usd" in df.columns:
             desviacion_alta = df[df["diferencia_vs_estimado_usd"].abs() >= 10]
             datasets["Desviación alta"] = desviacion_alta
@@ -195,7 +185,7 @@ def render_costeo_margenes_hub(usuario: str = "Sistema") -> None:
 
     secciones = {
         "📊 Resumen de costos": lambda: _render_resumen_costos(usuario),
-        "🧮 Costeo rápido": lambda: render_costeo(usuario),
+        "🧮 Costeo rápido": lambda: _render_costeo_rapido(usuario),
         "🏭 Costeo industrial": lambda: render_costeo_industrial(usuario),
         "📝 BOM / Recetas": lambda: render_fichas_tecnicas_bom(usuario),
         "📈 Rentabilidad por trabajo": lambda: render_rentabilidad(usuario),
