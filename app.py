@@ -438,19 +438,11 @@ MENU_ROUTES = {
     "🏭 Producción": (("produccion.plan", "produccion.execute", "produccion.route", "produccion.quality", "produccion.scrap"), lambda: render_produccion_unificada(usuario)),
 
     # FINANZAS
-    "💼 Finanzas": (("tesoreria.view", "dashboard.view"), lambda: render_area_combinada("Finanzas", render_planeacion_financiera, usuario)),
-    "📉 Gastos": ("gastos.view", lambda: render_gastos(usuario)),
-    "🏦 Caja": ("caja.view", lambda: render_caja(usuario)),
-    "🏦 Tesorería y cobranza": ("tesoreria.view", lambda: render_area_combinada("Tesorería y Cobranza", render_tesoreria, usuario)),
-    "💸 Cuentas por pagar": (("cxp.view", "dashboard.view"), lambda: render_cuentas_por_pagar(usuario)),
-    "📚 Contabilidad": ("contabilidad.view", lambda: render_area_combinada("Contabilidad", render_contabilidad, usuario)),
-    "🏛️ Conciliación bancaria": ("conciliacion.view", lambda: render_conciliacion_bancaria(usuario)),
-    "🧾 Impuestos": ("impuestos.view", lambda: render_impuestos(usuario)),
+    "💼 Finanzas": (("tesoreria.view", "dashboard.view", "gastos.view", "caja.view", "cxp.view", "contabilidad.view", "conciliacion.view", "impuestos.view", "presupuesto.view"), lambda: render_planeacion_financiera(usuario)),
 
     # ADMINISTRACION Y RRHH
     "🗂️ Administración": (("dashboard.view", "config.view"), lambda: render_area_empresarial("Administración", usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
-    "💰 Presupuesto mensual": ("presupuesto.view", lambda: render_presupuesto_mensual(usuario)),
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
 
     # LEGAL
