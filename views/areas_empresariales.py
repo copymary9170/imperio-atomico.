@@ -58,6 +58,12 @@ def _render_existente_seguro(render_existente, usuario: str) -> None:
 
 
 def render_area_empresarial(nombre_area: str, usuario: str = "Sistema", *, show_title: bool = True) -> None:
+    if nombre_area == "Administración" and show_title:
+        from views.administracion_hub import render_administracion_hub
+
+        render_administracion_hub(usuario)
+        return
+
     area = AREAS_EMPRESARIALES[nombre_area]
     carpeta = BASE_DIR / area["carpeta"]
 
