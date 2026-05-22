@@ -11,6 +11,7 @@ from views.caja import render_caja
 from views.contabilidad import render_contabilidad
 from views.finanzas_control import render_finanzas_control
 from views.gastos import render_gastos
+from views.presupuesto_mensual import render_presupuesto_mensual
 from views.rentabilidad import render_rentabilidad
 from views.erp_nuevos_modulos import (
     render_conciliacion_bancaria,
@@ -110,11 +111,12 @@ def _render_alertas_financieras(usuario: str) -> None:
 
 def render_planeacion_financiera(usuario: str) -> None:
     st.title("💼 Finanzas")
-    st.caption("Hub financiero: resumen ejecutivo, planeación, caja, tesorería, gastos, cuentas por pagar, contabilidad, conciliación, impuestos, rentabilidad y alertas.")
+    st.caption("Hub financiero: resumen ejecutivo, planeación, presupuesto mensual, caja, tesorería, gastos, cuentas por pagar, contabilidad, conciliación, impuestos, rentabilidad y alertas.")
 
     secciones = {
         "📊 Resumen ejecutivo": lambda: render_finanzas_control(usuario),
         "💰 Planeación / Presupuesto": lambda: render_planeacion_financiera_module(usuario),
+        "📅 Presupuesto mensual": lambda: render_presupuesto_mensual(usuario),
         "🏦 Caja": lambda: render_caja(usuario),
         "🏦 Tesorería y cobranza": lambda: render_tesoreria(usuario),
         "📉 Gastos": lambda: render_gastos(usuario),
