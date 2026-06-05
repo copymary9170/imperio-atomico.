@@ -1,0 +1,11 @@
+indicador,valor,unidad,estado,descripcion
+ventas_hoy,0,USD,pendiente,Total vendido durante el dia
+ganancia_hoy,0,USD,pendiente,Utilidad neta estimada del dia
+ventas_mes,0,USD,pendiente,Total vendido durante el mes
+ganancia_mes,0,USD,pendiente,Utilidad neta estimada del mes
+servicios_activos,8,servicios,OK,Servicios listos para vender
+materiales_criticos,0,materiales,pendiente,Materiales por debajo del stock minimo
+pedidos_pendientes,0,pedidos,pendiente,Pedidos que faltan por entregar
+cotizaciones_pendientes,0,cotizaciones,pendiente,Cotizaciones sin aprobar
+margen_promedio,40,porcentaje,OK,Margen base usado para precios
+alerta_perdida,0,alertas,OK,Ventas por debajo del costo
