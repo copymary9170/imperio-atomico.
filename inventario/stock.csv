@@ -1,2 +1,14 @@
-producto_id,stock_actual,stock_minimo,ubicacion
-IA-0001,0,1,bodega-principal
+producto_id,nombre,categoria,stock_actual,stock_minimo,costo_unitario_usd,precio_venta_usd,ubicacion,estado
+INV-BOND-CARTA,Papel bond carta,Material impresion,500,100,0.018,0.025,bodega-principal,disponible
+INV-OPALINA-CARTA,Opalina carta,Material impresion,0,20,0.250,0.400,bodega-principal,critico
+INV-FOTO-BRILLANTE,Fotografico brillante,Material impresion,50,10,0.180,0.300,bodega-principal,disponible
+INV-FOTO-MATE,Fotografico mate,Material impresion,20,10,0.250,0.400,bodega-principal,disponible
+INV-LUSTRILLO,Papel lustrillo carta,Papeleria,100,20,0.400,0.650,bodega-principal,disponible
+INV-CONSTRUCCION,Papel construccion carta,Papeleria,100,20,0.630,1.000,bodega-principal,disponible
+INV-CARPETA-CARTA,Carpeta marron carta,Papeleria,50,10,0.420,0.600,bodega-principal,disponible
+INV-CARPETA-OFICIO,Carpeta marron oficio,Papeleria,100,10,0.250,0.400,bodega-principal,disponible
+INV-BORRA-AMIKO,Borra Amiko,Papeleria,20,5,0.300,0.450,bodega-principal,disponible
+INV-TINTA-NEGRA,Tinta negra HP GT53,Tinta,5,1,19.000,0,bodega-principal,disponible
+INV-TINTA-CYAN,Tinta cyan HP GT52,Tinta,3,1,19.000,0,bodega-principal,disponible
+INV-TINTA-MAGENTA,Tinta magenta HP GT52,Tinta,3,1,19.000,0,bodega-principal,disponible
+INV-TINTA-AMARILLA,Tinta amarilla HP GT52,Tinta,3,1,19.000,0,bodega-principal,disponible
