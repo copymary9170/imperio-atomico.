@@ -1,4 +1,9 @@
 servicio_id,nombre,categoria,costo_base,precio_sugerido,estado
-SRV-0001,Impresion General,Impresion,0,0,activo
-SRV-0002,Sublimacion,Sublimacion,0,0,activo
-SRV-0003,Corte Alta Gama,Corte,0,0,activo
+SRV-IMP-BN-CARTA,Impresion blanco y negro carta,Impresion,0.066,0.25,activo
+SRV-IMP-COLOR-CARTA,Impresion color carta,Impresion,0.119,0.35,activo
+SRV-COP-BN-CARTA,Copia blanco y negro carta,Copias,0.062,0.25,activo
+SRV-COP-COLOR-CARTA,Copia color carta,Copias,0.114,0.35,activo
+SRV-OPALINA-CLIENTE,Impresion opalina cliente,Especial,0.128,0.35,activo
+SRV-FOTO-CARNET-4,4 fotos carnet,Fotografia,0.389,1.00,activo
+SRV-LUSTRILLO-CARTA,Papel lustrillo carta,Papeleria,0.420,0.65,activo
+SRV-CONSTRUCCION-CARTA,Papel construccion carta,Papeleria,0.650,1.00,activo
