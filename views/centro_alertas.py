@@ -107,6 +107,51 @@ def _safe_df(table: str, columns: list[str], where: str | None = None, where_col
         return pd.DataFrame()
 
 
+def _ensure_migration_review_columns() -> None:
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, "migration_errors"):
+                return
+            existing = _table_columns(conn, "migration_errors")
+            if "revisado" not in existing:
+                conn.execute("ALTER TABLE migration_errors ADD COLUMN revisado INTEGER DEFAULT 0")
+            if "fecha_revision" not in existing:
+                conn.execute("ALTER TABLE migration_errors ADD COLUMN fecha_revision TEXT")
+            if "usuario_revision" not in existing:
+                conn.execute("ALTER TABLE migration_errors ADD COLUMN usuario_revision TEXT")
+    except Exception:
+        pass
+
+
+def _migration_errors_count() -> int:
+    _ensure_migration_review_columns()
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, "migration_errors"):
+                return 0
+            existing = _table_columns(conn, "migration_errors")
+            where = "WHERE COALESCE(revisado, 0)=0" if "revisado" in existing else ""
+            row = conn.execute(f"SELECT COUNT(*) AS total FROM migration_errors {where}").fetchone()
+            return int(row["total"] if row else 0)
+    except Exception:
+        return _safe_count("migration_errors")
+
+
+def _mark_migration_errors_reviewed(usuario: str) -> None:
+    _ensure_migration_review_columns()
+    with db_transaction() as conn:
+        if not _table_exists(conn, "migration_errors"):
+            return
+        conn.execute(
+            """
+            UPDATE migration_errors
+            SET revisado=1, fecha_revision=CURRENT_TIMESTAMP, usuario_revision=?
+            WHERE COALESCE(revisado, 0)=0
+            """,
+            (usuario,),
+        )
+
+
 def _build_alerts() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
 
@@ -123,9 +168,9 @@ def _build_alerts() -> pd.DataFrame:
     if cierres_diferencia:
         rows.append({"nivel": "critica", "modulo": "Caja", "alerta": f"Cierres con diferencia (${diferencia_total:,.2f})", "cantidad": cierres_diferencia, "accion": "Revisar efectivo contado, métodos declarados y observaciones del cajero."})
 
-    migration_errors = _safe_count("migration_errors")
+    migration_errors = _migration_errors_count()
     if migration_errors:
-        rows.append({"nivel": "critica", "modulo": "Sistema", "alerta": "Errores de migración registrados", "cantidad": migration_errors, "accion": "Abrir Diagnóstico técnico y revisar la tabla migration_errors."})
+        rows.append({"nivel": "media", "modulo": "Sistema", "alerta": "Errores de migración pendientes de revisión", "cantidad": migration_errors, "accion": "Abrir la pestaña Sistema, revisar detalle y marcar como revisado si no afecta operación."})
 
     cola_pendiente = _safe_count("cola_impresion", "estado NOT IN ('Completado', 'Cancelado', 'Entregado')", ["estado"])
     if cola_pendiente:
@@ -215,10 +260,32 @@ def render_centro_alertas(usuario: str = "Sistema") -> None:
             st.success("No hay cierres con diferencia.")
 
     with tab_sistema:
-        df = _safe_df("migration_errors", ["id", "fecha", "area", "tabla", "columna", "operacion", "error"], None, None, 200)
+        _ensure_migration_review_columns()
+        df = _safe_df("migration_errors", ["id", "fecha", "area", "tabla", "columna", "operacion", "error", "revisado", "fecha_revision", "usuario_revision"], None, None, 300)
         if not df.empty:
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            _download_csv("errores sistema", df, "errores_migracion")
+            pendientes = df[df.get("revisado", 0).fillna(0).astype(int).eq(0)] if "revisado" in df.columns else df
+            revisados = df[df.get("revisado", 0).fillna(0).astype(int).eq(1)] if "revisado" in df.columns else pd.DataFrame()
+            p1, p2 = st.columns(2)
+            p1.metric("Pendientes de revisión", len(pendientes))
+            p2.metric("Revisados / archivados", len(revisados))
+
+            if not pendientes.empty:
+                st.warning("Hay errores de migración pendientes. Revisa si afectan la operación antes de archivarlos.")
+                st.dataframe(pendientes, use_container_width=True, hide_index=True)
+                _download_csv("errores sistema pendientes", pendientes, "errores_migracion_pendientes")
+                if st.button("Marcar errores pendientes como revisados", type="primary", use_container_width=True):
+                    _mark_migration_errors_reviewed(usuario)
+                    st.success("Errores de migración marcados como revisados.")
+                    st.rerun()
+            else:
+                st.success("No hay errores de migración pendientes de revisión.")
+
+            with st.expander("Ver errores revisados / archivados", expanded=False):
+                if revisados.empty:
+                    st.info("No hay errores archivados todavía.")
+                else:
+                    st.dataframe(revisados, use_container_width=True, hide_index=True)
+                    _download_csv("errores sistema revisados", revisados, "errores_migracion_revisados")
         else:
             st.success("No hay errores de migración registrados.")
 
@@ -244,4 +311,4 @@ def render_centro_alertas(usuario: str = "Sistema") -> None:
             st.dataframe(df, use_container_width=True, hide_index=True)
             _download_csv("auditoría reciente", df, "auditoria_reciente")
         else:
-            st.info("Todavía no hay eventos recientes de auditoría.")
+            st.info("No hay auditoría registrada todavía.")
