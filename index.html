@@ -4,7 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Copy Mary ERP</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=menu-superior-2" />
+  <style>
+    .app-shell{display:block!important;min-height:100vh!important}
+    .sidebar{position:sticky!important;top:0!important;z-index:999!important;height:auto!important;width:100%!important;display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:space-between!important;gap:24px!important;padding:14px 32px!important;background:linear-gradient(90deg,#073b63,#0f4c81)!important;border-right:0!important;border-bottom:1px solid rgba(255,255,255,.16)!important;box-shadow:0 12px 30px rgba(7,59,99,.18)!important;overflow-x:auto!important}
+    .brand{margin:0!important;display:flex!important;align-items:center!important;gap:12px!important;flex:0 0 auto!important}
+    .brand-mark{width:46px!important;height:46px!important;border-radius:18px!important}
+    .brand-title{font-size:18px!important}
+    .brand-subtitle{font-size:11px!important}
+    .nav{display:flex!important;flex-direction:row!important;align-items:center!important;gap:8px!important;flex-wrap:nowrap!important;width:auto!important}
+    .nav a{white-space:nowrap!important;border-radius:999px!important;padding:10px 13px!important;transform:none!important;font-size:14px!important}
+    .nav a:hover,.nav a.active{transform:translateY(-1px)!important;background:rgba(255,255,255,.16)!important}
+    .main{margin:0 auto!important;padding:32px!important;max-width:1480px!important;width:100%!important}
+    @media(max-width:900px){.sidebar{flex-direction:column!important;align-items:flex-start!important;padding:16px!important}.nav{width:100%!important;overflow-x:auto!important;padding-bottom:4px!important}}
+    @media(max-width:620px){.main{padding:14px!important}.nav a{font-size:13px!important;padding:9px 11px!important}}
+  </style>
 </head>
 <body>
   <div class="app-shell">
@@ -112,6 +126,6 @@
       </div>
     </main>
   </div>
-  <script src="app.js"></script>
+  <script src="app.js?v=menu-superior-2"></script>
 </body>
 </html>
