@@ -3,17 +3,7 @@ from pathlib import Path
 
 import streamlit as st
 
-# ==================================================
-
-st.set_page_config(
-    page_title="Imperio Atómico ERP",
-    layout="wide",
-    page_icon="⚛️",
-)
-
-# ==================================================
-# INICIALIZAR BASE DE DATOS
-# ==================================================
+st.set_page_config(page_title="Imperio Atómico ERP", layout="wide", page_icon="⚛️")
 
 from database.schema import init_schema
 from database.auto_migrations import run_auto_migrations
@@ -27,25 +17,19 @@ run_auto_migrations()
 ensure_extended_permissions()
 restore_session_snapshot()
 
-# ==================================================
-# LOGIN
-# ==================================================
 
 def _render_login() -> None:
     st.title("⚛️ Imperio Atómico ERP")
     st.subheader("Iniciar sesión")
-
     with st.form("login_form"):
         login_usuario = st.text_input("Usuario")
         login_password = st.text_input("Contraseña", type="password")
         submit_login = st.form_submit_button("Entrar")
-
     if submit_login:
         usuario_clean = str(login_usuario or "").strip()
         if not usuario_clean:
             st.error("Ingresa tu usuario.")
             return
-
         st.session_state["usuario"] = usuario_clean
         st.session_state["rol"] = "Operator"
         st.session_state["authentication_status"] = True
@@ -60,40 +44,28 @@ if not st.session_state.get("authentication_status"):
 
 set_session_role_from_db()
 
-# ==================================================
-# IMPORTAR VISTAS
-# ==================================================
-
 from views.dashboard import render_dashboard
 from views.panel_ejecutivo import render_panel_ejecutivo
 from views.centro_alertas import render_centro_alertas
-from views.respaldo_datos import render_respaldo_datos
 from views.inventario import render_inventario
 from views.stock_minimo import render_stock_minimo
 from views.kardex import render_kardex
 from views.clientes import render_clientes
 from views.cmyk import render_cmyk
 from views.activos import render_activos
-from views.diagnostico import render_diagnostico
 from views.otros_procesos import render_otros_procesos
 from views.corte import render_corte
 from views.sublimacion import render_sublimacion
 from views.produccion_manual import render_produccion_manual
 from views.ventas import render_ventas
-from views.gastos import render_gastos
-from views.caja import render_caja
-from views.auditoria import render_auditoria
 from views.cotizaciones import render_cotizaciones
 from views.calculadora import render_calculadora
 from views.costeo import render_costeo
-from views.contabilidad import render_contabilidad
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
-from views.manuales_sop import render_manuales_sop
 from views.catalogo import render_catalogo
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
-from views.modulos_rescatados import render_modulos_rescatados
 from views.areas_empresariales import render_area_combinada, render_area_empresarial
 from views.almacen_avanzado import render_almacen_avanzado
 from views.activos_patrimonial import render_activos_patrimonial
@@ -104,28 +76,19 @@ from views.disenos_aprobaciones import render_disenos_aprobaciones
 from views.fichas_tecnicas_bom import render_fichas_tecnicas_bom
 from views.legal_hub import render_legal_hub
 from views.nomina_trabajadores import render_nomina_trabajadores
-from views.presupuesto_mensual import render_presupuesto_mensual
-from views.calendario_operativo import render_calendario_operativo
 from views.publicaciones_marketing import render_publicaciones_marketing
-from modules.configuracion import render_sidebar_config_snapshot, render_configuracion
+from modules.configuracion import get_current_config, DEFAULT_CONFIG, _to_float
 from views.erp_nuevos_modulos import (
-    render_cuentas_por_pagar,
-    render_tesoreria,
     render_costeo_industrial,
     render_mermas_desperdicio,
     render_mantenimiento_activos,
     render_control_calidad,
-    render_impuestos,
-    render_conciliacion_bancaria,
     render_rrhh,
-    render_seguridad_roles,
 )
 
 usuario = st.session_state.get("usuario", "Sistema")
 user_role = st.session_state.get("rol", "Operator")
 
-# Mantengo las funciones unificadas originales importando el resto del archivo anterior desde backup no aplica.
-# En esta correccion solo se redefine la navegacion principal usada por la app real.
 
 def render_dashboard_unificado(usuario: str) -> None:
     tab_alertas, tab_operativo, tab_ejecutivo = st.tabs(["🚨 Alertas operativas", "Panel operativo", "📊 Panel ejecutivo"])
@@ -190,6 +153,7 @@ def render_activos_unificado(usuario: str) -> None:
     with tab_mantenimiento: render_mantenimiento_activos(usuario)
     with tab_patrimonial: render_activos_patrimonial(usuario)
 
+
 st.markdown(
     """
     <style>
@@ -198,22 +162,14 @@ st.markdown(
         div[data-testid="stHeader"] {background:transparent;}
         .block-container {padding-top:1.2rem; max-width:1500px;}
         div[role="radiogroup"] {gap:.45rem; flex-wrap:wrap;}
-        div[role="radiogroup"] label {
-            border:1px solid #e5e7eb;
-            border-radius:999px;
-            padding:.35rem .85rem;
-            background:#fff;
-            box-shadow:0 1px 2px rgba(15,23,42,.05);
-        }
+        div[role="radiogroup"] label {border:1px solid #e5e7eb;border-radius:999px;padding:.35rem .85rem;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.05);}
         div[role="radiogroup"] label:hover {border-color:#0f4c81; background:#eefafa;}
-        .top-header {
-            display:flex; align-items:center; justify-content:space-between; gap:1rem;
-            padding:1rem 1.2rem; border:1px solid #e5e7eb; border-radius:1rem;
-            background:linear-gradient(90deg,#073b63,#0f4c81); color:white; margin-bottom:1rem;
-            box-shadow:0 10px 28px rgba(15,76,129,.18);
-        }
+        .top-header {display:flex; align-items:center; justify-content:space-between; gap:1rem;padding:1rem 1.2rem; border:1px solid #e5e7eb; border-radius:1rem;background:linear-gradient(90deg,#073b63,#0f4c81); color:white; margin-bottom:1rem;box-shadow:0 10px 28px rgba(15,76,129,.18);}
         .top-brand {font-size:1.25rem; font-weight:800;}
         .top-actions {font-size:.85rem; opacity:.9;}
+        .rate-card {border:1px solid #e5e7eb;border-radius:14px;padding:.75rem .9rem;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04);}
+        .rate-label {font-size:.74rem;color:#6b7280;margin-bottom:.2rem;}
+        .rate-value {font-size:1.1rem;font-weight:750;color:#111827;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -238,12 +194,14 @@ MENU_ROUTES = {
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
 }
 
+
 def _can_access_menu_route(permission_rule):
     if isinstance(permission_rule, str):
         return has_permission(permission_rule)
     if isinstance(permission_rule, (tuple, list, set)):
         return any(has_permission(permission_code) for permission_code in permission_rule)
     return False
+
 
 VISIBLE_MENU = {label: callback for label, (permiso, callback) in MENU_ROUTES.items() if _can_access_menu_route(permiso)}
 
@@ -261,6 +219,32 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+try:
+    config = get_current_config()
+except Exception:
+    config = DEFAULT_CONFIG
+
+rate_fields = [
+    ("tasa_bcv", "BCV", "Bs/$", "%.2f"),
+    ("tasa_binance", "Binance", "Bs/$", "%.2f"),
+    ("iva_perc", "IVA", "%", "%.2f"),
+    ("igtf_perc", "IGTF", "%", "%.2f"),
+    ("banco_perc", "Banco", "%", "%.3f"),
+    ("kontigo_perc", "Kontigo", "%", "%.3f"),
+]
+rate_cols = st.columns(len(rate_fields))
+for col, (key, label, unit, fmt) in zip(rate_cols, rate_fields):
+    value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
+    col.markdown(
+        f"""
+        <div class="rate-card">
+            <div class="rate-label">{label}</div>
+            <div class="rate-value">{fmt % value} {unit}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 cols = st.columns([1, 1, 6])
 with cols[0]:
@@ -280,13 +264,7 @@ with cols[1]:
     else:
         st.success("✅ Sin alertas")
 
-menu = st.radio(
-    "Menú principal",
-    list(VISIBLE_MENU.keys()),
-    horizontal=True,
-    label_visibility="collapsed",
-    key="menu_principal_superior",
-)
+menu = st.radio("Menú principal", list(VISIBLE_MENU.keys()), horizontal=True, label_visibility="collapsed", key="menu_principal_superior")
 
 st.divider()
 VISIBLE_MENU[menu]()
