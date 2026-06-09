@@ -1,2 +1,2 @@
-cliente_id,nombre,email,telefono,estado
-CL-0001,Cliente Base,cliente@example.com,000000000,activo
+cliente_id,nombre,email,telefono,direccion,tipo_cliente,total_compras,ultima_compra,estado
+CL-0001,Cliente Base,cliente@example.com,000000000,Sin definir,normal,0,2026-06-05,activo
