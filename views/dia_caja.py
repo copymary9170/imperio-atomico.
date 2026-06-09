@@ -38,17 +38,14 @@ def _ensure_dia_tables() -> None:
         )
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
+
+
 def _get_dia_abierto():
     _ensure_dia_tables()
     with db_transaction() as conn:
-        return conn.execute(
-            """
-            SELECT * FROM dias_operacion
-            WHERE estado = 'abierto'
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ).fetchone()
+        return conn.execute("SELECT * FROM dias_operacion WHERE estado='abierto' ORDER BY id DESC LIMIT 1").fetchone()
 
 
 def _get_resumen_operacion() -> dict:
@@ -66,9 +63,52 @@ def _get_resumen_operacion() -> dict:
             FROM movimientos_tesoreria
             """
         ).fetchone()
-    return {key: _safe_float(row[key]) if row else 0.0 for key in [
-        "ingresos", "egresos", "ingreso_efectivo", "egreso_efectivo", "ingreso_transferencia", "ingreso_zelle", "ingreso_binance"
-    ]}
+    return {key: _safe_float(row[key]) if row else 0.0 for key in ["ingresos", "egresos", "ingreso_efectivo", "egreso_efectivo", "ingreso_transferencia", "ingreso_zelle", "ingreso_binance"]}
+
+
+def _get_config_rates() -> dict:
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, "configuracion"):
+                return {"bcv": 0.0, "binance": 0.0}
+            rows = conn.execute("SELECT parametro, valor FROM configuracion WHERE parametro IN ('tasa_bcv','tasa_binance')").fetchall()
+        data = {r["parametro"]: _safe_float(r["valor"]) for r in rows}
+        return {"bcv": data.get("tasa_bcv", 0.0), "binance": data.get("tasa_binance", 0.0)}
+    except Exception:
+        return {"bcv": 0.0, "binance": 0.0}
+
+
+def _count_table(table: str, where: str | None = None) -> int:
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, table):
+                return 0
+            sql = f"SELECT COUNT(*) AS total FROM {table}"
+            if where:
+                sql += f" WHERE {where}"
+            row = conn.execute(sql).fetchone()
+            return int(row["total"] if row else 0)
+    except Exception:
+        return 0
+
+
+def _ventas_por_hora() -> pd.DataFrame:
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, "movimientos_tesoreria"):
+                return pd.DataFrame()
+            return pd.read_sql_query(
+                """
+                SELECT strftime('%H:00', fecha) AS hora, SUM(monto_usd) AS ventas_usd
+                FROM movimientos_tesoreria
+                WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date('now')
+                GROUP BY strftime('%H', fecha)
+                ORDER BY hora
+                """,
+                conn,
+            )
+    except Exception:
+        return pd.DataFrame()
 
 
 def _get_movimientos_df() -> pd.DataFrame:
@@ -90,27 +130,13 @@ def _get_movimientos_df() -> pd.DataFrame:
 def _get_dias_df() -> pd.DataFrame:
     _ensure_dia_tables()
     with db_transaction() as conn:
-        return pd.read_sql_query(
-            """
-            SELECT id, fecha_inicio, fecha_fin, usuario_inicio, usuario_fin, estado, fondo_inicial_usd, fondo_final_usd, observaciones_inicio, observaciones_fin
-            FROM dias_operacion
-            ORDER BY id DESC
-            LIMIT 80
-            """,
-            conn,
-        )
+        return pd.read_sql_query("SELECT id, fecha_inicio, fecha_fin, usuario_inicio, usuario_fin, estado, fondo_inicial_usd, fondo_final_usd, observaciones_inicio, observaciones_fin FROM dias_operacion ORDER BY id DESC LIMIT 80", conn)
 
 
 def _iniciar_dia(usuario: str, fondo_inicial: float, observaciones: str) -> None:
     _ensure_dia_tables()
     with db_transaction() as conn:
-        conn.execute(
-            """
-            INSERT INTO dias_operacion (usuario_inicio, estado, fondo_inicial_usd, observaciones_inicio)
-            VALUES (?, 'abierto', ?, ?)
-            """,
-            (usuario, fondo_inicial, observaciones),
-        )
+        conn.execute("INSERT INTO dias_operacion (usuario_inicio, estado, fondo_inicial_usd, observaciones_inicio) VALUES (?, 'abierto', ?, ?)", (usuario, fondo_inicial, observaciones))
 
 
 def _finalizar_dia(usuario: str, fondo_final: float, observaciones: str) -> None:
@@ -118,14 +144,7 @@ def _finalizar_dia(usuario: str, fondo_final: float, observaciones: str) -> None
     if not dia:
         return
     with db_transaction() as conn:
-        conn.execute(
-            """
-            UPDATE dias_operacion
-            SET estado='cerrado', fecha_fin=CURRENT_TIMESTAMP, usuario_fin=?, fondo_final_usd=?, observaciones_fin=?
-            WHERE id=?
-            """,
-            (usuario, fondo_final, observaciones, dia["id"]),
-        )
+        conn.execute("UPDATE dias_operacion SET estado='cerrado', fecha_fin=CURRENT_TIMESTAMP, usuario_fin=?, fondo_final_usd=?, observaciones_fin=? WHERE id=?", (usuario, fondo_final, observaciones, dia["id"]))
 
 
 def _pos_status(diferencia: float) -> tuple[str, str]:
@@ -138,8 +157,7 @@ def _pos_status(diferencia: float) -> tuple[str, str]:
 
 
 def render_dia_caja(usuario: str) -> None:
-    st.markdown(
-        """
+    st.markdown("""
         <style>
             .pos-hero {border-radius:26px;padding:1.25rem 1.35rem;background:linear-gradient(135deg,#071f3a,#0f4c81 55%,#20b8b8);color:white;box-shadow:0 18px 45px rgba(15,76,129,.22);margin-bottom:1rem;}
             .pos-title {font-size:1.35rem;font-weight:900;letter-spacing:-.03em;}
@@ -148,42 +166,42 @@ def render_dia_caja(usuario: str) -> None:
             .pos-pill {display:inline-block;padding:.45rem .75rem;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);font-weight:800;margin-top:.35rem;}
             .quick-title {font-weight:850;color:#334155;margin:.3rem 0 .4rem;}
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    """, unsafe_allow_html=True)
 
     dia = _get_dia_abierto()
     resumen = _get_resumen_operacion()
+    rates = _get_config_rates()
     fondo_inicial = _safe_float(dia["fondo_inicial_usd"]) if dia else 0.0
     ventas_dia = resumen["ingresos"]
     gastos_dia = resumen["egresos"]
     saldo_efectivo = resumen["ingreso_efectivo"] - resumen["egreso_efectivo"]
     caja_esperada = fondo_inicial + saldo_efectivo
-
     now = datetime.now()
     estado_turno = "Abierto" if dia else "Cerrado"
 
-    st.markdown(
-        f"""
+    st.markdown(f"""
         <div class="pos-hero">
-            <div class="pos-title">🌅 Punto de venta · Día / Caja</div>
+            <div class="pos-title">🌅 Centro de operaciones · Punto de venta</div>
             <div class="pos-time">{now.strftime('%I:%M %p')}</div>
-            <div class="pos-sub">{now.strftime('%d/%m/%Y')} · Operación diaria de Copy Mary</div>
+            <div class="pos-sub">{now.strftime('%d/%m/%Y')} · Copy Mary · BCV {rates['bcv']:.2f} Bs/$ · Binance {rates['binance']:.2f} Bs/$</div>
             <div class="pos-pill">Turno: {estado_turno}</div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """, unsafe_allow_html=True)
 
     st.markdown('<div class="quick-title">Accesos rápidos</div>', unsafe_allow_html=True)
     q1, q2, q3, q4 = st.columns(4)
-    q1.button("💰 Nueva venta", use_container_width=True)
-    q2.button("📝 Nueva cotización", use_container_width=True)
-    q3.button("👥 Cliente", use_container_width=True)
+    if q1.button("💰 Nueva venta", use_container_width=True):
+        st.session_state["menu_principal_superior"] = "💰 Ventas"
+        st.rerun()
+    if q2.button("📝 Nueva cotización", use_container_width=True):
+        st.session_state["menu_principal_superior"] = "📝 Cotizaciones"
+        st.rerun()
+    if q3.button("👥 Cliente", use_container_width=True):
+        st.session_state["menu_principal_superior"] = "👥 Clientes"
+        st.rerun()
     q4.button("💵 Abrir cajón", use_container_width=True)
 
     st.divider()
-
     st.markdown("### Estado de caja")
     caja_contada = st.number_input("Caja contada USD", min_value=0.0, step=0.25, format="%.2f", value=float(max(caja_esperada, 0)))
     diferencia = caja_contada - caja_esperada
@@ -194,20 +212,25 @@ def render_dia_caja(usuario: str) -> None:
     k2.metric("Fondo inicial", f"$ {fondo_inicial:,.2f}")
     k3.metric("Ventas del día", f"$ {ventas_dia:,.2f}")
     k4.metric("Gastos del día", f"$ {gastos_dia:,.2f}")
-
     k5, k6, k7, k8 = st.columns(4)
     k5.metric("Caja esperada", f"$ {caja_esperada:,.2f}")
     k6.metric("Caja contada", f"$ {caja_contada:,.2f}")
     k7.metric("Diferencia", f"$ {diferencia:,.2f}")
     k8.metric("Semáforo", f"{semaforo} {semaforo_texto}")
 
-    tab_inicio, tab_operacion, tab_valores, tab_cajon, tab_fin = st.tabs([
-        "🌅 Iniciar día",
-        "🏦 Caja / Fondos / Operación",
-        "📊 Valores acumulados",
-        "💵 Cajón de dinero",
-        "🌙 Finalizar día",
-    ])
+    st.markdown("### Operación del día")
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("Ventas en Bs BCV", f"Bs {ventas_dia * rates['bcv']:,.2f}")
+    o2.metric("Órdenes en producción", _count_table("ordenes_trabajo", "estado NOT IN ('Finalizada','Cerrada','Cancelada','Entregada')"))
+    o3.metric("Cotizaciones pendientes", _count_table("cotizaciones", "estado NOT IN ('Aprobada','Rechazada','Vencida','Cerrada')"))
+    o4.metric("Clientes atendidos", _count_table("ventas", "date(fecha)=date('now')"))
+
+    ventas_hora = _ventas_por_hora()
+    if not ventas_hora.empty:
+        st.markdown("#### Ventas por hora")
+        st.bar_chart(ventas_hora.set_index("hora"))
+
+    tab_inicio, tab_operacion, tab_valores, tab_cajon, tab_fin = st.tabs(["🌅 Iniciar día", "🏦 Caja / Fondos / Operación", "📊 Valores acumulados", "💵 Cajón de dinero", "🌙 Finalizar día"])
 
     with tab_inicio:
         st.subheader("🌅 Iniciar día")
@@ -228,20 +251,11 @@ def render_dia_caja(usuario: str) -> None:
         cols[1].metric("Transferencia", f"$ {resumen['ingreso_transferencia']:,.2f}")
         cols[2].metric("Zelle", f"$ {resumen['ingreso_zelle']:,.2f}")
         cols[3].metric("Binance", f"$ {resumen['ingreso_binance']:,.2f}")
-        st.caption("Movimientos recientes de tesorería/caja.")
         df = _get_movimientos_df()
-        if df.empty:
-            st.info("No hay movimientos registrados todavía.")
-        else:
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.info("No hay movimientos registrados todavía.")
 
     with tab_valores:
         st.subheader("📊 Valores acumulados")
-        a1, a2, a3 = st.columns(3)
-        a1.metric("Ingresos acumulados", f"$ {resumen['ingresos']:,.2f}")
-        a2.metric("Egresos acumulados", f"$ {resumen['egresos']:,.2f}")
-        a3.metric("Saldo operativo", f"$ {resumen['ingresos'] - resumen['egresos']:,.2f}")
-        st.markdown("#### Historial de días")
         st.dataframe(_get_dias_df(), use_container_width=True, hide_index=True)
 
     with tab_cajon:
@@ -262,7 +276,6 @@ def render_dia_caja(usuario: str) -> None:
                 _finalizar_dia(usuario, fondo_final, obs_fin)
                 st.success("Día finalizado correctamente.")
                 st.rerun()
-
         st.divider()
         st.subheader("🚪 Cerrar programa")
         if st.button("Cerrar sesión / salir del sistema", use_container_width=True):
