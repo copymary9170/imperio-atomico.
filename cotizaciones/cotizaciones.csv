@@ -1,2 +1,2 @@
-cotizacion_id,cliente_id,producto_servicio,costo_estimado,precio_final,estado
-COT-0001,CL-0001,Impresion General,0,0,pendiente
+cotizacion_id,cliente_id,servicio_id,costo_estimado,precio_final,utilidad,fecha,estado
+COT-0001,CL-0001,SRV-IMP-BN-CARTA,0.066,0.25,0.184,2026-06-05,pendiente
