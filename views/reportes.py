@@ -59,19 +59,20 @@ def _download_button(df: pd.DataFrame, nombre: str) -> None:
         file_name=f"{nombre}.csv",
         mime="text/csv",
         use_container_width=True,
+        key=f"download_{nombre}",
     )
 
 
-def _date_filter() -> tuple[date, date]:
+def _date_filter(prefix: str) -> tuple[date, date]:
     c1, c2 = st.columns(2)
-    inicio = c1.date_input("Desde", value=date.today() - timedelta(days=30), key="reportes_desde")
-    fin = c2.date_input("Hasta", value=date.today(), key="reportes_hasta")
+    inicio = c1.date_input("Desde", value=date.today() - timedelta(days=30), key=f"{prefix}_desde")
+    fin = c2.date_input("Hasta", value=date.today(), key=f"{prefix}_hasta")
     return inicio, fin
 
 
 def _render_caja_punto() -> None:
     st.subheader("💵 Reportes de caja y punto")
-    inicio, fin = _date_filter()
+    inicio, fin = _date_filter("reportes_caja")
     params = (str(inicio), str(fin))
 
     movimientos = _safe_df(
@@ -106,7 +107,7 @@ def _render_caja_punto() -> None:
 
 def _render_historico() -> None:
     st.subheader("📚 Reporte histórico")
-    inicio, fin = _date_filter()
+    inicio, fin = _date_filter("reportes_historico")
     params = (str(inicio), str(fin))
 
     ventas = _safe_df("SELECT * FROM ventas WHERE date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha DESC", "ventas", params)
