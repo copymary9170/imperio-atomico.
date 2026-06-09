@@ -19,6 +19,8 @@
       <nav class="nav">
         <a class="active" href="#dashboard-section">Dashboard</a>
         <a href="#ventas-section">Ventas</a>
+        <a href="#clientes-section">Clientes</a>
+        <a href="#cotizaciones-section">Cotizaciones</a>
         <a href="#servicios-section">Servicios</a>
         <a href="#inventario-section">Inventario</a>
         <a href="#historial-section">Historial</a>
@@ -29,18 +31,29 @@
       <header class="hero">
         <p class="eyebrow">Imperio Atómico</p>
         <h1>Panel administrativo Copy Mary</h1>
-        <p>Controla precios, ventas, inventario crítico y utilidad sin vender por debajo del costo.</p>
+        <p>Controla precios, ventas, clientes, cotizaciones, inventario crítico y utilidad sin vender por debajo del costo.</p>
+        <div class="hero-actions">
+          <button id="themeButton" type="button" class="btn btn-secondary">Modo oscuro</button>
+          <button id="exportButton" type="button" class="btn">Exportar ventas CSV</button>
+        </div>
       </header>
 
       <section id="dashboard-section" class="card">
         <h2>Dashboard</h2>
         <div id="dashboard" class="grid"></div>
+        <div class="chart-wrap">
+          <h3>Resumen visual</h3>
+          <div id="profitChart" class="bars"></div>
+        </div>
       </section>
 
       <div class="layout">
         <section id="ventas-section" class="card">
           <h2>Registrar venta</h2>
           <form id="saleForm" class="form">
+            <label>Cliente
+              <select id="clientSelect"></select>
+            </label>
             <label>Servicio
               <select id="serviceSelect"></select>
             </label>
@@ -61,6 +74,25 @@
             <button type="submit">Guardar venta</button>
           </form>
           <div id="saleResult" class="result"></div>
+        </section>
+
+        <section id="clientes-section" class="card">
+          <h2>Clientes</h2>
+          <form id="clientForm" class="form compact-form">
+            <label>Nombre
+              <input id="clientName" type="text" placeholder="Nombre del cliente" />
+            </label>
+            <label>Teléfono
+              <input id="clientPhone" type="text" placeholder="Teléfono o WhatsApp" />
+            </label>
+            <button type="submit">Guardar cliente</button>
+          </form>
+          <table id="clientsTable"></table>
+        </section>
+
+        <section id="cotizaciones-section" class="card">
+          <h2>Cotizaciones rápidas</h2>
+          <div id="quoteBox" class="quote-box"></div>
         </section>
 
         <section id="servicios-section" class="card">
