@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Copy Mary ERP</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Imperio Atomico</p>
+      <h1>Copy Mary ERP</h1>
+      <p>Panel base para precios, ventas, inventario y ganancias.</p>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="card">
+      <h2>Dashboard</h2>
+      <div id="dashboard" class="grid"></div>
+    </section>
+
+    <section class="card">
+      <h2>Registrar venta</h2>
+      <form id="saleForm" class="form">
+        <label>Servicio
+          <select id="serviceSelect"></select>
+        </label>
+        <label>Cantidad
+          <input id="quantity" type="number" min="1" value="1" />
+        </label>
+        <label>Precio unitario USD
+          <input id="unitPrice" type="number" min="0" step="0.01" />
+        </label>
+        <label>Metodo de pago
+          <select id="paymentMethod">
+            <option value="efectivo">Efectivo</option>
+            <option value="pago_movil">Pago movil</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="divisas">Divisas</option>
+          </select>
+        </label>
+        <button type="submit">Calcular venta</button>
+      </form>
+      <div id="saleResult" class="result"></div>
+    </section>
+
+    <section class="card">
+      <h2>Servicios</h2>
+      <table id="servicesTable"></table>
+    </section>
+
+    <section class="card">
+      <h2>Inventario critico</h2>
+      <table id="inventoryTable"></table>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
