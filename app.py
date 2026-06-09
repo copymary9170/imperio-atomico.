@@ -79,6 +79,7 @@ from views.fichas_tecnicas_bom import render_fichas_tecnicas_bom
 from views.legal_hub import render_legal_hub
 from views.nomina_trabajadores import render_nomina_trabajadores
 from views.publicaciones_marketing import render_publicaciones_marketing
+from views.dia_caja import render_dia_caja
 from modules.configuracion import get_current_config, DEFAULT_CONFIG, _to_float
 from views.erp_nuevos_modulos import (
     render_costeo_industrial,
@@ -239,6 +240,7 @@ st.markdown(
 )
 
 MENU_ROUTES = {
+    "🌅 Día / Caja": (("dashboard.view", "caja.view"), lambda: render_dia_caja(usuario)),
     "📊 Panel de control": ("dashboard.view", lambda: render_dashboard_unificado(usuario)),
     "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
     "🏗️ Activos": (("activos.view", "mantenimiento.view"), lambda: render_activos_unificado(usuario)),
