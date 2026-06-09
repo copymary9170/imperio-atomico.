@@ -7,56 +7,79 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="hero">
-    <div>
-      <p class="eyebrow">Imperio Atomico</p>
-      <h1>Copy Mary ERP</h1>
-      <p>Panel base para precios, ventas, inventario y ganancias.</p>
-    </div>
-  </header>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">CM</div>
+        <div>
+          <div class="brand-title">Copy Mary</div>
+          <div class="brand-subtitle">ERP creativo</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="active" href="#dashboard-section">Dashboard</a>
+        <a href="#ventas-section">Ventas</a>
+        <a href="#servicios-section">Servicios</a>
+        <a href="#inventario-section">Inventario</a>
+        <a href="#historial-section">Historial</a>
+      </nav>
+    </aside>
 
-  <main class="layout">
-    <section class="card">
-      <h2>Dashboard</h2>
-      <div id="dashboard" class="grid"></div>
-    </section>
+    <main class="main">
+      <header class="hero">
+        <p class="eyebrow">Imperio Atómico</p>
+        <h1>Panel administrativo Copy Mary</h1>
+        <p>Controla precios, ventas, inventario crítico y utilidad sin vender por debajo del costo.</p>
+      </header>
 
-    <section class="card">
-      <h2>Registrar venta</h2>
-      <form id="saleForm" class="form">
-        <label>Servicio
-          <select id="serviceSelect"></select>
-        </label>
-        <label>Cantidad
-          <input id="quantity" type="number" min="1" value="1" />
-        </label>
-        <label>Precio unitario USD
-          <input id="unitPrice" type="number" min="0" step="0.01" />
-        </label>
-        <label>Metodo de pago
-          <select id="paymentMethod">
-            <option value="efectivo">Efectivo</option>
-            <option value="pago_movil">Pago movil</option>
-            <option value="transferencia">Transferencia</option>
-            <option value="divisas">Divisas</option>
-          </select>
-        </label>
-        <button type="submit">Calcular venta</button>
-      </form>
-      <div id="saleResult" class="result"></div>
-    </section>
+      <section id="dashboard-section" class="card">
+        <h2>Dashboard</h2>
+        <div id="dashboard" class="grid"></div>
+      </section>
 
-    <section class="card">
-      <h2>Servicios</h2>
-      <table id="servicesTable"></table>
-    </section>
+      <div class="layout">
+        <section id="ventas-section" class="card">
+          <h2>Registrar venta</h2>
+          <form id="saleForm" class="form">
+            <label>Servicio
+              <select id="serviceSelect"></select>
+            </label>
+            <label>Cantidad
+              <input id="quantity" type="number" min="1" value="1" />
+            </label>
+            <label>Precio unitario USD
+              <input id="unitPrice" type="number" min="0" step="0.01" />
+            </label>
+            <label>Método de pago
+              <select id="paymentMethod">
+                <option value="efectivo">Efectivo</option>
+                <option value="pago_movil">Pago móvil</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="divisas">Divisas</option>
+              </select>
+            </label>
+            <button type="submit">Guardar venta</button>
+          </form>
+          <div id="saleResult" class="result"></div>
+        </section>
 
-    <section class="card">
-      <h2>Inventario critico</h2>
-      <table id="inventoryTable"></table>
-    </section>
-  </main>
+        <section id="servicios-section" class="card">
+          <h2>Servicios</h2>
+          <table id="servicesTable"></table>
+        </section>
 
+        <section id="inventario-section" class="card">
+          <h2>Inventario crítico</h2>
+          <table id="inventoryTable"></table>
+        </section>
+
+        <section id="historial-section" class="card">
+          <h2>Historial de ventas</h2>
+          <table id="salesTable"></table>
+        </section>
+      </div>
+    </main>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>
