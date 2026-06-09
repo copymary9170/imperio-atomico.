@@ -174,26 +174,40 @@ def _search_table(table_name: str, query: str) -> pd.DataFrame:
     if df.empty:
         return df
     mask = df.astype(str).apply(lambda col: col.str.contains(query, case=False, na=False)).any(axis=1)
-    return df[mask].head(50)
+    return df[mask].head(30)
 
 
 def render_global_search() -> None:
-    st.markdown("### 🔎 Búsqueda rápida")
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        tipo = st.selectbox("Buscar en", ["Productos", "Servicios", "Clientes"], key="busqueda_tipo")
-    with c2:
-        consulta = st.text_input("Escribe para buscar", placeholder="Ejemplo: opalina, impresión color, María...", key="busqueda_texto")
+    consulta = st.text_input(
+        "🔎 Buscador universal",
+        placeholder="Buscar cualquier cosa: cliente, producto, servicio, venta, cotización...",
+        key="busqueda_universal_texto",
+    )
     if not consulta.strip():
-        st.caption("Busca productos, servicios o clientes sin entrar a cada módulo.")
+        st.caption("Busca en productos, servicios, clientes, ventas, cotizaciones e inventario desde un solo lugar.")
         return
-    table_map = {"Productos": "inventario", "Servicios": "servicios", "Clientes": "clientes"}
-    results = _search_table(table_map[tipo], consulta)
-    if results.empty:
-        st.warning(f"No encontré resultados en {tipo.lower()} para: {consulta}")
-    else:
-        st.success(f"{len(results)} resultado(s) encontrado(s) en {tipo.lower()}.")
-        st.dataframe(results, use_container_width=True, hide_index=True)
+
+    fuentes = [
+        ("🛍️ Productos / Inventario", "inventario"),
+        ("🧾 Servicios", "servicios"),
+        ("👥 Clientes", "clientes"),
+        ("💰 Ventas", "ventas"),
+        ("📝 Cotizaciones", "cotizaciones"),
+        ("📦 Stock", "stock"),
+    ]
+    total = 0
+    tabs = st.tabs([nombre for nombre, _tabla in fuentes])
+    for tab, (nombre, tabla) in zip(tabs, fuentes):
+        with tab:
+            results = _search_table(tabla, consulta)
+            total += len(results)
+            if results.empty:
+                st.info(f"Sin resultados en {nombre}.")
+            else:
+                st.success(f"{len(results)} resultado(s) en {nombre}.")
+                st.dataframe(results, use_container_width=True, hide_index=True)
+    if total == 0:
+        st.warning(f"No encontré coincidencias para: {consulta}")
 
 
 st.markdown(
@@ -296,7 +310,7 @@ for col, (key, label, unit, fmt) in zip(rate_cols, rate_fields):
     value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
     col.metric(label, f"{fmt % value} {unit}")
 
-with st.expander("🔎 Buscar producto, servicio o cliente", expanded=True):
+with st.expander("🔎 Buscador universal", expanded=True):
     render_global_search()
 
 cols = st.columns([1, 1, 6])
