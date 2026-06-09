@@ -92,39 +92,71 @@ def _count_table(table: str, where: str | None = None) -> int:
         return 0
 
 
-def _ventas_por_hora() -> pd.DataFrame:
+def _safe_query(sql: str, table: str) -> pd.DataFrame:
     try:
         with db_transaction() as conn:
-            if not _table_exists(conn, "movimientos_tesoreria"):
+            if not _table_exists(conn, table):
                 return pd.DataFrame()
-            return pd.read_sql_query(
-                """
-                SELECT strftime('%H:00', fecha) AS hora, SUM(monto_usd) AS ventas_usd
-                FROM movimientos_tesoreria
-                WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date('now')
-                GROUP BY strftime('%H', fecha)
-                ORDER BY hora
-                """,
-                conn,
-            )
+            return pd.read_sql_query(sql, conn)
     except Exception:
         return pd.DataFrame()
+
+
+def _ventas_por_hora() -> pd.DataFrame:
+    return _safe_query("""
+        SELECT strftime('%H:00', fecha) AS hora, SUM(monto_usd) AS ventas_usd
+        FROM movimientos_tesoreria
+        WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date('now')
+        GROUP BY strftime('%H', fecha)
+        ORDER BY hora
+    """, "movimientos_tesoreria")
+
+
+def _top_productos() -> pd.DataFrame:
+    return _safe_query("""
+        SELECT descripcion AS producto, COUNT(*) AS veces, SUM(monto_usd) AS total_usd
+        FROM movimientos_tesoreria
+        WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date('now')
+        GROUP BY descripcion
+        ORDER BY total_usd DESC
+        LIMIT 10
+    """, "movimientos_tesoreria")
+
+
+def _ultimas_ventas() -> pd.DataFrame:
+    return _safe_query("""
+        SELECT fecha, descripcion, monto_usd, metodo_pago, usuario
+        FROM movimientos_tesoreria
+        WHERE tipo='ingreso'
+        ORDER BY id DESC
+        LIMIT 10
+    """, "movimientos_tesoreria")
+
+
+def _ultimos_clientes() -> pd.DataFrame:
+    return _safe_query("""
+        SELECT * FROM clientes
+        ORDER BY id DESC
+        LIMIT 10
+    """, "clientes")
+
+
+def _inventario_bajo() -> pd.DataFrame:
+    return _safe_query("""
+        SELECT * FROM inventario
+        WHERE COALESCE(stock_actual, 0) <= COALESCE(stock_minimo, 0)
+        ORDER BY stock_actual ASC
+        LIMIT 15
+    """, "inventario")
 
 
 def _get_movimientos_df() -> pd.DataFrame:
-    try:
-        with db_transaction() as conn:
-            return pd.read_sql_query(
-                """
-                SELECT fecha, tipo, origen, descripcion, monto_usd, metodo_pago, usuario, estado
-                FROM movimientos_tesoreria
-                ORDER BY id DESC
-                LIMIT 120
-                """,
-                conn,
-            )
-    except Exception:
-        return pd.DataFrame()
+    return _safe_query("""
+        SELECT fecha, tipo, origen, descripcion, monto_usd, metodo_pago, usuario, estado
+        FROM movimientos_tesoreria
+        ORDER BY id DESC
+        LIMIT 120
+    """, "movimientos_tesoreria")
 
 
 def _get_dias_df() -> pd.DataFrame:
@@ -159,9 +191,9 @@ def _pos_status(diferencia: float) -> tuple[str, str]:
 def render_dia_caja(usuario: str) -> None:
     st.markdown("""
         <style>
-            .pos-hero {border-radius:26px;padding:1.25rem 1.35rem;background:linear-gradient(135deg,#071f3a,#0f4c81 55%,#20b8b8);color:white;box-shadow:0 18px 45px rgba(15,76,129,.22);margin-bottom:1rem;}
-            .pos-title {font-size:1.35rem;font-weight:900;letter-spacing:-.03em;}
-            .pos-time {font-size:2.45rem;font-weight:950;letter-spacing:-.06em;line-height:1;margin-top:.35rem;}
+            .pos-hero {border-radius:28px;padding:1.35rem 1.45rem;background:linear-gradient(135deg,#071f3a,#0f4c81 55%,#20b8b8);color:white;box-shadow:0 18px 45px rgba(15,76,129,.22);margin-bottom:1rem;}
+            .pos-title {font-size:1.45rem;font-weight:950;letter-spacing:-.03em;}
+            .pos-time {font-size:2.65rem;font-weight:950;letter-spacing:-.06em;line-height:1;margin-top:.35rem;}
             .pos-sub {opacity:.86;font-size:.9rem;margin-top:.35rem;}
             .pos-pill {display:inline-block;padding:.45rem .75rem;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);font-weight:800;margin-top:.35rem;}
             .quick-title {font-weight:850;color:#334155;margin:.3rem 0 .4rem;}
@@ -181,9 +213,9 @@ def render_dia_caja(usuario: str) -> None:
 
     st.markdown(f"""
         <div class="pos-hero">
-            <div class="pos-title">🌅 Centro de operaciones · Punto de venta</div>
+            <div class="pos-title">🖨️ Copy Mary · Centro de operaciones</div>
             <div class="pos-time">{now.strftime('%I:%M %p')}</div>
-            <div class="pos-sub">{now.strftime('%d/%m/%Y')} · Copy Mary · BCV {rates['bcv']:.2f} Bs/$ · Binance {rates['binance']:.2f} Bs/$</div>
+            <div class="pos-sub">{now.strftime('%d/%m/%Y')} · BCV {rates['bcv']:.2f} Bs/$ · Binance {rates['binance']:.2f} Bs/$</div>
             <div class="pos-pill">Turno: {estado_turno}</div>
         </div>
     """, unsafe_allow_html=True)
@@ -229,6 +261,27 @@ def render_dia_caja(usuario: str) -> None:
     if not ventas_hora.empty:
         st.markdown("#### Ventas por hora")
         st.bar_chart(ventas_hora.set_index("hora"))
+
+    st.markdown("### Resumen comercial")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### 🏆 Productos / servicios más vendidos hoy")
+        top = _top_productos()
+        st.dataframe(top, use_container_width=True, hide_index=True) if not top.empty else st.info("Aún no hay ventas registradas hoy.")
+    with c2:
+        st.markdown("#### ⚠️ Alertas de inventario bajo")
+        bajo = _inventario_bajo()
+        st.dataframe(bajo, use_container_width=True, hide_index=True) if not bajo.empty else st.success("No hay inventario bajo detectado.")
+
+    c3, c4 = st.columns(2)
+    with c3:
+        st.markdown("#### 🧾 Últimas 10 ventas")
+        ult = _ultimas_ventas()
+        st.dataframe(ult, use_container_width=True, hide_index=True) if not ult.empty else st.info("No hay ventas recientes.")
+    with c4:
+        st.markdown("#### 👥 Últimos clientes registrados")
+        cli = _ultimos_clientes()
+        st.dataframe(cli, use_container_width=True, hide_index=True) if not cli.empty else st.info("No hay clientes recientes.")
 
     tab_inicio, tab_operacion, tab_valores, tab_cajon, tab_fin = st.tabs(["🌅 Iniciar día", "🏦 Caja / Fondos / Operación", "📊 Valores acumulados", "💵 Cajón de dinero", "🌙 Finalizar día"])
 
