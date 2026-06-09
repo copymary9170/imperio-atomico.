@@ -128,20 +128,78 @@ def _finalizar_dia(usuario: str, fondo_final: float, observaciones: str) -> None
         )
 
 
+def _pos_status(diferencia: float) -> tuple[str, str]:
+    abs_diff = abs(diferencia)
+    if abs_diff <= 0.01:
+        return "🟢", "Caja cuadrada"
+    if abs_diff <= 1.0:
+        return "🟡", "Diferencia menor"
+    return "🔴", "Revisar caja"
+
+
 def render_dia_caja(usuario: str) -> None:
-    st.title("🌅 Día / Caja")
-    st.caption("Ventana diaria para iniciar operación, revisar fondos, controlar caja y finalizar el día.")
+    st.markdown(
+        """
+        <style>
+            .pos-hero {border-radius:26px;padding:1.25rem 1.35rem;background:linear-gradient(135deg,#071f3a,#0f4c81 55%,#20b8b8);color:white;box-shadow:0 18px 45px rgba(15,76,129,.22);margin-bottom:1rem;}
+            .pos-title {font-size:1.35rem;font-weight:900;letter-spacing:-.03em;}
+            .pos-time {font-size:2.45rem;font-weight:950;letter-spacing:-.06em;line-height:1;margin-top:.35rem;}
+            .pos-sub {opacity:.86;font-size:.9rem;margin-top:.35rem;}
+            .pos-pill {display:inline-block;padding:.45rem .75rem;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);font-weight:800;margin-top:.35rem;}
+            .quick-title {font-weight:850;color:#334155;margin:.3rem 0 .4rem;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     dia = _get_dia_abierto()
     resumen = _get_resumen_operacion()
+    fondo_inicial = _safe_float(dia["fondo_inicial_usd"]) if dia else 0.0
+    ventas_dia = resumen["ingresos"]
+    gastos_dia = resumen["egresos"]
     saldo_efectivo = resumen["ingreso_efectivo"] - resumen["egreso_efectivo"]
-    saldo_total = resumen["ingresos"] - resumen["egresos"]
+    caja_esperada = fondo_inicial + saldo_efectivo
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Estado del día", "Abierto" if dia else "Cerrado")
-    c2.metric("Fondo inicial", f"$ {_safe_float(dia['fondo_inicial_usd']) if dia else 0:,.2f}")
-    c3.metric("Saldo efectivo", f"$ {saldo_efectivo:,.2f}")
-    c4.metric("Operación acumulada", f"$ {saldo_total:,.2f}")
+    now = datetime.now()
+    estado_turno = "Abierto" if dia else "Cerrado"
+
+    st.markdown(
+        f"""
+        <div class="pos-hero">
+            <div class="pos-title">🌅 Punto de venta · Día / Caja</div>
+            <div class="pos-time">{now.strftime('%I:%M %p')}</div>
+            <div class="pos-sub">{now.strftime('%d/%m/%Y')} · Operación diaria de Copy Mary</div>
+            <div class="pos-pill">Turno: {estado_turno}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="quick-title">Accesos rápidos</div>', unsafe_allow_html=True)
+    q1, q2, q3, q4 = st.columns(4)
+    q1.button("💰 Nueva venta", use_container_width=True)
+    q2.button("📝 Nueva cotización", use_container_width=True)
+    q3.button("👥 Cliente", use_container_width=True)
+    q4.button("💵 Abrir cajón", use_container_width=True)
+
+    st.divider()
+
+    st.markdown("### Estado de caja")
+    caja_contada = st.number_input("Caja contada USD", min_value=0.0, step=0.25, format="%.2f", value=float(max(caja_esperada, 0)))
+    diferencia = caja_contada - caja_esperada
+    semaforo, semaforo_texto = _pos_status(diferencia)
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Estado del turno", estado_turno)
+    k2.metric("Fondo inicial", f"$ {fondo_inicial:,.2f}")
+    k3.metric("Ventas del día", f"$ {ventas_dia:,.2f}")
+    k4.metric("Gastos del día", f"$ {gastos_dia:,.2f}")
+
+    k5, k6, k7, k8 = st.columns(4)
+    k5.metric("Caja esperada", f"$ {caja_esperada:,.2f}")
+    k6.metric("Caja contada", f"$ {caja_contada:,.2f}")
+    k7.metric("Diferencia", f"$ {diferencia:,.2f}")
+    k8.metric("Semáforo", f"{semaforo} {semaforo_texto}")
 
     tab_inicio, tab_operacion, tab_valores, tab_cajon, tab_fin = st.tabs([
         "🌅 Iniciar día",
@@ -156,7 +214,7 @@ def render_dia_caja(usuario: str) -> None:
         if dia:
             st.success(f"Ya hay un día abierto desde {dia['fecha_inicio']} por {dia['usuario_inicio']}.")
         else:
-            fondo = st.number_input("Fondo inicial en caja USD", min_value=0.0, step=0.25, format="%.2f")
+            fondo = st.number_input("Fondo inicial en caja USD", min_value=0.0, step=0.25, format="%.2f", key="fondo_inicio_pos")
             obs = st.text_area("Observaciones de apertura", placeholder="Ejemplo: fondo inicial entregado, efectivo disponible, novedades...")
             if st.button("Iniciar día", type="primary", use_container_width=True):
                 _iniciar_dia(usuario, fondo, obs)
@@ -182,16 +240,15 @@ def render_dia_caja(usuario: str) -> None:
         a1, a2, a3 = st.columns(3)
         a1.metric("Ingresos acumulados", f"$ {resumen['ingresos']:,.2f}")
         a2.metric("Egresos acumulados", f"$ {resumen['egresos']:,.2f}")
-        a3.metric("Saldo operativo", f"$ {saldo_total:,.2f}")
+        a3.metric("Saldo operativo", f"$ {resumen['ingresos'] - resumen['egresos']:,.2f}")
         st.markdown("#### Historial de días")
-        dias_df = _get_dias_df()
-        st.dataframe(dias_df, use_container_width=True, hide_index=True)
+        st.dataframe(_get_dias_df(), use_container_width=True, hide_index=True)
 
     with tab_cajon:
         st.subheader("💵 Abrir cajón de dinero")
         st.info("Este botón registra la acción visualmente. Para abrir un cajón físico real se necesita integración con impresora POS o hardware compatible.")
         motivo = st.text_input("Motivo de apertura", placeholder="Cambio, cobro en efectivo, revisión de fondo...")
-        if st.button("Abrir cajón de dinero", use_container_width=True):
+        if st.button("Abrir cajón de dinero", use_container_width=True, key="abrir_cajon_tab"):
             st.success(f"Solicitud de apertura registrada. Motivo: {motivo or 'Sin motivo indicado'}")
 
     with tab_fin:
@@ -199,7 +256,7 @@ def render_dia_caja(usuario: str) -> None:
         if not dia:
             st.warning("No hay un día abierto para finalizar.")
         else:
-            fondo_final = st.number_input("Fondo final contado USD", min_value=0.0, step=0.25, format="%.2f", value=float(max(saldo_efectivo, 0)))
+            fondo_final = st.number_input("Fondo final contado USD", min_value=0.0, step=0.25, format="%.2f", value=float(max(caja_contada, 0)), key="fondo_final_pos")
             obs_fin = st.text_area("Observaciones de cierre", placeholder="Ejemplo: diferencia de caja, efectivo entregado, cierre normal...")
             if st.button("Finalizar día", type="primary", use_container_width=True):
                 _finalizar_dia(usuario, fondo_final, obs_fin)
