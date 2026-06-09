@@ -163,49 +163,20 @@ st.markdown(
         .block-container {padding-top:1rem; max-width:1540px;}
         .main .block-container {padding-left:2.4rem; padding-right:2.4rem;}
         div[role="radiogroup"] {gap:.45rem; flex-wrap:wrap; align-items:center;}
-        div[role="radiogroup"] label {
-            border:1px solid #dce5ef;
-            border-radius:999px;
-            padding:.42rem .92rem;
-            background:linear-gradient(180deg,#ffffff,#f8fbff);
-            box-shadow:0 3px 10px rgba(15,23,42,.04);
-            transition:all .18s ease;
-        }
+        div[role="radiogroup"] label {border:1px solid #dce5ef;border-radius:999px;padding:.42rem .92rem;background:linear-gradient(180deg,#ffffff,#f8fbff);box-shadow:0 3px 10px rgba(15,23,42,.04);transition:all .18s ease;}
         div[role="radiogroup"] label:hover {border-color:#20b8b8; background:#eefafa; transform:translateY(-1px);}
-        .top-shell {
-            background:linear-gradient(135deg,#073b63 0%,#0f4c81 48%,#20b8b8 120%);
-            color:white;
-            border-radius:24px;
-            padding:1.25rem 1.35rem;
-            margin-bottom:1rem;
-            box-shadow:0 18px 45px rgba(15,76,129,.22);
-            position:relative;
-            overflow:hidden;
-        }
-        .top-shell:after {
-            content:"";
-            position:absolute;
-            width:220px;
-            height:220px;
-            border-radius:999px;
-            right:-70px;
-            top:-95px;
-            background:rgba(255,255,255,.16);
-        }
+        .top-shell {background:linear-gradient(135deg,#073b63 0%,#0f4c81 48%,#20b8b8 120%);color:white;border-radius:24px;padding:1.25rem 1.35rem;margin-bottom:1rem;box-shadow:0 18px 45px rgba(15,76,129,.22);position:relative;overflow:hidden;}
+        .top-shell:after {content:"";position:absolute;width:220px;height:220px;border-radius:999px;right:-70px;top:-95px;background:rgba(255,255,255,.16);}
         .top-header {display:flex; align-items:center; justify-content:space-between; gap:1rem; position:relative; z-index:1;}
         .brand-wrap {display:flex; align-items:center; gap:.9rem;}
         .brand-icon {width:48px;height:48px;border-radius:18px;background:linear-gradient(135deg,#fff,#dffafa);color:#073b63;display:grid;place-items:center;font-size:1.35rem;font-weight:900;box-shadow:0 12px 26px rgba(0,0,0,.18);}
         .top-brand {font-size:1.35rem; font-weight:900; letter-spacing:-.03em; line-height:1;}
         .top-subtitle {font-size:.82rem; opacity:.82; margin-top:.25rem;}
         .top-actions {font-size:.85rem; opacity:.95; background:rgba(255,255,255,.13); border:1px solid rgba(255,255,255,.18); padding:.55rem .75rem; border-radius:999px;}
-        .rates-grid {display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:.75rem;margin:.95rem 0 1rem;}
-        .rate-card {border:1px solid #e7edf5;border-radius:18px;padding:.85rem .95rem;background:rgba(255,255,255,.92);box-shadow:0 10px 24px rgba(15,76,129,.07);}
-        .rate-label {font-size:.72rem;color:#64748b;margin-bottom:.18rem;font-weight:750;text-transform:uppercase;letter-spacing:.04em;}
-        .rate-value {font-size:1.22rem;font-weight:900;color:#0f172a;letter-spacing:-.03em;}
-        .action-row {display:flex;gap:.65rem;align-items:center;margin:.45rem 0 .85rem;}
+        .rate-title {font-size:.85rem;font-weight:800;color:#334155;margin:.6rem 0 .2rem;}
+        [data-testid="stMetric"] {background:#fff;border:1px solid #e7edf5;border-radius:18px;padding:1rem;box-shadow:0 10px 24px rgba(15,76,129,.07);}
         .stButton button {border-radius:14px !important; font-weight:800 !important; border:1px solid #dce5ef !important; box-shadow:0 6px 16px rgba(15,76,129,.06) !important;}
-        @media(max-width:1100px){.rates-grid{grid-template-columns:repeat(3,1fr)}}
-        @media(max-width:650px){.main .block-container{padding-left:1rem;padding-right:1rem}.top-header{align-items:flex-start;flex-direction:column}.rates-grid{grid-template-columns:repeat(2,1fr)}.rate-value{font-size:1.05rem}}
+        @media(max-width:650px){.main .block-container{padding-left:1rem;padding-right:1rem}.top-header{align-items:flex-start;flex-direction:column}}
     </style>
     """,
     unsafe_allow_html=True,
@@ -251,27 +222,6 @@ try:
 except Exception:
     config = DEFAULT_CONFIG
 
-rate_fields = [
-    ("tasa_bcv", "BCV", "Bs/$", "%.2f"),
-    ("tasa_binance", "Binance", "Bs/$", "%.2f"),
-    ("iva_perc", "IVA", "%", "%.2f"),
-    ("igtf_perc", "IGTF", "%", "%.2f"),
-    ("banco_perc", "Banco", "%", "%.3f"),
-    ("kontigo_perc", "Kontigo", "%", "%.3f"),
-]
-
-rate_cards = []
-for key, label, unit, fmt in rate_fields:
-    value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
-    rate_cards.append(
-        f"""
-        <div class="rate-card">
-            <div class="rate-label">{label}</div>
-            <div class="rate-value">{fmt % value} {unit}</div>
-        </div>
-        """
-    )
-
 st.markdown(
     f"""
     <div class="top-shell">
@@ -286,12 +236,23 @@ st.markdown(
             <div class="top-actions">Usuario: {usuario} · Rol: {user_role}</div>
         </div>
     </div>
-    <div class="rates-grid">
-        {''.join(rate_cards)}
-    </div>
     """,
     unsafe_allow_html=True,
 )
+
+st.markdown('<div class="rate-title">Tasas, impuestos y comisiones activas</div>', unsafe_allow_html=True)
+rate_fields = [
+    ("tasa_bcv", "BCV", "Bs/$", "%.2f"),
+    ("tasa_binance", "Binance", "Bs/$", "%.2f"),
+    ("iva_perc", "IVA", "%", "%.2f"),
+    ("igtf_perc", "IGTF", "%", "%.2f"),
+    ("banco_perc", "Banco", "%", "%.3f"),
+    ("kontigo_perc", "Kontigo", "%", "%.3f"),
+]
+rate_cols = st.columns(len(rate_fields))
+for col, (key, label, unit, fmt) in zip(rate_cols, rate_fields):
+    value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
+    col.metric(label, f"{fmt % value} {unit}")
 
 cols = st.columns([1, 1, 6])
 with cols[0]:
