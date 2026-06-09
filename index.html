@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Copy Mary ERP</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">CM</div>
+        <div>
+          <div class="brand-title">Copy Mary</div>
+          <div class="brand-subtitle">ERP creativo</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="active" href="#dashboard-section">Dashboard</a>
+        <a href="#ventas-section">Ventas</a>
+        <a href="#clientes-section">Clientes</a>
+        <a href="#cotizaciones-section">Cotizaciones</a>
+        <a href="#servicios-section">Servicios</a>
+        <a href="#inventario-section">Inventario</a>
+        <a href="#historial-section">Historial</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <p class="eyebrow">Imperio Atómico</p>
+        <h1>Panel administrativo Copy Mary</h1>
+        <p>Controla precios, ventas, clientes, cotizaciones, inventario crítico y utilidad sin vender por debajo del costo.</p>
+        <div class="hero-actions">
+          <button id="themeButton" type="button" class="btn btn-secondary">Modo oscuro</button>
+          <button id="exportButton" type="button" class="btn">Exportar ventas CSV</button>
+        </div>
+      </header>
+
+      <section id="dashboard-section" class="card">
+        <h2>Dashboard</h2>
+        <div id="dashboard" class="grid"></div>
+        <div class="chart-wrap">
+          <h3>Resumen visual</h3>
+          <div id="profitChart" class="bars"></div>
+        </div>
+      </section>
+
+      <div class="layout">
+        <section id="ventas-section" class="card">
+          <h2>Registrar venta</h2>
+          <form id="saleForm" class="form">
+            <label>Cliente
+              <select id="clientSelect"></select>
+            </label>
+            <label>Servicio
+              <select id="serviceSelect"></select>
+            </label>
+            <label>Cantidad
+              <input id="quantity" type="number" min="1" value="1" />
+            </label>
+            <label>Precio unitario USD
+              <input id="unitPrice" type="number" min="0" step="0.01" />
+            </label>
+            <label>Método de pago
+              <select id="paymentMethod">
+                <option value="efectivo">Efectivo</option>
+                <option value="pago_movil">Pago móvil</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="divisas">Divisas</option>
+              </select>
+            </label>
+            <button type="submit">Guardar venta</button>
+          </form>
+          <div id="saleResult" class="result"></div>
+        </section>
+
+        <section id="clientes-section" class="card">
+          <h2>Clientes</h2>
+          <form id="clientForm" class="form compact-form">
+            <label>Nombre
+              <input id="clientName" type="text" placeholder="Nombre del cliente" />
+            </label>
+            <label>Teléfono
+              <input id="clientPhone" type="text" placeholder="Teléfono o WhatsApp" />
+            </label>
+            <button type="submit">Guardar cliente</button>
+          </form>
+          <table id="clientsTable"></table>
+        </section>
+
+        <section id="cotizaciones-section" class="card">
+          <h2>Cotizaciones rápidas</h2>
+          <div id="quoteBox" class="quote-box"></div>
+        </section>
+
+        <section id="servicios-section" class="card">
+          <h2>Servicios</h2>
+          <table id="servicesTable"></table>
+        </section>
+
+        <section id="inventario-section" class="card">
+          <h2>Inventario crítico</h2>
+          <table id="inventoryTable"></table>
+        </section>
+
+        <section id="historial-section" class="card">
+          <h2>Historial de ventas</h2>
+          <table id="salesTable"></table>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
