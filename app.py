@@ -54,6 +54,7 @@ from views.stock_minimo import render_stock_minimo
 from views.kardex import render_kardex
 from views.clientes import render_clientes
 from views.contactos import render_contactos
+from views.reportes import render_reportes
 from views.cmyk import render_cmyk
 from views.activos import render_activos
 from views.otros_procesos import render_otros_procesos
@@ -194,6 +195,7 @@ def render_global_search() -> None:
         ("🧾 Servicios", "servicios"),
         ("👥 Clientes", "clientes"),
         ("📇 Contactos", "clientes"),
+        ("📊 Reportes", "ventas"),
         ("💰 Ventas", "ventas"),
         ("📝 Cotizaciones", "cotizaciones"),
         ("📦 Stock", "stock"),
@@ -248,6 +250,7 @@ MENU_ROUTES = {
     "🏗️ Activos": (("activos.view", "mantenimiento.view"), lambda: render_activos_unificado(usuario)),
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
     "📇 Contactos": (("clientes.view", "inventario.view", "dashboard.view"), lambda: render_contactos(usuario)),
+    "📊 Reportes": (("dashboard.view", "reportes.export", "contabilidad.view"), lambda: render_reportes(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
