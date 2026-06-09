@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Imperio Atómico ERP", layout="wide", page_icon="⚛️")
@@ -11,6 +12,7 @@ from security.permission_extensions import ensure_extended_permissions
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
 from services.alert_service import get_alert_summary
+from database.connection import db_transaction
 
 init_schema()
 run_auto_migrations()
@@ -154,6 +156,46 @@ def render_activos_unificado(usuario: str) -> None:
     with tab_patrimonial: render_activos_patrimonial(usuario)
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
+
+
+def _search_table(table_name: str, query: str) -> pd.DataFrame:
+    query = str(query or "").strip()
+    if not query:
+        return pd.DataFrame()
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, table_name):
+                return pd.DataFrame()
+            df = pd.read_sql_query(f"SELECT * FROM {table_name} LIMIT 1000", conn)
+    except Exception:
+        return pd.DataFrame()
+    if df.empty:
+        return df
+    mask = df.astype(str).apply(lambda col: col.str.contains(query, case=False, na=False)).any(axis=1)
+    return df[mask].head(50)
+
+
+def render_global_search() -> None:
+    st.markdown("### 🔎 Búsqueda rápida")
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        tipo = st.selectbox("Buscar en", ["Productos", "Servicios", "Clientes"], key="busqueda_tipo")
+    with c2:
+        consulta = st.text_input("Escribe para buscar", placeholder="Ejemplo: opalina, impresión color, María...", key="busqueda_texto")
+    if not consulta.strip():
+        st.caption("Busca productos, servicios o clientes sin entrar a cada módulo.")
+        return
+    table_map = {"Productos": "inventario", "Servicios": "servicios", "Clientes": "clientes"}
+    results = _search_table(table_map[tipo], consulta)
+    if results.empty:
+        st.warning(f"No encontré resultados en {tipo.lower()} para: {consulta}")
+    else:
+        st.success(f"{len(results)} resultado(s) encontrado(s) en {tipo.lower()}.")
+        st.dataframe(results, use_container_width=True, hide_index=True)
+
+
 st.markdown(
     """
     <style>
@@ -253,6 +295,9 @@ rate_cols = st.columns(len(rate_fields))
 for col, (key, label, unit, fmt) in zip(rate_cols, rate_fields):
     value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
     col.metric(label, f"{fmt % value} {unit}")
+
+with st.expander("🔎 Buscar producto, servicio o cliente", expanded=True):
+    render_global_search()
 
 cols = st.columns([1, 1, 6])
 with cols[0]:
