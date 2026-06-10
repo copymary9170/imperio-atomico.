@@ -12,12 +12,17 @@ from security.permission_extensions import ensure_extended_permissions
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
 from services.alert_service import get_alert_summary
+from services.backup_service import create_daily_backup_if_needed
 from database.connection import db_transaction
 
 init_schema()
 run_auto_migrations()
 ensure_extended_permissions()
 restore_session_snapshot()
+try:
+    create_daily_backup_if_needed()
+except Exception:
+    pass
 
 
 def _render_login() -> None:
@@ -55,6 +60,7 @@ from views.kardex import render_kardex
 from views.clientes import render_clientes
 from views.contactos import render_contactos
 from views.reportes import render_reportes
+from views.respaldo import render_respaldo
 from views.cmyk import render_cmyk
 from views.activos import render_activos
 from views.otros_procesos import render_otros_procesos
@@ -251,6 +257,7 @@ MENU_ROUTES = {
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
     "📇 Contactos": (("clientes.view", "inventario.view", "dashboard.view"), lambda: render_contactos(usuario)),
     "📊 Reportes": (("dashboard.view", "reportes.export", "contabilidad.view"), lambda: render_reportes(usuario)),
+    "💾 Respaldo": (("dashboard.view", "config.view", "reportes.export"), lambda: render_respaldo(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
