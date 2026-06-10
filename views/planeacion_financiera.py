@@ -129,7 +129,7 @@ def _saldo_kontigo(df: pd.DataFrame | None = None) -> float:
 def _render_kontigo(usuario: str) -> None:
     _ensure_kontigo_tables()
     st.subheader("💳 Kontigo / Protección de caja")
-    st.caption("Cuenta interna para proteger caja en USDC, controlar saldo, pagar nómina, reinvertir y comprar online.")
+    st.caption("Primero registras el dinero que entra a Kontigo como saldo libre. Después decides si se reserva para nómina, reinversión, compras online u otro uso.")
 
     df = _load_kontigo_movimientos()
     saldo = _saldo_kontigo(df)
@@ -141,16 +141,17 @@ def _render_kontigo(usuario: str) -> None:
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Saldo Kontigo", f"$ {saldo:,.2f} USDC")
-    c2.metric("Disponible real", f"$ {saldo - reservado:,.2f}")
+    c2.metric("Libre / sin asignar", f"$ {saldo - reservado:,.2f}")
     c3.metric("Salidas", f"$ {salidas:,.2f}")
     c4.metric("Comisiones", f"$ {comisiones:,.2f}")
 
     if saldo - reservado < 0:
         st.warning("⚠️ Tienes más dinero reservado que saldo disponible en Kontigo.")
 
-    tab_mov, tab_bolsillos, tab_historial, tab_calc = st.tabs(["Registrar movimiento", "Distribución", "Historial", "Calculadora"])
+    tab_mov, tab_bolsillos, tab_historial, tab_calc = st.tabs(["Registrar movimiento", "Asignar saldo después", "Historial", "Calculadora"])
 
     with tab_mov:
+        st.info("Las entradas a Kontigo quedarán como **Sin asignar**. La decisión de nómina, reinversión o compras se hace luego en 'Asignar saldo después'.")
         with st.form("form_kontigo_movimiento_integrado"):
             a1, a2, a3 = st.columns(3)
             fecha_mov = a1.date_input("Fecha", value=date.today())
@@ -167,7 +168,11 @@ def _render_kontigo(usuario: str) -> None:
             st.info(f"Movimiento neto: $ {monto_neto:,.2f} USDC · Equivalente: Bs {equivalente_bs:,.2f}")
 
             d1, d2 = st.columns(2)
-            destino = d1.selectbox("Destino / categoría", ["Nómina", "Reinversión", "Disponible", "Compras online", "Caja", "Otro"])
+            if tipo in KONTIGO_ENTRADAS:
+                destino = "Sin asignar"
+                d1.text_input("Estado del dinero", value="Sin asignar / saldo libre", disabled=True)
+            else:
+                destino = d1.selectbox("Uso de la salida", ["Nómina", "Reinversión", "Compras online", "Bolívares", "Efectivo", "Comisión", "Otro"])
             referencia = d2.text_input("Referencia")
             notas = st.text_area("Notas")
 
@@ -200,7 +205,7 @@ def _render_kontigo(usuario: str) -> None:
                 st.rerun()
 
     with tab_bolsillos:
-        st.caption("Reserva parte del saldo para nómina, reinversión, compras online o disponible.")
+        st.caption("Aquí decides después cómo quieres reservar el saldo libre. Esto no cambia el movimiento original; solo organiza el saldo disponible.")
         edited = st.data_editor(
             bolsillos,
             use_container_width=True,
@@ -208,13 +213,13 @@ def _render_kontigo(usuario: str) -> None:
             num_rows="dynamic",
             column_config={
                 "id": st.column_config.NumberColumn("ID", disabled=True),
-                "nombre": st.column_config.TextColumn("Bolsillo"),
+                "nombre": st.column_config.TextColumn("Destino futuro"),
                 "monto_objetivo_usdc": st.column_config.NumberColumn("Monto reservado USDC", min_value=0.0, step=1.0, format="$ %.2f"),
                 "notas": st.column_config.TextColumn("Notas"),
             },
             key="editor_bolsillos_kontigo_integrado",
         )
-        if st.button("💾 Guardar distribución", use_container_width=True):
+        if st.button("💾 Guardar asignación", use_container_width=True):
             with db_transaction() as conn:
                 conn.execute("DELETE FROM kontigo_bolsillos")
                 for _, row in edited.iterrows():
@@ -225,7 +230,7 @@ def _render_kontigo(usuario: str) -> None:
                             (nombre, float(row.get("monto_objetivo_usdc") or 0), str(row.get("notas") or "")),
                         )
             create_backup("kontigo_bolsillos", upload_external=True)
-            st.success("Distribución guardada.")
+            st.success("Asignación guardada.")
             st.rerun()
 
     with tab_historial:
