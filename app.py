@@ -61,6 +61,7 @@ from views.clientes import render_clientes
 from views.contactos import render_contactos
 from views.reportes import render_reportes
 from views.respaldo import render_respaldo
+from views.configuracion_sistema import render_configuracion_sistema
 from views.cmyk import render_cmyk
 from views.activos import render_activos
 from views.otros_procesos import render_otros_procesos
@@ -258,6 +259,7 @@ MENU_ROUTES = {
     "📇 Contactos": (("clientes.view", "inventario.view", "dashboard.view"), lambda: render_contactos(usuario)),
     "📊 Reportes": (("dashboard.view", "reportes.export", "contabilidad.view"), lambda: render_reportes(usuario)),
     "💾 Respaldo": (("dashboard.view", "config.view", "reportes.export"), lambda: render_respaldo(usuario)),
+    "⚙️ Configuración": (("dashboard.view", "config.view", "reportes.export"), lambda: render_configuracion_sistema(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
