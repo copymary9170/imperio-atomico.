@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from utils.timezone import now_caracas, caracas_timestamp
 
 
 def _safe_float(value, default: float = 0.0) -> float:
@@ -16,6 +16,10 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _today_caracas() -> str:
+    return now_caracas().strftime("%Y-%m-%d")
 
 
 def _ensure_dia_tables() -> None:
@@ -92,35 +96,37 @@ def _count_table(table: str, where: str | None = None) -> int:
         return 0
 
 
-def _safe_query(sql: str, table: str) -> pd.DataFrame:
+def _safe_query(sql: str, table: str, params: tuple = ()) -> pd.DataFrame:
     try:
         with db_transaction() as conn:
             if not _table_exists(conn, table):
                 return pd.DataFrame()
-            return pd.read_sql_query(sql, conn)
+            return pd.read_sql_query(sql, conn, params=params)
     except Exception:
         return pd.DataFrame()
 
 
 def _ventas_por_hora() -> pd.DataFrame:
+    hoy = _today_caracas()
     return _safe_query("""
         SELECT strftime('%H:00', fecha) AS hora, SUM(monto_usd) AS ventas_usd
         FROM movimientos_tesoreria
-        WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date('now')
+        WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date(?)
         GROUP BY strftime('%H', fecha)
         ORDER BY hora
-    """, "movimientos_tesoreria")
+    """, "movimientos_tesoreria", (hoy,))
 
 
 def _top_productos() -> pd.DataFrame:
+    hoy = _today_caracas()
     return _safe_query("""
         SELECT descripcion AS producto, COUNT(*) AS veces, SUM(monto_usd) AS total_usd
         FROM movimientos_tesoreria
-        WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date('now')
+        WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date(?)
         GROUP BY descripcion
         ORDER BY total_usd DESC
         LIMIT 10
-    """, "movimientos_tesoreria")
+    """, "movimientos_tesoreria", (hoy,))
 
 
 def _ultimas_ventas() -> pd.DataFrame:
@@ -168,7 +174,10 @@ def _get_dias_df() -> pd.DataFrame:
 def _iniciar_dia(usuario: str, fondo_inicial: float, observaciones: str) -> None:
     _ensure_dia_tables()
     with db_transaction() as conn:
-        conn.execute("INSERT INTO dias_operacion (usuario_inicio, estado, fondo_inicial_usd, observaciones_inicio) VALUES (?, 'abierto', ?, ?)", (usuario, fondo_inicial, observaciones))
+        conn.execute(
+            "INSERT INTO dias_operacion (fecha_inicio, usuario_inicio, estado, fondo_inicial_usd, observaciones_inicio) VALUES (?, ?, 'abierto', ?, ?)",
+            (caracas_timestamp(), usuario, fondo_inicial, observaciones),
+        )
 
 
 def _finalizar_dia(usuario: str, fondo_final: float, observaciones: str) -> None:
@@ -176,7 +185,10 @@ def _finalizar_dia(usuario: str, fondo_final: float, observaciones: str) -> None
     if not dia:
         return
     with db_transaction() as conn:
-        conn.execute("UPDATE dias_operacion SET estado='cerrado', fecha_fin=CURRENT_TIMESTAMP, usuario_fin=?, fondo_final_usd=?, observaciones_fin=? WHERE id=?", (usuario, fondo_final, observaciones, dia["id"]))
+        conn.execute(
+            "UPDATE dias_operacion SET estado='cerrado', fecha_fin=?, usuario_fin=?, fondo_final_usd=?, observaciones_fin=? WHERE id=?",
+            (caracas_timestamp(), usuario, fondo_final, observaciones, dia["id"]),
+        )
 
 
 def _pos_status(diferencia: float) -> tuple[str, str]:
@@ -208,14 +220,14 @@ def render_dia_caja(usuario: str) -> None:
     gastos_dia = resumen["egresos"]
     saldo_efectivo = resumen["ingreso_efectivo"] - resumen["egreso_efectivo"]
     caja_esperada = fondo_inicial + saldo_efectivo
-    now = datetime.now()
+    now = now_caracas()
     estado_turno = "Abierto" if dia else "Cerrado"
 
     st.markdown(f"""
         <div class="pos-hero">
             <div class="pos-title">🖨️ Copy Mary · Centro de operaciones</div>
             <div class="pos-time">{now.strftime('%I:%M %p')}</div>
-            <div class="pos-sub">{now.strftime('%d/%m/%Y')} · BCV {rates['bcv']:.2f} Bs/$ · Binance {rates['binance']:.2f} Bs/$</div>
+            <div class="pos-sub">{now.strftime('%d/%m/%Y')} · Hora Caracas · BCV {rates['bcv']:.2f} Bs/$ · Binance {rates['binance']:.2f} Bs/$</div>
             <div class="pos-pill">Turno: {estado_turno}</div>
         </div>
     """, unsafe_allow_html=True)
@@ -255,7 +267,7 @@ def render_dia_caja(usuario: str) -> None:
     o1.metric("Ventas en Bs BCV", f"Bs {ventas_dia * rates['bcv']:,.2f}")
     o2.metric("Órdenes en producción", _count_table("ordenes_trabajo", "estado NOT IN ('Finalizada','Cerrada','Cancelada','Entregada')"))
     o3.metric("Cotizaciones pendientes", _count_table("cotizaciones", "estado NOT IN ('Aprobada','Rechazada','Vencida','Cerrada')"))
-    o4.metric("Clientes atendidos", _count_table("ventas", "date(fecha)=date('now')"))
+    o4.metric("Clientes atendidos", _count_table("ventas", f"date(fecha)=date('{_today_caracas()}')"))
 
     ventas_hora = _ventas_por_hora()
     if not ventas_hora.empty:
