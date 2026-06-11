@@ -98,6 +98,10 @@ def listar_consumibles_por_impresora(activo_id: int | None = None) -> pd.DataFra
                 ic.rendimiento_paginas,
                 ic.cobertura_referencia,
                 ic.costo_estimado_hoja_usd,
+                COALESCE(ic.capacidad_maquina_ml, 0) AS capacidad_maquina_ml,
+                COALESCE(ic.cantidad_en_maquina_ml, 0) AS cantidad_en_maquina_ml,
+                COALESCE(ic.unidad_carga, 'ml') AS unidad_carga,
+                COALESCE(ic.descontar_de_inventario, 1) AS descontar_de_inventario,
                 ic.notas
             FROM impresora_consumibles ic
             JOIN activos a ON a.id = ic.activo_id
@@ -119,6 +123,10 @@ def asignar_consumible_impresora(
     rendimiento_paginas: float = 0.0,
     cobertura_referencia: str | None = None,
     costo_estimado_hoja_usd: float = 0.0,
+    capacidad_maquina_ml: float = 0.0,
+    cantidad_en_maquina_ml: float = 0.0,
+    unidad_carga: str = "ml",
+    descontar_de_inventario: bool = True,
     notas: str | None = None,
 ) -> int:
     activo_ok = int(activo_id)
@@ -127,6 +135,10 @@ def asignar_consumible_impresora(
     color_ok = require_text(color, "Color")
     rendimiento = max(0.0, float(rendimiento_paginas or 0.0))
     costo_hoja = max(0.0, float(costo_estimado_hoja_usd or 0.0))
+    capacidad = max(0.0, float(capacidad_maquina_ml or 0.0))
+    cantidad_maquina = max(0.0, float(cantidad_en_maquina_ml or 0.0))
+    unidad_ok = clean_text(unidad_carga) or "ml"
+    descuenta = 1 if bool(descontar_de_inventario) else 0
 
     with db_transaction() as conn:
         row = conn.execute(
@@ -146,6 +158,10 @@ def asignar_consumible_impresora(
                     rendimiento_paginas = ?,
                     cobertura_referencia = ?,
                     costo_estimado_hoja_usd = ?,
+                    capacidad_maquina_ml = ?,
+                    cantidad_en_maquina_ml = ?,
+                    unidad_carga = ?,
+                    descontar_de_inventario = ?,
                     notas = ?,
                     activo = 1
                 WHERE id = ?
@@ -155,6 +171,10 @@ def asignar_consumible_impresora(
                     rendimiento,
                     clean_text(cobertura_referencia),
                     money(costo_hoja),
+                    capacidad,
+                    cantidad_maquina,
+                    unidad_ok,
+                    descuenta,
                     clean_text(notas),
                     int(row["id"]),
                 ),
@@ -171,9 +191,13 @@ def asignar_consumible_impresora(
                 rendimiento_paginas,
                 cobertura_referencia,
                 costo_estimado_hoja_usd,
+                capacidad_maquina_ml,
+                cantidad_en_maquina_ml,
+                unidad_carga,
+                descontar_de_inventario,
                 notas,
                 activo
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
             (
                 activo_ok,
@@ -183,6 +207,10 @@ def asignar_consumible_impresora(
                 rendimiento,
                 clean_text(cobertura_referencia),
                 money(costo_hoja),
+                capacidad,
+                cantidad_maquina,
+                unidad_ok,
+                descuenta,
                 clean_text(notas),
             ),
         )
