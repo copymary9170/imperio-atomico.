@@ -80,6 +80,12 @@ COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("unidad_consumo", "ALTER TABLE unidades_fraccionadas ADD COLUMN unidad_consumo TEXT NOT NULL DEFAULT 'unidad'"),
         ("factor_conversion", "ALTER TABLE unidades_fraccionadas ADD COLUMN factor_conversion REAL NOT NULL DEFAULT 1"),
     ],
+    "impresora_consumibles": [
+        ("capacidad_maquina_ml", "ALTER TABLE impresora_consumibles ADD COLUMN capacidad_maquina_ml REAL NOT NULL DEFAULT 0"),
+        ("cantidad_en_maquina_ml", "ALTER TABLE impresora_consumibles ADD COLUMN cantidad_en_maquina_ml REAL NOT NULL DEFAULT 0"),
+        ("unidad_carga", "ALTER TABLE impresora_consumibles ADD COLUMN unidad_carga TEXT NOT NULL DEFAULT 'ml'"),
+        ("descontar_de_inventario", "ALTER TABLE impresora_consumibles ADD COLUMN descontar_de_inventario INTEGER NOT NULL DEFAULT 1"),
+    ],
 }
 
 
@@ -154,6 +160,10 @@ def _ensure_printer_consumables_table(conn) -> None:
             rendimiento_paginas REAL NOT NULL DEFAULT 0,
             cobertura_referencia TEXT,
             costo_estimado_hoja_usd REAL NOT NULL DEFAULT 0,
+            capacidad_maquina_ml REAL NOT NULL DEFAULT 0,
+            cantidad_en_maquina_ml REAL NOT NULL DEFAULT 0,
+            unidad_carga TEXT NOT NULL DEFAULT 'ml',
+            descontar_de_inventario INTEGER NOT NULL DEFAULT 1,
             notas TEXT,
             activo INTEGER NOT NULL DEFAULT 1,
             UNIQUE (activo_id, inventario_id, color),
