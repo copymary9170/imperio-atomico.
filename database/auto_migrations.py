@@ -141,6 +141,31 @@ def _ensure_columns(conn, table_name: str, column_specs: Iterable[tuple[str, str
             )
 
 
+def _ensure_printer_consumables_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS impresora_consumibles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_creacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            activo_id INTEGER NOT NULL,
+            inventario_id INTEGER NOT NULL,
+            tipo_consumible TEXT NOT NULL DEFAULT 'tinta',
+            color TEXT NOT NULL DEFAULT 'No aplica',
+            rendimiento_paginas REAL NOT NULL DEFAULT 0,
+            cobertura_referencia TEXT,
+            costo_estimado_hoja_usd REAL NOT NULL DEFAULT 0,
+            notas TEXT,
+            activo INTEGER NOT NULL DEFAULT 1,
+            UNIQUE (activo_id, inventario_id, color),
+            FOREIGN KEY (activo_id) REFERENCES activos(id),
+            FOREIGN KEY (inventario_id) REFERENCES inventario(id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_impresora_consumibles_activo ON impresora_consumibles(activo_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_impresora_consumibles_inventario ON impresora_consumibles(inventario_id)")
+
+
 def _backfill_timestamps(conn) -> None:
     for table_name, column_name in (("movimientos_tesoreria", "fecha"), ("cierres_caja", "fecha")):
         try:
@@ -191,6 +216,10 @@ def run_auto_migrations() -> None:
     """Ejecuta migraciones idempotentes y seguras para bases SQLite existentes."""
     with db_transaction() as conn:
         _ensure_migration_log_table(conn)
+        try:
+            _ensure_printer_consumables_table(conn)
+        except Exception as exc:
+            _log_migration_error(conn, area="table_creation", tabla="impresora_consumibles", columna=None, operacion="create table", error=exc)
         for table_name, column_specs in COLUMN_MIGRATIONS.items():
             try:
                 _ensure_columns(conn, table_name, column_specs)
