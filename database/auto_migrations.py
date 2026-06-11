@@ -26,6 +26,7 @@ COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("fiscal_iva_credito_usd", "ALTER TABLE historial_compras ADD COLUMN fiscal_iva_credito_usd REAL NOT NULL DEFAULT 0"),
         ("fiscal_credito_iva_deducible", "ALTER TABLE historial_compras ADD COLUMN fiscal_credito_iva_deducible INTEGER NOT NULL DEFAULT 1"),
         ("activo", "ALTER TABLE historial_compras ADD COLUMN activo INTEGER NOT NULL DEFAULT 1"),
+        ("comision_pago_usd", "ALTER TABLE historial_compras ADD COLUMN comision_pago_usd REAL NOT NULL DEFAULT 0"),
     ],
     "movimientos_tesoreria": [
         ("fecha", "ALTER TABLE movimientos_tesoreria ADD COLUMN fecha TEXT"),
