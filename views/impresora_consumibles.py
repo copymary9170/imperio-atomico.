@@ -6,6 +6,7 @@ import streamlit as st
 from services.impresora_consumibles_service import (
     COLORES_CONSUMIBLE,
     TIPOS_CONSUMIBLE,
+    UNIDADES_CARGA_CONSUMIBLE,
     asignar_consumible_impresora,
     desactivar_consumible_impresora,
     listar_consumibles_inventario,
@@ -43,7 +44,7 @@ def _label_consumible(row: pd.Series) -> str:
 def render_impresora_consumibles(usuario: str) -> None:
     st.subheader("🔗 Consumibles por impresora")
     st.caption(
-        "Asocia cada impresora registrada en Activos con sus tintas, cartuchos, tóneres o cabezales registrados en Inventario. "
+        "Asocia cada impresora registrada en Activos con sus consumibles registrados en Inventario: tinta, cartucho, tóner, rollo térmico, cinta, cabezal o mantenimiento. "
         "También puedes registrar cuánto consumible está cargado dentro de la máquina y cuánto queda almacenado externamente."
     )
 
@@ -54,7 +55,7 @@ def render_impresora_consumibles(usuario: str) -> None:
         st.warning("Primero registra tus impresoras en Activos con unidad 'Impresora'.")
         return
     if consumibles.empty:
-        st.warning("Primero registra tintas, cartuchos o materiales en Inventario.")
+        st.warning("Primero registra tintas, cartuchos, tóneres, rollos térmicos o materiales en Inventario.")
         return
 
     opciones_impresoras = {_label_impresora(row): int(row["id"]) for _, row in impresoras.iterrows()}
@@ -69,19 +70,19 @@ def render_impresora_consumibles(usuario: str) -> None:
             consumible_label = st.selectbox("Consumible de inventario", list(opciones_consumibles.keys()))
             c1, c2 = st.columns(2)
             tipo = c1.selectbox("Tipo de consumible", TIPOS_CONSUMIBLE)
-            color = c2.selectbox("Color / canal", COLORES_CONSUMIBLE)
+            color = c2.selectbox("Color / canal / uso", COLORES_CONSUMIBLE)
 
             c3, c4 = st.columns(2)
             rendimiento = c3.number_input(
-                "Rendimiento estimado en páginas",
+                "Rendimiento estimado",
                 min_value=0.0,
                 value=0.0,
                 step=100.0,
                 format="%.2f",
-                help="Ejemplo: 12000 páginas para negro en tanque, 6000 para color, o el rendimiento del cartucho/tóner.",
+                help="Ejemplo: páginas por botella/cartucho/tóner, etiquetas por rollo térmico, metros por cinta o rendimiento estimado manual.",
             )
             costo_hoja = c4.number_input(
-                "Costo estimado por hoja (USD)",
+                "Costo estimado por impresión/uso (USD)",
                 min_value=0.0,
                 value=0.0,
                 step=0.001,
@@ -89,15 +90,15 @@ def render_impresora_consumibles(usuario: str) -> None:
                 help="Opcional. Si lo dejas en 0, luego la calculadora podrá estimarlo usando costo y rendimiento.",
             )
 
-            st.markdown("##### Tinta/carga dentro de la máquina")
+            st.markdown("##### Carga interna de la máquina")
             c5, c6, c7 = st.columns(3)
             capacidad_maquina = c5.number_input(
-                "Capacidad del tanque/cartucho",
+                "Capacidad interna",
                 min_value=0.0,
                 value=0.0,
                 step=10.0,
                 format="%.2f",
-                help="Ejemplo: 70 ml si la botella/tanque es de 70 ml. Si no aplica, deja 0.",
+                help="Ejemplo: 70 ml de tinta, 1 cartucho, 1 tóner, 1 rollo térmico o 0 si no aplica.",
             )
             cantidad_maquina = c6.number_input(
                 "Cantidad cargada en máquina",
@@ -105,22 +106,22 @@ def render_impresora_consumibles(usuario: str) -> None:
                 value=0.0,
                 step=10.0,
                 format="%.2f",
-                help="Esto representa lo que ya está dentro de la impresora, no el stock guardado aparte.",
+                help="Esto representa lo que está dentro de la impresora, no el stock guardado aparte.",
             )
-            unidad_carga = c7.selectbox("Unidad de carga", ["ml", "unidad", "cartucho", "botella", "gramos"])
+            unidad_carga = c7.selectbox("Unidad de carga", UNIDADES_CARGA_CONSUMIBLE)
             descontar = st.checkbox(
                 "Descontar consumos desde inventario externo",
                 value=True,
-                help="Actívalo para que luego ventas/producción descuente del stock almacenado. Desactívalo si solo quieres medir la tinta cargada en máquina por separado.",
+                help="Actívalo para que luego ventas/producción descuente del stock almacenado. Desactívalo si solo quieres medir la carga interna por separado.",
             )
 
             cobertura = st.text_input(
-                "Cobertura de referencia",
-                placeholder="Ej: 5%, ISO, foto completa, estimado manual",
+                "Cobertura / referencia de rendimiento",
+                placeholder="Ej: 5%, ISO, foto completa, etiqueta térmica, estimado manual",
             )
             notas = st.text_area(
                 "Notas",
-                placeholder="Ej: tengo litros guardados de esta tinta; este canal está cargado en la impresora y se repone desde inventario externo.",
+                placeholder="Ej: tengo litros guardados, cartuchos de repuesto, tóner adicional o rollos térmicos almacenados.",
             )
             submitted = st.form_submit_button("Guardar relación", use_container_width=True)
 
@@ -177,11 +178,11 @@ def render_impresora_consumibles(usuario: str) -> None:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "costo_estimado_hoja_usd": st.column_config.NumberColumn("Costo hoja USD", format="%.4f"),
+                "costo_estimado_hoja_usd": st.column_config.NumberColumn("Costo uso USD", format="%.4f"),
                 "costo_unitario_usd": st.column_config.NumberColumn("Costo inventario USD", format="%.4f"),
                 "stock_actual": st.column_config.NumberColumn("Stock externo", format="%.2f"),
                 "rendimiento_paginas": st.column_config.NumberColumn("Rendimiento", format="%.2f"),
-                "capacidad_maquina_ml": st.column_config.NumberColumn("Capacidad máquina", format="%.2f"),
+                "capacidad_maquina_ml": st.column_config.NumberColumn("Capacidad interna", format="%.2f"),
                 "cantidad_en_maquina_ml": st.column_config.NumberColumn("En máquina", format="%.2f"),
             },
         )
