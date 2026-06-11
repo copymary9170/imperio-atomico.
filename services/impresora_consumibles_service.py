@@ -13,6 +13,10 @@ TIPOS_CONSUMIBLE = [
     "cartucho",
     "toner",
     "cabezal",
+    "rollo termico",
+    "cinta termica",
+    "ribbon",
+    "papel especial",
     "mantenimiento",
     "otro",
 ]
@@ -23,7 +27,24 @@ COLORES_CONSUMIBLE = [
     "M / Magenta",
     "Y / Amarillo",
     "Tricolor",
+    "Monocromatico",
+    "Termico / No usa tinta",
     "No aplica",
+]
+
+UNIDADES_CARGA_CONSUMIBLE = [
+    "ml",
+    "gramos",
+    "unidad",
+    "cartucho",
+    "toner",
+    "botella",
+    "litro",
+    "rollo",
+    "metro",
+    "hoja",
+    "cinta",
+    "no aplica",
 ]
 
 
