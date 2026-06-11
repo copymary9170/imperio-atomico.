@@ -10,8 +10,12 @@ from modules.common import clean_text, money, require_text
 
 TIPOS_CONSUMIBLE = [
     "tinta",
-    "cartucho",
-    "toner",
+    "cartucho negro",
+    "cartucho tricolor",
+    "cartucho individual",
+    "toner negro",
+    "toner color",
+    "toner monocromatico",
     "cabezal",
     "rollo termico",
     "cinta termica",
@@ -26,7 +30,8 @@ COLORES_CONSUMIBLE = [
     "C / Cyan",
     "M / Magenta",
     "Y / Amarillo",
-    "Tricolor",
+    "CMY / Tricolor",
+    "CMYK / Kit completo",
     "Monocromatico",
     "Termico / No usa tinta",
     "No aplica",
@@ -44,6 +49,7 @@ UNIDADES_CARGA_CONSUMIBLE = [
     "metro",
     "hoja",
     "cinta",
+    "kit",
     "no aplica",
 ]
 
