@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Streamlit / secrets
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Local session and runtime files
+data/session_snapshot.json
+*.log
+logs/
+tmp/
+temp/
+
+# Backups and protected exports
+backups/
+local_backups/
+*.backup
+*.bak
+*.protected.json
+*.zip
+*.tar
+*.tar.gz
+
+# Client files / temporary print jobs
+clientes_archivos/
+archivos_clientes/
+print_jobs/
+trabajos_temporales/
+uploads/
+downloads/
+
+# Generated files
+exports/
+reportes_exportados/
+*.xlsx
+*.xls
+*.csv
+*.pdf
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
