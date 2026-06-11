@@ -44,7 +44,7 @@ def render_impresora_consumibles(usuario: str) -> None:
     st.subheader("🔗 Consumibles por impresora")
     st.caption(
         "Asocia cada impresora registrada en Activos con sus tintas, cartuchos, tóneres o cabezales registrados en Inventario. "
-        "La calculadora de impresión usará esta relación para no mezclar consumibles entre máquinas."
+        "También puedes registrar cuánto consumible está cargado dentro de la máquina y cuánto queda almacenado externamente."
     )
 
     impresoras = listar_impresoras_activas()
@@ -89,13 +89,38 @@ def render_impresora_consumibles(usuario: str) -> None:
                 help="Opcional. Si lo dejas en 0, luego la calculadora podrá estimarlo usando costo y rendimiento.",
             )
 
+            st.markdown("##### Tinta/carga dentro de la máquina")
+            c5, c6, c7 = st.columns(3)
+            capacidad_maquina = c5.number_input(
+                "Capacidad del tanque/cartucho",
+                min_value=0.0,
+                value=0.0,
+                step=10.0,
+                format="%.2f",
+                help="Ejemplo: 70 ml si la botella/tanque es de 70 ml. Si no aplica, deja 0.",
+            )
+            cantidad_maquina = c6.number_input(
+                "Cantidad cargada en máquina",
+                min_value=0.0,
+                value=0.0,
+                step=10.0,
+                format="%.2f",
+                help="Esto representa lo que ya está dentro de la impresora, no el stock guardado aparte.",
+            )
+            unidad_carga = c7.selectbox("Unidad de carga", ["ml", "unidad", "cartucho", "botella", "gramos"])
+            descontar = st.checkbox(
+                "Descontar consumos desde inventario externo",
+                value=True,
+                help="Actívalo para que luego ventas/producción descuente del stock almacenado. Desactívalo si solo quieres medir la tinta cargada en máquina por separado.",
+            )
+
             cobertura = st.text_input(
                 "Cobertura de referencia",
                 placeholder="Ej: 5%, ISO, foto completa, estimado manual",
             )
             notas = st.text_area(
                 "Notas",
-                placeholder="Ej: tinta negra compatible con HP 580; usar solo para documentos B/N.",
+                placeholder="Ej: tengo litros guardados de esta tinta; este canal está cargado en la impresora y se repone desde inventario externo.",
             )
             submitted = st.form_submit_button("Guardar relación", use_container_width=True)
 
@@ -109,6 +134,10 @@ def render_impresora_consumibles(usuario: str) -> None:
                     rendimiento_paginas=float(rendimiento),
                     cobertura_referencia=cobertura,
                     costo_estimado_hoja_usd=float(costo_hoja),
+                    capacidad_maquina_ml=float(capacidad_maquina),
+                    cantidad_en_maquina_ml=float(cantidad_maquina),
+                    unidad_carga=unidad_carga,
+                    descontar_de_inventario=bool(descontar),
                     notas=notas,
                 )
                 st.success(f"Consumible asociado correctamente. Relación #{relacion_id}.")
@@ -133,11 +162,16 @@ def render_impresora_consumibles(usuario: str) -> None:
                 "rendimiento_paginas",
                 "cobertura_referencia",
                 "costo_estimado_hoja_usd",
+                "capacidad_maquina_ml",
+                "cantidad_en_maquina_ml",
+                "unidad_carga",
+                "descontar_de_inventario",
                 "stock_actual",
                 "costo_unitario_usd",
                 "notas",
             ]
         ].copy()
+        vista["descontar_de_inventario"] = vista["descontar_de_inventario"].map({1: "Sí", 0: "No"})
         st.dataframe(
             vista,
             use_container_width=True,
@@ -145,8 +179,10 @@ def render_impresora_consumibles(usuario: str) -> None:
             column_config={
                 "costo_estimado_hoja_usd": st.column_config.NumberColumn("Costo hoja USD", format="%.4f"),
                 "costo_unitario_usd": st.column_config.NumberColumn("Costo inventario USD", format="%.4f"),
-                "stock_actual": st.column_config.NumberColumn("Stock", format="%.2f"),
+                "stock_actual": st.column_config.NumberColumn("Stock externo", format="%.2f"),
                 "rendimiento_paginas": st.column_config.NumberColumn("Rendimiento", format="%.2f"),
+                "capacidad_maquina_ml": st.column_config.NumberColumn("Capacidad máquina", format="%.2f"),
+                "cantidad_en_maquina_ml": st.column_config.NumberColumn("En máquina", format="%.2f"),
             },
         )
 
