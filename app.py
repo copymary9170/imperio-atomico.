@@ -77,6 +77,7 @@ from views.costeo_impresion_real import render_costeo_impresion_real
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
 from views.catalogo import render_catalogo
+from views.productos_terminados import render_productos_terminados
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
 from views.areas_empresariales import render_area_combinada, render_area_empresarial
@@ -116,15 +117,16 @@ def render_dashboard_unificado(usuario: str) -> None:
 
 def render_inventario_almacen_unificado(usuario: str) -> None:
     st.title("📦 Inventario / Almacén")
-    tabs = st.tabs(["📦 Inventario operativo", "📉 Stock mínimo", "📏 Unidades", "🧾 Kardex", "🛒 Compras", "👥 Proveedores", "🏬 Almacén", "🛍️ Catálogo"])
+    tabs = st.tabs(["📦 Materia prima", "🧩 Productos terminados", "📉 Stock mínimo", "📏 Unidades", "🧾 Kardex", "🛒 Compras", "👥 Proveedores", "🏬 Almacén", "🛍️ Catálogo"])
     with tabs[0]: render_inventario(usuario)
-    with tabs[1]: render_stock_minimo(usuario)
-    with tabs[2]: render_unidades_fraccionadas(usuario)
-    with tabs[3]: render_kardex(usuario)
-    with tabs[4]: render_compras_suministro(usuario)
-    with tabs[5]: render_proveedores(usuario)
-    with tabs[6]: render_almacen_avanzado(usuario)
-    with tabs[7]: render_catalogo(usuario)
+    with tabs[1]: render_productos_terminados(usuario)
+    with tabs[2]: render_stock_minimo(usuario)
+    with tabs[3]: render_unidades_fraccionadas(usuario)
+    with tabs[4]: render_kardex(usuario)
+    with tabs[5]: render_compras_suministro(usuario)
+    with tabs[6]: render_proveedores(usuario)
+    with tabs[7]: render_almacen_avanzado(usuario)
+    with tabs[8]: render_catalogo(usuario)
 
 
 def render_produccion_unificada(usuario: str) -> None:
