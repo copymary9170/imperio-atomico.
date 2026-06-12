@@ -29,31 +29,64 @@ UNIDADES_MATERIA_PRIMA = [
     "unidad",
     "hoja",
     "resma",
-    "ml",
-    "litro",
-    "gramo",
-    "kg",
     "cartucho",
     "toner",
     "botella",
     "rollo",
-    "metro",
     "paquete",
     "caja",
 ]
+
+UNIDADES_TECNICAS = [
+    "no aplica",
+    "ml",
+    "litro",
+    "gramo",
+    "kg",
+    "cm",
+    "metro",
+    "hoja",
+    "unidad",
+]
+
+MASTER_FIELD_COLUMNS: dict[str, str] = {
+    "proveedor_principal": "TEXT",
+    "proveedor_alternativo": "TEXT",
+    "marca": "TEXT",
+    "fabricante": "TEXT",
+    "codigo_fabricante": "TEXT",
+    "ubicacion": "TEXT",
+    "stock_maximo": "REAL NOT NULL DEFAULT 0",
+    "unidad_tecnica": "TEXT NOT NULL DEFAULT 'no aplica'",
+    "contenido_tecnico": "REAL NOT NULL DEFAULT 0",
+    "rendimiento_estimado": "REAL NOT NULL DEFAULT 0",
+    "compatible_con": "TEXT",
+}
 
 
 def _table_columns(conn: Any, table_name: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
 
+def ensure_materia_prima_master_fields() -> None:
+    with db_transaction() as conn:
+        columns = _table_columns(conn, "inventario")
+        for column, ddl_type in MASTER_FIELD_COLUMNS.items():
+            if column not in columns:
+                conn.execute(f"ALTER TABLE inventario ADD COLUMN {column} {ddl_type}")
+                columns.add(column)
+
+
 def listar_materia_prima() -> pd.DataFrame:
+    ensure_materia_prima_master_fields()
     with db_transaction() as conn:
         return pd.read_sql_query(
             """
             SELECT
-                id, fecha, sku, nombre, categoria, unidad,
-                stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd, estado
+                id, fecha, sku, nombre, categoria, proveedor_principal, marca,
+                unidad, stock_actual, stock_minimo, stock_maximo, ubicacion,
+                unidad_tecnica, contenido_tecnico, rendimiento_estimado, compatible_con,
+                costo_unitario_usd, precio_venta_usd, estado
             FROM inventario
             WHERE COALESCE(estado, 'activo') = 'activo'
             ORDER BY categoria, nombre
@@ -71,7 +104,19 @@ def crear_materia_prima(
     unidad: str,
     stock_minimo: float = 0.0,
     precio_venta_usd: float = 0.0,
+    proveedor_principal: str = "",
+    proveedor_alternativo: str = "",
+    marca: str = "",
+    fabricante: str = "",
+    codigo_fabricante: str = "",
+    ubicacion: str = "",
+    stock_maximo: float = 0.0,
+    unidad_tecnica: str = "no aplica",
+    contenido_tecnico: float = 0.0,
+    rendimiento_estimado: float = 0.0,
+    compatible_con: str = "",
 ) -> int:
+    ensure_materia_prima_master_fields()
     sku_ok = require_text(sku, "SKU")
     nombre_ok = require_text(nombre, "Nombre")
     categoria_ok = clean_text(categoria) or "Materia prima"
@@ -84,8 +129,14 @@ def crear_materia_prima(
         cur = conn.execute(
             """
             INSERT INTO inventario
-            (usuario, sku, nombre, categoria, unidad, stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd, creado_por, creado_en)
-            VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?, ?, CURRENT_TIMESTAMP)
+            (
+                usuario, sku, nombre, categoria, unidad, stock_actual, stock_minimo,
+                costo_unitario_usd, precio_venta_usd, creado_por, creado_en,
+                proveedor_principal, proveedor_alternativo, marca, fabricante,
+                codigo_fabricante, ubicacion, stock_maximo, unidad_tecnica,
+                contenido_tecnico, rendimiento_estimado, compatible_con
+            )
+            VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(usuario or "Sistema"),
@@ -96,6 +147,17 @@ def crear_materia_prima(
                 max(0.0, float(stock_minimo or 0.0)),
                 max(0.0, float(precio_venta_usd or 0.0)),
                 str(usuario or "Sistema"),
+                clean_text(proveedor_principal),
+                clean_text(proveedor_alternativo),
+                clean_text(marca),
+                clean_text(fabricante),
+                clean_text(codigo_fabricante),
+                clean_text(ubicacion),
+                max(0.0, float(stock_maximo or 0.0)),
+                clean_text(unidad_tecnica) or "no aplica",
+                max(0.0, float(contenido_tecnico or 0.0)),
+                max(0.0, float(rendimiento_estimado or 0.0)),
+                clean_text(compatible_con),
             ),
         )
         return int(cur.lastrowid)
@@ -116,11 +178,15 @@ def registrar_compra_materia_prima(
     tipo_pago: str = "contado",
     monto_pagado_inicial_usd: float | None = None,
     referencia: str = "",
+    proveedor: str = "",
+    factura: str = "",
+    otros_gastos_usd: float = 0.0,
 ) -> dict[str, Any]:
+    ensure_materia_prima_master_fields()
     cantidad = as_positive(cantidad_comprada, "Cantidad comprada", allow_zero=False)
     costo_base = as_positive(costo_base_usd, "Costo base", allow_zero=False)
     costo = calcular_costo_real_compra(
-        costo_base_usd=costo_base,
+        costo_base_usd=costo_base + max(0.0, float(otros_gastos_usd or 0.0)),
         cantidad=cantidad,
         impuestos_pct=float(impuestos_pct or 0.0),
         delivery_usd=float(delivery_usd or 0.0),
@@ -142,19 +208,25 @@ def registrar_compra_materia_prima(
         stock_nuevo = stock_anterior + cantidad
         costo_promedio = ((stock_anterior * costo_anterior) + (cantidad * costo.costo_unitario_real_usd)) / stock_nuevo if stock_nuevo > 0 else costo.costo_unitario_real_usd
 
+        update_extra = ""
+        params_extra: list[Any] = []
+        if clean_text(proveedor):
+            update_extra = ", proveedor_principal = ?"
+            params_extra.append(clean_text(proveedor))
+
         conn.execute(
-            """
+            f"""
             UPDATE inventario
-            SET stock_actual = ?, costo_unitario_usd = ?, actualizado_por = ?, actualizado_en = CURRENT_TIMESTAMP
+            SET stock_actual = ?, costo_unitario_usd = ?, actualizado_por = ?, actualizado_en = CURRENT_TIMESTAMP{update_extra}
             WHERE id = ?
             """,
-            (stock_nuevo, round(costo_promedio, 6), str(usuario or "Sistema"), int(inventario_id)),
+            (stock_nuevo, round(costo_promedio, 6), str(usuario or "Sistema"), *params_extra, int(inventario_id)),
         )
 
         ref = (
-            f"Compra materia prima | Cantidad: {cantidad:g} {row['unidad']} | "
-            f"Base: ${costo.base_usd:,.2f} | Impuesto: ${costo.impuesto_usd:,.2f} | "
-            f"Delivery: ${costo.delivery_usd:,.2f} | Comision: ${costo.comision_pago_usd:,.2f}"
+            f"Compra materia prima | Proveedor: {clean_text(proveedor) or 'N/D'} | Factura: {clean_text(factura) or 'N/D'} | "
+            f"Cantidad: {cantidad:g} {row['unidad']} | Base: ${costo_base:,.2f} | Otros: ${float(otros_gastos_usd or 0):,.2f} | "
+            f"Impuesto: ${costo.impuesto_usd:,.2f} | Delivery: ${costo.delivery_usd:,.2f} | Comision: ${costo.comision_pago_usd:,.2f}"
         )
         if clean_text(referencia):
             ref += f" | {clean_text(referencia)}"
@@ -209,10 +281,13 @@ def registrar_compra_materia_prima(
                     "modulo": "materia_prima",
                     "compra_id": compra_id,
                     "inventario_id": int(inventario_id),
+                    "proveedor": clean_text(proveedor),
+                    "factura": clean_text(factura),
                     "cantidad_comprada": cantidad,
                     "stock_anterior": stock_anterior,
                     "stock_nuevo": stock_nuevo,
-                    "costo_base_usd": costo.base_usd,
+                    "costo_base_usd": costo_base,
+                    "otros_gastos_usd": max(0.0, float(otros_gastos_usd or 0.0)),
                     "impuesto_usd": costo.impuesto_usd,
                     "delivery_usd": costo.delivery_usd,
                     "comision_pago_usd": costo.comision_pago_usd,
@@ -236,6 +311,7 @@ def registrar_compra_materia_prima(
 
 
 def listar_compras_materia_prima(limit: int = 100) -> pd.DataFrame:
+    ensure_materia_prima_master_fields()
     with db_transaction() as conn:
         columns = _table_columns(conn, "historial_compras")
         comision_expr = "COALESCE(comision_pago_usd, 0) AS comision_pago_usd" if "comision_pago_usd" in columns else "0 AS comision_pago_usd"
@@ -247,6 +323,7 @@ def listar_compras_materia_prima(limit: int = 100) -> pd.DataFrame:
                 hc.costo_total_usd, hc.costo_unit_usd, hc.impuestos, hc.delivery,
                 {comision_expr}, hc.moneda_pago, {tasa_expr}, hc.tipo_pago, hc.metodo_pago,
                 hc.monto_pagado_inicial_usd, hc.saldo_pendiente_usd,
+                i.proveedor_principal, i.marca, i.unidad_tecnica, i.contenido_tecnico,
                 i.stock_actual, i.costo_unitario_usd AS costo_promedio_actual
             FROM historial_compras hc
             LEFT JOIN inventario i ON i.id = hc.inventario_id
