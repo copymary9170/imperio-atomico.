@@ -25,13 +25,18 @@ def render_productos_terminados(usuario: str) -> None:
     )
 
     inventario = listar_inventario_para_bom()
-    if inventario.empty:
-        st.warning("Primero registra materia prima en Inventario operativo → Productos.")
-        return
-
     tab_crear, tab_historial = st.tabs(["Crear producto terminado", "Historial"])
 
     with tab_crear:
+        if inventario.empty:
+            st.warning(
+                "No hay materia prima activa disponible para seleccionar. "
+                "Puedes ver este formulario, pero para guardar un producto terminado necesitas crear primero insumos en 📦 Materia prima → Productos."
+            )
+            st.info(
+                "Ejemplos de materia prima: papel bond, tinta, opalina, acetato, empaque, lápices, carpetas, cartulina, vinil o rollos."
+            )
+
         st.markdown("##### Datos del producto terminado")
         c1, c2, c3 = st.columns(3)
         codigo = c1.text_input("Código / SKU terminado", placeholder="PT-0001")
@@ -45,33 +50,36 @@ def render_productos_terminados(usuario: str) -> None:
         if "producto_terminado_insumos" not in st.session_state:
             st.session_state["producto_terminado_insumos"] = []
 
-        opciones = {
-            f"#{int(row['id'])} · {row['nombre']} · stock {row['stock_actual']} {row['unidad']}": row
-            for _, row in inventario.iterrows()
-        }
-        i1, i2, i3 = st.columns([3, 1, 1])
-        insumo_label = i1.selectbox("Materia prima / insumo", list(opciones.keys()))
-        cantidad = i2.number_input("Cantidad usada", min_value=0.0, value=1.0, step=0.1, format="%.4f")
-        notas = i3.text_input("Notas", placeholder="opcional")
+        if not inventario.empty:
+            opciones = {
+                f"#{int(row['id'])} · {row['nombre']} · stock {row['stock_actual']} {row['unidad']}": row
+                for _, row in inventario.iterrows()
+            }
+            i1, i2, i3 = st.columns([3, 1, 1])
+            insumo_label = i1.selectbox("Materia prima / insumo", list(opciones.keys()))
+            cantidad = i2.number_input("Cantidad usada", min_value=0.0, value=1.0, step=0.1, format="%.4f")
+            notas = i3.text_input("Notas", placeholder="opcional")
 
-        row = opciones[insumo_label]
-        costo_unitario = float(row.get("costo_unitario_usd") or 0.0)
-        costo_total = costo_unitario * float(cantidad or 0.0)
-        st.info(f"Costo estimado del insumo: ${costo_total:,.4f} ({cantidad:g} {row.get('unidad')} × ${costo_unitario:,.4f})")
+            row = opciones[insumo_label]
+            costo_unitario = float(row.get("costo_unitario_usd") or 0.0)
+            costo_total = costo_unitario * float(cantidad or 0.0)
+            st.info(f"Costo estimado del insumo: ${costo_total:,.4f} ({cantidad:g} {row.get('unidad')} × ${costo_unitario:,.4f})")
 
-        if st.button("➕ Agregar insumo", use_container_width=True):
-            st.session_state["producto_terminado_insumos"].append(
-                {
-                    "inventario_id": int(row["id"]),
-                    "insumo_nombre": str(row["nombre"]),
-                    "cantidad": float(cantidad or 0.0),
-                    "unidad": str(row.get("unidad") or "unidad"),
-                    "costo_unitario_usd": costo_unitario,
-                    "costo_total_usd": costo_total,
-                    "notas": str(notas or ""),
-                }
-            )
-            st.success("Insumo agregado a la receta.")
+            if st.button("➕ Agregar insumo", use_container_width=True):
+                st.session_state["producto_terminado_insumos"].append(
+                    {
+                        "inventario_id": int(row["id"]),
+                        "insumo_nombre": str(row["nombre"]),
+                        "cantidad": float(cantidad or 0.0),
+                        "unidad": str(row.get("unidad") or "unidad"),
+                        "costo_unitario_usd": costo_unitario,
+                        "costo_total_usd": costo_total,
+                        "notas": str(notas or ""),
+                    }
+                )
+                st.success("Insumo agregado a la receta.")
+        else:
+            st.error("No puedes agregar insumos todavía porque no hay materia prima activa en inventario.")
 
         insumos = st.session_state.get("producto_terminado_insumos", [])
         if insumos:
@@ -98,7 +106,7 @@ def render_productos_terminados(usuario: str) -> None:
         r2.metric("Precio sugerido", f"${precio_sugerido:,.4f}")
         r3.metric("Ganancia estimada", f"${(precio_sugerido - costo_total_producto):,.4f}")
 
-        if st.button("💾 Guardar producto terminado", use_container_width=True):
+        if st.button("💾 Guardar producto terminado", use_container_width=True, disabled=not bool(insumos)):
             try:
                 producto_id = crear_producto_terminado(
                     usuario=usuario,
