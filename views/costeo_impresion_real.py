@@ -3,6 +3,10 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from services.costeo_impresion_historial_service import (
+    guardar_costeo_impresion_real,
+    listar_costeos_impresion_real,
+)
 from services.costeo_impresion_real_service import calcular_costo_impresion_real
 from services.impresora_consumibles_service import listar_impresoras_activas
 
@@ -117,6 +121,28 @@ def render_costeo_impresion_real(usuario: str) -> None:
         ganancia = precio_sugerido - costo_total
         precio_unitario = precio_sugerido / paginas_totales if paginas_totales > 0 else 0.0
 
+        st.session_state["ultimo_costeo_impresion_real"] = {
+            "usuario": usuario,
+            "activo_id": impresora_id,
+            "impresora_label": impresora_label,
+            "paginas": paginas_totales,
+            "costo_consumibles_usd": resultado.costo_consumibles_usd,
+            "costo_cabezales_usd": resultado.costo_cabezales_usd,
+            "costo_papel_usd": costo_papel_total,
+            "costo_merma_usd": costo_merma,
+            "otros_materiales_usd": float(otros_materiales),
+            "electricidad_usd": float(electricidad),
+            "internet_usd": float(internet),
+            "mano_obra_usd": float(mano_obra),
+            "depreciacion_usd": float(depreciacion),
+            "costo_total_usd": costo_total,
+            "margen_pct": float(margen_pct),
+            "precio_sugerido_usd": precio_sugerido,
+            "precio_unitario_usd": precio_unitario,
+            "ganancia_usd": ganancia,
+            "detalle": resultado.detalle,
+        }
+
         r1, r2, r3, r4 = st.columns(4)
         r1.metric("Costo técnico", f"${resultado.costo_total_tecnico_usd:,.4f}")
         r2.metric("Costo total", f"${costo_total:,.4f}")
@@ -154,5 +180,25 @@ def render_costeo_impresion_real(usuario: str) -> None:
                 st.dataframe(pd.DataFrame(resultado.detalle), use_container_width=True, hide_index=True)
         else:
             st.warning("Esta impresora no tiene consumibles asociados o no tienen costo/rendimiento suficiente.")
+
+    ultimo = st.session_state.get("ultimo_costeo_impresion_real")
+    if ultimo:
+        if st.button("💾 Guardar costeo calculado", use_container_width=True):
+            try:
+                costeo_id = guardar_costeo_impresion_real(**ultimo)
+                st.success(f"Costeo guardado con ID #{costeo_id}.")
+                st.session_state.pop("ultimo_costeo_impresion_real", None)
+            except Exception as exc:
+                st.error(f"No se pudo guardar el costeo: {exc}")
+
+    st.markdown("##### Historial reciente")
+    try:
+        historial = listar_costeos_impresion_real(limit=25)
+        if historial.empty:
+            st.caption("Aún no hay costeos reales guardados.")
+        else:
+            st.dataframe(historial, use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(f"No se pudo cargar el historial: {exc}")
 
     st.caption(f"Usuario: {usuario}")
