@@ -73,6 +73,7 @@ from views.ventas import render_ventas
 from views.cotizaciones import render_cotizaciones
 from views.calculadora import render_calculadora
 from views.costeo import render_costeo
+from views.costeo_impresion_real import render_costeo_impresion_real
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
 from views.catalogo import render_catalogo
@@ -147,8 +148,9 @@ def render_produccion_unificada(usuario: str) -> None:
 
 def render_costeo_margenes_unificado(usuario: str) -> None:
     st.title("🧮 Costeo y Márgenes")
-    tab_simple, tab_industrial, tab_bom, tab_rentabilidad = st.tabs(["Costeo simple", "Costeo industrial", "📝 BOM", "📈 Rentabilidad"])
+    tab_simple, tab_real, tab_industrial, tab_bom, tab_rentabilidad = st.tabs(["Costeo simple", "🖨️ Costeo real por impresora", "Costeo industrial", "📝 BOM", "📈 Rentabilidad"])
     with tab_simple: render_costeo(usuario)
+    with tab_real: render_costeo_impresion_real(usuario)
     with tab_industrial: render_costeo_industrial(usuario)
     with tab_bom: render_fichas_tecnicas_bom(usuario)
     with tab_rentabilidad: render_rentabilidad(usuario)
