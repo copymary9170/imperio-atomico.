@@ -177,6 +177,39 @@ def _ensure_printer_consumables_table(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_impresora_consumibles_inventario ON impresora_consumibles(inventario_id)")
 
 
+def _ensure_real_print_costing_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS costeos_impresion_real (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            usuario TEXT NOT NULL,
+            activo_id INTEGER NOT NULL,
+            impresora_label TEXT,
+            paginas REAL NOT NULL DEFAULT 0,
+            costo_consumibles_usd REAL NOT NULL DEFAULT 0,
+            costo_cabezales_usd REAL NOT NULL DEFAULT 0,
+            costo_papel_usd REAL NOT NULL DEFAULT 0,
+            costo_merma_usd REAL NOT NULL DEFAULT 0,
+            otros_materiales_usd REAL NOT NULL DEFAULT 0,
+            electricidad_usd REAL NOT NULL DEFAULT 0,
+            internet_usd REAL NOT NULL DEFAULT 0,
+            mano_obra_usd REAL NOT NULL DEFAULT 0,
+            depreciacion_usd REAL NOT NULL DEFAULT 0,
+            costo_total_usd REAL NOT NULL DEFAULT 0,
+            margen_pct REAL NOT NULL DEFAULT 0,
+            precio_sugerido_usd REAL NOT NULL DEFAULT 0,
+            precio_unitario_usd REAL NOT NULL DEFAULT 0,
+            ganancia_usd REAL NOT NULL DEFAULT 0,
+            detalle_json TEXT,
+            estado TEXT NOT NULL DEFAULT 'borrador'
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_costeos_impresion_real_fecha ON costeos_impresion_real(fecha)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_costeos_impresion_real_activo ON costeos_impresion_real(activo_id)")
+
+
 def _backfill_timestamps(conn) -> None:
     for table_name, column_name in (("movimientos_tesoreria", "fecha"), ("cierres_caja", "fecha")):
         try:
@@ -231,6 +264,10 @@ def run_auto_migrations() -> None:
             _ensure_printer_consumables_table(conn)
         except Exception as exc:
             _log_migration_error(conn, area="table_creation", tabla="impresora_consumibles", columna=None, operacion="create table", error=exc)
+        try:
+            _ensure_real_print_costing_table(conn)
+        except Exception as exc:
+            _log_migration_error(conn, area="table_creation", tabla="costeos_impresion_real", columna=None, operacion="create table", error=exc)
         for table_name, column_specs in COLUMN_MIGRATIONS.items():
             try:
                 _ensure_columns(conn, table_name, column_specs)
