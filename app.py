@@ -55,6 +55,7 @@ from views.dashboard import render_dashboard
 from views.panel_ejecutivo import render_panel_ejecutivo
 from views.centro_alertas import render_centro_alertas
 from views.inventario import render_inventario
+from views.materia_prima import render_materia_prima
 from views.stock_minimo import render_stock_minimo
 from views.kardex import render_kardex
 from views.clientes import render_clientes
@@ -117,16 +118,17 @@ def render_dashboard_unificado(usuario: str) -> None:
 
 def render_inventario_almacen_unificado(usuario: str) -> None:
     st.title("📦 Inventario / Almacén")
-    tabs = st.tabs(["📦 Materia prima", "🧩 Productos terminados", "📉 Stock mínimo", "📏 Unidades", "🧾 Kardex", "🛒 Compras", "👥 Proveedores", "🏬 Almacén", "🛍️ Catálogo"])
-    with tabs[0]: render_inventario(usuario)
+    tabs = st.tabs(["📦 Materia prima", "🧩 Productos terminados", "⚙️ Inventario operativo", "📉 Stock mínimo", "📏 Unidades", "🧾 Kardex", "🛒 Compras", "👥 Proveedores", "🏬 Almacén", "🛍️ Catálogo"])
+    with tabs[0]: render_materia_prima(usuario)
     with tabs[1]: render_productos_terminados(usuario)
-    with tabs[2]: render_stock_minimo(usuario)
-    with tabs[3]: render_unidades_fraccionadas(usuario)
-    with tabs[4]: render_kardex(usuario)
-    with tabs[5]: render_compras_suministro(usuario)
-    with tabs[6]: render_proveedores(usuario)
-    with tabs[7]: render_almacen_avanzado(usuario)
-    with tabs[8]: render_catalogo(usuario)
+    with tabs[2]: render_inventario(usuario)
+    with tabs[3]: render_stock_minimo(usuario)
+    with tabs[4]: render_unidades_fraccionadas(usuario)
+    with tabs[5]: render_kardex(usuario)
+    with tabs[6]: render_compras_suministro(usuario)
+    with tabs[7]: render_proveedores(usuario)
+    with tabs[8]: render_almacen_avanzado(usuario)
+    with tabs[9]: render_catalogo(usuario)
 
 
 def render_produccion_unificada(usuario: str) -> None:
