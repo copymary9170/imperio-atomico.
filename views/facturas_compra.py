@@ -11,17 +11,22 @@ from services.facturas_compra_service import (
     registrar_factura_compra,
 )
 from services.materia_prima_service import listar_materia_prima
+from services.reventa_service import listar_mercancia_reventa
 
 
 def _label_materia_prima(row: pd.Series) -> str:
     return f"#{int(row['id'])} · {row['nombre']} · stock {float(row['stock_actual'] or 0):g} {row['unidad']}"
 
 
+def _label_reventa(row: pd.Series) -> str:
+    return f"#{int(row['id'])} · {row['nombre']} · stock {float(row['stock_actual'] or 0):g} {row['unidad']}"
+
+
 def render_facturas_compra(usuario: str) -> None:
     st.subheader("🧾 Facturas de compra")
     st.caption(
-        "Registra una factura completa con varias líneas. Cada línea puede ser materia prima, mercancía para reventa, activo/equipo, gasto o servicio. "
-        "Por ahora las líneas de materia prima actualizan stock automáticamente; las demás quedan registradas para control de factura y cuentas por pagar."
+        "Registra una factura completa con varias líneas. Materia prima y mercancía para reventa actualizan stock automáticamente; "
+        "activos, gastos y servicios quedan registrados para control de factura y cuentas por pagar."
     )
 
     tab_nueva, tab_historial, tab_cxp = st.tabs(["Nueva factura", "Historial", "Cuentas por pagar"])
@@ -32,21 +37,34 @@ def render_facturas_compra(usuario: str) -> None:
 
         st.markdown("##### Líneas de la factura")
         materia_prima = listar_materia_prima()
+        reventa = listar_mercancia_reventa()
         tipo_linea = st.selectbox("Tipo de línea", TIPOS_LINEA_FACTURA, key="fc_tipo_linea")
 
-        if tipo_linea == "Materia prima" and not materia_prima.empty:
-            opciones_mp = {_label_materia_prima(row): row for _, row in materia_prima.iterrows()}
-            item_label = st.selectbox("Materia prima", list(opciones_mp.keys()), key="fc_materia_prima")
-            item_row = opciones_mp[item_label]
-            descripcion_default = str(item_row["nombre"])
-            inventario_id = int(item_row["id"])
-            unidad_default = str(item_row.get("unidad") or "unidad")
-        else:
-            if tipo_linea == "Materia prima" and materia_prima.empty:
+        descripcion_default = ""
+        inventario_id = None
+        mercancia_reventa_id = None
+        unidad_default = "unidad"
+
+        if tipo_linea == "Materia prima":
+            if not materia_prima.empty:
+                opciones_mp = {_label_materia_prima(row): row for _, row in materia_prima.iterrows()}
+                item_label = st.selectbox("Materia prima", list(opciones_mp.keys()), key="fc_materia_prima")
+                item_row = opciones_mp[item_label]
+                descripcion_default = str(item_row["nombre"])
+                inventario_id = int(item_row["id"])
+                unidad_default = str(item_row.get("unidad") or "unidad")
+            else:
                 st.warning("No hay materia prima creada. Puedes usar otro tipo de línea o crear la materia prima primero.")
-            descripcion_default = ""
-            inventario_id = None
-            unidad_default = "unidad"
+        elif tipo_linea == "Mercancia para reventa":
+            if not reventa.empty:
+                opciones_reventa = {_label_reventa(row): row for _, row in reventa.iterrows()}
+                item_label = st.selectbox("Mercancía reventa", list(opciones_reventa.keys()), key="fc_reventa")
+                item_row = opciones_reventa[item_label]
+                descripcion_default = str(item_row["nombre"])
+                mercancia_reventa_id = int(item_row["id"])
+                unidad_default = str(item_row.get("unidad") or "unidad")
+            else:
+                st.warning("No hay mercancía para reventa creada. Créala primero en Inventario / Almacén → Mercancía reventa.")
 
         c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
         descripcion = c1.text_input("Descripción", value=descripcion_default, placeholder="Ej: lápices, foami, papel bond, impresora HP 580")
@@ -57,11 +75,16 @@ def render_facturas_compra(usuario: str) -> None:
         if st.button("➕ Agregar línea", use_container_width=True):
             if not descripcion.strip() or subtotal_linea <= 0:
                 st.error("La línea necesita descripción y subtotal mayor a cero.")
+            elif tipo_linea == "Materia prima" and not inventario_id:
+                st.error("Selecciona una materia prima válida.")
+            elif tipo_linea == "Mercancia para reventa" and not mercancia_reventa_id:
+                st.error("Selecciona una mercancía para reventa válida.")
             else:
                 st.session_state["facturas_compra_lineas"].append(
                     {
                         "tipo_linea": tipo_linea,
                         "inventario_id": inventario_id,
+                        "mercancia_reventa_id": mercancia_reventa_id,
                         "descripcion": descripcion,
                         "item": descripcion,
                         "cantidad": float(cantidad),
