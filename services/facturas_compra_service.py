@@ -6,7 +6,8 @@ import pandas as pd
 
 from database.connection import db_transaction
 from modules.common import clean_text
-from services.materia_prima_service import listar_materia_prima, registrar_factura_materia_prima
+from services.materia_prima_service import _insertar_compra_linea, listar_materia_prima
+from services.tesoreria_service import registrar_egreso
 
 
 TIPOS_LINEA_FACTURA = [
@@ -64,11 +65,15 @@ def ensure_facturas_compra_tables() -> None:
                 costo_unitario_real_usd REAL NOT NULL DEFAULT 0,
                 total_real_linea_usd REAL NOT NULL DEFAULT 0,
                 referencia_generada TEXT,
+                compra_historial_id INTEGER,
                 FOREIGN KEY(factura_id) REFERENCES facturas_compra(id),
                 FOREIGN KEY(inventario_id) REFERENCES inventario(id)
             )
             """
         )
+        columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(facturas_compra_lineas)").fetchall()}
+        if "compra_historial_id" not in columns:
+            conn.execute("ALTER TABLE facturas_compra_lineas ADD COLUMN compra_historial_id INTEGER")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facturas_compra_fecha ON facturas_compra(fecha_creacion)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facturas_compra_estado ON facturas_compra(estado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facturas_compra_lineas_factura ON facturas_compra_lineas(factura_id)")
@@ -130,6 +135,7 @@ def registrar_factura_compra(
     pagado = total if monto_pagado_inicial_usd is None else max(0.0, float(monto_pagado_inicial_usd or 0.0))
     pendiente = max(0.0, total - pagado)
     estado = calcular_estado_factura(total, pagado)
+    resultados_lineas: list[dict[str, Any]] = []
 
     with db_transaction() as conn:
         cur = conn.execute(
@@ -178,15 +184,42 @@ def registrar_factura_compra(
             comision_linea = max(0.0, float(comision_total_usd or 0.0)) * proporcion
             total_linea = base_linea + impuesto_linea + delivery_linea + comision_linea
             costo_unitario = total_linea / linea["cantidad"] if linea["cantidad"] else 0
-            conn.execute(
+            pago_linea = pagado * (total_linea / total) if total > 0 else 0
+            referencia = f"Factura compra #{factura_id} · {clean_text(numero_factura) or 'S/N'}"
+            compra_historial_id = None
+            stock_result: dict[str, Any] = {}
+
+            if linea["tipo_linea"].lower().startswith("materia") and linea.get("inventario_id"):
+                stock_result = _insertar_compra_linea(
+                    conn,
+                    usuario=usuario,
+                    inventario_id=int(linea["inventario_id"]),
+                    cantidad=float(linea["cantidad"]),
+                    costo_unitario_real=float(costo_unitario),
+                    total_linea_real=float(total_linea),
+                    impuestos_pct=float(impuestos_pct or 0.0),
+                    delivery_asignado=float(delivery_linea),
+                    comision_asignada=float(comision_linea),
+                    moneda_pago=moneda_pago,
+                    tasa_cambio=float(tasa_cambio or 1.0),
+                    metodo_pago=metodo_pago,
+                    tipo_pago=tipo_pago,
+                    pago_inicial_linea=float(pago_linea),
+                    referencia=referencia,
+                    proveedor=proveedor,
+                    factura=numero_factura,
+                )
+                compra_historial_id = stock_result.get("compra_id")
+
+            cur_linea = conn.execute(
                 """
                 INSERT INTO facturas_compra_lineas
                 (
                     factura_id, tipo_linea, inventario_id, descripcion, cantidad, unidad,
                     subtotal_usd, costo_unitario_estimado_usd, costo_unitario_real_usd,
-                    total_real_linea_usd, referencia_generada
+                    total_real_linea_usd, referencia_generada, compra_historial_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     factura_id,
@@ -199,37 +232,39 @@ def registrar_factura_compra(
                     round(linea["subtotal_usd"] / linea["cantidad"], 6),
                     round(costo_unitario, 6),
                     round(total_linea, 4),
-                    f"Factura compra #{factura_id} · {clean_text(numero_factura) or 'S/N'}",
+                    referencia,
+                    compra_historial_id,
                 ),
             )
+            resultados_lineas.append(
+                {
+                    "linea_id": int(cur_linea.lastrowid),
+                    "tipo_linea": linea["tipo_linea"],
+                    "descripcion": linea["descripcion"],
+                    "cantidad": round(float(linea["cantidad"]), 4),
+                    "subtotal_usd": round(float(linea["subtotal_usd"]), 4),
+                    "total_real_linea_usd": round(float(total_linea), 4),
+                    "costo_unitario_real_usd": round(float(costo_unitario), 6),
+                    "compra_historial_id": compra_historial_id,
+                    **stock_result,
+                }
+            )
 
-    materia_prima_lineas = [
-        {
-            "inventario_id": x["inventario_id"],
-            "cantidad": x["cantidad"],
-            "subtotal_usd": x["subtotal_usd"],
-        }
-        for x in lineas_ok
-        if x["tipo_linea"].lower().startswith("materia") and x.get("inventario_id")
-    ]
-    if materia_prima_lineas:
-        registrar_factura_materia_prima(
-            usuario=usuario,
-            proveedor=proveedor,
-            factura=f"FC-{factura_id} {numero_factura}",
-            lineas=materia_prima_lineas,
-            delivery_total_usd=delivery_total_usd,
-            impuestos_pct=impuestos_pct,
-            comision_total_usd=comision_total_usd,
-            descuento_total_usd=descuento_total_usd,
-            otros_gastos_usd=otros_gastos_usd,
-            moneda_pago=moneda_pago,
-            tasa_cambio=tasa_cambio,
-            metodo_pago=metodo_pago,
-            tipo_pago=tipo_pago,
-            monto_pagado_inicial_usd=monto_pagado_inicial_usd,
-            referencia=f"Factura de compra #{factura_id}",
-        )
+        if pagado > 0:
+            registrar_egreso(
+                conn,
+                origen="factura_compra_pagada",
+                referencia_id=factura_id,
+                descripcion=f"Factura de compra #{factura_id} · {clean_text(proveedor) or 'Proveedor N/D'}",
+                monto_usd=float(pagado),
+                moneda=clean_text(moneda_pago).upper() or "USD",
+                monto_moneda=float(pagado) if clean_text(moneda_pago).upper() == "USD" else float(pagado) * float(tasa_cambio or 1.0),
+                tasa_cambio=float(tasa_cambio or 1.0),
+                metodo_pago=clean_text(metodo_pago).lower() or "efectivo",
+                usuario=str(usuario or "Sistema"),
+                metadata={"modulo": "facturas_compra", "factura_id": factura_id, "numero_factura": clean_text(numero_factura), "proveedor": clean_text(proveedor)},
+                allow_duplicate=True,
+            )
 
     return {
         "factura_id": factura_id,
@@ -243,7 +278,7 @@ def registrar_factura_compra(
         "pagado_usd": round(pagado, 4),
         "pendiente_usd": round(pendiente, 4),
         "estado": estado,
-        "lineas": lineas_ok,
+        "lineas": resultados_lineas,
     }
 
 
@@ -274,7 +309,7 @@ def listar_lineas_factura(factura_id: int) -> pd.DataFrame:
             SELECT
                 id, tipo_linea, descripcion, cantidad, unidad, subtotal_usd,
                 costo_unitario_estimado_usd, costo_unitario_real_usd, total_real_linea_usd,
-                inventario_id, referencia_generada
+                inventario_id, compra_historial_id, referencia_generada
             FROM facturas_compra_lineas
             WHERE factura_id = ?
             ORDER BY id
