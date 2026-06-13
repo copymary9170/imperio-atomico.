@@ -259,6 +259,7 @@ MENU_ROUTES = {
     "💾 Respaldo": (("dashboard.view", "config.view", "reportes.export"), lambda: render_respaldo(usuario)),
     "⚙️ Configuración": (("dashboard.view", "config.view", "reportes.export"), lambda: render_configuracion_sistema(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
+    "💰 Cuentas por cobrar": (("ventas.view", "clientes.view", "dashboard.view"), lambda: render_cuentas_por_cobrar(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
     "🏭 Producción": (("produccion.plan", "produccion.execute", "produccion.route", "produccion.quality", "produccion.scrap"), lambda: render_produccion_unificada(usuario)),
