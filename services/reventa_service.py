@@ -61,8 +61,6 @@ def ensure_reventa_tables() -> None:
             )
             """
         )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_reventa_estado ON mercancia_reventa(estado)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_compras_reventa_item ON compras_reventa(mercancia_id)")
 
 
 def crear_mercancia_reventa(*, usuario: str, sku: str, nombre: str, categoria: str, unidad: str, precio_venta_usd: float = 0.0, stock_minimo: float = 0.0, marca: str = "", proveedor_principal: str = "", ubicacion: str = "") -> int:
@@ -88,36 +86,40 @@ def crear_mercancia_reventa(*, usuario: str, sku: str, nombre: str, categoria: s
         return int(cur.lastrowid)
 
 
-def registrar_compra_reventa(*, usuario: str, mercancia_id: int, cantidad: float, costo_total_usd: float, precio_venta_usd: float | None = None, proveedor: str = "", factura: str = "", referencia: str = "") -> dict[str, Any]:
-    ensure_reventa_tables()
+def _registrar_compra_reventa_conn(conn: Any, *, usuario: str, mercancia_id: int, cantidad: float, costo_total_usd: float, precio_venta_usd: float | None = None, proveedor: str = "", factura: str = "", referencia: str = "") -> dict[str, Any]:
     cantidad_ok = float(cantidad or 0.0)
     total_ok = float(costo_total_usd or 0.0)
     if cantidad_ok <= 0 or total_ok <= 0:
         raise ValueError("Cantidad y costo total deben ser mayores a cero.")
     costo_unit = total_ok / cantidad_ok
+    row = conn.execute("SELECT * FROM mercancia_reventa WHERE id=? AND estado='activo'", (int(mercancia_id),)).fetchone()
+    if not row:
+        raise ValueError("Mercancía de reventa no encontrada o inactiva.")
+    stock_anterior = float(row["stock_actual"] or 0.0)
+    costo_anterior = float(row["costo_unitario_usd"] or 0.0)
+    stock_nuevo = stock_anterior + cantidad_ok
+    costo_promedio = ((stock_anterior * costo_anterior) + total_ok) / stock_nuevo if stock_nuevo else costo_unit
+    precio = float(precio_venta_usd) if precio_venta_usd is not None and float(precio_venta_usd) > 0 else float(row["precio_venta_usd"] or 0.0)
+    margen = ((precio - costo_promedio) / precio * 100.0) if precio > 0 else 0.0
+    conn.execute(
+        "UPDATE mercancia_reventa SET stock_actual=?, costo_unitario_usd=?, precio_venta_usd=?, margen_pct=?, proveedor_principal=COALESCE(NULLIF(?, ''), proveedor_principal) WHERE id=?",
+        (round(stock_nuevo, 4), round(costo_promedio, 6), round(precio, 4), round(margen, 4), clean_text(proveedor), int(mercancia_id)),
+    )
+    cur = conn.execute(
+        """
+        INSERT INTO compras_reventa
+        (usuario, mercancia_id, proveedor, factura, cantidad, costo_total_usd, costo_unitario_usd, precio_venta_usd, referencia)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (str(usuario or "Sistema"), int(mercancia_id), clean_text(proveedor), clean_text(factura), cantidad_ok, round(total_ok, 4), round(costo_unit, 6), round(precio, 4), clean_text(referencia)),
+    )
+    return {"compra_reventa_id": int(cur.lastrowid), "stock_anterior_reventa": stock_anterior, "stock_nuevo_reventa": stock_nuevo, "costo_unitario_reventa_usd": costo_unit, "costo_promedio_reventa_usd": costo_promedio, "margen_reventa_pct": margen}
+
+
+def registrar_compra_reventa(*, usuario: str, mercancia_id: int, cantidad: float, costo_total_usd: float, precio_venta_usd: float | None = None, proveedor: str = "", factura: str = "", referencia: str = "") -> dict[str, Any]:
+    ensure_reventa_tables()
     with db_transaction() as conn:
-        row = conn.execute("SELECT * FROM mercancia_reventa WHERE id=? AND estado='activo'", (int(mercancia_id),)).fetchone()
-        if not row:
-            raise ValueError("Mercancía no encontrada o inactiva.")
-        stock_anterior = float(row["stock_actual"] or 0.0)
-        costo_anterior = float(row["costo_unitario_usd"] or 0.0)
-        stock_nuevo = stock_anterior + cantidad_ok
-        costo_promedio = ((stock_anterior * costo_anterior) + total_ok) / stock_nuevo if stock_nuevo else costo_unit
-        precio = float(precio_venta_usd) if precio_venta_usd is not None and float(precio_venta_usd) > 0 else float(row["precio_venta_usd"] or 0.0)
-        margen = ((precio - costo_promedio) / precio * 100.0) if precio > 0 else 0.0
-        conn.execute(
-            "UPDATE mercancia_reventa SET stock_actual=?, costo_unitario_usd=?, precio_venta_usd=?, margen_pct=?, proveedor_principal=COALESCE(NULLIF(?, ''), proveedor_principal) WHERE id=?",
-            (round(stock_nuevo, 4), round(costo_promedio, 6), round(precio, 4), round(margen, 4), clean_text(proveedor), int(mercancia_id)),
-        )
-        cur = conn.execute(
-            """
-            INSERT INTO compras_reventa
-            (usuario, mercancia_id, proveedor, factura, cantidad, costo_total_usd, costo_unitario_usd, precio_venta_usd, referencia)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (str(usuario or "Sistema"), int(mercancia_id), clean_text(proveedor), clean_text(factura), cantidad_ok, round(total_ok, 4), round(costo_unit, 6), round(precio, 4), clean_text(referencia)),
-        )
-        return {"compra_id": int(cur.lastrowid), "stock_anterior": stock_anterior, "stock_nuevo": stock_nuevo, "costo_unitario_usd": costo_unit, "costo_promedio_usd": costo_promedio, "margen_pct": margen}
+        return _registrar_compra_reventa_conn(conn, usuario=usuario, mercancia_id=mercancia_id, cantidad=cantidad, costo_total_usd=costo_total_usd, precio_venta_usd=precio_venta_usd, proveedor=proveedor, factura=factura, referencia=referencia)
 
 
 def listar_mercancia_reventa() -> pd.DataFrame:
