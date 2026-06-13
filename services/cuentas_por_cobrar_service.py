@@ -45,8 +45,6 @@ def ensure_cuentas_por_cobrar_tables() -> None:
             )
             """
         )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cxc_estado ON cuentas_por_cobrar(estado)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cxc_cliente ON cuentas_por_cobrar(cliente)")
 
 
 def _estado_por_pago(total: float, pagado: float) -> str:
