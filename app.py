@@ -54,11 +54,7 @@ set_session_role_from_db()
 from views.dashboard import render_dashboard
 from views.panel_ejecutivo import render_panel_ejecutivo
 from views.centro_alertas import render_centro_alertas
-from views.inventario import render_inventario
-from views.materia_prima import render_materia_prima
-from views.facturas_compra import render_facturas_compra
-from views.stock_minimo import render_stock_minimo
-from views.kardex import render_kardex
+from views.inventario_almacen_unificado import render_inventario_almacen_unificado
 from views.clientes import render_clientes
 from views.contactos import render_contactos
 from views.reportes import render_reportes
@@ -78,16 +74,11 @@ from views.costeo import render_costeo
 from views.costeo_impresion_real import render_costeo_impresion_real
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
-from views.catalogo import render_catalogo
-from views.productos_terminados import render_productos_terminados
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
 from views.areas_empresariales import render_area_combinada, render_area_empresarial
-from views.almacen_avanzado import render_almacen_avanzado
 from views.activos_patrimonial import render_activos_patrimonial
-from views.proveedores_compras import render_compras_suministro, render_proveedores
 from views.despacho_entregas import render_despacho_entregas
-from views.unidades_fraccionadas import render_unidades_fraccionadas
 from views.disenos_aprobaciones import render_disenos_aprobaciones
 from views.fichas_tecnicas_bom import render_fichas_tecnicas_bom
 from views.legal_hub import render_legal_hub
@@ -115,21 +106,6 @@ def render_dashboard_unificado(usuario: str) -> None:
         render_dashboard()
     with tab_ejecutivo:
         render_panel_ejecutivo(usuario)
-
-
-def render_inventario_almacen_unificado(usuario: str) -> None:
-    st.title("📦 Inventario / Almacén")
-    tabs = st.tabs(["📦 Materia prima", "🧩 Productos terminados", "⚙️ Inventario operativo", "📉 Stock mínimo", "📏 Unidades", "🧾 Kardex", "🛒 Compras", "👥 Proveedores", "🏬 Almacén", "🛍️ Catálogo"])
-    with tabs[0]: render_materia_prima(usuario)
-    with tabs[1]: render_productos_terminados(usuario)
-    with tabs[2]: render_inventario(usuario)
-    with tabs[3]: render_stock_minimo(usuario)
-    with tabs[4]: render_unidades_fraccionadas(usuario)
-    with tabs[5]: render_kardex(usuario)
-    with tabs[6]: render_compras_suministro(usuario)
-    with tabs[7]: render_proveedores(usuario)
-    with tabs[8]: render_almacen_avanzado(usuario)
-    with tabs[9]: render_catalogo(usuario)
 
 
 def render_produccion_unificada(usuario: str) -> None:
