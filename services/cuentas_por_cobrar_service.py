@@ -11,6 +11,8 @@ ESTADOS_CXC = ["pendiente", "parcial", "cobrada", "vencida", "anulada"]
 CXC_COLUMNS = {
     "fecha_creacion": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
     "usuario": "TEXT NOT NULL DEFAULT 'Sistema'",
+    "venta_id": "INTEGER",
+    "cliente_id": "INTEGER",
     "cliente": "TEXT NOT NULL DEFAULT ''",
     "concepto": "TEXT NOT NULL DEFAULT ''",
     "referencia": "TEXT",
@@ -18,6 +20,8 @@ CXC_COLUMNS = {
     "total_usd": "REAL NOT NULL DEFAULT 0",
     "pagado_usd": "REAL NOT NULL DEFAULT 0",
     "pendiente_usd": "REAL NOT NULL DEFAULT 0",
+    "saldo_usd": "REAL NOT NULL DEFAULT 0",
+    "dias_vencimiento": "INTEGER NOT NULL DEFAULT 0",
     "estado": "TEXT NOT NULL DEFAULT 'pendiente'",
     "metodo_pago": "TEXT",
     "notas": "TEXT",
@@ -46,6 +50,8 @@ def ensure_cuentas_por_cobrar_tables() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fecha_creacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 usuario TEXT NOT NULL DEFAULT 'Sistema',
+                venta_id INTEGER,
+                cliente_id INTEGER,
                 cliente TEXT NOT NULL DEFAULT '',
                 concepto TEXT NOT NULL DEFAULT '',
                 referencia TEXT,
@@ -53,6 +59,8 @@ def ensure_cuentas_por_cobrar_tables() -> None:
                 total_usd REAL NOT NULL DEFAULT 0,
                 pagado_usd REAL NOT NULL DEFAULT 0,
                 pendiente_usd REAL NOT NULL DEFAULT 0,
+                saldo_usd REAL NOT NULL DEFAULT 0,
+                dias_vencimiento INTEGER NOT NULL DEFAULT 0,
                 estado TEXT NOT NULL DEFAULT 'pendiente',
                 metodo_pago TEXT,
                 notas TEXT
@@ -95,7 +103,7 @@ def _estado_por_pago(total: float, pagado: float) -> str:
     return "parcial"
 
 
-def crear_cuenta_por_cobrar(*, usuario: str, cliente: str, concepto: str, total_usd: float, pagado_usd: float = 0.0, fecha_compromiso: str = "", metodo_pago: str = "", referencia: str = "", notas: str = "") -> int:
+def crear_cuenta_por_cobrar(*, usuario: str, cliente: str, concepto: str, total_usd: float, pagado_usd: float = 0.0, fecha_compromiso: str = "", metodo_pago: str = "", referencia: str = "", notas: str = "", venta_id: int | None = None, cliente_id: int | None = None) -> int:
     ensure_cuentas_por_cobrar_tables()
     cliente_ok = require_text(cliente, "Cliente")
     concepto_ok = require_text(concepto, "Concepto")
@@ -110,10 +118,10 @@ def crear_cuenta_por_cobrar(*, usuario: str, cliente: str, concepto: str, total_
         cur = conn.execute(
             """
             INSERT INTO cuentas_por_cobrar
-            (usuario, cliente, concepto, referencia, fecha_compromiso, total_usd, pagado_usd, pendiente_usd, estado, metodo_pago, notas)
-            VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
+            (usuario, venta_id, cliente_id, cliente, concepto, referencia, fecha_compromiso, total_usd, pagado_usd, pendiente_usd, saldo_usd, estado, metodo_pago, notas)
+            VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
             """,
-            (str(usuario or "Sistema"), cliente_ok, concepto_ok, clean_text(referencia), clean_text(fecha_compromiso), round(total, 4), round(pagado, 4), round(pendiente, 4), estado, clean_text(metodo_pago), clean_text(notas)),
+            (str(usuario or "Sistema"), int(venta_id) if venta_id else None, int(cliente_id) if cliente_id else None, cliente_ok, concepto_ok, clean_text(referencia), clean_text(fecha_compromiso), round(total, 4), round(pagado, 4), round(pendiente, 4), round(pendiente, 4), estado, clean_text(metodo_pago), clean_text(notas)),
         )
         cuenta_id = int(cur.lastrowid)
         if pagado > 0:
@@ -138,12 +146,12 @@ def registrar_abono_cxc(*, usuario: str, cuenta_id: int, monto_usd: float, metod
         nuevo_pagado = min(total, pagado_actual + monto)
         pendiente = max(0.0, total - nuevo_pagado)
         estado = _estado_por_pago(total, nuevo_pagado)
-        conn.execute("UPDATE cuentas_por_cobrar SET pagado_usd=?, pendiente_usd=?, estado=?, metodo_pago=COALESCE(NULLIF(?, ''), metodo_pago) WHERE id=?", (round(nuevo_pagado, 4), round(pendiente, 4), estado, clean_text(metodo_pago), int(cuenta_id)))
+        conn.execute("UPDATE cuentas_por_cobrar SET pagado_usd=?, pendiente_usd=?, saldo_usd=?, estado=?, metodo_pago=COALESCE(NULLIF(?, ''), metodo_pago) WHERE id=?", (round(nuevo_pagado, 4), round(pendiente, 4), round(pendiente, 4), estado, clean_text(metodo_pago), int(cuenta_id)))
         cur = conn.execute(
             "INSERT INTO abonos_cuentas_por_cobrar(usuario, cuenta_id, monto_usd, metodo_pago, referencia, notas) VALUES (?, ?, ?, ?, ?, ?)",
             (str(usuario or "Sistema"), int(cuenta_id), round(monto, 4), clean_text(metodo_pago), clean_text(referencia), clean_text(notas)),
         )
-        return {"abono_id": int(cur.lastrowid), "pagado_usd": nuevo_pagado, "pendiente_usd": pendiente, "estado": estado}
+        return {"abono_id": int(cur.lastrowid), "pagado_usd": nuevo_pagado, "pendiente_usd": pendiente, "saldo_usd": pendiente, "estado": estado}
 
 
 def listar_cuentas_por_cobrar(limit: int = 200) -> pd.DataFrame:
@@ -151,7 +159,7 @@ def listar_cuentas_por_cobrar(limit: int = 200) -> pd.DataFrame:
     with db_transaction() as conn:
         return pd.read_sql_query(
             """
-            SELECT id, fecha_creacion, cliente, concepto, referencia, fecha_compromiso, total_usd, pagado_usd, pendiente_usd, estado, metodo_pago, notas
+            SELECT id, fecha_creacion, venta_id, cliente_id, cliente, concepto, referencia, fecha_compromiso, total_usd, pagado_usd, pendiente_usd, saldo_usd, estado, metodo_pago, notas
             FROM cuentas_por_cobrar
             ORDER BY id DESC
             LIMIT ?
