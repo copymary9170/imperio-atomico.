@@ -76,6 +76,7 @@ from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
 from views.estado_resultados import render_estado_resultados
 from views.cuentas_por_cobrar import render_cuentas_por_cobrar
+from views.presupuesto_equilibrio import render_presupuesto_equilibrio
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
 from views.areas_empresariales import render_area_combinada, render_area_empresarial
@@ -155,13 +156,15 @@ def render_activos_unificado(usuario: str) -> None:
 
 def render_finanzas_unificado(usuario: str) -> None:
     st.title("💼 Finanzas")
-    tab_plan, tab_estado, tab_cxc = st.tabs(["Planeación", "📊 Estado de resultados", "💰 Cuentas por cobrar"])
+    tab_plan, tab_estado, tab_cxc, tab_presupuesto = st.tabs(["Planeación", "📊 Estado de resultados", "💰 Cuentas por cobrar", "📅 Presupuesto / Equilibrio"])
     with tab_plan:
         render_planeacion_financiera(usuario)
     with tab_estado:
         render_estado_resultados(usuario)
     with tab_cxc:
         render_cuentas_por_cobrar(usuario)
+    with tab_presupuesto:
+        render_presupuesto_equilibrio(usuario)
 
 
 def _table_exists(conn, table_name: str) -> bool:
@@ -260,6 +263,7 @@ MENU_ROUTES = {
     "⚙️ Configuración": (("dashboard.view", "config.view", "reportes.export"), lambda: render_configuracion_sistema(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "💰 Cuentas por cobrar": (("ventas.view", "clientes.view", "dashboard.view"), lambda: render_cuentas_por_cobrar(usuario)),
+    "📅 Presupuesto / Equilibrio": (("dashboard.view", "contabilidad.view", "presupuesto.view"), lambda: render_presupuesto_equilibrio(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
     "🏭 Producción": (("produccion.plan", "produccion.execute", "produccion.route", "produccion.quality", "produccion.scrap"), lambda: render_produccion_unificada(usuario)),
