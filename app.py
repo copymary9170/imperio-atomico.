@@ -74,6 +74,8 @@ from views.costeo import render_costeo
 from views.costeo_impresion_real import render_costeo_impresion_real
 from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
+from views.estado_resultados import render_estado_resultados
+from views.cuentas_por_cobrar import render_cuentas_por_cobrar
 from views.rutas_produccion import render_rutas_produccion
 from views.planificacion_produccion import render_planificacion_produccion
 from views.areas_empresariales import render_area_combinada, render_area_empresarial
@@ -149,6 +151,17 @@ def render_activos_unificado(usuario: str) -> None:
     with tab_consumibles: render_impresora_consumibles(usuario)
     with tab_mantenimiento: render_mantenimiento_activos(usuario)
     with tab_patrimonial: render_activos_patrimonial(usuario)
+
+
+def render_finanzas_unificado(usuario: str) -> None:
+    st.title("💼 Finanzas")
+    tab_plan, tab_estado, tab_cxc = st.tabs(["Planeación", "📊 Estado de resultados", "💰 Cuentas por cobrar"])
+    with tab_plan:
+        render_planeacion_financiera(usuario)
+    with tab_estado:
+        render_estado_resultados(usuario)
+    with tab_cxc:
+        render_cuentas_por_cobrar(usuario)
 
 
 def _table_exists(conn, table_name: str) -> bool:
@@ -249,7 +262,7 @@ MENU_ROUTES = {
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
     "🏭 Producción": (("produccion.plan", "produccion.execute", "produccion.route", "produccion.quality", "produccion.scrap"), lambda: render_produccion_unificada(usuario)),
-    "💼 Finanzas": (("tesoreria.view", "dashboard.view", "gastos.view", "caja.view", "cxp.view", "contabilidad.view", "conciliacion.view", "impuestos.view", "presupuesto.view"), lambda: render_planeacion_financiera(usuario)),
+    "💼 Finanzas": (("tesoreria.view", "dashboard.view", "gastos.view", "caja.view", "cxp.view", "contabilidad.view", "conciliacion.view", "impuestos.view", "presupuesto.view"), lambda: render_finanzas_unificado(usuario)),
     "🗂️ Administración": (("dashboard.view", "config.view", "security.view", "reportes.export", "manuales.view", "auditoria.view", "calendario_operativo.view"), lambda: render_area_empresarial("Administración", usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
