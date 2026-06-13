@@ -8,6 +8,35 @@ from modules.common import clean_text, require_text
 
 ESTADOS_CXC = ["pendiente", "parcial", "cobrada", "vencida", "anulada"]
 
+CXC_COLUMNS = {
+    "fecha_creacion": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    "usuario": "TEXT NOT NULL DEFAULT 'Sistema'",
+    "cliente": "TEXT NOT NULL DEFAULT ''",
+    "concepto": "TEXT NOT NULL DEFAULT ''",
+    "referencia": "TEXT",
+    "fecha_compromiso": "TEXT",
+    "total_usd": "REAL NOT NULL DEFAULT 0",
+    "pagado_usd": "REAL NOT NULL DEFAULT 0",
+    "pendiente_usd": "REAL NOT NULL DEFAULT 0",
+    "estado": "TEXT NOT NULL DEFAULT 'pendiente'",
+    "metodo_pago": "TEXT",
+    "notas": "TEXT",
+}
+
+ABONOS_CXC_COLUMNS = {
+    "fecha": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    "usuario": "TEXT NOT NULL DEFAULT 'Sistema'",
+    "cuenta_id": "INTEGER NOT NULL DEFAULT 0",
+    "monto_usd": "REAL NOT NULL DEFAULT 0",
+    "metodo_pago": "TEXT",
+    "referencia": "TEXT",
+    "notas": "TEXT",
+}
+
+
+def _table_columns(conn, table_name: str) -> set[str]:
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
 
 def ensure_cuentas_por_cobrar_tables() -> None:
     with db_transaction() as conn:
@@ -17,8 +46,8 @@ def ensure_cuentas_por_cobrar_tables() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fecha_creacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 usuario TEXT NOT NULL DEFAULT 'Sistema',
-                cliente TEXT NOT NULL,
-                concepto TEXT NOT NULL,
+                cliente TEXT NOT NULL DEFAULT '',
+                concepto TEXT NOT NULL DEFAULT '',
                 referencia TEXT,
                 fecha_compromiso TEXT,
                 total_usd REAL NOT NULL DEFAULT 0,
@@ -30,13 +59,19 @@ def ensure_cuentas_por_cobrar_tables() -> None:
             )
             """
         )
+        cols = _table_columns(conn, "cuentas_por_cobrar")
+        for column, ddl in CXC_COLUMNS.items():
+            if column not in cols:
+                conn.execute(f"ALTER TABLE cuentas_por_cobrar ADD COLUMN {column} {ddl}")
+                cols.add(column)
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS abonos_cuentas_por_cobrar (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 usuario TEXT NOT NULL DEFAULT 'Sistema',
-                cuenta_id INTEGER NOT NULL,
+                cuenta_id INTEGER NOT NULL DEFAULT 0,
                 monto_usd REAL NOT NULL DEFAULT 0,
                 metodo_pago TEXT,
                 referencia TEXT,
@@ -45,6 +80,11 @@ def ensure_cuentas_por_cobrar_tables() -> None:
             )
             """
         )
+        cols_abonos = _table_columns(conn, "abonos_cuentas_por_cobrar")
+        for column, ddl in ABONOS_CXC_COLUMNS.items():
+            if column not in cols_abonos:
+                conn.execute(f"ALTER TABLE abonos_cuentas_por_cobrar ADD COLUMN {column} {ddl}")
+                cols_abonos.add(column)
 
 
 def _estado_por_pago(total: float, pagado: float) -> str:
@@ -113,7 +153,7 @@ def listar_cuentas_por_cobrar(limit: int = 200) -> pd.DataFrame:
             """
             SELECT id, fecha_creacion, cliente, concepto, referencia, fecha_compromiso, total_usd, pagado_usd, pendiente_usd, estado, metodo_pago, notas
             FROM cuentas_por_cobrar
-            ORDER BY CASE estado WHEN 'pendiente' THEN 0 WHEN 'parcial' THEN 1 WHEN 'vencida' THEN 2 ELSE 3 END, fecha_compromiso, id DESC
+            ORDER BY id DESC
             LIMIT ?
             """,
             conn,
