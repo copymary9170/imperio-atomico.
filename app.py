@@ -56,6 +56,7 @@ from views.panel_ejecutivo import render_panel_ejecutivo
 from views.centro_alertas import render_centro_alertas
 from views.inventario import render_inventario
 from views.materia_prima import render_materia_prima
+from views.facturas_compra import render_facturas_compra
 from views.stock_minimo import render_stock_minimo
 from views.kardex import render_kardex
 from views.clientes import render_clientes
