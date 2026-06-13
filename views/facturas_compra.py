@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+import pandas as pd
+import streamlit as st
+
+from services.facturas_compra_service import (
+    TIPOS_LINEA_FACTURA,
+    listar_cuentas_por_pagar,
+    listar_facturas_compra,
+    listar_lineas_factura,
+    registrar_factura_compra,
+)
+from services.materia_prima_service import listar_materia_prima
+
+
+def _label_materia_prima(row: pd.Series) -> str:
+    return f"#{int(row['id'])} · {row['nombre']} · stock {float(row['stock_actual'] or 0):g} {row['unidad']}"
+
+
+def render_facturas_compra(usuario: str) -> None:
+    st.subheader("🧾 Facturas de compra")
+    st.caption(
+        "Registra una factura completa con varias líneas. Cada línea puede ser materia prima, mercancía para reventa, activo/equipo, gasto o servicio. "
+        "Por ahora las líneas de materia prima actualizan stock automáticamente; las demás quedan registradas para control de factura y cuentas por pagar."
+    )
+
+    tab_nueva, tab_historial, tab_cxp = st.tabs(["Nueva factura", "Historial", "Cuentas por pagar"])
+
+    with tab_nueva:
+        if "facturas_compra_lineas" not in st.session_state:
+            st.session_state["facturas_compra_lineas"] = []
+
+        st.markdown("##### Líneas de la factura")
+        materia_prima = listar_materia_prima()
+        tipo_linea = st.selectbox("Tipo de línea", TIPOS_LINEA_FACTURA, key="fc_tipo_linea")
+
+        if tipo_linea == "Materia prima" and not materia_prima.empty:
+            opciones_mp = {_label_materia_prima(row): row for _, row in materia_prima.iterrows()}
+            item_label = st.selectbox("Materia prima", list(opciones_mp.keys()), key="fc_materia_prima")
+            item_row = opciones_mp[item_label]
+            descripcion_default = str(item_row["nombre"])
+            inventario_id = int(item_row["id"])
+            unidad_default = str(item_row.get("unidad") or "unidad")
+        else:
+            if tipo_linea == "Materia prima" and materia_prima.empty:
+                st.warning("No hay materia prima creada. Puedes usar otro tipo de línea o crear la materia prima primero.")
+            descripcion_default = ""
+            inventario_id = None
+            unidad_default = "unidad"
+
+        c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
+        descripcion = c1.text_input("Descripción", value=descripcion_default, placeholder="Ej: lápices, foami, papel bond, impresora HP 580")
+        cantidad = c2.number_input("Cantidad", min_value=0.0001, value=1.0, step=1.0, format="%.4f", key="fc_cantidad")
+        unidad = c3.text_input("Unidad", value=unidad_default)
+        subtotal_linea = c4.number_input("Subtotal USD", min_value=0.0, value=0.0, step=1.0, format="%.4f", key="fc_subtotal_linea")
+
+        if st.button("➕ Agregar línea", use_container_width=True):
+            if not descripcion.strip() or subtotal_linea <= 0:
+                st.error("La línea necesita descripción y subtotal mayor a cero.")
+            else:
+                st.session_state["facturas_compra_lineas"].append(
+                    {
+                        "tipo_linea": tipo_linea,
+                        "inventario_id": inventario_id,
+                        "descripcion": descripcion,
+                        "item": descripcion,
+                        "cantidad": float(cantidad),
+                        "unidad": unidad,
+                        "subtotal_usd": float(subtotal_linea),
+                    }
+                )
+                st.success("Línea agregada a la factura.")
+
+        lineas = st.session_state.get("facturas_compra_lineas", [])
+        if lineas:
+            st.dataframe(pd.DataFrame(lineas), use_container_width=True, hide_index=True)
+            if st.button("🧹 Limpiar líneas", use_container_width=True):
+                st.session_state["facturas_compra_lineas"] = []
+                st.rerun()
+        else:
+            st.info("Agrega al menos una línea a la factura.")
+
+        subtotal = sum(float(x.get("subtotal_usd") or 0.0) for x in lineas)
+        st.markdown("##### Encabezado y costos globales")
+        with st.form("form_nueva_factura_compra"):
+            f1, f2, f3, f4 = st.columns(4)
+            proveedor = f1.text_input("Proveedor")
+            numero_factura = f2.text_input("Número de factura")
+            fecha_factura = f3.date_input("Fecha de factura", value=None)
+            fecha_vencimiento = f4.date_input("Fecha de vencimiento", value=None)
+
+            g1, g2, g3, g4, g5 = st.columns(5)
+            descuento = g1.number_input("Descuento / promo USD", min_value=0.0, value=0.0, step=1.0, format="%.4f")
+            impuestos_pct = g2.number_input("Impuestos %", min_value=0.0, value=0.0, step=1.0, format="%.4f")
+            delivery = g3.number_input("Delivery total USD", min_value=0.0, value=0.0, step=1.0, format="%.4f")
+            comision = g4.number_input("Comisión total USD", min_value=0.0, value=0.0, step=0.5, format="%.4f")
+            otros = g5.number_input("Otros gastos USD", min_value=0.0, value=0.0, step=0.5, format="%.4f")
+
+            p1, p2, p3, p4 = st.columns(4)
+            moneda = p1.selectbox("Moneda", ["USD", "Bs", "COP", "EUR"])
+            tasa = p2.number_input("Tasa", min_value=0.0001, value=1.0, step=1.0, format="%.4f")
+            metodo_pago = p3.selectbox("Método de pago", ["efectivo", "transferencia", "pago movil", "binance", "zelle", "punto", "otro"])
+            tipo_pago = p4.selectbox("Tipo de pago", ["contado", "credito", "parcial"])
+
+            monto_pagado = st.number_input("Monto pagado inicial USD", min_value=0.0, value=0.0, step=1.0, format="%.4f")
+            observaciones = st.text_area("Observaciones")
+
+            base_desc = max(0.0, subtotal - float(descuento)) + float(otros)
+            impuesto_total = base_desc * (float(impuestos_pct) / 100.0)
+            total = base_desc + impuesto_total + float(delivery) + float(comision)
+            pagado_preview = total if monto_pagado <= 0 and tipo_pago == "contado" else float(monto_pagado)
+            pendiente_preview = max(0.0, total - pagado_preview)
+
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Subtotal líneas", f"${subtotal:,.4f}")
+            m2.metric("Base neta", f"${base_desc:,.4f}")
+            m3.metric("Impuesto", f"${impuesto_total:,.4f}")
+            m4.metric("Total", f"${total:,.4f}")
+            m5.metric("Pendiente", f"${pendiente_preview:,.4f}")
+
+            submitted = st.form_submit_button("💾 Registrar factura", use_container_width=True, disabled=not bool(lineas))
+
+        if submitted:
+            try:
+                resultado = registrar_factura_compra(
+                    usuario=usuario,
+                    proveedor=proveedor,
+                    numero_factura=numero_factura,
+                    fecha_factura=fecha_factura.isoformat() if fecha_factura else "",
+                    fecha_vencimiento=fecha_vencimiento.isoformat() if fecha_vencimiento else "",
+                    lineas=lineas,
+                    descuento_total_usd=float(descuento),
+                    impuestos_pct=float(impuestos_pct),
+                    delivery_total_usd=float(delivery),
+                    comision_total_usd=float(comision),
+                    otros_gastos_usd=float(otros),
+                    moneda_pago=moneda,
+                    tasa_cambio=float(tasa),
+                    metodo_pago=metodo_pago,
+                    tipo_pago=tipo_pago,
+                    monto_pagado_inicial_usd=float(monto_pagado) if float(monto_pagado) > 0 else None,
+                    observaciones=observaciones,
+                )
+                st.session_state["facturas_compra_lineas"] = []
+                st.success(f"Factura #{resultado['factura_id']} registrada. Total: ${resultado['total_usd']:,.4f}. Estado: {resultado['estado']}.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"No se pudo registrar la factura: {exc}")
+
+    with tab_historial:
+        st.markdown("##### Historial de facturas")
+        facturas = listar_facturas_compra(limit=100)
+        if facturas.empty:
+            st.info("Aún no hay facturas registradas.")
+        else:
+            st.dataframe(facturas, use_container_width=True, hide_index=True)
+            factura_id = st.number_input("Ver líneas de factura ID", min_value=1, value=int(facturas.iloc[0]["id"]), step=1)
+            lineas_df = listar_lineas_factura(int(factura_id))
+            if lineas_df.empty:
+                st.caption("Sin líneas para esa factura.")
+            else:
+                st.dataframe(lineas_df, use_container_width=True, hide_index=True)
+
+    with tab_cxp:
+        st.markdown("##### Cuentas por pagar")
+        cxp = listar_cuentas_por_pagar(limit=100)
+        if cxp.empty:
+            st.success("No hay cuentas por pagar pendientes.")
+        else:
+            st.dataframe(cxp, use_container_width=True, hide_index=True)
+
+    st.caption(f"Usuario: {usuario}")
