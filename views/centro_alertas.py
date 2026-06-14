@@ -107,6 +107,19 @@ def _safe_df(table: str, columns: list[str], where: str | None = None, where_col
         return pd.DataFrame()
 
 
+def _safe_query_df(sql: str, needed_table: str, needed_columns: list[str], limit: int = 200) -> pd.DataFrame:
+    try:
+        with db_transaction() as conn:
+            if not _table_exists(conn, needed_table):
+                return pd.DataFrame()
+            existing = _table_columns(conn, needed_table)
+            if not set(needed_columns).issubset(existing):
+                return pd.DataFrame()
+            return pd.read_sql_query(sql, conn, params=(int(limit),))
+    except Exception:
+        return pd.DataFrame()
+
+
 def _ensure_migration_review_columns() -> None:
     try:
         with db_transaction() as conn:
@@ -152,12 +165,53 @@ def _mark_migration_errors_reviewed(usuario: str) -> None:
         )
 
 
+def _cxp_alertas_df() -> pd.DataFrame:
+    return _safe_query_df(
+        """
+        SELECT
+            id,
+            proveedor,
+            numero_factura,
+            fecha_factura,
+            fecha_vencimiento,
+            total_usd,
+            pagado_usd,
+            pendiente_usd,
+            estado,
+            CAST(julianday(date(fecha_vencimiento)) - julianday(date('now')) AS INTEGER) AS dias_para_vencer,
+            CASE
+                WHEN date(fecha_vencimiento) < date('now') THEN 'Vencida'
+                WHEN date(fecha_vencimiento) BETWEEN date('now') AND date('now', '+7 day') THEN 'Vence pronto'
+                ELSE 'Al día'
+            END AS estado_vencimiento
+        FROM facturas_compra
+        WHERE pendiente_usd > 0.0001
+          AND fecha_vencimiento IS NOT NULL
+          AND date(fecha_vencimiento) <= date('now', '+7 day')
+        ORDER BY date(fecha_vencimiento) ASC, id DESC
+        LIMIT ?
+        """,
+        "facturas_compra",
+        ["id", "proveedor", "numero_factura", "fecha_factura", "fecha_vencimiento", "total_usd", "pagado_usd", "pendiente_usd", "estado"],
+        200,
+    )
+
+
 def _build_alerts() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
 
     disenos_bloqueados = _safe_count("disenos_aprobaciones", "bloqueo_produccion=1", ["bloqueo_produccion"])
     if disenos_bloqueados:
         rows.append({"nivel": "critica", "modulo": "Diseños", "alerta": "Diseños bloqueando producción", "cantidad": disenos_bloqueados, "accion": "Revisar aprobación del cliente y cambiar estado a aprobado/listo."})
+
+    cxp_alertas = _cxp_alertas_df()
+    if not cxp_alertas.empty:
+        vencidas = cxp_alertas[cxp_alertas["estado_vencimiento"].eq("Vencida")]
+        pronto = cxp_alertas[cxp_alertas["estado_vencimiento"].eq("Vence pronto")]
+        if not vencidas.empty:
+            rows.append({"nivel": "critica", "modulo": "Cuentas por pagar", "alerta": f"Facturas vencidas por pagar (${float(vencidas['pendiente_usd'].sum()):,.2f})", "cantidad": len(vencidas), "accion": "Entrar a Cuentas por pagar → Vencimientos y registrar abono o pago."})
+        if not pronto.empty:
+            rows.append({"nivel": "media", "modulo": "Cuentas por pagar", "alerta": f"Facturas próximas a vencer (${float(pronto['pendiente_usd'].sum()):,.2f})", "cantidad": len(pronto), "accion": "Planificar pago antes del vencimiento."})
 
     despachos_abiertos = _safe_count("despachos_entregas", "estado NOT IN ('Entregado', 'Devuelto')", ["estado"])
     if despachos_abiertos:
@@ -216,7 +270,7 @@ def render_centro_alertas(usuario: str = "Sistema") -> None:
     c4.metric("Informativas", infos)
 
     if criticas:
-        st.error("Hay alertas críticas que pueden afectar caja, producción o estabilidad técnica.")
+        st.error("Hay alertas críticas que pueden afectar caja, producción, pagos o estabilidad técnica.")
     elif medias:
         st.warning("Hay alertas operativas pendientes de seguimiento.")
     else:
@@ -226,7 +280,8 @@ def render_centro_alertas(usuario: str = "Sistema") -> None:
     st.dataframe(alert_view, use_container_width=True, hide_index=True)
     _download_csv("alertas", alert_view, "alertas_operativas")
 
-    tab_disenos, tab_despacho, tab_caja, tab_sistema, tab_compras, tab_auditoria = st.tabs([
+    tab_cxp, tab_disenos, tab_despacho, tab_caja, tab_sistema, tab_compras, tab_auditoria = st.tabs([
+        "CxP vencidas",
         "Diseños bloqueados",
         "Despachos abiertos",
         "Diferencias caja",
@@ -234,6 +289,20 @@ def render_centro_alertas(usuario: str = "Sistema") -> None:
         "Compras / Proveedores",
         "Auditoría reciente",
     ])
+
+    with tab_cxp:
+        df = _cxp_alertas_df()
+        if not df.empty:
+            vencidas = df[df["estado_vencimiento"].eq("Vencida")]
+            pronto = df[df["estado_vencimiento"].eq("Vence pronto")]
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Facturas vencidas", len(vencidas))
+            c2.metric("Vencen en 7 días", len(pronto))
+            c3.metric("Monto en alerta", f"${float(df['pendiente_usd'].sum()):,.2f}")
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            _download_csv("cuentas por pagar vencidas", df, "cxp_vencidas_proximas")
+        else:
+            st.success("No hay cuentas por pagar vencidas ni próximas a vencer.")
 
     with tab_disenos:
         df = _safe_df("disenos_aprobaciones", ["id", "fecha_creacion", "cliente", "nombre_diseno", "estado", "bloqueo_produccion", "aprobado_por"], "bloqueo_produccion=1", ["bloqueo_produccion"])
