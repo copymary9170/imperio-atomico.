@@ -16,7 +16,11 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
-
+        
+def _ensure_column(conn, table_name: str, column_name: str, column_sql: str) -> None:
+    cols = [row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
+    if column_name not in cols:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 def _today_caracas() -> str:
     return now_caracas().strftime("%Y-%m-%d")
@@ -41,6 +45,46 @@ def _ensure_dia_tables() -> None:
             """
         )
 
+        for col, sql in [
+            ("ventas_usd", "REAL DEFAULT 0"),
+            ("gastos_usd", "REAL DEFAULT 0"),
+            ("caja_esperada_usd", "REAL DEFAULT 0"),
+            ("diferencia_usd", "REAL DEFAULT 0"),
+            ("estatus_cierre", "TEXT"),
+        ]:
+            _ensure_column(conn, "dias_operacion", col, sql)
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cierres_caja (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                usuario TEXT NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'cerrado',
+                inicio_efectivo REAL NOT NULL DEFAULT 0,
+                ventas_efectivo REAL NOT NULL DEFAULT 0,
+                ventas_transferencia REAL NOT NULL DEFAULT 0,
+                ventas_pago_movil REAL NOT NULL DEFAULT 0,
+                ventas_binance REAL NOT NULL DEFAULT 0,
+                gastos_efectivo REAL NOT NULL DEFAULT 0,
+                gastos_transferencia REAL NOT NULL DEFAULT 0,
+                fin_efectivo REAL NOT NULL DEFAULT 0,
+                observaciones TEXT
+            )
+            """
+        )
+
+        for col, sql in [
+            ("dia_operacion_id", "INTEGER"),
+            ("ventas_totales_usd", "REAL DEFAULT 0"),
+            ("gastos_totales_usd", "REAL DEFAULT 0"),
+            ("ventas_zelle", "REAL DEFAULT 0"),
+            ("caja_esperada_usd", "REAL DEFAULT 0"),
+            ("caja_contada_usd", "REAL DEFAULT 0"),
+            ("diferencia_usd", "REAL DEFAULT 0"),
+            ("estatus_cierre", "TEXT"),
+        ]:
+            _ensure_column(conn, "cierres_caja", col, sql)
 
 def _table_exists(conn, table_name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
@@ -194,14 +238,97 @@ def _iniciar_dia(usuario: str, fondo_inicial: float, observaciones: str) -> None
         )
 
 
-def _finalizar_dia(usuario: str, fondo_final: float, observaciones: str) -> None:
+def _finalizar_dia(
+    usuario: str,
+    fondo_final: float,
+    observaciones: str,
+    resumen: dict,
+    caja_esperada: float,
+    diferencia: float,
+    estatus_cierre: str,
+) -> None:
     dia = _get_dia_abierto()
     if not dia:
         return
+
+    _ensure_dia_tables()
+
     with db_transaction() as conn:
         conn.execute(
-            "UPDATE dias_operacion SET estado='cerrado', fecha_fin=?, usuario_fin=?, fondo_final_usd=?, observaciones_fin=? WHERE id=?",
-            (caracas_timestamp(), usuario, fondo_final, observaciones, dia["id"]),
+            """
+            INSERT INTO cierres_caja (
+                fecha,
+                usuario,
+                estado,
+                inicio_efectivo,
+                ventas_efectivo,
+                ventas_transferencia,
+                ventas_pago_movil,
+                ventas_binance,
+                gastos_efectivo,
+                gastos_transferencia,
+                fin_efectivo,
+                observaciones,
+                dia_operacion_id,
+                ventas_totales_usd,
+                gastos_totales_usd,
+                ventas_zelle,
+                caja_esperada_usd,
+                caja_contada_usd,
+                diferencia_usd,
+                estatus_cierre
+            ) VALUES (?, ?, 'cerrado', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                caracas_timestamp(),
+                usuario,
+                _safe_float(dia["fondo_inicial_usd"]),
+                _safe_float(resumen.get("ingreso_efectivo")),
+                _safe_float(resumen.get("ingreso_transferencia")),
+                _safe_float(resumen.get("ingreso_pago_movil")),
+                _safe_float(resumen.get("ingreso_binance")),
+                _safe_float(resumen.get("egreso_efectivo")),
+                _safe_float(resumen.get("egreso_transferencia")),
+                _safe_float(fondo_final),
+                observaciones,
+                dia["id"],
+                _safe_float(resumen.get("ingresos")),
+                _safe_float(resumen.get("egresos")),
+                _safe_float(resumen.get("ingreso_zelle")),
+                _safe_float(caja_esperada),
+                _safe_float(fondo_final),
+                _safe_float(diferencia),
+                estatus_cierre,
+            ),
+        )
+
+        conn.execute(
+            """
+            UPDATE dias_operacion
+            SET estado='cerrado',
+                fecha_fin=?,
+                usuario_fin=?,
+                fondo_final_usd=?,
+                observaciones_fin=?,
+                ventas_usd=?,
+                gastos_usd=?,
+                caja_esperada_usd=?,
+                diferencia_usd=?,
+                estatus_cierre=?
+            WHERE id=?
+            """,
+            (
+                caracas_timestamp(),
+                usuario,
+                fondo_final,
+                observaciones,
+                _safe_float(resumen.get("ingresos")),
+                _safe_float(resumen.get("egresos")),
+                _safe_float(caja_esperada),
+                _safe_float(diferencia),
+                estatus_cierre,
+                dia["id"],
+            ),
         )
 
 
@@ -352,10 +479,25 @@ def render_dia_caja(usuario: str) -> None:
         else:
             fondo_final = st.number_input("Fondo final contado USD", min_value=0.0, step=0.25, format="%.2f", value=float(max(caja_contada, 0)), key="fondo_final_pos")
             obs_fin = st.text_area("Observaciones de cierre", placeholder="Ejemplo: diferencia de caja, efectivo entregado, cierre normal...")
-            if st.button("Finalizar día", type="primary", use_container_width=True):
-                _finalizar_dia(usuario, fondo_final, obs_fin)
-                st.success("Día finalizado correctamente.")
-                st.rerun()
+diferencia_final = fondo_final - caja_esperada
+semaforo_final, texto_final = _pos_status(diferencia_final)
+estatus_final = f"{semaforo_final} {texto_final}"
+
+st.metric("Diferencia al cerrar", f"$ {diferencia_final:,.2f}", estatus_final)
+
+if st.button("Finalizar día y guardar cierre de caja", type="primary", use_container_width=True):
+    _finalizar_dia(
+        usuario,
+        fondo_final,
+        obs_fin,
+        resumen,
+        caja_esperada,
+        diferencia_final,
+        estatus_final,
+    )
+    st.success("Día finalizado y cierre de caja guardado correctamente.")
+    st.rerun()
+    
         st.divider()
         st.subheader("🚪 Cerrar programa")
         if st.button("Cerrar sesión / salir del sistema", use_container_width=True):
