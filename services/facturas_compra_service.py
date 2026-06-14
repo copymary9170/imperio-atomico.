@@ -7,6 +7,7 @@ import pandas as pd
 from database.connection import db_transaction
 from modules.common import clean_text
 from services.activos_compra_service import ensure_activos_compra_tables, registrar_activo_desde_factura_conn
+from services.gastos_operativos_service import ensure_gastos_operativos_tables, registrar_gasto_operativo_desde_factura_conn
 from services.materia_prima_service import _insertar_compra_linea, listar_materia_prima
 from services.reventa_service import _registrar_compra_reventa_conn
 from services.tesoreria_service import registrar_egreso
@@ -27,6 +28,7 @@ def _table_columns(conn: Any, table_name: str) -> set[str]:
 
 def ensure_facturas_compra_tables() -> None:
     ensure_activos_compra_tables()
+    ensure_gastos_operativos_tables()
     with db_transaction() as conn:
         conn.execute(
             """
@@ -66,6 +68,7 @@ def ensure_facturas_compra_tables() -> None:
                 inventario_id INTEGER,
                 mercancia_reventa_id INTEGER,
                 activo_comprado_id INTEGER,
+                gasto_operativo_id INTEGER,
                 descripcion TEXT NOT NULL,
                 cantidad REAL NOT NULL DEFAULT 0,
                 unidad TEXT NOT NULL DEFAULT 'unidad',
@@ -79,7 +82,8 @@ def ensure_facturas_compra_tables() -> None:
                 FOREIGN KEY(factura_id) REFERENCES facturas_compra(id),
                 FOREIGN KEY(inventario_id) REFERENCES inventario(id),
                 FOREIGN KEY(mercancia_reventa_id) REFERENCES mercancia_reventa(id),
-                FOREIGN KEY(activo_comprado_id) REFERENCES activos_comprados(id)
+                FOREIGN KEY(activo_comprado_id) REFERENCES activos_comprados(id),
+                FOREIGN KEY(gasto_operativo_id) REFERENCES gastos_operativos(id)
             )
             """
         )
@@ -89,6 +93,7 @@ def ensure_facturas_compra_tables() -> None:
             "compra_historial_id": "INTEGER",
             "compra_reventa_id": "INTEGER",
             "activo_comprado_id": "INTEGER",
+            "gasto_operativo_id": "INTEGER",
         }
         for column, ddl in migrations.items():
             if column not in columns:
@@ -215,6 +220,7 @@ def registrar_factura_compra(
             compra_historial_id = None
             compra_reventa_id = None
             activo_comprado_id = None
+            gasto_operativo_id = None
             stock_result: dict[str, Any] = {}
 
             if linea["tipo_linea"].lower().startswith("materia") and linea.get("inventario_id"):
@@ -256,11 +262,11 @@ def registrar_factura_compra(
                 """
                 INSERT INTO facturas_compra_lineas
                 (
-                    factura_id, tipo_linea, inventario_id, mercancia_reventa_id, activo_comprado_id, descripcion, cantidad, unidad,
-                    subtotal_usd, costo_unitario_estimado_usd, costo_unitario_real_usd,
+                    factura_id, tipo_linea, inventario_id, mercancia_reventa_id, activo_comprado_id, gasto_operativo_id,
+                    descripcion, cantidad, unidad, subtotal_usd, costo_unitario_estimado_usd, costo_unitario_real_usd,
                     total_real_linea_usd, referencia_generada, compra_historial_id, compra_reventa_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     factura_id,
@@ -268,6 +274,7 @@ def registrar_factura_compra(
                     linea["inventario_id"],
                     linea["mercancia_reventa_id"],
                     activo_comprado_id,
+                    gasto_operativo_id,
                     linea["descripcion"],
                     linea["cantidad"],
                     linea["unidad"],
@@ -300,6 +307,25 @@ def registrar_factura_compra(
                 activo_comprado_id = activo_result.get("activo_comprado_id")
                 conn.execute("UPDATE facturas_compra_lineas SET activo_comprado_id=? WHERE id=?", (activo_comprado_id, linea_id))
                 stock_result.update(activo_result)
+            elif linea["tipo_linea"].lower().startswith("gasto") or linea["tipo_linea"].lower().startswith("servicio"):
+                gasto_result = registrar_gasto_operativo_desde_factura_conn(
+                    conn,
+                    usuario=usuario,
+                    concepto=linea["descripcion"],
+                    tipo_linea=linea["tipo_linea"],
+                    proveedor=proveedor,
+                    factura=numero_factura,
+                    factura_compra_id=factura_id,
+                    factura_linea_id=linea_id,
+                    monto_usd=float(total_linea),
+                    fecha_gasto=fecha_factura,
+                    metodo_pago=metodo_pago,
+                    tipo_pago=tipo_pago_limpio,
+                    notas=referencia,
+                )
+                gasto_operativo_id = gasto_result.get("gasto_operativo_id")
+                conn.execute("UPDATE facturas_compra_lineas SET gasto_operativo_id=? WHERE id=?", (gasto_operativo_id, linea_id))
+                stock_result.update(gasto_result)
 
             resultados_lineas.append(
                 {
@@ -313,6 +339,7 @@ def registrar_factura_compra(
                     "compra_historial_id": compra_historial_id,
                     "compra_reventa_id": compra_reventa_id,
                     "activo_comprado_id": activo_comprado_id,
+                    "gasto_operativo_id": gasto_operativo_id,
                     **stock_result,
                 }
             )
@@ -376,7 +403,8 @@ def listar_lineas_factura(factura_id: int) -> pd.DataFrame:
             SELECT
                 id, tipo_linea, descripcion, cantidad, unidad, subtotal_usd,
                 costo_unitario_estimado_usd, costo_unitario_real_usd, total_real_linea_usd,
-                inventario_id, mercancia_reventa_id, activo_comprado_id, compra_historial_id, compra_reventa_id, referencia_generada
+                inventario_id, mercancia_reventa_id, activo_comprado_id, gasto_operativo_id,
+                compra_historial_id, compra_reventa_id, referencia_generada
             FROM facturas_compra_lineas
             WHERE factura_id = ?
             ORDER BY id
