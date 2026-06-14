@@ -6,6 +6,7 @@ import pandas as pd
 
 from database.connection import db_transaction
 from modules.common import clean_text
+from services.activos_compra_service import ensure_activos_compra_tables, registrar_activo_desde_factura_conn
 from services.materia_prima_service import _insertar_compra_linea, listar_materia_prima
 from services.reventa_service import _registrar_compra_reventa_conn
 from services.tesoreria_service import registrar_egreso
@@ -25,6 +26,7 @@ def _table_columns(conn: Any, table_name: str) -> set[str]:
 
 
 def ensure_facturas_compra_tables() -> None:
+    ensure_activos_compra_tables()
     with db_transaction() as conn:
         conn.execute(
             """
@@ -63,6 +65,7 @@ def ensure_facturas_compra_tables() -> None:
                 tipo_linea TEXT NOT NULL DEFAULT 'Materia prima',
                 inventario_id INTEGER,
                 mercancia_reventa_id INTEGER,
+                activo_comprado_id INTEGER,
                 descripcion TEXT NOT NULL,
                 cantidad REAL NOT NULL DEFAULT 0,
                 unidad TEXT NOT NULL DEFAULT 'unidad',
@@ -75,7 +78,8 @@ def ensure_facturas_compra_tables() -> None:
                 compra_reventa_id INTEGER,
                 FOREIGN KEY(factura_id) REFERENCES facturas_compra(id),
                 FOREIGN KEY(inventario_id) REFERENCES inventario(id),
-                FOREIGN KEY(mercancia_reventa_id) REFERENCES mercancia_reventa(id)
+                FOREIGN KEY(mercancia_reventa_id) REFERENCES mercancia_reventa(id),
+                FOREIGN KEY(activo_comprado_id) REFERENCES activos_comprados(id)
             )
             """
         )
@@ -84,6 +88,7 @@ def ensure_facturas_compra_tables() -> None:
             "mercancia_reventa_id": "INTEGER",
             "compra_historial_id": "INTEGER",
             "compra_reventa_id": "INTEGER",
+            "activo_comprado_id": "INTEGER",
         }
         for column, ddl in migrations.items():
             if column not in columns:
@@ -148,7 +153,12 @@ def registrar_factura_compra(
     base_desc = subtotal - descuento + max(0.0, float(otros_gastos_usd or 0.0))
     impuesto_total = base_desc * (max(0.0, float(impuestos_pct or 0.0)) / 100.0)
     total = base_desc + impuesto_total + max(0.0, float(delivery_total_usd or 0.0)) + max(0.0, float(comision_total_usd or 0.0))
-    pagado = total if monto_pagado_inicial_usd is None else max(0.0, float(monto_pagado_inicial_usd or 0.0))
+    tipo_pago_limpio = clean_text(tipo_pago).lower() or "contado"
+    if monto_pagado_inicial_usd is None:
+        pagado = total if tipo_pago_limpio == "contado" else 0.0
+    else:
+        pagado = max(0.0, float(monto_pagado_inicial_usd or 0.0))
+    pagado = min(pagado, total)
     pendiente = max(0.0, total - pagado)
     estado = calcular_estado_factura(total, pagado)
     resultados_lineas: list[dict[str, Any]] = []
@@ -173,7 +183,7 @@ def registrar_factura_compra(
                 clean_text(moneda_pago).upper() or "USD",
                 float(tasa_cambio or 1.0),
                 clean_text(metodo_pago).lower() or "efectivo",
-                clean_text(tipo_pago).lower() or "contado",
+                tipo_pago_limpio,
                 clean_text(fecha_vencimiento),
                 round(subtotal, 4),
                 round(descuento, 4),
@@ -204,6 +214,7 @@ def registrar_factura_compra(
             referencia = f"Factura compra #{factura_id} · {clean_text(numero_factura) or 'S/N'}"
             compra_historial_id = None
             compra_reventa_id = None
+            activo_comprado_id = None
             stock_result: dict[str, Any] = {}
 
             if linea["tipo_linea"].lower().startswith("materia") and linea.get("inventario_id"):
@@ -220,7 +231,7 @@ def registrar_factura_compra(
                     moneda_pago=moneda_pago,
                     tasa_cambio=float(tasa_cambio or 1.0),
                     metodo_pago=metodo_pago,
-                    tipo_pago=tipo_pago,
+                    tipo_pago=tipo_pago_limpio,
                     pago_inicial_linea=float(pago_linea),
                     referencia=referencia,
                     proveedor=proveedor,
@@ -245,17 +256,18 @@ def registrar_factura_compra(
                 """
                 INSERT INTO facturas_compra_lineas
                 (
-                    factura_id, tipo_linea, inventario_id, mercancia_reventa_id, descripcion, cantidad, unidad,
+                    factura_id, tipo_linea, inventario_id, mercancia_reventa_id, activo_comprado_id, descripcion, cantidad, unidad,
                     subtotal_usd, costo_unitario_estimado_usd, costo_unitario_real_usd,
                     total_real_linea_usd, referencia_generada, compra_historial_id, compra_reventa_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     factura_id,
                     linea["tipo_linea"],
                     linea["inventario_id"],
                     linea["mercancia_reventa_id"],
+                    activo_comprado_id,
                     linea["descripcion"],
                     linea["cantidad"],
                     linea["unidad"],
@@ -268,9 +280,30 @@ def registrar_factura_compra(
                     compra_reventa_id,
                 ),
             )
+            linea_id = int(cur_linea.lastrowid)
+
+            if linea["tipo_linea"].lower().startswith("activo"):
+                activo_result = registrar_activo_desde_factura_conn(
+                    conn,
+                    usuario=usuario,
+                    nombre=linea["descripcion"],
+                    tipo_activo="Otro",
+                    proveedor=proveedor,
+                    factura=numero_factura,
+                    factura_compra_id=factura_id,
+                    factura_linea_id=linea_id,
+                    cantidad=float(linea["cantidad"]),
+                    costo_total_usd=float(total_linea),
+                    fecha_compra=fecha_factura,
+                    notas=referencia,
+                )
+                activo_comprado_id = activo_result.get("activo_comprado_id")
+                conn.execute("UPDATE facturas_compra_lineas SET activo_comprado_id=? WHERE id=?", (activo_comprado_id, linea_id))
+                stock_result.update(activo_result)
+
             resultados_lineas.append(
                 {
-                    "linea_id": int(cur_linea.lastrowid),
+                    "linea_id": linea_id,
                     "tipo_linea": linea["tipo_linea"],
                     "descripcion": linea["descripcion"],
                     "cantidad": round(float(linea["cantidad"]), 4),
@@ -279,6 +312,7 @@ def registrar_factura_compra(
                     "costo_unitario_real_usd": round(float(costo_unitario), 6),
                     "compra_historial_id": compra_historial_id,
                     "compra_reventa_id": compra_reventa_id,
+                    "activo_comprado_id": activo_comprado_id,
                     **stock_result,
                 }
             )
@@ -342,7 +376,7 @@ def listar_lineas_factura(factura_id: int) -> pd.DataFrame:
             SELECT
                 id, tipo_linea, descripcion, cantidad, unidad, subtotal_usd,
                 costo_unitario_estimado_usd, costo_unitario_real_usd, total_real_linea_usd,
-                inventario_id, mercancia_reventa_id, compra_historial_id, compra_reventa_id, referencia_generada
+                inventario_id, mercancia_reventa_id, activo_comprado_id, compra_historial_id, compra_reventa_id, referencia_generada
             FROM facturas_compra_lineas
             WHERE factura_id = ?
             ORDER BY id
