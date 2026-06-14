@@ -63,6 +63,22 @@ def get_alert_summary() -> AlertSummary:
             if _count(conn, "migration_errors"):
                 criticas += 1
 
+            # Cuentas por pagar vencidas o próximas.
+            if _count(
+                conn,
+                "facturas_compra",
+                "pendiente_usd > 0.0001 AND fecha_vencimiento IS NOT NULL AND date(fecha_vencimiento) < date('now')",
+                {"pendiente_usd", "fecha_vencimiento"},
+            ):
+                criticas += 1
+            if _count(
+                conn,
+                "facturas_compra",
+                "pendiente_usd > 0.0001 AND fecha_vencimiento IS NOT NULL AND date(fecha_vencimiento) BETWEEN date('now') AND date('now', '+7 day')",
+                {"pendiente_usd", "fecha_vencimiento"},
+            ):
+                medias += 1
+
             if _count(conn, "despachos_entregas", "estado NOT IN ('Entregado', 'Devuelto')", {"estado"}):
                 medias += 1
             if _count(conn, "cola_impresion", "estado NOT IN ('Completado', 'Cancelado', 'Entregado')", {"estado"}):
