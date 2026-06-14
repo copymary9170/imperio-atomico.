@@ -62,6 +62,7 @@ from views.respaldo import render_respaldo
 from views.configuracion_sistema import render_configuracion_sistema
 from views.cmyk import render_cmyk
 from views.activos import render_activos
+from views.activos_comprados import render_activos_comprados
 from views.impresora_consumibles import render_impresora_consumibles
 from views.otros_procesos import render_otros_procesos
 from views.corte import render_corte
@@ -148,8 +149,9 @@ def render_marketing_unificado(usuario: str) -> None:
 
 def render_activos_unificado(usuario: str) -> None:
     st.title("🏗️ Activos")
-    tab_operacion, tab_consumibles, tab_mantenimiento, tab_patrimonial = st.tabs(["🖥️ Equipos", "🔗 Consumibles por impresora", "🛠️ Mantenimiento", "🧾 Patrimonio"])
+    tab_operacion, tab_comprados, tab_consumibles, tab_mantenimiento, tab_patrimonial = st.tabs(["🖥️ Equipos", "🧾 Comprados por factura", "🔗 Consumibles por impresora", "🛠️ Mantenimiento", "🧾 Patrimonio"])
     with tab_operacion: render_activos(usuario)
+    with tab_comprados: render_activos_comprados(usuario)
     with tab_consumibles: render_impresora_consumibles(usuario)
     with tab_mantenimiento: render_mantenimiento_activos(usuario)
     with tab_patrimonial: render_activos_patrimonial(usuario)
