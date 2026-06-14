@@ -28,6 +28,14 @@ def _read_table(table: str, order: str = "id DESC", limit: int = 500) -> pd.Data
             return pd.read_sql_query(f"SELECT * FROM {table} LIMIT {int(limit)}", conn)
 
 
+def _read_query(sql: str, params: tuple[Any, ...] = ()) -> pd.DataFrame:
+    try:
+        with db_transaction() as conn:
+            return pd.read_sql_query(sql, conn, params=params)
+    except Exception:
+        return pd.DataFrame()
+
+
 def _insert_provider(data: dict[str, Any]) -> None:
     with db_transaction() as conn:
         cols = _columns(conn, "proveedores")
@@ -89,6 +97,69 @@ def _render_internal(section: str, callback_name: str, *args) -> None:
         st.exception(exc)
 
 
+def _facturas_compra_cxp() -> pd.DataFrame:
+    return _read_query(
+        """
+        SELECT
+            id,
+            proveedor,
+            numero_factura,
+            fecha_factura,
+            fecha_vencimiento,
+            total_usd,
+            pagado_usd,
+            pendiente_usd,
+            estado,
+            metodo_pago,
+            tipo_pago
+        FROM facturas_compra
+        WHERE pendiente_usd > 0.0001 OR estado IN ('pendiente', 'parcial')
+        ORDER BY proveedor, date(fecha_vencimiento), id DESC
+        """
+    )
+
+
+def _abonos_facturas_compra() -> pd.DataFrame:
+    return _read_query(
+        """
+        SELECT
+            a.id,
+            a.fecha,
+            f.proveedor,
+            f.numero_factura,
+            a.factura_id,
+            a.monto_usd,
+            a.metodo_pago,
+            a.referencia,
+            a.notas,
+            a.movimiento_tesoreria_id
+        FROM abonos_facturas_compra a
+        LEFT JOIN facturas_compra f ON f.id = a.factura_id
+        ORDER BY a.id DESC
+        LIMIT 500
+        """
+    )
+
+
+def _resumen_cxp_por_proveedor(cxp: pd.DataFrame) -> pd.DataFrame:
+    if cxp.empty:
+        return pd.DataFrame()
+    df = cxp.copy()
+    df["proveedor"] = df["proveedor"].fillna("Proveedor N/D").astype(str)
+    df["fecha_vencimiento_dt"] = pd.to_datetime(df["fecha_vencimiento"], errors="coerce")
+    hoy = pd.Timestamp.today().normalize()
+    df["vencida"] = df["fecha_vencimiento_dt"].notna() & (df["fecha_vencimiento_dt"] < hoy)
+    df["vence_pronto"] = df["fecha_vencimiento_dt"].notna() & df["fecha_vencimiento_dt"].between(hoy, hoy + pd.Timedelta(days=7), inclusive="both")
+    resumen = df.groupby("proveedor", as_index=False).agg(
+        facturas_pendientes=("id", "count"),
+        total_pendiente_usd=("pendiente_usd", "sum"),
+        total_facturado_usd=("total_usd", "sum"),
+        facturas_vencidas=("vencida", "sum"),
+        vencen_7_dias=("vence_pronto", "sum"),
+    )
+    return resumen.sort_values("total_pendiente_usd", ascending=False)
+
+
 def render_proveedores(usuario: str = "Sistema") -> None:
     st.subheader("👥 Proveedores")
     st.caption("Ficha maestra, relación proveedor-producto, documentos, evaluación y pagos relacionados.")
@@ -97,13 +168,15 @@ def render_proveedores(usuario: str = "Sistema") -> None:
     compras = _read_table("historial_compras", "id DESC", 1000)
     docs = _read_table("proveedor_documentos", "id DESC", 500)
     evaluaciones = _read_table("evaluaciones_proveedor", "id DESC", 500)
-    cxp = _read_table("cuentas_por_pagar_proveedores", "id DESC", 500)
+    cxp_legacy = _read_table("cuentas_por_pagar_proveedores", "id DESC", 500)
+    cxp_nueva = _facturas_compra_cxp()
+    abonos_nuevos = _abonos_facturas_compra()
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Proveedores", len(proveedores))
     c2.metric("Activos", int(proveedores.get("activo", pd.Series(dtype=int)).fillna(1).astype(int).sum()) if not proveedores.empty and "activo" in proveedores.columns else len(proveedores))
     c3.metric("Compras históricas", f"${_safe_sum(compras, 'costo_total_usd'):,.2f}")
-    c4.metric("Documentos", len(docs))
+    c4.metric("CxP nueva", f"${_safe_sum(cxp_nueva, 'pendiente_usd'):,.2f}")
 
     tabs = st.tabs([
         "Listado",
@@ -113,7 +186,9 @@ def render_proveedores(usuario: str = "Sistema") -> None:
         "Historial de compras",
         "Documentos",
         "Evaluaciones",
-        "CxP resumen",
+        "CxP facturas",
+        "Abonos facturas",
+        "CxP anterior",
         "Pagos",
     ])
 
@@ -198,13 +273,60 @@ def render_proveedores(usuario: str = "Sistema") -> None:
             _render_internal("Evaluación de proveedores", "_render_evaluacion_proveedores", usuario)
 
     with tabs[7]:
-        if cxp.empty:
-            st.info("No hay cuentas por pagar de proveedores.")
+        st.markdown("##### CxP nueva desde facturas de compra")
+        resumen = _resumen_cxp_por_proveedor(cxp_nueva)
+        if cxp_nueva.empty:
+            st.success("No hay facturas de compra pendientes por proveedor.")
         else:
-            st.dataframe(cxp, use_container_width=True, hide_index=True)
-        st.caption("La gestión avanzada de CxP vive en 🛒 Compras → CxP proveedores.")
+            r1, r2, r3 = st.columns(3)
+            r1.metric("Total pendiente", f"${_safe_sum(cxp_nueva, 'pendiente_usd'):,.2f}")
+            r2.metric("Facturas pendientes", len(cxp_nueva))
+            r3.metric("Proveedores con deuda", len(resumen))
+            st.markdown("###### Resumen por proveedor")
+            st.dataframe(resumen, use_container_width=True, hide_index=True)
+            st.markdown("###### Facturas pendientes")
+            filtro_proveedor = st.selectbox("Filtrar proveedor", ["Todos"] + sorted(cxp_nueva["proveedor"].fillna("Proveedor N/D").astype(str).unique().tolist()), key="proveedores_cxp_nueva_filtro")
+            detalle = cxp_nueva.copy()
+            if filtro_proveedor != "Todos":
+                detalle = detalle[detalle["proveedor"].fillna("Proveedor N/D").astype(str).eq(filtro_proveedor)]
+            st.dataframe(detalle, use_container_width=True, hide_index=True)
+            st.download_button(
+                "⬇️ Descargar CxP facturas CSV",
+                data=detalle.to_csv(index=False).encode("utf-8-sig"),
+                file_name="cxp_facturas_por_proveedor.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        st.caption("Esta pestaña usa la CxP nueva creada desde Facturas de compra.")
 
     with tabs[8]:
+        st.markdown("##### Abonos registrados desde facturas de compra")
+        if abonos_nuevos.empty:
+            st.info("Aún no hay abonos registrados en la CxP nueva.")
+        else:
+            filtro = st.text_input("Buscar proveedor / factura / referencia", key="proveedores_abonos_buscar")
+            vista_abonos = abonos_nuevos.copy()
+            if filtro.strip():
+                mask = vista_abonos.astype(str).apply(lambda col: col.str.contains(filtro.strip(), case=False, na=False)).any(axis=1)
+                vista_abonos = vista_abonos[mask]
+            st.dataframe(vista_abonos, use_container_width=True, hide_index=True)
+            st.download_button(
+                "⬇️ Descargar abonos CSV",
+                data=vista_abonos.to_csv(index=False).encode("utf-8-sig"),
+                file_name="abonos_facturas_por_proveedor.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+    with tabs[9]:
+        st.markdown("##### CxP anterior / legado")
+        if cxp_legacy.empty:
+            st.info("No hay cuentas por pagar anteriores de proveedores.")
+        else:
+            st.dataframe(cxp_legacy, use_container_width=True, hide_index=True)
+        st.caption("Este bloque queda como referencia histórica. La CxP nueva vive en 'CxP facturas'.")
+
+    with tabs[10]:
         _render_internal("Pagos a proveedores", "_render_pagos_proveedores", usuario)
 
 
@@ -216,14 +338,15 @@ def render_compras_suministro(usuario: str = "Sistema") -> None:
     detalle = _read_table("ordenes_compra_detalle", "id DESC", 1000)
     recepciones = _read_table("recepciones_orden_compra", "id DESC", 500)
     historial = _read_table("historial_compras", "id DESC", 1000)
-    cxp = _read_table("cuentas_por_pagar_proveedores", "id DESC", 500)
+    cxp_legacy = _read_table("cuentas_por_pagar_proveedores", "id DESC", 500)
+    cxp_nueva = _facturas_compra_cxp()
     tasa_bcv, tasa_binance = _get_rates()
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Órdenes", len(ordenes))
     c2.metric("Recepciones", len(recepciones))
     c3.metric("Compras históricas", f"${_safe_sum(historial, 'costo_total_usd'):,.2f}")
-    c4.metric("CxP proveedores", f"${_safe_sum(cxp, 'saldo_pendiente_usd'):,.2f}" if "saldo_pendiente_usd" in cxp.columns else f"${_safe_sum(cxp, 'monto_usd'):,.2f}")
+    c4.metric("CxP facturas", f"${_safe_sum(cxp_nueva, 'pendiente_usd'):,.2f}")
 
     tabs = st.tabs([
         "Registrar compra",
@@ -233,7 +356,8 @@ def render_compras_suministro(usuario: str = "Sistema") -> None:
         "Recepciones",
         "Historial compras",
         "Resumen abastecimiento",
-        "CxP proveedores",
+        "CxP facturas",
+        "CxP anterior",
         "Alertas",
     ])
 
@@ -275,25 +399,35 @@ def render_compras_suministro(usuario: str = "Sistema") -> None:
         _render_internal("Resumen de abastecimiento", "_render_resumen_abastecimiento")
 
     with tabs[7]:
-        if cxp.empty:
-            st.info("No hay cuentas por pagar de proveedores.")
+        st.markdown("##### Cuentas por pagar desde facturas de compra")
+        if cxp_nueva.empty:
+            st.success("No hay facturas pendientes por pagar.")
         else:
-            st.dataframe(cxp, use_container_width=True, hide_index=True)
-        with st.expander("CxP avanzada"):
-            _render_internal("Cuentas por pagar de proveedores", "_render_cuentas_por_pagar")
+            resumen = _resumen_cxp_por_proveedor(cxp_nueva)
+            st.dataframe(resumen, use_container_width=True, hide_index=True)
+            st.dataframe(cxp_nueva, use_container_width=True, hide_index=True)
 
     with tabs[8]:
+        st.markdown("##### CxP anterior / legado")
+        if cxp_legacy.empty:
+            st.info("No hay cuentas por pagar anteriores de proveedores.")
+        else:
+            st.dataframe(cxp_legacy, use_container_width=True, hide_index=True)
+        with st.expander("CxP avanzada anterior"):
+            _render_internal("Cuentas por pagar de proveedores", "_render_cuentas_por_pagar")
+
+    with tabs[9]:
         alertas = []
         if not ordenes.empty and "estado" in ordenes.columns:
             abiertas = ordenes[ordenes["estado"].fillna("").astype(str).str.lower().isin(["borrador", "aprobada", "enviada", "parcial"])]
             if not abiertas.empty:
                 alertas.append({"nivel": "Media", "alerta": f"Hay {len(abiertas)} orden(es) abiertas o parciales.", "accion": "Revisar recepción o cierre."})
-        if not cxp.empty:
-            estado_col = "estado" if "estado" in cxp.columns else None
-            if estado_col:
-                vencidas = cxp[cxp[estado_col].fillna("").astype(str).str.lower().eq("vencida")]
-                if not vencidas.empty:
-                    alertas.append({"nivel": "Alta", "alerta": f"Hay {len(vencidas)} CxP de proveedores vencidas.", "accion": "Priorizar pago o negociación."})
+        if not cxp_nueva.empty:
+            cxp_tmp = cxp_nueva.copy()
+            cxp_tmp["fecha_vencimiento_dt"] = pd.to_datetime(cxp_tmp["fecha_vencimiento"], errors="coerce")
+            vencidas = cxp_tmp[cxp_tmp["fecha_vencimiento_dt"].notna() & (cxp_tmp["fecha_vencimiento_dt"] < pd.Timestamp.today().normalize())]
+            if not vencidas.empty:
+                alertas.append({"nivel": "Alta", "alerta": f"Hay {len(vencidas)} factura(s) de compra vencidas por pagar.", "accion": "Revisar CxP facturas y registrar abono."})
         if alertas:
             st.dataframe(pd.DataFrame(alertas), use_container_width=True, hide_index=True)
         else:
