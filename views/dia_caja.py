@@ -52,22 +52,33 @@ def _get_dia_abierto():
         return conn.execute("SELECT * FROM dias_operacion WHERE estado='abierto' ORDER BY id DESC LIMIT 1").fetchone()
 
 
-def _get_resumen_operacion() -> dict:
+def _rango_turno(dia):
+    if dia:
+        return "fecha >= ?", (dia["fecha_inicio"],)
+    return "date(fecha)=date(?)", (_today_caracas(),)
+
+
+def _get_resumen_operacion(dia=None) -> dict:
+    filtro, params = _rango_turno(dia)
     with db_transaction() as conn:
         row = conn.execute(
-            """
+            f"""
             SELECT
                 SUM(CASE WHEN tipo = 'ingreso' AND estado = 'confirmado' THEN monto_usd ELSE 0 END) AS ingresos,
                 SUM(CASE WHEN tipo = 'egreso' AND estado = 'confirmado' THEN monto_usd ELSE 0 END) AS egresos,
                 SUM(CASE WHEN tipo = 'ingreso' AND metodo_pago = 'efectivo' AND estado = 'confirmado' THEN monto_usd ELSE 0 END) AS ingreso_efectivo,
                 SUM(CASE WHEN tipo = 'egreso' AND metodo_pago = 'efectivo' AND estado = 'confirmado' THEN monto_usd ELSE 0 END) AS egreso_efectivo,
                 SUM(CASE WHEN tipo = 'ingreso' AND metodo_pago = 'transferencia' AND estado = 'confirmado' THEN monto_usd ELSE 0 END) AS ingreso_transferencia,
+                SUM(CASE WHEN tipo = 'ingreso' AND metodo_pago IN ('pago_movil','pago móvil','pagomovil') AND estado = 'confirmado' THEN monto_usd ELSE 0 END) AS ingreso_pago_movil,
                 SUM(CASE WHEN tipo = 'ingreso' AND metodo_pago = 'zelle' AND estado = 'confirmado' THEN monto_usd ELSE 0 END) AS ingreso_zelle,
                 SUM(CASE WHEN tipo = 'ingreso' AND metodo_pago = 'binance' AND estado = 'confirmado' THEN monto_usd ELSE 0 END) AS ingreso_binance
             FROM movimientos_tesoreria
-            """
+            WHERE {filtro}
+            """,
+            params,
         ).fetchone()
-    return {key: _safe_float(row[key]) if row else 0.0 for key in ["ingresos", "egresos", "ingreso_efectivo", "egreso_efectivo", "ingreso_transferencia", "ingreso_zelle", "ingreso_binance"]}
+    keys = ["ingresos", "egresos", "ingreso_efectivo", "egreso_efectivo", "ingreso_transferencia", "ingreso_pago_movil", "ingreso_zelle", "ingreso_binance"]
+    return {key: _safe_float(row[key]) if row else 0.0 for key in keys}
 
 
 def _get_config_rates() -> dict:
@@ -82,7 +93,7 @@ def _get_config_rates() -> dict:
         return {"bcv": 0.0, "binance": 0.0}
 
 
-def _count_table(table: str, where: str | None = None) -> int:
+def _count_table(table: str, where: str | None = None, params: tuple = ()) -> int:
     try:
         with db_transaction() as conn:
             if not _table_exists(conn, table):
@@ -90,7 +101,7 @@ def _count_table(table: str, where: str | None = None) -> int:
             sql = f"SELECT COUNT(*) AS total FROM {table}"
             if where:
                 sql += f" WHERE {where}"
-            row = conn.execute(sql).fetchone()
+            row = conn.execute(sql, params).fetchone()
             return int(row["total"] if row else 0)
     except Exception:
         return 0
@@ -106,37 +117,38 @@ def _safe_query(sql: str, table: str, params: tuple = ()) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _ventas_por_hora() -> pd.DataFrame:
-    hoy = _today_caracas()
-    return _safe_query("""
+def _ventas_por_hora(dia=None) -> pd.DataFrame:
+    filtro, params = _rango_turno(dia)
+    return _safe_query(f"""
         SELECT strftime('%H:00', fecha) AS hora, SUM(monto_usd) AS ventas_usd
         FROM movimientos_tesoreria
-        WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date(?)
+        WHERE tipo='ingreso' AND estado='confirmado' AND {filtro}
         GROUP BY strftime('%H', fecha)
         ORDER BY hora
-    """, "movimientos_tesoreria", (hoy,))
+    """, "movimientos_tesoreria", params)
 
 
-def _top_productos() -> pd.DataFrame:
-    hoy = _today_caracas()
-    return _safe_query("""
+def _top_productos(dia=None) -> pd.DataFrame:
+    filtro, params = _rango_turno(dia)
+    return _safe_query(f"""
         SELECT descripcion AS producto, COUNT(*) AS veces, SUM(monto_usd) AS total_usd
         FROM movimientos_tesoreria
-        WHERE tipo='ingreso' AND estado='confirmado' AND date(fecha)=date(?)
+        WHERE tipo='ingreso' AND estado='confirmado' AND {filtro}
         GROUP BY descripcion
         ORDER BY total_usd DESC
         LIMIT 10
-    """, "movimientos_tesoreria", (hoy,))
+    """, "movimientos_tesoreria", params)
 
 
-def _ultimas_ventas() -> pd.DataFrame:
-    return _safe_query("""
+def _ultimas_ventas(dia=None) -> pd.DataFrame:
+    filtro, params = _rango_turno(dia)
+    return _safe_query(f"""
         SELECT fecha, descripcion, monto_usd, metodo_pago, usuario
         FROM movimientos_tesoreria
-        WHERE tipo='ingreso'
+        WHERE tipo='ingreso' AND {filtro}
         ORDER BY id DESC
         LIMIT 10
-    """, "movimientos_tesoreria")
+    """, "movimientos_tesoreria", params)
 
 
 def _ultimos_clientes() -> pd.DataFrame:
@@ -156,13 +168,15 @@ def _inventario_bajo() -> pd.DataFrame:
     """, "inventario")
 
 
-def _get_movimientos_df() -> pd.DataFrame:
-    return _safe_query("""
+def _get_movimientos_df(dia=None) -> pd.DataFrame:
+    filtro, params = _rango_turno(dia)
+    return _safe_query(f"""
         SELECT fecha, tipo, origen, descripcion, monto_usd, metodo_pago, usuario, estado
         FROM movimientos_tesoreria
+        WHERE {filtro}
         ORDER BY id DESC
         LIMIT 120
-    """, "movimientos_tesoreria")
+    """, "movimientos_tesoreria", params)
 
 
 def _get_dias_df() -> pd.DataFrame:
@@ -213,7 +227,7 @@ def render_dia_caja(usuario: str) -> None:
     """, unsafe_allow_html=True)
 
     dia = _get_dia_abierto()
-    resumen = _get_resumen_operacion()
+    resumen = _get_resumen_operacion(dia)
     rates = _get_config_rates()
     fondo_inicial = _safe_float(dia["fondo_inicial_usd"]) if dia else 0.0
     ventas_dia = resumen["ingresos"]
@@ -254,22 +268,22 @@ def render_dia_caja(usuario: str) -> None:
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Estado del turno", estado_turno)
     k2.metric("Fondo inicial", f"$ {fondo_inicial:,.2f}")
-    k3.metric("Ventas del día", f"$ {ventas_dia:,.2f}")
-    k4.metric("Gastos del día", f"$ {gastos_dia:,.2f}")
+    k3.metric("Ventas del turno", f"$ {ventas_dia:,.2f}")
+    k4.metric("Gastos del turno", f"$ {gastos_dia:,.2f}")
     k5, k6, k7, k8 = st.columns(4)
     k5.metric("Caja esperada", f"$ {caja_esperada:,.2f}")
     k6.metric("Caja contada", f"$ {caja_contada:,.2f}")
     k7.metric("Diferencia", f"$ {diferencia:,.2f}")
     k8.metric("Semáforo", f"{semaforo} {semaforo_texto}")
 
-    st.markdown("### Operación del día")
+    st.markdown("### Operación del turno")
     o1, o2, o3, o4 = st.columns(4)
     o1.metric("Ventas en Bs BCV", f"Bs {ventas_dia * rates['bcv']:,.2f}")
     o2.metric("Órdenes en producción", _count_table("ordenes_trabajo", "estado NOT IN ('Finalizada','Cerrada','Cancelada','Entregada')"))
     o3.metric("Cotizaciones pendientes", _count_table("cotizaciones", "estado NOT IN ('Aprobada','Rechazada','Vencida','Cerrada')"))
-    o4.metric("Clientes atendidos", _count_table("ventas", f"date(fecha)=date('{_today_caracas()}')"))
+    o4.metric("Clientes atendidos", _count_table("ventas", "fecha >= ?" if dia else "date(fecha)=date(?)", (dia["fecha_inicio"],) if dia else (_today_caracas(),)))
 
-    ventas_hora = _ventas_por_hora()
+    ventas_hora = _ventas_por_hora(dia)
     if not ventas_hora.empty:
         st.markdown("#### Ventas por hora")
         st.bar_chart(ventas_hora.set_index("hora"))
@@ -277,9 +291,9 @@ def render_dia_caja(usuario: str) -> None:
     st.markdown("### Resumen comercial")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("#### 🏆 Productos / servicios más vendidos hoy")
-        top = _top_productos()
-        st.dataframe(top, use_container_width=True, hide_index=True) if not top.empty else st.info("Aún no hay ventas registradas hoy.")
+        st.markdown("#### 🏆 Productos / servicios más vendidos del turno")
+        top = _top_productos(dia)
+        st.dataframe(top, use_container_width=True, hide_index=True) if not top.empty else st.info("Aún no hay ventas registradas en este turno.")
     with c2:
         st.markdown("#### ⚠️ Alertas de inventario bajo")
         bajo = _inventario_bajo()
@@ -287,8 +301,8 @@ def render_dia_caja(usuario: str) -> None:
 
     c3, c4 = st.columns(2)
     with c3:
-        st.markdown("#### 🧾 Últimas 10 ventas")
-        ult = _ultimas_ventas()
+        st.markdown("#### 🧾 Últimas 10 ventas del turno")
+        ult = _ultimas_ventas(dia)
         st.dataframe(ult, use_container_width=True, hide_index=True) if not ult.empty else st.info("No hay ventas recientes.")
     with c4:
         st.markdown("#### 👥 Últimos clientes registrados")
@@ -311,12 +325,13 @@ def render_dia_caja(usuario: str) -> None:
 
     with tab_operacion:
         st.subheader("🏦 Caja / Fondos / Operación")
-        cols = st.columns(4)
+        cols = st.columns(5)
         cols[0].metric("Efectivo", f"$ {saldo_efectivo:,.2f}")
         cols[1].metric("Transferencia", f"$ {resumen['ingreso_transferencia']:,.2f}")
-        cols[2].metric("Zelle", f"$ {resumen['ingreso_zelle']:,.2f}")
-        cols[3].metric("Binance", f"$ {resumen['ingreso_binance']:,.2f}")
-        df = _get_movimientos_df()
+        cols[2].metric("Pago móvil", f"$ {resumen['ingreso_pago_movil']:,.2f}")
+        cols[3].metric("Zelle", f"$ {resumen['ingreso_zelle']:,.2f}")
+        cols[4].metric("Binance", f"$ {resumen['ingreso_binance']:,.2f}")
+        df = _get_movimientos_df(dia)
         st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty else st.info("No hay movimientos registrados todavía.")
 
     with tab_valores:
