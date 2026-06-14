@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -17,13 +17,23 @@ def _preparar_cxp(cxp: pd.DataFrame) -> pd.DataFrame:
         return cxp
     out = cxp.copy()
     hoy = pd.Timestamp(date.today())
+    if "fecha_vencimiento" not in out.columns:
+        out["fecha_vencimiento"] = ""
+    out["fecha_vencimiento"] = out["fecha_vencimiento"].fillna("").astype(str)
     out["fecha_vencimiento_dt"] = pd.to_datetime(out["fecha_vencimiento"], errors="coerce")
     out["dias_para_vencer"] = (out["fecha_vencimiento_dt"] - hoy).dt.days
     out["estado_vencimiento"] = "Sin vencimiento"
     out.loc[out["dias_para_vencer"].notna() & (out["dias_para_vencer"] < 0), "estado_vencimiento"] = "Vencida"
-    out.loc[out["dias_para_vencer"].between(0, 7, inclusive="both"), "estado_vencimiento"] = "Vence pronto"
-    out.loc[out["dias_para_vencer"] > 7, "estado_vencimiento"] = "Al día"
-    return out
+    out.loc[out["dias_para_vencer"].notna() & out["dias_para_vencer"].between(0, 7, inclusive="both"), "estado_vencimiento"] = "Vence pronto"
+    out.loc[out["dias_para_vencer"].notna() & (out["dias_para_vencer"] > 7), "estado_vencimiento"] = "Al día"
+    out["dias_para_vencer"] = out["dias_para_vencer"].fillna("")
+    columnas_primero = [
+        "id", "proveedor", "numero_factura", "fecha_factura", "fecha_vencimiento",
+        "estado_vencimiento", "dias_para_vencer", "total_usd", "pagado_usd", "pendiente_usd",
+        "estado", "metodo_pago", "tipo_pago",
+    ]
+    columnas = [c for c in columnas_primero if c in out.columns] + [c for c in out.columns if c not in columnas_primero and c != "fecha_vencimiento_dt"]
+    return out[columnas]
 
 
 def _render_abono(usuario: str, cxp: pd.DataFrame) -> int | None:
@@ -32,7 +42,7 @@ def _render_abono(usuario: str, cxp: pd.DataFrame) -> int | None:
         return None
 
     opciones = {
-        f"#{int(row['id'])} · {row.get('proveedor') or 'Proveedor N/D'} · Pendiente ${float(row['pendiente_usd'] or 0):,.2f}": row
+        f"#{int(row['id'])} · {row.get('proveedor') or 'Proveedor N/D'} · Vence: {row.get('fecha_vencimiento') or 'S/F'} · Pendiente ${float(row['pendiente_usd'] or 0):,.2f}": row
         for _, row in cxp.iterrows()
     }
     seleccion = st.selectbox("Factura pendiente", list(opciones.keys()), key="cxp_standalone_factura")
@@ -93,6 +103,7 @@ def render_cuentas_por_pagar(usuario: str) -> None:
         if cxp.empty:
             st.success("No hay cuentas por pagar pendientes.")
         else:
+            st.info("La columna 'fecha_vencimiento' muestra la fecha de pago. Si sale vacía, esa factura fue guardada sin vencimiento.")
             buscar = st.text_input("Buscar proveedor / factura", key="cxp_standalone_buscar")
             vista = cxp.copy()
             if buscar.strip():
@@ -114,8 +125,11 @@ def render_cuentas_por_pagar(usuario: str) -> None:
         if cxp.empty:
             st.success("No hay vencimientos pendientes.")
         else:
+            st.markdown("##### Resumen por estado de vencimiento")
             resumen = cxp.groupby("estado_vencimiento", as_index=False)["pendiente_usd"].sum().sort_values("pendiente_usd", ascending=False)
             st.dataframe(resumen, use_container_width=True, hide_index=True)
+            st.markdown("##### Todas las facturas con fecha / estado")
+            st.dataframe(cxp, use_container_width=True, hide_index=True)
             st.markdown("##### Facturas vencidas o próximas")
             alertas = cxp[cxp["estado_vencimiento"].isin(["Vencida", "Vence pronto"])].copy()
             if alertas.empty:
