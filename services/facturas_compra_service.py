@@ -87,6 +87,22 @@ def ensure_facturas_compra_tables() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS abonos_facturas_compra (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                usuario TEXT NOT NULL DEFAULT 'Sistema',
+                factura_id INTEGER NOT NULL,
+                monto_usd REAL NOT NULL DEFAULT 0,
+                metodo_pago TEXT,
+                referencia TEXT,
+                notas TEXT,
+                movimiento_tesoreria_id INTEGER,
+                FOREIGN KEY(factura_id) REFERENCES facturas_compra(id)
+            )
+            """
+        )
         columns = _table_columns(conn, "facturas_compra_lineas")
         migrations = {
             "mercancia_reventa_id": "INTEGER",
@@ -99,9 +115,15 @@ def ensure_facturas_compra_tables() -> None:
             if column not in columns:
                 conn.execute(f"ALTER TABLE facturas_compra_lineas ADD COLUMN {column} {ddl}")
                 columns.add(column)
+        abonos_cols = _table_columns(conn, "abonos_facturas_compra")
+        abonos_migrations = {"movimiento_tesoreria_id": "INTEGER", "referencia": "TEXT", "notas": "TEXT"}
+        for column, ddl in abonos_migrations.items():
+            if column not in abonos_cols:
+                conn.execute(f"ALTER TABLE abonos_facturas_compra ADD COLUMN {column} {ddl}")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facturas_compra_fecha ON facturas_compra(fecha_creacion)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facturas_compra_estado ON facturas_compra(estado)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_facturas_compra_lineas_factura ON facturas_compra_lineas(factura_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_abonos_facturas_compra_factura ON abonos_facturas_compra(factura_id)")
 
 
 def calcular_estado_factura(total: float, pagado: float) -> str:
@@ -374,6 +396,115 @@ def registrar_factura_compra(
         "estado": estado,
         "lineas": resultados_lineas,
     }
+
+
+def registrar_abono_factura_compra(
+    *,
+    usuario: str,
+    factura_id: int,
+    monto_usd: float,
+    metodo_pago: str = "efectivo",
+    referencia: str = "",
+    notas: str = "",
+    fecha: str = "",
+) -> dict[str, Any]:
+    ensure_facturas_compra_tables()
+    monto = max(0.0, float(monto_usd or 0.0))
+    if monto <= 0:
+        raise ValueError("El abono debe ser mayor a cero.")
+
+    with db_transaction() as conn:
+        factura = conn.execute(
+            "SELECT id, proveedor, numero_factura, total_usd, pagado_usd, pendiente_usd FROM facturas_compra WHERE id=?",
+            (int(factura_id),),
+        ).fetchone()
+        if not factura:
+            raise ValueError("La factura de compra no existe.")
+        pendiente_anterior = float(factura["pendiente_usd"] or 0.0)
+        if pendiente_anterior <= 0:
+            raise ValueError("Esta factura ya está pagada.")
+        abono = min(monto, pendiente_anterior)
+        nuevo_pagado = float(factura["pagado_usd"] or 0.0) + abono
+        nuevo_pendiente = max(0.0, float(factura["total_usd"] or 0.0) - nuevo_pagado)
+        nuevo_estado = calcular_estado_factura(float(factura["total_usd"] or 0.0), nuevo_pagado)
+
+        cur = conn.execute(
+            """
+            INSERT INTO abonos_facturas_compra
+            (fecha, usuario, factura_id, monto_usd, metodo_pago, referencia, notas)
+            VALUES (COALESCE(NULLIF(?, ''), CURRENT_TIMESTAMP), ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                clean_text(fecha),
+                str(usuario or "Sistema"),
+                int(factura_id),
+                round(abono, 4),
+                clean_text(metodo_pago).lower() or "efectivo",
+                clean_text(referencia),
+                clean_text(notas),
+            ),
+        )
+        abono_id = int(cur.lastrowid)
+        mov_id = registrar_egreso(
+            conn,
+            origen="pago_proveedor",
+            referencia_id=abono_id,
+            descripcion=f"Abono factura compra #{factura_id} · {clean_text(factura['proveedor']) or 'Proveedor N/D'}",
+            monto_usd=float(abono),
+            moneda="USD",
+            monto_moneda=float(abono),
+            tasa_cambio=1.0,
+            metodo_pago=clean_text(metodo_pago).lower() or "efectivo",
+            usuario=str(usuario or "Sistema"),
+            fecha=clean_text(fecha) or None,
+            metadata={
+                "modulo": "facturas_compra",
+                "abono_id": abono_id,
+                "factura_id": int(factura_id),
+                "numero_factura": clean_text(factura["numero_factura"]),
+                "proveedor": clean_text(factura["proveedor"]),
+            },
+        )
+        conn.execute("UPDATE abonos_facturas_compra SET movimiento_tesoreria_id=? WHERE id=?", (mov_id, abono_id))
+        conn.execute(
+            "UPDATE facturas_compra SET pagado_usd=?, pendiente_usd=?, estado=? WHERE id=?",
+            (round(nuevo_pagado, 4), round(nuevo_pendiente, 4), nuevo_estado, int(factura_id)),
+        )
+    return {
+        "abono_id": abono_id,
+        "movimiento_tesoreria_id": mov_id,
+        "monto_abonado_usd": round(abono, 4),
+        "pendiente_anterior_usd": round(pendiente_anterior, 4),
+        "pendiente_actual_usd": round(nuevo_pendiente, 4),
+        "estado": nuevo_estado,
+    }
+
+
+def listar_abonos_factura_compra(factura_id: int | None = None, limit: int = 100) -> pd.DataFrame:
+    ensure_facturas_compra_tables()
+    with db_transaction() as conn:
+        if factura_id:
+            return pd.read_sql_query(
+                """
+                SELECT id, fecha, usuario, factura_id, monto_usd, metodo_pago, referencia, notas, movimiento_tesoreria_id
+                FROM abonos_facturas_compra
+                WHERE factura_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                conn,
+                params=(int(factura_id), int(limit)),
+            )
+        return pd.read_sql_query(
+            """
+            SELECT id, fecha, usuario, factura_id, monto_usd, metodo_pago, referencia, notas, movimiento_tesoreria_id
+            FROM abonos_facturas_compra
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            conn,
+            params=(int(limit),),
+        )
 
 
 def listar_facturas_compra(limit: int = 100) -> pd.DataFrame:
