@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 import streamlit as st
 
 from services.facturas_compra_service import (
     TIPOS_LINEA_FACTURA,
+    listar_abonos_factura_compra,
     listar_cuentas_por_pagar,
     listar_facturas_compra,
     listar_lineas_factura,
+    registrar_abono_factura_compra,
     registrar_factura_compra,
 )
 from services.materia_prima_service import listar_materia_prima
@@ -20,6 +24,48 @@ def _label_materia_prima(row: pd.Series) -> str:
 
 def _label_reventa(row: pd.Series) -> str:
     return f"#{int(row['id'])} · {row['nombre']} · stock {float(row['stock_actual'] or 0):g} {row['unidad']}"
+
+
+def _render_registrar_abono_cxp(usuario: str, cxp: pd.DataFrame) -> None:
+    st.markdown("##### Registrar abono a proveedor")
+    if cxp.empty:
+        st.caption("No hay facturas pendientes para abonar.")
+        return
+
+    opciones = {
+        f"#{int(row['id'])} · {row.get('proveedor') or 'Proveedor N/D'} · Pendiente ${float(row['pendiente_usd'] or 0):,.2f}": row
+        for _, row in cxp.iterrows()
+    }
+    seleccion = st.selectbox("Factura pendiente", list(opciones.keys()), key="cxp_factura_abono")
+    factura = opciones[seleccion]
+    pendiente = float(factura["pendiente_usd"] or 0.0)
+
+    with st.form("form_abono_factura_compra"):
+        c1, c2, c3 = st.columns(3)
+        fecha_abono = c1.date_input("Fecha del abono", value=date.today())
+        monto_abono = c2.number_input("Monto abono USD", min_value=0.0, max_value=max(pendiente, 0.01), value=min(pendiente, 1.0), step=1.0, format="%.4f")
+        metodo_pago = c3.selectbox("Método de pago", ["efectivo", "transferencia", "pago movil", "binance", "zelle", "punto", "otro"], key="cxp_metodo_abono")
+        referencia = st.text_input("Referencia / comprobante", placeholder="Opcional")
+        notas = st.text_area("Notas", placeholder="Opcional")
+        submit_abono = st.form_submit_button("💸 Registrar abono", use_container_width=True)
+
+    if submit_abono:
+        try:
+            result = registrar_abono_factura_compra(
+                usuario=usuario,
+                factura_id=int(factura["id"]),
+                monto_usd=float(monto_abono),
+                metodo_pago=metodo_pago,
+                referencia=referencia,
+                notas=notas,
+                fecha=fecha_abono.isoformat(),
+            )
+            st.success(
+                f"✅ Abono #{result['abono_id']} registrado. Pendiente actual: ${result['pendiente_actual_usd']:,.4f}. Estado: {result['estado']}"
+            )
+            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo registrar el abono: {exc}")
 
 
 def render_facturas_compra(usuario: str) -> None:
@@ -183,6 +229,12 @@ def render_facturas_compra(usuario: str) -> None:
                 st.caption("Sin líneas para esa factura.")
             else:
                 st.dataframe(lineas_df, use_container_width=True, hide_index=True)
+            abonos_df = listar_abonos_factura_compra(int(factura_id))
+            st.caption("Abonos de esta factura")
+            if abonos_df.empty:
+                st.info("Esta factura no tiene abonos registrados.")
+            else:
+                st.dataframe(abonos_df, use_container_width=True, hide_index=True)
 
     with tab_cxp:
         st.markdown("##### Cuentas por pagar")
@@ -190,6 +242,11 @@ def render_facturas_compra(usuario: str) -> None:
         if cxp.empty:
             st.success("No hay cuentas por pagar pendientes.")
         else:
+            total_pendiente = float(pd.to_numeric(cxp["pendiente_usd"], errors="coerce").fillna(0).sum())
+            c1, c2 = st.columns(2)
+            c1.metric("Facturas pendientes", len(cxp))
+            c2.metric("Total por pagar", f"${total_pendiente:,.2f}")
             st.dataframe(cxp, use_container_width=True, hide_index=True)
+            _render_registrar_abono_cxp(usuario, cxp)
 
     st.caption(f"Usuario: {usuario}")
