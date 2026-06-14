@@ -22,6 +22,12 @@ def _table_exists(conn: Any, table_name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
 
 
+def _ensure_column(conn, table_name: str, column_name: str, column_sql: str) -> None:
+    cols = [row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
+    if column_name not in cols:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+
+
 def _ensure_pos_tables() -> None:
     with db_transaction() as conn:
         conn.execute(
@@ -96,6 +102,29 @@ def _ensure_pos_tables() -> None:
             )
             """
         )
+        if not _table_exists(conn, "movimientos_tesoreria"):
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS movimientos_tesoreria (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    tipo TEXT NOT NULL,
+                    origen TEXT NOT NULL,
+                    referencia_id INTEGER,
+                    descripcion TEXT NOT NULL,
+                    monto_usd REAL NOT NULL,
+                    moneda TEXT NOT NULL DEFAULT 'USD',
+                    monto_moneda REAL NOT NULL DEFAULT 0,
+                    tasa_cambio REAL NOT NULL DEFAULT 1,
+                    metodo_pago TEXT NOT NULL DEFAULT 'efectivo',
+                    usuario TEXT NOT NULL,
+                    estado TEXT NOT NULL DEFAULT 'confirmado',
+                    metadata TEXT,
+                    fecha_creacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        _ensure_column(conn, "movimientos_tesoreria", "metadata", "TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pos_ventas_fecha ON pos_ventas(fecha)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pos_detalle_venta ON pos_venta_detalle(venta_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_comprobantes_pos_fecha ON comprobantes_pos(fecha)")
@@ -157,6 +186,26 @@ def _create_pos_comprobante(conn, *, usuario: str, pos_id: int, cliente: str, it
     return comp_id
 
 
+def _registrar_ingreso_tesoreria(conn, *, venta_id: int, usuario: str, cliente: str, total: float, metodo: str, moneda: str, notas: str) -> None:
+    referencia = f"POS-{venta_id}"
+    existing = conn.execute(
+        "SELECT id FROM movimientos_tesoreria WHERE origen='venta' AND referencia_id=? AND metadata=?",
+        (venta_id, referencia),
+    ).fetchone()
+    if existing or float(total or 0) <= 0:
+        return
+    descripcion = f"Venta POS #{venta_id} - {cliente or 'Cliente General'}"
+    conn.execute(
+        """
+        INSERT INTO movimientos_tesoreria(
+            tipo, origen, referencia_id, descripcion, monto_usd, moneda, monto_moneda,
+            tasa_cambio, metodo_pago, usuario, estado, metadata
+        ) VALUES ('ingreso', 'venta', ?, ?, ?, ?, ?, 1, ?, ?, 'confirmado', ?)
+        """,
+        (venta_id, descripcion, float(total), moneda or "USD", float(total), metodo or "efectivo", usuario, referencia),
+    )
+
+
 def _load_pos_history() -> pd.DataFrame:
     _ensure_pos_tables()
     with db_transaction() as conn:
@@ -204,6 +253,7 @@ def _save_sale(usuario: str, cliente: str, items: list[dict[str, Any]], descuent
                     int(item.get("clics_cobrados", 0)),
                 ),
             )
+        _registrar_ingreso_tesoreria(conn, venta_id=venta_id, usuario=usuario, cliente=cliente, total=total, metodo=metodo, moneda=moneda, notas=notas)
         comp_id = _create_pos_comprobante(conn, usuario=usuario, pos_id=venta_id, cliente=cliente, items=items, subtotal=subtotal, descuento=float(descuento or 0), total=total, efectivo=float(efectivo or 0), vuelto=vuelto, metodo=metodo, notas=notas) if generar_comprobante else None
     return venta_id, comp_id
 
@@ -251,7 +301,7 @@ def render_pos_rapido(usuario: str = "Sistema") -> None:
     cliente = st.text_input("Cliente", value="Cliente General")
     p1, p2, p3, p4 = st.columns(4)
     descuento = p1.number_input("Descuento USD", min_value=0.0, value=0.0, step=0.05)
-    metodo = p2.selectbox("Método", ["efectivo", "transferencia", "tarjeta", "mixto"])
+    metodo = p2.selectbox("Método", ["efectivo", "transferencia", "pago_movil", "zelle", "binance", "tarjeta", "mixto"])
     moneda = p3.selectbox("Moneda", ["USD", "VES", "COP", "EUR"])
     efectivo = p4.number_input("Efectivo recibido USD", min_value=0.0, value=max(0.0, subtotal - descuento), step=0.05)
     generar_comprobante = st.checkbox("Generar comprobante automático", value=True)
