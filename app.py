@@ -88,6 +88,7 @@ from views.legal_hub import render_legal_hub
 from views.nomina_trabajadores import render_nomina_trabajadores
 from views.publicaciones_marketing import render_publicaciones_marketing
 from views.dia_caja import render_dia_caja
+from modules.mermas import render_mermas
 from modules.configuracion import get_current_config, DEFAULT_CONFIG, _to_float
 from views.erp_nuevos_modulos import (
     render_costeo_industrial,
@@ -122,7 +123,7 @@ def render_produccion_unificada(usuario: str) -> None:
         "🔥 Sublimación": lambda: render_sublimacion(usuario),
         "🎨 Manual": lambda: render_produccion_manual(usuario),
         "✅ Calidad": lambda: render_control_calidad(usuario),
-        "♻️ Mermas": lambda: render_mermas_desperdicio(usuario),
+        "♻️ Mermas": lambda: render_mermas(usuario),
         "🚚 Despacho": lambda: render_despacho_entregas(usuario),
     }
     seccion = st.radio("Sección de producción", list(secciones.keys()), horizontal=True)
@@ -264,6 +265,7 @@ MENU_ROUTES = {
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "💰 Cuentas por cobrar": (("ventas.view", "clientes.view", "dashboard.view"), lambda: render_cuentas_por_cobrar(usuario)),
     "📅 Presupuesto / Equilibrio": (("dashboard.view", "contabilidad.view", "presupuesto.view"), lambda: render_presupuesto_equilibrio(usuario)),
+    "♻️ Mermas / Desperdicio": (("inventario.view", "dashboard.view", "produccion.scrap"), lambda: render_mermas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
     "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
     "🏭 Producción": (("produccion.plan", "produccion.execute", "produccion.route", "produccion.quality", "produccion.scrap"), lambda: render_produccion_unificada(usuario)),
