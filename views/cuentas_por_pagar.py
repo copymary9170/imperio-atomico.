@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -10,6 +10,20 @@ from services.facturas_compra_service import (
     listar_cuentas_por_pagar,
     registrar_abono_factura_compra,
 )
+
+
+def _preparar_cxp(cxp: pd.DataFrame) -> pd.DataFrame:
+    if cxp.empty:
+        return cxp
+    out = cxp.copy()
+    hoy = pd.Timestamp(date.today())
+    out["fecha_vencimiento_dt"] = pd.to_datetime(out["fecha_vencimiento"], errors="coerce")
+    out["dias_para_vencer"] = (out["fecha_vencimiento_dt"] - hoy).dt.days
+    out["estado_vencimiento"] = "Sin vencimiento"
+    out.loc[out["dias_para_vencer"].notna() & (out["dias_para_vencer"] < 0), "estado_vencimiento"] = "Vencida"
+    out.loc[out["dias_para_vencer"].between(0, 7, inclusive="both"), "estado_vencimiento"] = "Vence pronto"
+    out.loc[out["dias_para_vencer"] > 7, "estado_vencimiento"] = "Al día"
+    return out
 
 
 def _render_abono(usuario: str, cxp: pd.DataFrame) -> int | None:
@@ -56,20 +70,24 @@ def _render_abono(usuario: str, cxp: pd.DataFrame) -> int | None:
 
 def render_cuentas_por_pagar(usuario: str) -> None:
     st.title("💸 Cuentas por pagar")
-    st.caption("Control de facturas de compra pendientes y abonos parciales a proveedores.")
+    st.caption("Control de facturas de compra pendientes, vencimientos y abonos parciales a proveedores.")
 
-    cxp = listar_cuentas_por_pagar(limit=300)
+    cxp = _preparar_cxp(listar_cuentas_por_pagar(limit=300))
     abonos = listar_abonos_factura_compra(limit=300)
 
     total_pendiente = 0.0 if cxp.empty else float(pd.to_numeric(cxp["pendiente_usd"], errors="coerce").fillna(0).sum())
     total_abonado = 0.0 if abonos.empty else float(pd.to_numeric(abonos["monto_usd"], errors="coerce").fillna(0).sum())
+    total_vencido = 0.0 if cxp.empty else float(cxp.loc[cxp["estado_vencimiento"] == "Vencida", "pendiente_usd"].sum())
+    total_pronto = 0.0 if cxp.empty else float(cxp.loc[cxp["estado_vencimiento"] == "Vence pronto", "pendiente_usd"].sum())
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Facturas pendientes", 0 if cxp.empty else len(cxp))
     c2.metric("Total por pagar", f"${total_pendiente:,.2f}")
-    c3.metric("Abonos registrados", f"${total_abonado:,.2f}")
+    c3.metric("Vencido", f"${total_vencido:,.2f}")
+    c4.metric("Vence en 7 días", f"${total_pronto:,.2f}")
+    st.caption(f"Abonos registrados: ${total_abonado:,.2f}")
 
-    tab_pendientes, tab_abono, tab_historial = st.tabs(["📌 Pendientes", "💸 Registrar abono", "📜 Historial de abonos"])
+    tab_pendientes, tab_vencimientos, tab_abono, tab_historial = st.tabs(["📌 Pendientes", "⏰ Vencimientos", "💸 Registrar abono", "📜 Historial de abonos"])
 
     with tab_pendientes:
         if cxp.empty:
@@ -91,6 +109,19 @@ def render_cuentas_por_pagar(usuario: str) -> None:
                 mime="text/csv",
                 use_container_width=True,
             )
+
+    with tab_vencimientos:
+        if cxp.empty:
+            st.success("No hay vencimientos pendientes.")
+        else:
+            resumen = cxp.groupby("estado_vencimiento", as_index=False)["pendiente_usd"].sum().sort_values("pendiente_usd", ascending=False)
+            st.dataframe(resumen, use_container_width=True, hide_index=True)
+            st.markdown("##### Facturas vencidas o próximas")
+            alertas = cxp[cxp["estado_vencimiento"].isin(["Vencida", "Vence pronto"])].copy()
+            if alertas.empty:
+                st.success("No hay facturas vencidas ni próximas a vencer en 7 días.")
+            else:
+                st.dataframe(alertas, use_container_width=True, hide_index=True)
 
     with tab_abono:
         factura_id = _render_abono(usuario, cxp)
