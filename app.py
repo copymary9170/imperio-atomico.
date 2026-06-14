@@ -77,6 +77,7 @@ from views.rentabilidad import render_rentabilidad
 from views.planeacion_financiera import render_planeacion_financiera
 from views.estado_resultados import render_estado_resultados
 from views.cuentas_por_cobrar import render_cuentas_por_cobrar
+from views.cuentas_por_pagar import render_cuentas_por_pagar
 from views.gastos_operativos import render_gastos_operativos
 from views.presupuesto_equilibrio import render_presupuesto_equilibrio
 from views.rutas_produccion import render_rutas_produccion
@@ -160,13 +161,15 @@ def render_activos_unificado(usuario: str) -> None:
 
 def render_finanzas_unificado(usuario: str) -> None:
     st.title("💼 Finanzas")
-    tab_plan, tab_estado, tab_cxc, tab_gastos, tab_presupuesto = st.tabs(["Planeación", "📊 Estado de resultados", "💰 Cuentas por cobrar", "📌 Gastos operativos", "📅 Presupuesto / Equilibrio"])
+    tab_plan, tab_estado, tab_cxc, tab_cxp, tab_gastos, tab_presupuesto = st.tabs(["Planeación", "📊 Estado de resultados", "💰 Cuentas por cobrar", "💸 Cuentas por pagar", "📌 Gastos operativos", "📅 Presupuesto / Equilibrio"])
     with tab_plan:
         render_planeacion_financiera(usuario)
     with tab_estado:
         render_estado_resultados(usuario)
     with tab_cxc:
         render_cuentas_por_cobrar(usuario)
+    with tab_cxp:
+        render_cuentas_por_pagar(usuario)
     with tab_gastos:
         render_gastos_operativos(usuario)
     with tab_presupuesto:
@@ -269,6 +272,7 @@ MENU_ROUTES = {
     "⚙️ Configuración": (("dashboard.view", "config.view", "reportes.export"), lambda: render_configuracion_sistema(usuario)),
     "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
     "💰 Cuentas por cobrar": (("ventas.view", "clientes.view", "dashboard.view"), lambda: render_cuentas_por_cobrar(usuario)),
+    "💸 Cuentas por pagar": (("tesoreria.view", "cxp.view", "contabilidad.view", "dashboard.view"), lambda: render_cuentas_por_pagar(usuario)),
     "📅 Presupuesto / Equilibrio": (("dashboard.view", "contabilidad.view", "presupuesto.view"), lambda: render_presupuesto_equilibrio(usuario)),
     "♻️ Mermas / Desperdicio": (("inventario.view", "dashboard.view", "produccion.scrap"), lambda: render_mermas(usuario)),
     "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
