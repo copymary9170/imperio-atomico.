@@ -6,6 +6,7 @@ from views.almacen_avanzado import render_almacen_avanzado
 from views.catalogo import render_catalogo
 from views.facturas_compra import render_facturas_compra
 from views.inventario import render_inventario
+from views.inventario_avanzado import render_inventario_avanzado
 from views.kardex import render_kardex
 from views.materia_prima import render_materia_prima
 from views.mercancia_reventa import render_mercancia_reventa
@@ -30,6 +31,7 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
         "👥 Proveedores",
         "🏬 Almacén",
         "🛍️ Catálogo",
+        "🧪 Inventario avanzado",
     ])
     with tabs[0]:
         render_facturas_compra(usuario)
@@ -55,3 +57,5 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
         render_almacen_avanzado(usuario)
     with tabs[11]:
         render_catalogo(usuario)
+    with tabs[12]:
+        render_inventario_avanzado(usuario)
