@@ -272,37 +272,16 @@ def _caja_metodos_df() -> pd.DataFrame:
 
 
 def _datos_minimos_df() -> pd.DataFrame:
-    rows = [
-        ("Inventario", "sku", "Código único", "BOND-CARTA-001", "Evita duplicados y permite buscar rápido."),
-        ("Inventario", "nombre", "Nombre del producto", "Papel bond carta 75g", "Identifica el producto en ventas y compras."),
-        ("Inventario", "categoria", "Familia", "Papel / Tinta / Papelería / Sublimación", "Permite analizar rentabilidad por área."),
-        ("Inventario", "stock_actual", "Existencia actual", "50", "Permite saber cuánto queda."),
-        ("Inventario", "stock_minimo", "Mínimo permitido", "10", "Activa compras sugeridas."),
-        ("Inventario", "costo_unitario_usd", "Costo real unitario", "0.018", "Base para no vender por debajo del costo."),
-        ("Inventario", "precio_venta_usd", "Precio de venta", "0.05", "Base para margen y alertas de precio."),
-        ("Venta detalle", "descripcion", "Producto o servicio vendido", "Impresión color carta", "Permite ver qué deja más dinero."),
-        ("Venta detalle", "cantidad", "Cantidad vendida", "4", "Calcula costo y ganancia."),
-        ("Venta detalle", "precio_unitario_usd", "Precio cobrado", "0.50", "Detecta ventas baratas."),
-        ("Venta detalle", "costo_unitario_usd", "Costo unitario real", "0.22", "Detecta pérdida por impresión/producto."),
-        ("Venta", "metodo_pago", "Forma de pago", "efectivo / pago móvil / transferencia", "Cuadra caja por método."),
-        ("CxC", "saldo_usd", "Saldo pendiente", "3.00", "Controla dinero por cobrar."),
-        ("CxC", "fecha_vencimiento", "Fecha límite de pago", "2026-06-30", "Detecta cuentas vencidas."),
-    ]
+    rows = [("Inventario", "sku", "Código único", "BOND-CARTA-001", "Evita duplicados."), ("Inventario", "nombre", "Nombre", "Papel bond carta 75g", "Identifica producto."), ("Inventario", "categoria", "Familia", "Papel / Tinta / Papelería", "Analiza rentabilidad."), ("Inventario", "stock_actual", "Existencia", "50", "Controla stock."), ("Inventario", "stock_minimo", "Mínimo", "10", "Activa compras."), ("Inventario", "costo_unitario_usd", "Costo real", "0.018", "Evita pérdidas."), ("Inventario", "precio_venta_usd", "Precio venta", "0.05", "Calcula margen."), ("Venta detalle", "descripcion", "Producto/servicio", "Impresión color carta", "Top ventas."), ("Venta detalle", "cantidad", "Cantidad", "4", "Costo/ganancia."), ("Venta detalle", "precio_unitario_usd", "Precio cobrado", "0.50", "Detecta barato."), ("Venta detalle", "costo_unitario_usd", "Costo unitario", "0.22", "Detecta pérdida."), ("Venta", "metodo_pago", "Forma pago", "efectivo / pago móvil", "Cuadra caja."), ("CxC", "saldo_usd", "Saldo pendiente", "3.00", "Controla cobro."), ("CxC", "fecha_vencimiento", "Fecha límite", "2026-06-30", "Detecta vencidas.")]
     return pd.DataFrame(rows, columns=["Módulo", "Campo", "Qué llenar", "Ejemplo", "Para qué sirve"])
 
 
 def _plantilla_inventario_df() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"sku": "BOND-CARTA-001", "nombre": "Papel bond carta 75g", "categoria": "Papel", "unidad": "hoja", "stock_actual": 500, "stock_minimo": 100, "costo_unitario_usd": 0.018, "precio_venta_usd": 0.05},
-        {"sku": "FOTO-BRILLANTE-001", "nombre": "Papel fotográfico brillante", "categoria": "Fotográfico", "unidad": "hoja", "stock_actual": 50, "stock_minimo": 10, "costo_unitario_usd": 0.18, "precio_venta_usd": 0.50},
-    ])
+    return pd.DataFrame([{"sku": "BOND-CARTA-001", "nombre": "Papel bond carta 75g", "categoria": "Papel", "unidad": "hoja", "stock_actual": 500, "stock_minimo": 100, "costo_unitario_usd": 0.018, "precio_venta_usd": 0.05}])
 
 
 def _plantilla_ventas_detalle_df() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"fecha": "2026-06-14", "descripcion": "Impresión B/N carta", "cantidad": 1, "precio_unitario_usd": 0.25, "costo_unitario_usd": 0.08, "subtotal_usd": 0.25},
-        {"fecha": "2026-06-14", "descripcion": "Impresión color carta", "cantidad": 1, "precio_unitario_usd": 0.80, "costo_unitario_usd": 0.30, "subtotal_usd": 0.80},
-    ])
+    return pd.DataFrame([{"fecha": "2026-06-14", "descripcion": "Impresión B/N carta", "cantidad": 1, "precio_unitario_usd": 0.25, "costo_unitario_usd": 0.08, "subtotal_usd": 0.25}])
 
 
 def _build_alerts(metrics: dict[str, float | int]) -> list[dict[str, str]]:
@@ -325,14 +304,7 @@ def _build_alerts(metrics: dict[str, float | int]) -> list[dict[str, str]]:
 
 
 def _recommended_actions_df(metrics: dict[str, float | int]) -> pd.DataFrame:
-    rows = [
-        ("Alta", "Precios", "Ventas bajo costo y productos con precio menor al costo.", "Corregir precio, costo y tasa antes de repetir ventas.", "Evitar pérdidas invisibles."),
-        ("Alta", "Cobranza", "Cuentas por cobrar vencidas y ventas pendientes.", "Contactar clientes, pedir abono y limitar nuevos créditos.", "Recuperar caja."),
-        ("Alta", "Inventario", "Stock crítico y compras sugeridas.", "Comprar primero lo que bloquea ventas: papel, tinta, fotográfico, opalina y escolares.", "No aceptar pedidos sin material."),
-        ("Media", "Caja", "Métodos de pago del día y diferencia de cierre.", "Cuadrar efectivo, pago móvil, transferencia y divisas antes de cerrar.", "Caja limpia."),
-        ("Media", "Datos", "Productos sin costo, precio, mínimo o categoría.", "Completar fichas para que la rentabilidad sea real.", "Reportes confiables."),
-        ("Media", "Rentabilidad", "Margen neto y ganancia por item.", "Subir precios o reducir descuentos donde el margen sea bajo.", "Proteger utilidad."),
-    ]
+    rows = [("Alta", "Precios", "Ventas bajo costo y productos con precio menor al costo.", "Corregir precio, costo y tasa antes de repetir ventas.", "Evitar pérdidas invisibles."), ("Alta", "Cobranza", "Cuentas por cobrar vencidas y ventas pendientes.", "Contactar clientes, pedir abono y limitar nuevos créditos.", "Recuperar caja."), ("Alta", "Inventario", "Stock crítico y compras sugeridas.", "Comprar primero lo que bloquea ventas.", "No aceptar pedidos sin material."), ("Media", "Caja", "Métodos de pago del día y diferencia de cierre.", "Cuadrar antes de cerrar.", "Caja limpia."), ("Media", "Datos", "Productos sin costo, precio, mínimo o categoría.", "Completar fichas.", "Reportes confiables."), ("Media", "Rentabilidad", "Margen neto y ganancia por item.", "Subir precios o reducir descuentos.", "Proteger utilidad.")]
     return pd.DataFrame(rows, columns=["Prioridad", "Área", "Revisar", "Acción recomendada", "Decisión esperada"])
 
 
@@ -343,11 +315,11 @@ def _show_df_or_info(df: pd.DataFrame, empty_message: str) -> None:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 
-def render_panel_ejecutivo(usuario: str = "Sistema") -> None:
+def render_panel_ejecutivo(usuario: str = "Sistema", context_key: str = "principal") -> None:
     st.title("📊 Panel ejecutivo")
     st.caption(f"Centro de control financiero, operativo y comercial · {date.today().isoformat()} · Usuario: {usuario}")
 
-    instance_key = f"panel_ejecutivo_{abs(hash(str(usuario))) % 100000}"
+    instance_key = f"panel_ejecutivo_{context_key}_{abs(hash(str(usuario))) % 100000}"
     metrics = {**_collect_db_metrics(), **_collect_csv_metrics()}
 
     st.subheader("🌅 Pulso de hoy")
