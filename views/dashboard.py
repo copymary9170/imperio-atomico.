@@ -1,6 +1,7 @@
 import streamlit as st
 from modules.dashboard import render_dashboard as dashboard_module
 from views.modo_supervisor import render_modo_supervisor
+from views.panel_ejecutivo import render_panel_ejecutivo
 
 
 def render_dashboard():
@@ -11,10 +12,14 @@ def render_dashboard():
     """
     usuario = st.session_state.get("usuario", "Sistema")
 
-    tab_supervisor, tab_analitica = st.tabs([
+    tab_resumen, tab_supervisor, tab_analitica = st.tabs([
+        "🏦 Resumen ejecutivo",
         "🧑‍💼 Supervisor diario",
         "📈 Analítica financiera",
     ])
+
+    with tab_resumen:
+        render_panel_ejecutivo(usuario)
 
     with tab_supervisor:
         render_modo_supervisor(usuario)
