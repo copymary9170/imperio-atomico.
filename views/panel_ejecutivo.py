@@ -13,10 +13,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 
 
 def _table_exists(conn: Any, table_name: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-        (table_name,),
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone()
     return row is not None
 
 
@@ -36,10 +33,7 @@ def _pick(cols: set[str], *candidates: str) -> str | None:
 def _scalar(conn: Any, sql: str, default: float = 0.0) -> float:
     try:
         row = conn.execute(sql).fetchone()
-        if row is None:
-            return default
-        value = row[0]
-        return float(value or default)
+        return float((row[0] if row else default) or default)
     except Exception:
         return default
 
@@ -89,25 +83,37 @@ def _collect_db_metrics() -> dict[str, float | int]:
         ventas_cols = _columns(conn, "ventas")
         if ventas_cols:
             total_col = _pick(ventas_cols, "total_usd", "total", "monto_usd", "monto") or "total"
-            costo_col = _pick(ventas_cols, "costo_total_usd", "costo_usd", "costo", "costo_total")
-            ganancia_col = _pick(ventas_cols, "ganancia_usd", "utilidad_usd", "margen_usd", "beneficio_usd")
             fecha_col = _pick(ventas_cols, "fecha", "fecha_venta", "created_at") or "fecha"
             estado_filter = "AND lower(COALESCE(estado,'')) NOT IN ('anulada','anulado','cancelada','cancelado')" if "estado" in ventas_cols else ""
-
             metrics["ventas_mes"] = _scalar(conn, f"SELECT COALESCE(SUM({total_col}),0) FROM ventas WHERE strftime('%Y-%m', {fecha_col})=strftime('%Y-%m','now') {estado_filter}")
             metrics["ventas_hoy"] = _scalar(conn, f"SELECT COALESCE(SUM({total_col}),0) FROM ventas WHERE date({fecha_col})=date('now') {estado_filter}")
             metrics["ventas_7d"] = _scalar(conn, f"SELECT COALESCE(SUM({total_col}),0) FROM ventas WHERE date({fecha_col})>=date('now','-6 day') {estado_filter}")
             metrics["tickets_hoy"] = _count(conn, f"SELECT COUNT(*) FROM ventas WHERE date({fecha_col})=date('now') {estado_filter}")
             metrics["ventas_pendientes"] = _count(conn, "SELECT COUNT(*) FROM ventas WHERE lower(COALESCE(estado,'')) IN ('pendiente','por cobrar','credito','crédito')" if "estado" in ventas_cols else "SELECT 0")
-            if costo_col:
-                metrics["costo_ventas_mes"] = _scalar(conn, f"SELECT COALESCE(SUM({costo_col}),0) FROM ventas WHERE strftime('%Y-%m', {fecha_col})=strftime('%Y-%m','now') {estado_filter}")
-            elif ganancia_col:
-                ganancia_mes = _scalar(conn, f"SELECT COALESCE(SUM({ganancia_col}),0) FROM ventas WHERE strftime('%Y-%m', {fecha_col})=strftime('%Y-%m','now') {estado_filter}")
-                metrics["costo_ventas_mes"] = max(0.0, float(metrics["ventas_mes"]) - ganancia_mes)
+        else:
+            metrics.update({"ventas_mes": 0.0, "ventas_hoy": 0.0, "ventas_7d": 0.0, "tickets_hoy": 0, "ventas_pendientes": 0})
+
+        if _table_exists(conn, "ventas_detalle"):
+            det_cols = _columns(conn, "ventas_detalle")
+            if {"cantidad", "costo_unitario_usd"}.issubset(det_cols):
+                metrics["costo_ventas_mes"] = _scalar(conn, """
+                    SELECT COALESCE(SUM(d.cantidad * d.costo_unitario_usd),0)
+                    FROM ventas_detalle d
+                    JOIN ventas v ON v.id=d.venta_id
+                    WHERE strftime('%Y-%m', v.fecha)=strftime('%Y-%m','now')
+                      AND lower(COALESCE(v.estado,'')) NOT IN ('anulada','anulado','cancelada','cancelado')
+                """)
+                metrics["lineas_bajo_costo"] = _count(conn, """
+                    SELECT COUNT(*) FROM ventas_detalle
+                    WHERE COALESCE(precio_unitario_usd,0) < COALESCE(costo_unitario_usd,0)
+                      AND COALESCE(costo_unitario_usd,0) > 0
+                """) if {"precio_unitario_usd", "costo_unitario_usd"}.issubset(det_cols) else 0
             else:
                 metrics["costo_ventas_mes"] = 0.0
+                metrics["lineas_bajo_costo"] = 0
         else:
-            metrics.update({"ventas_mes": 0.0, "ventas_hoy": 0.0, "ventas_7d": 0.0, "tickets_hoy": 0, "ventas_pendientes": 0, "costo_ventas_mes": 0.0})
+            metrics["costo_ventas_mes"] = 0.0
+            metrics["lineas_bajo_costo"] = 0
 
         gastos_cols = _columns(conn, "gastos")
         if gastos_cols:
@@ -120,16 +126,27 @@ def _collect_db_metrics() -> dict[str, float | int]:
             metrics["gastos_mes"] = 0.0
             metrics["gastos_hoy"] = 0.0
 
-        inventario_cols = _columns(conn, "inventario")
-        if inventario_cols:
-            stock_col = _pick(inventario_cols, "stock_actual", "cantidad", "stock", "existencia") or "stock"
-            minimo_col = _pick(inventario_cols, "stock_minimo", "minimo", "stock_alerta")
-            costo_col = _pick(inventario_cols, "costo_unitario_usd", "costo_usd", "costo", "precio_compra_usd")
+        inv_cols = _columns(conn, "inventario")
+        if inv_cols:
+            stock_col = _pick(inv_cols, "stock_actual", "cantidad", "stock", "existencia") or "stock_actual"
+            minimo_col = _pick(inv_cols, "stock_minimo", "minimo", "stock_alerta")
+            costo_col = _pick(inv_cols, "costo_unitario_usd", "costo_usd", "costo", "precio_compra_usd")
+            precio_col = _pick(inv_cols, "precio_venta_usd", "precio_usd", "precio", "precio_publico_usd")
             metrics["productos_inventario"] = _count(conn, "SELECT COUNT(*) FROM inventario")
             metrics["stock_critico"] = _count(conn, f"SELECT COUNT(*) FROM inventario WHERE COALESCE({stock_col},0) <= COALESCE({minimo_col},0)") if minimo_col else 0
             metrics["valor_inventario"] = _scalar(conn, f"SELECT COALESCE(SUM(COALESCE({stock_col},0) * COALESCE({costo_col},0)),0) FROM inventario") if costo_col else 0.0
+            metrics["productos_sin_costo"] = _count(conn, f"SELECT COUNT(*) FROM inventario WHERE COALESCE({costo_col},0)<=0") if costo_col else 0
+            metrics["productos_sin_precio"] = _count(conn, f"SELECT COUNT(*) FROM inventario WHERE COALESCE({precio_col},0)<=0") if precio_col else 0
+            metrics["productos_precio_bajo_costo"] = _count(conn, f"SELECT COUNT(*) FROM inventario WHERE COALESCE({precio_col},0) <= COALESCE({costo_col},0) AND COALESCE({costo_col},0)>0") if costo_col and precio_col else 0
         else:
-            metrics.update({"productos_inventario": 0, "stock_critico": 0, "valor_inventario": 0.0})
+            metrics.update({"productos_inventario": 0, "stock_critico": 0, "valor_inventario": 0.0, "productos_sin_costo": 0, "productos_sin_precio": 0, "productos_precio_bajo_costo": 0})
+
+        if _table_exists(conn, "cuentas_por_cobrar"):
+            metrics["cxc_total"] = _scalar(conn, "SELECT COALESCE(SUM(saldo_usd),0) FROM cuentas_por_cobrar WHERE lower(COALESCE(estado,'')) NOT IN ('pagada','cerrada','cancelada')")
+            metrics["cxc_vencida"] = _scalar(conn, "SELECT COALESCE(SUM(saldo_usd),0) FROM cuentas_por_cobrar WHERE COALESCE(saldo_usd,0)>0 AND fecha_vencimiento IS NOT NULL AND date(fecha_vencimiento)<date('now')")
+        else:
+            metrics["cxc_total"] = 0.0
+            metrics["cxc_vencida"] = 0.0
 
         activos_cols = _columns(conn, "activos")
         if activos_cols:
@@ -139,18 +156,9 @@ def _collect_db_metrics() -> dict[str, float | int]:
             metrics["activos"] = 0
             metrics["valor_activos"] = 0.0
 
-        rutas_cols = _columns(conn, "rutas_produccion")
-        metrics["rutas_activas"] = _count(conn, "SELECT COUNT(*) FROM rutas_produccion WHERE lower(COALESCE(estado,''))='activa'") if rutas_cols else 0
+        metrics["rutas_activas"] = _count(conn, "SELECT COUNT(*) FROM rutas_produccion WHERE lower(COALESCE(estado,''))='activa'") if _columns(conn, "rutas_produccion") else 0
         metrics["mantenimiento_abierto"] = _count(conn, "SELECT COUNT(*) FROM industrial_maintenance_orders WHERE estado IN ('pendiente','programado','en_ejecucion')") if _table_exists(conn, "industrial_maintenance_orders") else 0
-
-        if _table_exists(conn, "cierres_caja_turnos"):
-            cierre_cols = _columns(conn, "cierres_caja_turnos")
-            fecha_col = _pick(cierre_cols, "fecha_operativa", "fecha", "created_at") or "fecha_operativa"
-            metrics["cierres_diferencia_hoy"] = _count(conn, f"SELECT COUNT(*) FROM cierres_caja_turnos WHERE date({fecha_col})=date('now') AND estado='Con diferencia'") if "estado" in cierre_cols else 0
-            metrics["diferencia_caja_hoy"] = _scalar(conn, f"SELECT COALESCE(SUM(diferencia_total_usd),0) FROM cierres_caja_turnos WHERE date({fecha_col})=date('now')") if "diferencia_total_usd" in cierre_cols else 0.0
-        else:
-            metrics["cierres_diferencia_hoy"] = 0
-            metrics["diferencia_caja_hoy"] = 0.0
+        metrics["diferencia_caja_hoy"] = _scalar(conn, "SELECT COALESCE(SUM(diferencia_total_usd),0) FROM cierres_caja_turnos WHERE date(fecha_operativa)=date('now')") if _table_exists(conn, "cierres_caja_turnos") and "diferencia_total_usd" in _columns(conn, "cierres_caja_turnos") else 0.0
 
     metrics["ganancia_bruta_mes"] = float(metrics.get("ventas_mes", 0.0)) - float(metrics.get("costo_ventas_mes", 0.0))
     metrics["utilidad_estimada_mes"] = float(metrics.get("ganancia_bruta_mes", 0.0)) - float(metrics.get("gastos_mes", 0.0))
@@ -175,25 +183,16 @@ def _collect_csv_metrics() -> dict[str, float | int]:
 
 def _ventas_por_linea_df() -> pd.DataFrame:
     with db_transaction() as conn:
-        cols = _columns(conn, "ventas")
-        if not cols:
-            return pd.DataFrame()
-        total_col = _pick(cols, "total_usd", "total", "monto_usd", "monto")
-        fecha_col = _pick(cols, "fecha", "fecha_venta", "created_at")
-        linea_col = _pick(cols, "linea_negocio", "categoria", "tipo_servicio", "tipo", "area")
-        if not total_col or not fecha_col or not linea_col:
-            return pd.DataFrame()
-        estado_filter = "AND lower(COALESCE(estado,'')) NOT IN ('anulada','anulado','cancelada','cancelado')" if "estado" in cols else ""
-        return _read_sql(conn, f"""
-            SELECT COALESCE({linea_col}, 'Sin clasificar') AS linea,
-                   COUNT(*) AS operaciones,
-                   COALESCE(SUM({total_col}),0) AS ventas_usd
-            FROM ventas
-            WHERE strftime('%Y-%m', {fecha_col})=strftime('%Y-%m','now') {estado_filter}
-            GROUP BY COALESCE({linea_col}, 'Sin clasificar')
-            ORDER BY ventas_usd DESC
-            LIMIT 12
+        cols = _columns(conn, "ventas_detalle")
+        if _table_exists(conn, "ventas_detalle") and {"descripcion", "cantidad", "subtotal_usd"}.issubset(cols):
+            return _read_sql(conn, """
+                SELECT descripcion AS linea, COUNT(*) AS operaciones, COALESCE(SUM(subtotal_usd),0) AS ventas_usd
+                FROM ventas_detalle
+                GROUP BY descripcion
+                ORDER BY ventas_usd DESC
+                LIMIT 12
             """)
+    return pd.DataFrame()
 
 
 def _inventario_familia_df() -> pd.DataFrame:
@@ -210,16 +209,12 @@ def _inventario_familia_df() -> pd.DataFrame:
         valor_expr = f"SUM(COALESCE({stock_col},0) * COALESCE({costo_col},0))" if costo_col else "0"
         critico_expr = f"SUM(CASE WHEN COALESCE({stock_col},0) <= COALESCE({minimo_col},0) THEN 1 ELSE 0 END)" if minimo_col else "0"
         return _read_sql(conn, f"""
-            SELECT COALESCE({familia_col}, 'Sin familia') AS familia,
-                   COUNT(*) AS productos,
-                   COALESCE(SUM({stock_col}),0) AS unidades,
-                   COALESCE({critico_expr},0) AS criticos,
+            SELECT COALESCE({familia_col}, 'Sin familia') AS familia, COUNT(*) AS productos,
+                   COALESCE(SUM({stock_col}),0) AS unidades, COALESCE({critico_expr},0) AS criticos,
                    COALESCE({valor_expr},0) AS valor_usd
-            FROM inventario
-            GROUP BY COALESCE({familia_col}, 'Sin familia')
-            ORDER BY criticos DESC, valor_usd DESC
-            LIMIT 15
-            """)
+            FROM inventario GROUP BY COALESCE({familia_col}, 'Sin familia')
+            ORDER BY criticos DESC, valor_usd DESC LIMIT 15
+        """)
 
 
 def _produccion_estado_df() -> pd.DataFrame:
@@ -228,119 +223,161 @@ def _produccion_estado_df() -> pd.DataFrame:
         for table, estado_col in candidates:
             cols = _columns(conn, table)
             if estado_col in cols:
-                return _read_sql(conn, f"""
-                    SELECT '{table}' AS fuente,
-                           COALESCE({estado_col}, 'Sin estado') AS estado,
-                           COUNT(*) AS cantidad
-                    FROM {table}
-                    GROUP BY COALESCE({estado_col}, 'Sin estado')
-                    ORDER BY cantidad DESC
-                    LIMIT 12
-                    """)
+                return _read_sql(conn, f"SELECT '{table}' AS fuente, COALESCE({estado_col}, 'Sin estado') AS estado, COUNT(*) AS cantidad FROM {table} GROUP BY COALESCE({estado_col}, 'Sin estado') ORDER BY cantidad DESC LIMIT 12")
     return pd.DataFrame()
 
 
 def _top_rentabilidad_df() -> pd.DataFrame:
     with db_transaction() as conn:
-        cols = _columns(conn, "ventas")
-        if not cols:
+        if not _table_exists(conn, "ventas_detalle"):
             return pd.DataFrame()
-        nombre_col = _pick(cols, "producto", "servicio", "descripcion", "concepto", "detalle")
-        total_col = _pick(cols, "total_usd", "total", "monto_usd", "monto")
-        costo_col = _pick(cols, "costo_total_usd", "costo_usd", "costo", "costo_total")
-        ganancia_col = _pick(cols, "ganancia_usd", "utilidad_usd", "margen_usd", "beneficio_usd")
-        fecha_col = _pick(cols, "fecha", "fecha_venta", "created_at")
-        if not nombre_col or not total_col or not fecha_col:
+        cols = _columns(conn, "ventas_detalle")
+        if not {"descripcion", "cantidad", "precio_unitario_usd", "costo_unitario_usd", "subtotal_usd"}.issubset(cols):
             return pd.DataFrame()
-        estado_filter = "AND lower(COALESCE(estado,'')) NOT IN ('anulada','anulado','cancelada','cancelado')" if "estado" in cols else ""
-        if ganancia_col:
-            ganancia_expr = f"SUM(COALESCE({ganancia_col},0))"
-        elif costo_col:
-            ganancia_expr = f"SUM(COALESCE({total_col},0) - COALESCE({costo_col},0))"
-        else:
-            return pd.DataFrame()
-        return _read_sql(conn, f"""
-            SELECT COALESCE({nombre_col}, 'Sin nombre') AS item,
-                   COUNT(*) AS ventas,
-                   COALESCE(SUM({total_col}),0) AS ingreso_usd,
-                   COALESCE({ganancia_expr},0) AS ganancia_usd
-            FROM ventas
-            WHERE strftime('%Y-%m', {fecha_col})=strftime('%Y-%m','now') {estado_filter}
-            GROUP BY COALESCE({nombre_col}, 'Sin nombre')
+        return _read_sql(conn, """
+            SELECT descripcion AS item, COUNT(*) AS ventas, COALESCE(SUM(subtotal_usd),0) AS ingreso_usd,
+                   COALESCE(SUM(cantidad * costo_unitario_usd),0) AS costo_usd,
+                   COALESCE(SUM(subtotal_usd - (cantidad * costo_unitario_usd)),0) AS ganancia_usd
+            FROM ventas_detalle
+            GROUP BY descripcion
             ORDER BY ganancia_usd DESC
             LIMIT 10
+        """)
+
+
+def _ventas_bajo_costo_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        if not _table_exists(conn, "ventas_detalle"):
+            return pd.DataFrame()
+        cols = _columns(conn, "ventas_detalle")
+        if not {"fecha", "descripcion", "cantidad", "precio_unitario_usd", "costo_unitario_usd"}.issubset(cols):
+            return pd.DataFrame()
+        return _read_sql(conn, """
+            SELECT fecha, descripcion, cantidad, precio_unitario_usd, costo_unitario_usd,
+                   (precio_unitario_usd - costo_unitario_usd) AS diferencia_unitaria_usd
+            FROM ventas_detalle
+            WHERE COALESCE(precio_unitario_usd,0) < COALESCE(costo_unitario_usd,0)
+              AND COALESCE(costo_unitario_usd,0) > 0
+            ORDER BY fecha DESC
+            LIMIT 100
+        """)
+
+
+def _inventario_riesgos_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        cols = _columns(conn, "inventario")
+        if not cols:
+            return pd.DataFrame()
+        checks = []
+        if {"nombre", "costo_unitario_usd", "precio_venta_usd", "stock_minimo", "categoria"}.issubset(cols):
+            return _read_sql(conn, """
+                SELECT sku, nombre, categoria, stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd,
+                       CASE
+                         WHEN COALESCE(costo_unitario_usd,0)<=0 THEN 'Sin costo'
+                         WHEN COALESCE(precio_venta_usd,0)<=0 THEN 'Sin precio'
+                         WHEN COALESCE(precio_venta_usd,0)<=COALESCE(costo_unitario_usd,0) THEN 'Precio bajo o igual al costo'
+                         WHEN COALESCE(stock_minimo,0)<=0 THEN 'Sin mínimo definido'
+                         WHEN COALESCE(categoria,'')='' THEN 'Sin categoría'
+                         ELSE 'OK'
+                       END AS riesgo
+                FROM inventario
+                WHERE COALESCE(costo_unitario_usd,0)<=0
+                   OR COALESCE(precio_venta_usd,0)<=0
+                   OR COALESCE(precio_venta_usd,0)<=COALESCE(costo_unitario_usd,0)
+                   OR COALESCE(stock_minimo,0)<=0
+                   OR COALESCE(categoria,'')=''
+                ORDER BY riesgo, nombre
+                LIMIT 200
             """)
+        return pd.DataFrame(checks)
+
+
+def _compras_sugeridas_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        cols = _columns(conn, "inventario")
+        if not {"sku", "nombre", "categoria", "stock_actual", "stock_minimo", "costo_unitario_usd"}.issubset(cols):
+            return pd.DataFrame()
+        return _read_sql(conn, """
+            SELECT sku, nombre, categoria, stock_actual, stock_minimo,
+                   MAX(stock_minimo - stock_actual, 0) AS cantidad_sugerida,
+                   costo_unitario_usd,
+                   MAX(stock_minimo - stock_actual, 0) * costo_unitario_usd AS inversion_estimada_usd
+            FROM inventario
+            WHERE COALESCE(stock_actual,0) <= COALESCE(stock_minimo,0)
+            ORDER BY inversion_estimada_usd DESC, nombre
+            LIMIT 100
+        """)
+
+
+def _cxc_vencida_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        cols = _columns(conn, "cuentas_por_cobrar")
+        if not cols:
+            return pd.DataFrame()
+        return _read_sql(conn, """
+            SELECT cxc.id, cl.nombre AS cliente, cxc.estado, cxc.monto_original_usd, cxc.monto_cobrado_usd,
+                   cxc.saldo_usd, cxc.fecha_vencimiento,
+                   CAST(julianday(date('now')) - julianday(date(cxc.fecha_vencimiento)) AS INTEGER) AS dias_vencida
+            FROM cuentas_por_cobrar cxc
+            LEFT JOIN clientes cl ON cl.id=cxc.cliente_id
+            WHERE COALESCE(cxc.saldo_usd,0)>0
+              AND cxc.fecha_vencimiento IS NOT NULL
+              AND date(cxc.fecha_vencimiento) < date('now')
+            ORDER BY date(cxc.fecha_vencimiento) ASC
+            LIMIT 100
+        """)
+
+
+def _caja_metodos_df() -> pd.DataFrame:
+    with db_transaction() as conn:
+        if _table_exists(conn, "ventas") and {"metodo_pago", "total_usd", "fecha"}.issubset(_columns(conn, "ventas")):
+            return _read_sql(conn, """
+                SELECT metodo_pago, COUNT(*) AS operaciones, COALESCE(SUM(total_usd),0) AS total_usd
+                FROM ventas
+                WHERE date(fecha)=date('now') AND lower(COALESCE(estado,'')) NOT IN ('anulada','anulado','cancelada','cancelado')
+                GROUP BY metodo_pago
+                ORDER BY total_usd DESC
+            """)
+    return pd.DataFrame()
 
 
 def _build_alerts(metrics: dict[str, float | int]) -> list[dict[str, str]]:
     alerts: list[dict[str, str]] = []
+    if int(metrics.get("lineas_bajo_costo", 0)) > 0:
+        alerts.append({"nivel": "Crítica", "área": "Precios", "alerta": f"Hay {int(metrics['lineas_bajo_costo'])} línea(s) vendidas por debajo del costo.", "acción": "Revisar precio, costo y tasa antes de repetir la venta."})
+    if int(metrics.get("productos_precio_bajo_costo", 0)) > 0:
+        alerts.append({"nivel": "Crítica", "área": "Inventario", "alerta": f"Hay {int(metrics['productos_precio_bajo_costo'])} producto(s) con precio igual o menor al costo.", "acción": "Actualizar precio de venta o costo unitario."})
+    if float(metrics.get("cxc_vencida", 0.0)) > 0:
+        alerts.append({"nivel": "Crítica", "área": "Cobranza", "alerta": f"Hay ${float(metrics['cxc_vencida']):,.2f} vencidos por cobrar.", "acción": "Contactar clientes y bloquear nuevos créditos sin abono."})
     if int(metrics.get("stock_critico", 0)) > 0:
         alerts.append({"nivel": "Crítica", "área": "Inventario", "alerta": f"Hay {int(metrics['stock_critico'])} producto(s) en o bajo mínimo.", "acción": "Revisar compras y reposición."})
-    if int(metrics.get("cierres_diferencia_hoy", 0)) > 0:
-        alerts.append({"nivel": "Crítica", "área": "Caja", "alerta": f"Hay {int(metrics['cierres_diferencia_hoy'])} cierre(s) con diferencia hoy.", "acción": "Cuadrar efectivo, transferencias, punto y divisas antes de cerrar."})
+    if float(metrics.get("diferencia_caja_hoy", 0.0)) != 0:
+        alerts.append({"nivel": "Crítica", "área": "Caja", "alerta": f"Diferencia de caja hoy: ${float(metrics['diferencia_caja_hoy']):,.2f}.", "acción": "Cuadrar efectivo, transferencias, punto y divisas."})
+    if int(metrics.get("productos_sin_costo", 0)) or int(metrics.get("productos_sin_precio", 0)):
+        alerts.append({"nivel": "Media", "área": "Datos", "alerta": f"Productos sin costo: {int(metrics.get('productos_sin_costo',0))}; sin precio: {int(metrics.get('productos_sin_precio',0))}.", "acción": "Completar datos para que el panel calcule rentabilidad real."})
     if float(metrics.get("utilidad_estimada_mes", 0.0)) < 0:
         alerts.append({"nivel": "Crítica", "área": "Finanzas", "alerta": "La utilidad estimada del mes está negativa.", "acción": "Revisar ventas, gastos, costos y precios."})
     if float(metrics.get("margen_neto_pct", 0.0)) < 15 and float(metrics.get("ventas_mes", 0.0)) > 0:
         alerts.append({"nivel": "Media", "área": "Rentabilidad", "alerta": f"Margen neto bajo: {float(metrics.get('margen_neto_pct', 0.0)):.1f}%.", "acción": "Revisar precios, descuentos, mermas y gastos fijos."})
     if int(metrics.get("reservas_almacen", 0)) > 0:
         alerts.append({"nivel": "Media", "área": "Almacén", "alerta": f"Hay {int(metrics['reservas_almacen'])} reserva(s) de material activas.", "acción": "Confirmar liberación o consumo."})
-    if int(metrics.get("garantias_vencidas", 0)) > 0:
-        alerts.append({"nivel": "Media", "área": "Activos", "alerta": f"Hay {int(metrics['garantias_vencidas'])} garantía(s) vencida(s).", "acción": "Actualizar garantía o programar revisión."})
-    if int(metrics.get("documentos_activos_pendientes", 0)) > 0:
-        alerts.append({"nivel": "Media", "área": "Activos", "alerta": f"Hay {int(metrics['documentos_activos_pendientes'])} documento(s) de activos pendientes.", "acción": "Subir factura, garantía o evidencia."})
-    if int(metrics.get("bajas_pendientes", 0)) > 0:
-        alerts.append({"nivel": "Baja", "área": "Activos", "alerta": f"Hay {int(metrics['bajas_pendientes'])} baja(s) pendientes.", "acción": "Revisar autorización de baja."})
     if int(metrics.get("mantenimiento_abierto", 0)) > 0:
         alerts.append({"nivel": "Media", "área": "Mantenimiento", "alerta": f"Hay {int(metrics['mantenimiento_abierto'])} orden(es) de mantenimiento abiertas.", "acción": "Programar o cerrar mantenimiento."})
     return alerts
 
 
 def _recommended_actions_df(metrics: dict[str, float | int]) -> pd.DataFrame:
-    rows: list[dict[str, str]] = []
-
-    def add(prioridad: str, area: str, revisar: str, accion: str, decision: str) -> None:
-        rows.append({"Prioridad": prioridad, "Área": area, "Revisar": revisar, "Acción recomendada": accion, "Decisión esperada": decision})
-
-    if float(metrics.get("diferencia_caja_hoy", 0.0)) != 0 or int(metrics.get("cierres_diferencia_hoy", 0)) > 0:
-        add("Alta", "Caja", "Cierre del día, efectivo contado, pago móvil, transferencias, punto y divisas.", "No cerrar el día hasta explicar la diferencia y dejar observación.", "Corregir, justificar o registrar ajuste de caja.")
-    else:
-        add("Media", "Caja", "Caja inicial, ventas cobradas, gastos pagados y caja final.", "Hacer arqueo rápido antes del cierre, aunque no haya alerta.", "Confirmar caja cuadrada.")
-
-    if float(metrics.get("avance_equilibrio_hoy_pct", 0.0)) < 100 and float(metrics.get("punto_equilibrio_diario", 0.0)) > 0:
-        add("Alta", "Ventas", "Ventas de hoy contra punto de equilibrio diario.", "Impulsar productos rápidos: impresiones, copias, fotos, papelería escolar y servicios de mayor rotación.", "Cubrir gastos del día antes de aceptar trabajos de baja ganancia.")
-    else:
-        add("Media", "Ventas", "Ventas de hoy y ticket promedio.", "Subir ticket promedio ofreciendo complemento: carpeta, sobre, hoja extra, plastificado o diseño.", "Aumentar ingreso sin depender de más clientes.")
-
-    if float(metrics.get("margen_neto_pct", 0.0)) < 15 and float(metrics.get("ventas_mes", 0.0)) > 0:
-        add("Alta", "Rentabilidad", "Margen neto, descuentos, gastos fijos, mermas y costo de insumos.", "Revisar precios de color, fotos, papelería creativa y sublimación; subir lo que no cubra costo + margen.", "Evitar vender por debajo del costo real.")
-    else:
-        add("Media", "Rentabilidad", "Servicios con más ventas y menor ganancia.", "Comparar impresión B/N, color, fotos, papelería, sublimación y diseño por margen.", "Priorizar lo más rentable.")
-
-    if int(metrics.get("stock_critico", 0)) > 0:
-        add("Alta", "Inventario", "Productos bajo mínimo, papel bond, fotográfico, opalina, tintas y papelería escolar.", "Preparar compra o mover stock antes de aceptar pedidos grandes.", "Evitar prometer trabajos sin material.")
-    else:
-        add("Media", "Inventario", "Stock de alta rotación y materiales de temporada.", "Revisar si hay suficiente papel, tinta, sobres, carpetas y hojas de examen para la semana.", "Comprar antes de quedarse sin inventario.")
-
-    if int(metrics.get("reservas_almacen", 0)) > 0:
-        add("Media", "Almacén", "Reservas de material contra pedidos activos.", "Liberar reservas de pedidos cancelados o confirmar consumo en producción.", "No inmovilizar material útil.")
-
-    if float(metrics.get("merma_almacen_usd", 0.0)) > 0:
-        add("Media", "Mermas", "Pérdidas por pruebas, errores de impresión, cortes dañados y material vencido.", "Registrar causa de merma y ajustar precios si la merma es frecuente.", "Reducir desperdicio y proteger margen.")
-
-    if int(metrics.get("mantenimiento_abierto", 0)) > 0:
-        add("Media", "Activos", "Órdenes de mantenimiento de impresoras, equipos y herramientas.", "Cerrar, reprogramar o documentar mantenimiento pendiente.", "Evitar fallas en horas de venta.")
-
-    if int(metrics.get("documentos_activos_pendientes", 0)) > 0:
-        add("Baja", "Patrimonio", "Facturas, garantías, seriales y evidencia de activos.", "Completar documentos de impresoras, plancha, herramientas y equipos.", "Tener control patrimonial y soporte ante garantía.")
-
-    if int(metrics.get("ventas_pendientes", 0)) > 0:
-        add("Alta", "Cuentas por cobrar", "Ventas pendientes, créditos y pedidos por cobrar.", "Contactar clientes pendientes y no entregar trabajos grandes sin abono.", "Recuperar efectivo y bajar riesgo.")
-
-    add("Media", "Precios", "Tasa BCV/Binance, costos de tinta, papel, electricidad, internet, comisiones y mano de obra.", "Actualizar precios cuando cambie la tasa o suba el costo de insumos.", "Mantener margen mínimo real.")
-    add("Media", "Producción", "Pedidos en diseño, aprobación, impresión, corte, sublimación, calidad y despacho.", "Mover cada pedido al siguiente estado y marcar atrasados.", "Evitar olvidos y reclamos.")
-    add("Baja", "Clientes", "Clientes frecuentes, clientes inactivos y clientes que escriben fuera de horario.", "Reforzar catálogo, horario y canal correcto de atención.", "Ordenar la demanda y reducir interrupciones.")
-
-    return pd.DataFrame(rows)
+    rows = [
+        ("Alta", "Precios", "Ventas bajo costo y productos con precio menor al costo.", "Corregir precio, costo y tasa antes de repetir ventas.", "Evitar pérdidas invisibles."),
+        ("Alta", "Cobranza", "Cuentas por cobrar vencidas y ventas pendientes.", "Contactar clientes, pedir abono y limitar nuevos créditos.", "Recuperar caja."),
+        ("Alta", "Inventario", "Stock crítico y compras sugeridas.", "Comprar primero lo que bloquea ventas: papel, tinta, fotográfico, opalina y escolares.", "No aceptar pedidos sin material."),
+        ("Media", "Caja", "Métodos de pago del día y diferencia de cierre.", "Cuadrar efectivo, pago móvil, transferencia y divisas antes de cerrar.", "Caja limpia."),
+        ("Media", "Datos", "Productos sin costo, precio, mínimo o categoría.", "Completar fichas para que la rentabilidad sea real.", "Reportes confiables."),
+        ("Media", "Rentabilidad", "Margen neto y ganancia por item.", "Subir precios o reducir descuentos donde el margen sea bajo.", "Proteger utilidad."),
+        ("Media", "Producción", "Pedidos en cola, despacho o producción.", "Actualizar estados y marcar atrasados.", "Evitar reclamos."),
+        ("Baja", "Clientes", "Clientes frecuentes, inactivos y fuera de horario.", "Reforzar catálogo, horario y canal de empresa.", "Ordenar demanda."),
+    ]
+    return pd.DataFrame(rows, columns=["Prioridad", "Área", "Revisar", "Acción recomendada", "Decisión esperada"])
 
 
 def _show_df_or_info(df: pd.DataFrame, empty_message: str) -> None:
@@ -354,9 +391,7 @@ def render_panel_ejecutivo(usuario: str = "Sistema") -> None:
     st.title("📊 Panel ejecutivo")
     st.caption(f"Centro de control financiero, operativo y comercial · {date.today().isoformat()} · Usuario: {usuario}")
 
-    db_metrics = _collect_db_metrics()
-    csv_metrics = _collect_csv_metrics()
-    metrics = {**db_metrics, **csv_metrics}
+    metrics = {**_collect_db_metrics(), **_collect_csv_metrics()}
 
     st.subheader("🌅 Pulso de hoy")
     h1, h2, h3, h4, h5 = st.columns(5)
@@ -376,25 +411,18 @@ def render_panel_ejecutivo(usuario: str = "Sistema") -> None:
     e1, e2, e3, e4 = st.columns(4)
     e1.metric("Punto equilibrio/día", f"${float(metrics.get('punto_equilibrio_diario', 0)):,.2f}")
     e2.metric("Avance hoy", f"{float(metrics.get('avance_equilibrio_hoy_pct', 0)):,.1f}%")
-    e3.metric("Ventas últimos 7 días", f"${float(metrics.get('ventas_7d', 0)):,.2f}")
-    e4.metric("Ventas pendientes", int(metrics.get("ventas_pendientes", 0)))
+    e3.metric("CxC total", f"${float(metrics.get('cxc_total', 0)):,.2f}")
+    e4.metric("CxC vencida", f"${float(metrics.get('cxc_vencida', 0)):,.2f}")
 
-    st.subheader("📦 Operación e inventario")
+    st.subheader("📦 Operación, inventario y riesgos")
     o1, o2, o3, o4, o5 = st.columns(5)
     o1.metric("Valor inventario", f"${float(metrics.get('valor_inventario', 0)):,.2f}")
     o2.metric("Stock crítico", int(metrics.get("stock_critico", 0)))
-    o3.metric("Reservas almacén", int(metrics.get("reservas_almacen", 0)))
-    o4.metric("Merma estimada", f"${float(metrics.get('merma_almacen_usd', 0)):,.2f}")
+    o3.metric("Ventas bajo costo", int(metrics.get("lineas_bajo_costo", 0)))
+    o4.metric("Precio ≤ costo", int(metrics.get("productos_precio_bajo_costo", 0)))
     o5.metric("Diferencia caja hoy", f"${float(metrics.get('diferencia_caja_hoy', 0)):,.2f}")
 
-    a1, a2, a3, a4 = st.columns(4)
-    a1.metric("Activos", int(metrics.get("activos", 0)))
-    a2.metric("Valor activos", f"${float(metrics.get('valor_activos', 0)):,.2f}")
-    a3.metric("Rutas activas", int(metrics.get("rutas_activas", 0)))
-    a4.metric("Mantenimiento abierto", int(metrics.get("mantenimiento_abierto", 0)))
-
     st.divider()
-
     alerts = _build_alerts(metrics)
     st.subheader("🚨 Centro de alertas gerenciales")
     if alerts:
@@ -402,25 +430,25 @@ def render_panel_ejecutivo(usuario: str = "Sistema") -> None:
     else:
         st.success("No hay alertas gerenciales críticas detectadas con la información disponible.")
 
-    tab_lineas, tab_inventario, tab_produccion, tab_rentabilidad, tab_acciones = st.tabs(["📈 Ventas por línea", "📦 Inventario por familia", "🏭 Semáforo producción", "💰 Top rentabilidad", "📌 Acciones"])
-
-    with tab_lineas:
-        st.caption("Muestra qué líneas del negocio venden más este mes si la tabla ventas tiene campo de categoría, tipo, área o línea de negocio.")
-        _show_df_or_info(_ventas_por_linea_df(), "No hay datos suficientes para separar ventas por línea de negocio.")
-
-    with tab_inventario:
-        st.caption("Resume stock, valor y productos críticos por familia/categoría de inventario.")
-        _show_df_or_info(_inventario_familia_df(), "No hay datos suficientes para agrupar inventario por familia.")
-
-    with tab_produccion:
-        st.caption("Semáforo rápido de pedidos/trabajos según la tabla de producción disponible.")
-        _show_df_or_info(_produccion_estado_df(), "No hay órdenes o estados de producción suficientes para mostrar semáforo.")
-
-    with tab_rentabilidad:
-        st.caption("Lista productos o servicios más rentables si ventas guarda costo o ganancia por operación.")
-        _show_df_or_info(_top_rentabilidad_df(), "No hay datos suficientes de costo/ganancia por venta para calcular rentabilidad por item.")
-
-    with tab_acciones:
-        st.caption("Checklist gerencial para decidir qué atender primero. Cambia según caja, ventas, margen, inventario, mermas y pendientes.")
-        acciones_df = _recommended_actions_df(metrics)
-        st.dataframe(acciones_df, use_container_width=True, hide_index=True)
+    tabs = st.tabs(["📈 Ventas", "💸 Bajo costo", "📦 Inventario", "🛒 Compras", "💳 CxC", "🏦 Caja", "🏭 Producción", "📌 Acciones"])
+    with tabs[0]:
+        _show_df_or_info(_ventas_por_linea_df(), "No hay ventas detalladas suficientes para agrupar.")
+        st.markdown("#### Top rentabilidad")
+        _show_df_or_info(_top_rentabilidad_df(), "No hay datos suficientes de costo/ganancia por venta.")
+    with tabs[1]:
+        _show_df_or_info(_ventas_bajo_costo_df(), "No hay ventas registradas por debajo del costo.")
+    with tabs[2]:
+        st.markdown("#### Inventario por familia")
+        _show_df_or_info(_inventario_familia_df(), "No hay datos suficientes para agrupar inventario.")
+        st.markdown("#### Riesgos de datos y precios")
+        _show_df_or_info(_inventario_riesgos_df(), "No hay productos con datos incompletos o precio bajo costo.")
+    with tabs[3]:
+        _show_df_or_info(_compras_sugeridas_df(), "No hay compras sugeridas por stock mínimo.")
+    with tabs[4]:
+        _show_df_or_info(_cxc_vencida_df(), "No hay cuentas por cobrar vencidas.")
+    with tabs[5]:
+        _show_df_or_info(_caja_metodos_df(), "No hay ventas de hoy separadas por método de pago.")
+    with tabs[6]:
+        _show_df_or_info(_produccion_estado_df(), "No hay órdenes o estados de producción suficientes.")
+    with tabs[7]:
+        st.dataframe(_recommended_actions_df(metrics), use_container_width=True, hide_index=True)
