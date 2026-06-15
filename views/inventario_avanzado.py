@@ -75,24 +75,14 @@ def _render_clasificacion(usuario: str) -> None:
         st.info("Primero registra artículos en inventario.")
         return
 
-    item_id = st.selectbox(
-        "Artículo",
-        inv["id"].tolist(),
-        format_func=lambda i: _item_label(inv, i),
-        key="clasificacion_item_id",
-    )
+    item_id = st.selectbox("Artículo", inv["id"].tolist(), format_func=lambda i: _item_label(inv, i), key="clasificacion_item_id")
     row = inv[inv["id"] == item_id].iloc[0]
     tipo_actual = str(row.get("tipo_item") or "producto_venta")
     tipo_keys = list(TIPOS_ITEM.keys())
     tipo_index = tipo_keys.index(tipo_actual) if tipo_actual in tipo_keys else 0
 
     with st.form("form_clasificacion_articulo"):
-        tipo_item = st.selectbox(
-            "Tipo de artículo",
-            tipo_keys,
-            index=tipo_index,
-            format_func=lambda value: TIPOS_ITEM.get(value, value),
-        )
+        tipo_item = st.selectbox("Tipo de artículo", tipo_keys, index=tipo_index, format_func=lambda value: TIPOS_ITEM.get(value, value))
         c1, c2, c3 = st.columns(3)
         unidad_base = c1.text_input("Unidad base", value=str(row.get("unidad_base") or row.get("unidad") or "unidad"))
         unidad_compra = c2.text_input("Unidad de compra", value=str(row.get("unidad_compra") or ""))
@@ -106,21 +96,10 @@ def _render_clasificacion(usuario: str) -> None:
                 conn.execute(
                     """
                     UPDATE inventario
-                    SET tipo_item = ?,
-                        unidad_base = ?,
-                        unidad_compra = ?,
-                        punto_reorden = ?,
-                        stock_ideal = ?
+                    SET tipo_item = ?, unidad_base = ?, unidad_compra = ?, punto_reorden = ?, stock_ideal = ?
                     WHERE id = ?
                     """,
-                    (
-                        tipo_item,
-                        unidad_base.strip(),
-                        unidad_compra.strip(),
-                        float(punto_reorden),
-                        float(stock_ideal),
-                        int(item_id),
-                    ),
+                    (tipo_item, unidad_base.strip(), unidad_compra.strip(), float(punto_reorden), float(stock_ideal), int(item_id)),
                 )
             st.success("Clasificación guardada.")
             st.rerun()
@@ -144,18 +123,8 @@ def _render_recetas(usuario: str) -> None:
 
     with st.form("form_receta_consumo"):
         c1, c2 = st.columns(2)
-        producto_id = c1.selectbox(
-            "Producto / servicio final",
-            inv["id"].tolist(),
-            format_func=lambda i: _item_label(inv, i),
-            key="receta_producto_id",
-        )
-        insumo_id = c2.selectbox(
-            "Insumo consumido",
-            inv["id"].tolist(),
-            format_func=lambda i: _item_label(inv, i),
-            key="receta_insumo_id",
-        )
+        producto_id = c1.selectbox("Producto / servicio final", inv["id"].tolist(), format_func=lambda i: _item_label(inv, i), key="receta_producto_id")
+        insumo_id = c2.selectbox("Insumo consumido", inv["id"].tolist(), format_func=lambda i: _item_label(inv, i), key="receta_insumo_id")
         c3, c4 = st.columns(2)
         cantidad = c3.number_input("Cantidad de insumo por unidad vendida", min_value=0.0, value=1.0, step=0.01)
         unidad = c4.text_input("Unidad", value="unidad")
@@ -186,17 +155,8 @@ def _render_recetas(usuario: str) -> None:
 
     recetas = _safe_read_sql(
         """
-        SELECT
-            r.id,
-            p.nombre AS producto,
-            p.sku AS producto_sku,
-            i.nombre AS insumo,
-            i.sku AS insumo_sku,
-            r.cantidad_insumo,
-            r.unidad,
-            r.merma_pct,
-            r.activo,
-            r.observaciones
+        SELECT r.id, p.nombre AS producto, p.sku AS producto_sku, i.nombre AS insumo, i.sku AS insumo_sku,
+               r.cantidad_insumo, r.unidad, r.merma_pct, r.activo, r.observaciones
         FROM recetas_consumo r
         JOIN inventario p ON p.id = r.producto_id
         JOIN inventario i ON i.id = r.insumo_id
@@ -219,22 +179,14 @@ def _render_recetas(usuario: str) -> None:
         col_info.write(label)
         if int(receta["activo"] or 0) == 1:
             if col_accion.button("Desactivar", key=f"desactivar_receta_{int(receta['id'])}"):
-                try:
-                    _set_receta_activa(int(receta["id"]), 0)
-                    st.success("Receta desactivada.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error("No se pudo desactivar la receta.")
-                    st.exception(exc)
+                _set_receta_activa(int(receta["id"]), 0)
+                st.success("Receta desactivada.")
+                st.rerun()
         else:
             if col_accion.button("Reactivar", key=f"reactivar_receta_{int(receta['id'])}"):
-                try:
-                    _set_receta_activa(int(receta["id"]), 1)
-                    st.success("Receta reactivada.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error("No se pudo reactivar la receta.")
-                    st.exception(exc)
+                _set_receta_activa(int(receta["id"]), 1)
+                st.success("Receta reactivada.")
+                st.rerun()
 
 
 def _render_simulador_consumo() -> None:
@@ -247,30 +199,19 @@ def _render_simulador_consumo() -> None:
         return
 
     c1, c2 = st.columns([3, 1])
-    producto_id = c1.selectbox(
-        "Producto / servicio a vender",
-        inv["id"].tolist(),
-        format_func=lambda i: _item_label(inv, i),
-        key="simulador_producto_id",
-    )
+    producto_id = c1.selectbox("Producto / servicio a vender", inv["id"].tolist(), format_func=lambda i: _item_label(inv, i), key="simulador_producto_id")
     cantidad = c2.number_input("Cantidad a vender", min_value=0.01, value=1.0, step=1.0, key="simulador_cantidad")
 
     consumos = _safe_read_sql(
         """
-        SELECT
-            i.sku,
-            i.nombre AS insumo,
-            COALESCE(r.cantidad_insumo, 0) AS cantidad_por_unidad,
-            COALESCE(r.merma_pct, 0) AS merma_pct,
-            COALESCE(r.unidad, i.unidad, '') AS unidad,
-            COALESCE(i.stock_actual, 0) AS stock_actual,
-            COALESCE(i.costo_unitario_usd, 0) AS costo_unitario_usd,
-            COALESCE(r.cantidad_insumo, 0) * ? AS cantidad_base,
-            COALESCE(r.cantidad_insumo, 0) * ? * (1 + (COALESCE(r.merma_pct, 0) / 100.0)) AS cantidad_total
+        SELECT i.sku, i.nombre AS insumo, COALESCE(r.cantidad_insumo, 0) AS cantidad_por_unidad,
+               COALESCE(r.merma_pct, 0) AS merma_pct, COALESCE(r.unidad, i.unidad, '') AS unidad,
+               COALESCE(i.stock_actual, 0) AS stock_actual, COALESCE(i.costo_unitario_usd, 0) AS costo_unitario_usd,
+               COALESCE(r.cantidad_insumo, 0) * ? AS cantidad_base,
+               COALESCE(r.cantidad_insumo, 0) * ? * (1 + (COALESCE(r.merma_pct, 0) / 100.0)) AS cantidad_total
         FROM recetas_consumo r
         JOIN inventario i ON i.id = r.insumo_id
-        WHERE r.producto_id = ?
-          AND COALESCE(r.activo, 1) = 1
+        WHERE r.producto_id = ? AND COALESCE(r.activo, 1) = 1
         ORDER BY i.nombre COLLATE NOCASE
         """,
         (float(cantidad), float(cantidad), int(producto_id)),
@@ -288,23 +229,8 @@ def _render_simulador_consumo() -> None:
     c1.metric("Insumos", len(consumos))
     c2.metric("Costo estimado", f"${float(consumos['costo_total_usd'].sum()):,.2f}")
     c3.metric("Alertas de stock", int((consumos["estado_stock"] == "Insuficiente").sum()))
+    st.dataframe(consumos[["sku", "insumo", "cantidad_por_unidad", "merma_pct", "cantidad_total", "unidad", "stock_actual", "stock_despues", "estado_stock", "costo_total_usd"]], use_container_width=True, hide_index=True)
 
-    st.dataframe(
-        consumos[[
-            "sku",
-            "insumo",
-            "cantidad_por_unidad",
-            "merma_pct",
-            "cantidad_total",
-            "unidad",
-            "stock_actual",
-            "stock_despues",
-            "estado_stock",
-            "costo_total_usd",
-        ]],
-        use_container_width=True,
-        hide_index=True,
-    )
 
 def _render_historial_consumos_receta() -> None:
     st.subheader("📜 Historial de consumos por receta")
@@ -312,16 +238,13 @@ def _render_historial_consumos_receta() -> None:
 
     df = _safe_read_sql(
         """
-        SELECT
-            m.fecha,
-            m.usuario,
-            REPLACE(COALESCE(m.referencia, ''), 'Consumo receta por venta #', '') AS venta_id,
-            i.sku,
-            i.nombre AS insumo,
-            ABS(COALESCE(m.cantidad, 0)) AS cantidad_consumida,
-            COALESCE(m.costo_unitario_usd, 0) AS costo_unitario_usd,
-            ABS(COALESCE(m.cantidad, 0)) * COALESCE(m.costo_unitario_usd, 0) AS costo_total_usd,
-            m.referencia
+        SELECT m.fecha, m.usuario,
+               REPLACE(COALESCE(m.referencia, ''), 'Consumo receta por venta #', '') AS venta_id,
+               i.sku, i.nombre AS insumo,
+               ABS(COALESCE(m.cantidad, 0)) AS cantidad_consumida,
+               COALESCE(m.costo_unitario_usd, 0) AS costo_unitario_usd,
+               ABS(COALESCE(m.cantidad, 0)) * COALESCE(m.costo_unitario_usd, 0) AS costo_total_usd,
+               m.referencia
         FROM movimientos_inventario m
         JOIN inventario i ON i.id = m.inventario_id
         WHERE COALESCE(m.referencia, '') LIKE 'Consumo receta por venta #%'
@@ -342,7 +265,6 @@ def _render_historial_consumos_receta() -> None:
     c1.metric("Movimientos", len(df))
     c2.metric("Costo total consumido", f"${float(df['costo_total_usd'].sum()):,.2f}")
     c3.metric("Ventas con receta", df["venta_id"].nunique())
-
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
@@ -355,12 +277,7 @@ def _render_conteo_fisico(usuario: str) -> None:
         st.info("No hay inventario para contar.")
         return
 
-    item_id = st.selectbox(
-        "Artículo contado",
-        inv["id"].tolist(),
-        format_func=lambda i: _item_label(inv, i),
-        key="conteo_item_id",
-    )
+    item_id = st.selectbox("Artículo contado", inv["id"].tolist(), format_func=lambda i: _item_label(inv, i), key="conteo_item_id")
     row = inv[inv["id"] == item_id].iloc[0]
     stock_sistema = float(row.get("stock_actual") or 0)
     costo_unitario = float(row.get("costo_unitario_usd") or 0)
@@ -377,10 +294,7 @@ def _render_conteo_fisico(usuario: str) -> None:
         diferencia = float(stock_contado) - stock_sistema
         try:
             with db_transaction() as conn:
-                cur = conn.execute(
-                    "INSERT INTO conteos_fisicos(usuario, observaciones) VALUES (?, ?)",
-                    (usuario, observaciones.strip()),
-                )
+                cur = conn.execute("INSERT INTO conteos_fisicos(usuario, observaciones) VALUES (?, ?)", (usuario, observaciones.strip()))
                 conteo_id = cur.lastrowid
                 conn.execute(
                     """
@@ -390,36 +304,17 @@ def _render_conteo_fisico(usuario: str) -> None:
                     (conteo_id, int(item_id), stock_sistema, float(stock_contado), diferencia, motivo.strip()),
                 )
             if ajustar_stock and diferencia != 0:
-                add_inventory_movement_shared(
-                    usuario=usuario,
-                    inventario_id=int(item_id),
-                    tipo="ajuste",
-                    cantidad=float(diferencia),
-                    costo_unitario_usd=costo_unitario,
-                    referencia=f"Conteo físico: {motivo.strip() or 'Ajuste por conteo'}",
-                )
+                add_inventory_movement_shared(usuario=usuario, inventario_id=int(item_id), tipo="ajuste", cantidad=float(diferencia), costo_unitario_usd=costo_unitario, referencia=f"Conteo físico: {motivo.strip() or 'Ajuste por conteo'}")
         except Exception as exc:
             st.error("No se pudo registrar el conteo físico.")
             st.exception(exc)
         else:
-            if ajustar_stock and diferencia != 0:
-                st.success(f"Conteo registrado y stock ajustado. Diferencia aplicada: {diferencia:,.2f}")
-            else:
-                st.success(f"Conteo registrado. Diferencia: {diferencia:,.2f}")
+            st.success(f"Conteo registrado{' y stock ajustado' if ajustar_stock and diferencia != 0 else ''}. Diferencia: {diferencia:,.2f}")
             st.rerun()
 
     historial = _safe_read_sql(
         """
-        SELECT
-            c.fecha,
-            c.usuario,
-            i.nombre AS articulo,
-            i.sku,
-            d.stock_sistema,
-            d.stock_contado,
-            d.diferencia,
-            d.motivo,
-            c.observaciones
+        SELECT c.fecha, c.usuario, i.nombre AS articulo, i.sku, d.stock_sistema, d.stock_contado, d.diferencia, d.motivo, c.observaciones
         FROM conteos_fisicos_detalle d
         JOIN conteos_fisicos c ON c.id = d.conteo_id
         JOIN inventario i ON i.id = d.inventario_id
@@ -436,23 +331,11 @@ def _render_rentabilidad() -> None:
 
     df = _safe_read_sql(
         """
-        SELECT
-            i.sku,
-            i.nombre,
-            i.categoria,
-            i.unidad,
-            COALESCE(i.tipo_item, 'producto_venta') AS tipo_item,
-            COALESCE(i.stock_actual, 0) AS stock_actual,
-            COALESCE(i.costo_unitario_usd, 0) AS costo_unitario_usd,
-            COALESCE(i.precio_venta_usd, 0) AS precio_venta_usd,
-            COALESCE(SUM(
-                CASE
-                    WHEN COALESCE(r.activo, 1) = 1
-                    THEN COALESCE(r.cantidad_insumo, 0) * (1 + (COALESCE(r.merma_pct, 0) / 100.0)) * COALESCE(ins.costo_unitario_usd, 0)
-                    ELSE 0
-                END
-            ), 0) AS costo_receta_usd,
-            COUNT(r.id) AS lineas_receta
+        SELECT i.sku, i.nombre, i.categoria, i.unidad, COALESCE(i.tipo_item, 'producto_venta') AS tipo_item,
+               COALESCE(i.stock_actual, 0) AS stock_actual,
+               COALESCE(i.costo_unitario_usd, 0) AS costo_unitario_usd,
+               COALESCE(i.precio_venta_usd, 0) AS precio_venta_usd,
+               COALESCE(SUM(CASE WHEN COALESCE(r.activo, 1) = 1 THEN COALESCE(r.cantidad_insumo, 0) * (1 + (COALESCE(r.merma_pct, 0) / 100.0)) * COALESCE(ins.costo_unitario_usd, 0) ELSE 0 END), 0) AS costo_receta_usd
         FROM inventario i
         LEFT JOIN recetas_consumo r ON r.producto_id = i.id AND COALESCE(r.activo, 1) = 1
         LEFT JOIN inventario ins ON ins.id = r.insumo_id
@@ -465,19 +348,10 @@ def _render_rentabilidad() -> None:
         st.info("No hay productos para analizar.")
         return
 
-    df["costo_base_usd"] = df.apply(
-        lambda row: float(row["costo_receta_usd"] or 0) if float(row["costo_receta_usd"] or 0) > 0 else float(row["costo_unitario_usd"] or 0),
-        axis=1,
-    )
-    df["fuente_costo"] = df.apply(
-        lambda row: "Receta" if float(row["costo_receta_usd"] or 0) > 0 else "Inventario",
-        axis=1,
-    )
+    df["costo_base_usd"] = df.apply(lambda row: float(row["costo_receta_usd"] or 0) if float(row["costo_receta_usd"] or 0) > 0 else float(row["costo_unitario_usd"] or 0), axis=1)
+    df["fuente_costo"] = df.apply(lambda row: "Receta" if float(row["costo_receta_usd"] or 0) > 0 else "Inventario", axis=1)
     df["ganancia_unitaria_usd"] = df["precio_venta_usd"].astype(float) - df["costo_base_usd"].astype(float)
-    df["margen_pct"] = df.apply(
-        lambda row: ((float(row["ganancia_unitaria_usd"]) / float(row["precio_venta_usd"])) * 100) if float(row["precio_venta_usd"] or 0) > 0 else 0,
-        axis=1,
-    )
+    df["margen_pct"] = df.apply(lambda row: ((float(row["ganancia_unitaria_usd"]) / float(row["precio_venta_usd"])) * 100) if float(row["precio_venta_usd"] or 0) > 0 else 0, axis=1)
 
     bajo_costo = df[df["ganancia_unitaria_usd"] < 0]
     margen_bajo = df[(df["ganancia_unitaria_usd"] >= 0) & (df["margen_pct"] < 30)]
@@ -488,33 +362,14 @@ def _render_rentabilidad() -> None:
     c3.metric("Por debajo del costo", len(bajo_costo))
     c4.metric("Margen menor a 30%", len(margen_bajo))
 
-    columnas = [
-        "sku",
-        "nombre",
-        "categoria",
-        "tipo_item",
-        "precio_venta_usd",
-        "costo_base_usd",
-        "costo_receta_usd",
-        "costo_unitario_usd",
-        "fuente_costo",
-        "ganancia_unitaria_usd",
-        "margen_pct",
-        "stock_actual",
-    ]
+    columnas = ["sku", "nombre", "categoria", "tipo_item", "precio_venta_usd", "costo_base_usd", "costo_receta_usd", "costo_unitario_usd", "fuente_costo", "ganancia_unitaria_usd", "margen_pct", "stock_actual"]
     st.dataframe(df[columnas].sort_values("margen_pct", ascending=True), use_container_width=True, hide_index=True)
 
 
 def render_inventario_avanzado(usuario: str) -> None:
-    st.caption("Inventario avanzado: clasificación, recetas, simulación, conteo físico y rentabilidad.")
-    tabs = st.tabs([
-    "🏷️ Clasificación",
-    "🧪 Recetas",
-    "🧮 Simulador",
-    "📋 Conteo físico",
-    "💰 Rentabilidad",
-    "📜 Consumos",
-])
+    st.caption("Inventario avanzado: clasificación, recetas, simulación, conteo físico, rentabilidad y consumos.")
+    tabs = st.tabs(["🏷️ Clasificación", "🧪 Recetas", "🧮 Simulador", "📋 Conteo físico", "💰 Rentabilidad", "📜 Consumos"])
+    with tabs[0]:
         _render_clasificacion(usuario)
     with tabs[1]:
         _render_recetas(usuario)
@@ -523,6 +378,6 @@ def render_inventario_avanzado(usuario: str) -> None:
     with tabs[3]:
         _render_conteo_fisico(usuario)
     with tabs[4]:
-    _render_rentabilidad()
+        _render_rentabilidad()
     with tabs[5]:
-    _render_historial_consumos_receta()
+        _render_historial_consumos_receta()
