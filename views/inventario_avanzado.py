@@ -306,6 +306,45 @@ def _render_simulador_consumo() -> None:
         hide_index=True,
     )
 
+def _render_historial_consumos_receta() -> None:
+    st.subheader("📜 Historial de consumos por receta")
+    st.caption("Auditoría de insumos descontados automáticamente por ventas con receta.")
+
+    df = _safe_read_sql(
+        """
+        SELECT
+            m.fecha,
+            m.usuario,
+            REPLACE(COALESCE(m.referencia, ''), 'Consumo receta por venta #', '') AS venta_id,
+            i.sku,
+            i.nombre AS insumo,
+            ABS(COALESCE(m.cantidad, 0)) AS cantidad_consumida,
+            COALESCE(m.costo_unitario_usd, 0) AS costo_unitario_usd,
+            ABS(COALESCE(m.cantidad, 0)) * COALESCE(m.costo_unitario_usd, 0) AS costo_total_usd,
+            m.referencia
+        FROM movimientos_inventario m
+        JOIN inventario i ON i.id = m.inventario_id
+        WHERE COALESCE(m.referencia, '') LIKE 'Consumo receta por venta #%'
+        ORDER BY m.fecha DESC, m.id DESC
+        LIMIT 1000
+        """
+    )
+
+    if df.empty:
+        st.info("Aún no hay consumos automáticos por receta.")
+        return
+
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+    df["cantidad_consumida"] = pd.to_numeric(df["cantidad_consumida"], errors="coerce").fillna(0)
+    df["costo_total_usd"] = pd.to_numeric(df["costo_total_usd"], errors="coerce").fillna(0)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Movimientos", len(df))
+    c2.metric("Costo total consumido", f"${float(df['costo_total_usd'].sum()):,.2f}")
+    c3.metric("Ventas con receta", df["venta_id"].nunique())
+
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 def _render_conteo_fisico(usuario: str) -> None:
     st.subheader("📋 Conteo físico")
@@ -468,8 +507,14 @@ def _render_rentabilidad() -> None:
 
 def render_inventario_avanzado(usuario: str) -> None:
     st.caption("Inventario avanzado: clasificación, recetas, simulación, conteo físico y rentabilidad.")
-    tabs = st.tabs(["🏷️ Clasificación", "🧪 Recetas", "🧮 Simulador", "📋 Conteo físico", "💰 Rentabilidad"])
-    with tabs[0]:
+    tabs = st.tabs([
+    "🏷️ Clasificación",
+    "🧪 Recetas",
+    "🧮 Simulador",
+    "📋 Conteo físico",
+    "💰 Rentabilidad",
+    "📜 Consumos",
+])
         _render_clasificacion(usuario)
     with tabs[1]:
         _render_recetas(usuario)
@@ -478,4 +523,6 @@ def render_inventario_avanzado(usuario: str) -> None:
     with tabs[3]:
         _render_conteo_fisico(usuario)
     with tabs[4]:
-        _render_rentabilidad()
+    _render_rentabilidad()
+    with tabs[5]:
+    _render_historial_consumos_receta()
