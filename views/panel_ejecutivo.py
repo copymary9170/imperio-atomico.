@@ -49,6 +49,10 @@ def _read_sql(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> pd.DataFrame
         return pd.DataFrame()
 
 
+def _csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8-sig")
+
+
 def _read_csv(relative_path: str) -> pd.DataFrame:
     path = BASE_DIR / relative_path
     if not path.exists():
@@ -98,8 +102,7 @@ def _collect_db_metrics() -> dict[str, float | int]:
             if {"cantidad", "costo_unitario_usd"}.issubset(det_cols):
                 metrics["costo_ventas_mes"] = _scalar(conn, """
                     SELECT COALESCE(SUM(d.cantidad * d.costo_unitario_usd),0)
-                    FROM ventas_detalle d
-                    JOIN ventas v ON v.id=d.venta_id
+                    FROM ventas_detalle d JOIN ventas v ON v.id=d.venta_id
                     WHERE strftime('%Y-%m', v.fecha)=strftime('%Y-%m','now')
                       AND lower(COALESCE(v.estado,'')) NOT IN ('anulada','anulado','cancelada','cancelado')
                 """)
@@ -148,16 +151,6 @@ def _collect_db_metrics() -> dict[str, float | int]:
             metrics["cxc_total"] = 0.0
             metrics["cxc_vencida"] = 0.0
 
-        activos_cols = _columns(conn, "activos")
-        if activos_cols:
-            metrics["activos"] = _count(conn, "SELECT COUNT(*) FROM activos WHERE COALESCE(activo,1)=1") if "activo" in activos_cols else _count(conn, "SELECT COUNT(*) FROM activos")
-            metrics["valor_activos"] = _scalar(conn, "SELECT COALESCE(SUM(inversion),0) FROM activos WHERE COALESCE(activo,1)=1") if "inversion" in activos_cols else 0.0
-        else:
-            metrics["activos"] = 0
-            metrics["valor_activos"] = 0.0
-
-        metrics["rutas_activas"] = _count(conn, "SELECT COUNT(*) FROM rutas_produccion WHERE lower(COALESCE(estado,''))='activa'") if _columns(conn, "rutas_produccion") else 0
-        metrics["mantenimiento_abierto"] = _count(conn, "SELECT COUNT(*) FROM industrial_maintenance_orders WHERE estado IN ('pendiente','programado','en_ejecucion')") if _table_exists(conn, "industrial_maintenance_orders") else 0
         metrics["diferencia_caja_hoy"] = _scalar(conn, "SELECT COALESCE(SUM(diferencia_total_usd),0) FROM cierres_caja_turnos WHERE date(fecha_operativa)=date('now')") if _table_exists(conn, "cierres_caja_turnos") and "diferencia_total_usd" in _columns(conn, "cierres_caja_turnos") else 0.0
 
     metrics["ganancia_bruta_mes"] = float(metrics.get("ventas_mes", 0.0)) - float(metrics.get("costo_ventas_mes", 0.0))
@@ -187,10 +180,7 @@ def _ventas_por_linea_df() -> pd.DataFrame:
         if _table_exists(conn, "ventas_detalle") and {"descripcion", "cantidad", "subtotal_usd"}.issubset(cols):
             return _read_sql(conn, """
                 SELECT descripcion AS linea, COUNT(*) AS operaciones, COALESCE(SUM(subtotal_usd),0) AS ventas_usd
-                FROM ventas_detalle
-                GROUP BY descripcion
-                ORDER BY ventas_usd DESC
-                LIMIT 12
+                FROM ventas_detalle GROUP BY descripcion ORDER BY ventas_usd DESC LIMIT 12
             """)
     return pd.DataFrame()
 
@@ -212,8 +202,7 @@ def _inventario_familia_df() -> pd.DataFrame:
             SELECT COALESCE({familia_col}, 'Sin familia') AS familia, COUNT(*) AS productos,
                    COALESCE(SUM({stock_col}),0) AS unidades, COALESCE({critico_expr},0) AS criticos,
                    COALESCE({valor_expr},0) AS valor_usd
-            FROM inventario GROUP BY COALESCE({familia_col}, 'Sin familia')
-            ORDER BY criticos DESC, valor_usd DESC LIMIT 15
+            FROM inventario GROUP BY COALESCE({familia_col}, 'Sin familia') ORDER BY criticos DESC, valor_usd DESC LIMIT 15
         """)
 
 
@@ -238,10 +227,7 @@ def _top_rentabilidad_df() -> pd.DataFrame:
             SELECT descripcion AS item, COUNT(*) AS ventas, COALESCE(SUM(subtotal_usd),0) AS ingreso_usd,
                    COALESCE(SUM(cantidad * costo_unitario_usd),0) AS costo_usd,
                    COALESCE(SUM(subtotal_usd - (cantidad * costo_unitario_usd)),0) AS ganancia_usd
-            FROM ventas_detalle
-            GROUP BY descripcion
-            ORDER BY ganancia_usd DESC
-            LIMIT 10
+            FROM ventas_detalle GROUP BY descripcion ORDER BY ganancia_usd DESC LIMIT 10
         """)
 
 
@@ -256,40 +242,32 @@ def _ventas_bajo_costo_df() -> pd.DataFrame:
             SELECT fecha, descripcion, cantidad, precio_unitario_usd, costo_unitario_usd,
                    (precio_unitario_usd - costo_unitario_usd) AS diferencia_unitaria_usd
             FROM ventas_detalle
-            WHERE COALESCE(precio_unitario_usd,0) < COALESCE(costo_unitario_usd,0)
-              AND COALESCE(costo_unitario_usd,0) > 0
-            ORDER BY fecha DESC
-            LIMIT 100
+            WHERE COALESCE(precio_unitario_usd,0) < COALESCE(costo_unitario_usd,0) AND COALESCE(costo_unitario_usd,0) > 0
+            ORDER BY fecha DESC LIMIT 100
         """)
 
 
 def _inventario_riesgos_df() -> pd.DataFrame:
     with db_transaction() as conn:
         cols = _columns(conn, "inventario")
-        if not cols:
+        if not {"nombre", "costo_unitario_usd", "precio_venta_usd", "stock_minimo", "categoria"}.issubset(cols):
             return pd.DataFrame()
-        checks = []
-        if {"nombre", "costo_unitario_usd", "precio_venta_usd", "stock_minimo", "categoria"}.issubset(cols):
-            return _read_sql(conn, """
-                SELECT sku, nombre, categoria, stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd,
-                       CASE
-                         WHEN COALESCE(costo_unitario_usd,0)<=0 THEN 'Sin costo'
-                         WHEN COALESCE(precio_venta_usd,0)<=0 THEN 'Sin precio'
-                         WHEN COALESCE(precio_venta_usd,0)<=COALESCE(costo_unitario_usd,0) THEN 'Precio bajo o igual al costo'
-                         WHEN COALESCE(stock_minimo,0)<=0 THEN 'Sin mínimo definido'
-                         WHEN COALESCE(categoria,'')='' THEN 'Sin categoría'
-                         ELSE 'OK'
-                       END AS riesgo
-                FROM inventario
-                WHERE COALESCE(costo_unitario_usd,0)<=0
-                   OR COALESCE(precio_venta_usd,0)<=0
-                   OR COALESCE(precio_venta_usd,0)<=COALESCE(costo_unitario_usd,0)
-                   OR COALESCE(stock_minimo,0)<=0
-                   OR COALESCE(categoria,'')=''
-                ORDER BY riesgo, nombre
-                LIMIT 200
-            """)
-        return pd.DataFrame(checks)
+        return _read_sql(conn, """
+            SELECT sku, nombre, categoria, stock_actual, stock_minimo, costo_unitario_usd, precio_venta_usd,
+                   CASE
+                     WHEN COALESCE(costo_unitario_usd,0)<=0 THEN 'Sin costo'
+                     WHEN COALESCE(precio_venta_usd,0)<=0 THEN 'Sin precio'
+                     WHEN COALESCE(precio_venta_usd,0)<=COALESCE(costo_unitario_usd,0) THEN 'Precio bajo o igual al costo'
+                     WHEN COALESCE(stock_minimo,0)<=0 THEN 'Sin mínimo definido'
+                     WHEN COALESCE(categoria,'')='' THEN 'Sin categoría'
+                     ELSE 'OK'
+                   END AS riesgo
+            FROM inventario
+            WHERE COALESCE(costo_unitario_usd,0)<=0 OR COALESCE(precio_venta_usd,0)<=0
+               OR COALESCE(precio_venta_usd,0)<=COALESCE(costo_unitario_usd,0)
+               OR COALESCE(stock_minimo,0)<=0 OR COALESCE(categoria,'')=''
+            ORDER BY riesgo, nombre LIMIT 200
+        """)
 
 
 def _compras_sugeridas_df() -> pd.DataFrame:
@@ -302,29 +280,22 @@ def _compras_sugeridas_df() -> pd.DataFrame:
                    MAX(stock_minimo - stock_actual, 0) AS cantidad_sugerida,
                    costo_unitario_usd,
                    MAX(stock_minimo - stock_actual, 0) * costo_unitario_usd AS inversion_estimada_usd
-            FROM inventario
-            WHERE COALESCE(stock_actual,0) <= COALESCE(stock_minimo,0)
-            ORDER BY inversion_estimada_usd DESC, nombre
-            LIMIT 100
+            FROM inventario WHERE COALESCE(stock_actual,0) <= COALESCE(stock_minimo,0)
+            ORDER BY inversion_estimada_usd DESC, nombre LIMIT 100
         """)
 
 
 def _cxc_vencida_df() -> pd.DataFrame:
     with db_transaction() as conn:
-        cols = _columns(conn, "cuentas_por_cobrar")
-        if not cols:
+        if not _columns(conn, "cuentas_por_cobrar"):
             return pd.DataFrame()
         return _read_sql(conn, """
             SELECT cxc.id, cl.nombre AS cliente, cxc.estado, cxc.monto_original_usd, cxc.monto_cobrado_usd,
                    cxc.saldo_usd, cxc.fecha_vencimiento,
                    CAST(julianday(date('now')) - julianday(date(cxc.fecha_vencimiento)) AS INTEGER) AS dias_vencida
-            FROM cuentas_por_cobrar cxc
-            LEFT JOIN clientes cl ON cl.id=cxc.cliente_id
-            WHERE COALESCE(cxc.saldo_usd,0)>0
-              AND cxc.fecha_vencimiento IS NOT NULL
-              AND date(cxc.fecha_vencimiento) < date('now')
-            ORDER BY date(cxc.fecha_vencimiento) ASC
-            LIMIT 100
+            FROM cuentas_por_cobrar cxc LEFT JOIN clientes cl ON cl.id=cxc.cliente_id
+            WHERE COALESCE(cxc.saldo_usd,0)>0 AND cxc.fecha_vencimiento IS NOT NULL AND date(cxc.fecha_vencimiento) < date('now')
+            ORDER BY date(cxc.fecha_vencimiento) ASC LIMIT 100
         """)
 
 
@@ -335,10 +306,43 @@ def _caja_metodos_df() -> pd.DataFrame:
                 SELECT metodo_pago, COUNT(*) AS operaciones, COALESCE(SUM(total_usd),0) AS total_usd
                 FROM ventas
                 WHERE date(fecha)=date('now') AND lower(COALESCE(estado,'')) NOT IN ('anulada','anulado','cancelada','cancelado')
-                GROUP BY metodo_pago
-                ORDER BY total_usd DESC
+                GROUP BY metodo_pago ORDER BY total_usd DESC
             """)
     return pd.DataFrame()
+
+
+def _datos_minimos_df() -> pd.DataFrame:
+    rows = [
+        ("Inventario", "sku", "Código único", "Ej: BOND-CARTA-001", "Evita duplicados y permite buscar rápido."),
+        ("Inventario", "nombre", "Nombre del producto", "Papel bond carta 75g", "Identifica el producto en ventas y compras."),
+        ("Inventario", "categoria", "Familia", "Papel / Tinta / Papelería / Sublimación", "Permite analizar rentabilidad por área."),
+        ("Inventario", "stock_actual", "Existencia actual", "50", "Permite saber cuánto queda."),
+        ("Inventario", "stock_minimo", "Mínimo permitido", "10", "Activa compras sugeridas."),
+        ("Inventario", "costo_unitario_usd", "Costo real unitario", "0.018", "Base para no vender por debajo del costo."),
+        ("Inventario", "precio_venta_usd", "Precio de venta", "0.05", "Base para margen y alertas de precio."),
+        ("Venta detalle", "descripcion", "Producto o servicio vendido", "Impresión color carta", "Permite ver qué deja más dinero."),
+        ("Venta detalle", "cantidad", "Cantidad vendida", "4", "Calcula costo y ganancia."),
+        ("Venta detalle", "precio_unitario_usd", "Precio cobrado", "0.50", "Detecta ventas baratas."),
+        ("Venta detalle", "costo_unitario_usd", "Costo unitario real", "0.22", "Detecta pérdida por impresión/producto."),
+        ("Venta", "metodo_pago", "Forma de pago", "efectivo / pago móvil / transferencia", "Cuadra caja por método."),
+        ("CxC", "saldo_usd", "Saldo pendiente", "3.00", "Controla dinero por cobrar."),
+        ("CxC", "fecha_vencimiento", "Fecha límite de pago", "2026-06-30", "Detecta cuentas vencidas."),
+    ]
+    return pd.DataFrame(rows, columns=["Módulo", "Campo", "Qué llenar", "Ejemplo", "Para qué sirve"])
+
+
+def _plantilla_inventario_df() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"sku": "BOND-CARTA-001", "nombre": "Papel bond carta 75g", "categoria": "Papel", "unidad": "hoja", "stock_actual": 500, "stock_minimo": 100, "costo_unitario_usd": 0.018, "precio_venta_usd": 0.05},
+        {"sku": "FOTO-BRILLANTE-001", "nombre": "Papel fotográfico brillante", "categoria": "Fotográfico", "unidad": "hoja", "stock_actual": 50, "stock_minimo": 10, "costo_unitario_usd": 0.18, "precio_venta_usd": 0.50},
+    ])
+
+
+def _plantilla_ventas_detalle_df() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"fecha": "2026-06-14", "descripcion": "Impresión B/N carta", "cantidad": 1, "precio_unitario_usd": 0.25, "costo_unitario_usd": 0.08, "subtotal_usd": 0.25},
+        {"fecha": "2026-06-14", "descripcion": "Impresión color carta", "cantidad": 1, "precio_unitario_usd": 0.80, "costo_unitario_usd": 0.30, "subtotal_usd": 0.80},
+    ])
 
 
 def _build_alerts(metrics: dict[str, float | int]) -> list[dict[str, str]]:
@@ -357,12 +361,6 @@ def _build_alerts(metrics: dict[str, float | int]) -> list[dict[str, str]]:
         alerts.append({"nivel": "Media", "área": "Datos", "alerta": f"Productos sin costo: {int(metrics.get('productos_sin_costo',0))}; sin precio: {int(metrics.get('productos_sin_precio',0))}.", "acción": "Completar datos para que el panel calcule rentabilidad real."})
     if float(metrics.get("utilidad_estimada_mes", 0.0)) < 0:
         alerts.append({"nivel": "Crítica", "área": "Finanzas", "alerta": "La utilidad estimada del mes está negativa.", "acción": "Revisar ventas, gastos, costos y precios."})
-    if float(metrics.get("margen_neto_pct", 0.0)) < 15 and float(metrics.get("ventas_mes", 0.0)) > 0:
-        alerts.append({"nivel": "Media", "área": "Rentabilidad", "alerta": f"Margen neto bajo: {float(metrics.get('margen_neto_pct', 0.0)):.1f}%.", "acción": "Revisar precios, descuentos, mermas y gastos fijos."})
-    if int(metrics.get("reservas_almacen", 0)) > 0:
-        alerts.append({"nivel": "Media", "área": "Almacén", "alerta": f"Hay {int(metrics['reservas_almacen'])} reserva(s) de material activas.", "acción": "Confirmar liberación o consumo."})
-    if int(metrics.get("mantenimiento_abierto", 0)) > 0:
-        alerts.append({"nivel": "Media", "área": "Mantenimiento", "alerta": f"Hay {int(metrics['mantenimiento_abierto'])} orden(es) de mantenimiento abiertas.", "acción": "Programar o cerrar mantenimiento."})
     return alerts
 
 
@@ -374,8 +372,6 @@ def _recommended_actions_df(metrics: dict[str, float | int]) -> pd.DataFrame:
         ("Media", "Caja", "Métodos de pago del día y diferencia de cierre.", "Cuadrar efectivo, pago móvil, transferencia y divisas antes de cerrar.", "Caja limpia."),
         ("Media", "Datos", "Productos sin costo, precio, mínimo o categoría.", "Completar fichas para que la rentabilidad sea real.", "Reportes confiables."),
         ("Media", "Rentabilidad", "Margen neto y ganancia por item.", "Subir precios o reducir descuentos donde el margen sea bajo.", "Proteger utilidad."),
-        ("Media", "Producción", "Pedidos en cola, despacho o producción.", "Actualizar estados y marcar atrasados.", "Evitar reclamos."),
-        ("Baja", "Clientes", "Clientes frecuentes, inactivos y fuera de horario.", "Reforzar catálogo, horario y canal de empresa.", "Ordenar demanda."),
     ]
     return pd.DataFrame(rows, columns=["Prioridad", "Área", "Revisar", "Acción recomendada", "Decisión esperada"])
 
@@ -430,7 +426,7 @@ def render_panel_ejecutivo(usuario: str = "Sistema") -> None:
     else:
         st.success("No hay alertas gerenciales críticas detectadas con la información disponible.")
 
-    tabs = st.tabs(["📈 Ventas", "💸 Bajo costo", "📦 Inventario", "🛒 Compras", "💳 CxC", "🏦 Caja", "🏭 Producción", "📌 Acciones"])
+    tabs = st.tabs(["📈 Ventas", "💸 Bajo costo", "📦 Inventario", "🛒 Compras", "💳 CxC", "🏦 Caja", "🏭 Producción", "🧾 Datos mínimos", "📌 Acciones"])
     with tabs[0]:
         _show_df_or_info(_ventas_por_linea_df(), "No hay ventas detalladas suficientes para agrupar.")
         st.markdown("#### Top rentabilidad")
@@ -451,4 +447,13 @@ def render_panel_ejecutivo(usuario: str = "Sistema") -> None:
     with tabs[6]:
         _show_df_or_info(_produccion_estado_df(), "No hay órdenes o estados de producción suficientes.")
     with tabs[7]:
+        st.markdown("#### Checklist de datos mínimos")
+        st.caption("Completa estos campos para que el ERP calcule caja, margen, compras sugeridas y cuentas por cobrar sin adivinar.")
+        st.dataframe(_datos_minimos_df(), use_container_width=True, hide_index=True)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.download_button("⬇️ Plantilla inventario CSV", data=_csv_bytes(_plantilla_inventario_df()), file_name="plantilla_inventario_copy_mary.csv", mime="text/csv", use_container_width=True)
+        with col_b:
+            st.download_button("⬇️ Plantilla ventas detalle CSV", data=_csv_bytes(_plantilla_ventas_detalle_df()), file_name="plantilla_ventas_detalle_copy_mary.csv", mime="text/csv", use_container_width=True)
+    with tabs[8]:
         st.dataframe(_recommended_actions_df(metrics), use_container_width=True, hide_index=True)
