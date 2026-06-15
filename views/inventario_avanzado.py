@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from modules.kardex import add_inventory_movement_shared
 
 
 def _safe_read_sql(query: str, params: tuple = ()) -> pd.DataFrame:
@@ -134,11 +135,13 @@ def _render_conteo_fisico(usuario: str) -> None:
     )
     row = inv[inv["id"] == item_id].iloc[0]
     stock_sistema = float(row.get("stock_actual") or 0)
+    costo_unitario = float(row.get("costo_unitario_usd") or 0)
     st.metric("Stock en sistema", f"{stock_sistema:,.2f}")
 
     with st.form("form_conteo_fisico"):
         stock_contado = st.number_input("Stock contado físicamente", min_value=0.0, value=stock_sistema, step=1.0)
         motivo = st.text_input("Motivo de la diferencia", value="Conteo físico")
+        ajustar_stock = st.checkbox("Ajustar stock del sistema con este conteo", value=False)
         observaciones = st.text_area("Observaciones del conteo", value="")
         registrar = st.form_submit_button("Registrar conteo")
 
@@ -158,11 +161,23 @@ def _render_conteo_fisico(usuario: str) -> None:
                     """,
                     (conteo_id, int(item_id), stock_sistema, float(stock_contado), diferencia, motivo.strip()),
                 )
+            if ajustar_stock and diferencia != 0:
+                add_inventory_movement_shared(
+                    usuario=usuario,
+                    inventario_id=int(item_id),
+                    tipo="ajuste",
+                    cantidad=float(diferencia),
+                    costo_unitario_usd=costo_unitario,
+                    referencia=f"Conteo físico: {motivo.strip() or 'Ajuste por conteo'}",
+                )
         except Exception as exc:
             st.error("No se pudo registrar el conteo físico.")
             st.exception(exc)
         else:
-            st.success(f"Conteo registrado. Diferencia: {diferencia:,.2f}")
+            if ajustar_stock and diferencia != 0:
+                st.success(f"Conteo registrado y stock ajustado. Diferencia aplicada: {diferencia:,.2f}")
+            else:
+                st.success(f"Conteo registrado. Diferencia: {diferencia:,.2f}")
             st.rerun()
 
     historial = _safe_read_sql(
