@@ -180,6 +180,26 @@ def _render_recetas(usuario: str) -> None:
 
     st.dataframe(recetas, use_container_width=True, hide_index=True)
 
+    duplicados = _safe_read_sql(
+        """
+        SELECT p.nombre AS producto, i.nombre AS insumo, COUNT(*) AS recetas_activas,
+               GROUP_CONCAT(r.id, ', ') AS ids_recetas
+        FROM recetas_consumo r
+        JOIN inventario p ON p.id = r.producto_id
+        JOIN inventario i ON i.id = r.insumo_id
+        WHERE COALESCE(r.activo, 1) = 1
+        GROUP BY r.producto_id, r.insumo_id
+        HAVING COUNT(*) > 1
+        ORDER BY recetas_activas DESC, p.nombre, i.nombre
+        """
+    )
+    st.markdown("### Duplicados detectados")
+    if duplicados.empty:
+        st.success("No hay recetas activas duplicadas.")
+    else:
+        st.warning("Hay recetas activas duplicadas. Desactiva una para evitar consumo doble.")
+        st.dataframe(duplicados, use_container_width=True, hide_index=True)
+
     st.markdown("### Editar receta")
     receta_id = st.selectbox(
         "Receta a editar",
