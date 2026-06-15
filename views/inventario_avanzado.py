@@ -136,15 +136,29 @@ def _render_recetas(usuario: str) -> None:
         else:
             try:
                 with db_transaction() as conn:
-                    conn.execute(
+                    duplicada = conn.execute(
                         """
-                        INSERT INTO recetas_consumo(producto_id, insumo_id, cantidad_insumo, unidad, merma_pct, observaciones)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        SELECT id
+                        FROM recetas_consumo
+                        WHERE producto_id = ?
+                          AND insumo_id = ?
+                          AND COALESCE(activo, 1) = 1
+                        LIMIT 1
                         """,
-                        (int(producto_id), int(insumo_id), float(cantidad), unidad.strip(), float(merma_pct), observaciones.strip()),
-                    )
-                st.success("Receta guardada.")
-                st.rerun()
+                        (int(producto_id), int(insumo_id)),
+                    ).fetchone()
+                    if duplicada:
+                        st.error("Ya existe una receta activa para ese producto con ese mismo insumo. Edita la receta existente o desactívala antes de crear otra.")
+                    else:
+                        conn.execute(
+                            """
+                            INSERT INTO recetas_consumo(producto_id, insumo_id, cantidad_insumo, unidad, merma_pct, observaciones)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (int(producto_id), int(insumo_id), float(cantidad), unidad.strip(), float(merma_pct), observaciones.strip()),
+                        )
+                        st.success("Receta guardada.")
+                        st.rerun()
             except Exception as exc:
                 st.error("No se pudo guardar la receta.")
                 st.exception(exc)
