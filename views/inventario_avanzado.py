@@ -31,20 +31,16 @@ def _safe_read_sql(query: str, params: tuple = ()) -> pd.DataFrame:
 def _load_inventory_options() -> pd.DataFrame:
     return _safe_read_sql(
         """
-        SELECT
-            id,
-            COALESCE(sku, '') AS sku,
-            COALESCE(nombre, '') AS nombre,
-            COALESCE(categoria, '') AS categoria,
-            COALESCE(unidad, '') AS unidad,
-            COALESCE(tipo_item, 'producto_venta') AS tipo_item,
-            COALESCE(unidad_base, '') AS unidad_base,
-            COALESCE(unidad_compra, '') AS unidad_compra,
-            COALESCE(stock_actual, 0) AS stock_actual,
-            COALESCE(stock_ideal, 0) AS stock_ideal,
-            COALESCE(punto_reorden, 0) AS punto_reorden,
-            COALESCE(costo_unitario_usd, 0) AS costo_unitario_usd,
-            COALESCE(precio_venta_usd, 0) AS precio_venta_usd
+        SELECT id, COALESCE(sku, '') AS sku, COALESCE(nombre, '') AS nombre,
+               COALESCE(categoria, '') AS categoria, COALESCE(unidad, '') AS unidad,
+               COALESCE(tipo_item, 'producto_venta') AS tipo_item,
+               COALESCE(unidad_base, '') AS unidad_base,
+               COALESCE(unidad_compra, '') AS unidad_compra,
+               COALESCE(stock_actual, 0) AS stock_actual,
+               COALESCE(stock_ideal, 0) AS stock_ideal,
+               COALESCE(punto_reorden, 0) AS punto_reorden,
+               COALESCE(costo_unitario_usd, 0) AS costo_unitario_usd,
+               COALESCE(precio_venta_usd, 0) AS precio_venta_usd
         FROM inventario
         ORDER BY nombre COLLATE NOCASE
         """
@@ -169,6 +165,43 @@ def _render_recetas(usuario: str) -> None:
         return
 
     st.dataframe(recetas, use_container_width=True, hide_index=True)
+
+    st.markdown("### Editar receta")
+    receta_id = st.selectbox(
+        "Receta a editar",
+        recetas["id"].tolist(),
+        format_func=lambda rid: f"#{int(rid)} · {recetas.loc[recetas['id'] == rid, 'producto'].iloc[0]} → {recetas.loc[recetas['id'] == rid, 'insumo'].iloc[0]}",
+        key="editar_receta_id",
+    )
+    receta_sel = recetas[recetas["id"] == receta_id].iloc[0]
+    with st.form("form_editar_receta_consumo"):
+        c1, c2, c3 = st.columns(3)
+        nueva_cantidad = c1.number_input("Nueva cantidad", min_value=0.0, value=float(receta_sel["cantidad_insumo"] or 0), step=0.01)
+        nueva_unidad = c2.text_input("Nueva unidad", value=str(receta_sel["unidad"] or "unidad"))
+        nueva_merma = c3.number_input("Nueva merma (%)", min_value=0.0, max_value=100.0, value=float(receta_sel["merma_pct"] or 0), step=0.5)
+        nuevas_obs = st.text_area("Nuevas observaciones", value=str(receta_sel["observaciones"] or ""))
+        actualizar = st.form_submit_button("Actualizar receta")
+
+    if actualizar:
+        if nueva_cantidad <= 0:
+            st.error("La cantidad debe ser mayor que cero.")
+        else:
+            try:
+                with db_transaction() as conn:
+                    conn.execute(
+                        """
+                        UPDATE recetas_consumo
+                        SET cantidad_insumo = ?, unidad = ?, merma_pct = ?, observaciones = ?
+                        WHERE id = ?
+                        """,
+                        (float(nueva_cantidad), nueva_unidad.strip(), float(nueva_merma), nuevas_obs.strip(), int(receta_id)),
+                    )
+                st.success("Receta actualizada.")
+                st.rerun()
+            except Exception as exc:
+                st.error("No se pudo actualizar la receta.")
+                st.exception(exc)
+
     st.markdown("### Activar / desactivar recetas")
     st.caption("Desactivar una receta evita que ventas consuma sus insumos, pero conserva el registro para historial.")
 
@@ -280,11 +313,9 @@ def _render_reposicion_inteligente() -> None:
                COALESCE(punto_reorden, 0) AS punto_reorden,
                COALESCE(stock_ideal, 0) AS stock_ideal,
                COALESCE(costo_unitario_usd, 0) AS costo_unitario_usd,
-               CASE
-                   WHEN COALESCE(stock_ideal, 0) > COALESCE(stock_actual, 0)
-                   THEN COALESCE(stock_ideal, 0) - COALESCE(stock_actual, 0)
-                   ELSE 0
-               END AS cantidad_sugerida
+               CASE WHEN COALESCE(stock_ideal, 0) > COALESCE(stock_actual, 0)
+                    THEN COALESCE(stock_ideal, 0) - COALESCE(stock_actual, 0)
+                    ELSE 0 END AS cantidad_sugerida
         FROM inventario
         WHERE COALESCE(punto_reorden, 0) > 0
           AND COALESCE(stock_actual, 0) <= COALESCE(punto_reorden, 0)
@@ -303,18 +334,8 @@ def _render_reposicion_inteligente() -> None:
     c2.metric("Críticos sin stock", len(criticos))
     c3.metric("Compra estimada", f"${float(df['costo_estimado_reposicion_usd'].sum()):,.2f}")
 
-    st.dataframe(
-        df[["sku", "nombre", "categoria", "tipo_item", "stock_actual", "punto_reorden", "stock_ideal", "cantidad_sugerida", "unidad", "costo_estimado_reposicion_usd"]],
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.download_button(
-        "⬇️ Descargar lista de reposición CSV",
-        data=df.to_csv(index=False).encode("utf-8-sig"),
-        file_name="reposicion_inteligente.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+    st.dataframe(df[["sku", "nombre", "categoria", "tipo_item", "stock_actual", "punto_reorden", "stock_ideal", "cantidad_sugerida", "unidad", "costo_estimado_reposicion_usd"]], use_container_width=True, hide_index=True)
+    st.download_button("⬇️ Descargar lista de reposición CSV", data=df.to_csv(index=False).encode("utf-8-sig"), file_name="reposicion_inteligente.csv", mime="text/csv", use_container_width=True)
 
 
 def _render_conteo_fisico(usuario: str) -> None:
