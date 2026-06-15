@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from database.connection import db_transaction
+from database.inventario_avanzado_migrations import run_inventory_advanced_migrations
 
 
 COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
@@ -268,6 +269,10 @@ def run_auto_migrations() -> None:
             _ensure_real_print_costing_table(conn)
         except Exception as exc:
             _log_migration_error(conn, area="table_creation", tabla="costeos_impresion_real", columna=None, operacion="create table", error=exc)
+        try:
+            run_inventory_advanced_migrations(conn)
+        except Exception as exc:
+            _log_migration_error(conn, area="inventario_avanzado", tabla="inventario", columna=None, operacion="run inventory advanced migrations", error=exc)
         for table_name, column_specs in COLUMN_MIGRATIONS.items():
             try:
                 _ensure_columns(conn, table_name, column_specs)
