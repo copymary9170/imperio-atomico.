@@ -88,7 +88,7 @@ def render_inventario(usuario: str) -> None:
         "Resumen",
         "Existencias",
         "Productos",
-         "Variantes",
+        "Variantes",
         "Movimientos",
         "Reposición básica",
         "Ajustes",
@@ -116,13 +116,10 @@ def render_inventario(usuario: str) -> None:
     with tabs[7]:
         _render_safe("Reportes", inv_module._render_reportes, df)
     with tabs[8]:
-    _render_safe("Recetas", inv_module._render_recetas_consumo, usuario)
-
+        _render_safe("Recetas", inv_module._render_recetas_consumo, usuario)
     with tabs[9]:
-    _render_safe("Conteo físico", inv_module._render_conteo_fisico, usuario)
-
+        _render_safe("Conteo físico", inv_module._render_conteo_fisico, usuario)
     with tabs[10]:
-    _render_safe("Rentabilidad", inv_module._render_rentabilidad_inventario, df)
-
+        _render_safe("Rentabilidad", inv_module._render_rentabilidad_inventario, df)
     with tabs[11]:
-    _render_safe("Integración", inv_module._render_integridad_e_integraciones)
+        _render_safe("Integración", inv_module._render_integridad_e_integraciones)
