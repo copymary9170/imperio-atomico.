@@ -328,10 +328,27 @@ def _render_historial_consumos_receta() -> None:
     df["cantidad_consumida"] = pd.to_numeric(df["cantidad_consumida"], errors="coerce").fillna(0)
     df["costo_total_usd"] = pd.to_numeric(df["costo_total_usd"], errors="coerce").fillna(0)
 
+    resumen = (
+        df.groupby("venta_id", dropna=False)
+        .agg(
+            fecha=("fecha", "max"),
+            usuario=("usuario", "last"),
+            insumos=("insumo", "nunique"),
+            movimientos=("insumo", "count"),
+            costo_total_usd=("costo_total_usd", "sum"),
+        )
+        .reset_index()
+        .sort_values("fecha", ascending=False, na_position="last")
+    )
+
     c1, c2, c3 = st.columns(3)
     c1.metric("Movimientos", len(df))
     c2.metric("Costo total consumido", f"${float(df['costo_total_usd'].sum()):,.2f}")
     c3.metric("Ventas con receta", df["venta_id"].nunique())
+
+    st.markdown("### Resumen por venta")
+    st.dataframe(resumen, use_container_width=True, hide_index=True)
+    st.markdown("### Detalle de consumos")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
