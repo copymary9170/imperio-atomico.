@@ -5,6 +5,7 @@ from typing import Sequence
 
 from database.connection import db_transaction
 from services.inventory_service import InventoryMovement, InventoryService
+from services.recetas_consumo_service import consumir_receta_por_venta, validar_stock_receta
 from services.tesoreria_service import registrar_ingreso
 from services.contabilidad_service import contabilizar_venta
 from utils.helpers import validar_stock_para_salida
@@ -50,9 +51,10 @@ class VentasService:
 
         with db_transaction() as conn:
 
-            # 1. VALIDAR STOCK
+            # 1. VALIDAR STOCK DEL PRODUCTO VENDIDO Y DE SUS INSUMOS DE RECETA
             for item in items:
                 validar_stock_para_salida(conn, item.inventario_id, float(item.cantidad))
+                validar_stock_receta(conn, item.inventario_id, float(item.cantidad))
 
             # 2. CREAR VENTA
             cur = conn.execute(
@@ -76,7 +78,7 @@ class VentasService:
 
             venta_id = int(cur.lastrowid)
 
-            # 3. DETALLE + INVENTARIO
+            # 3. DETALLE + INVENTARIO + CONSUMO DE RECETAS
             for item in items:
 
                 conn.execute(
@@ -111,6 +113,15 @@ class VentasService:
 
                 if not ok:
                     raise ValueError(msg)
+
+                consumir_receta_por_venta(
+                    conn,
+                    inventory_service=self.inventory_service,
+                    usuario=usuario,
+                    venta_id=venta_id,
+                    producto_id=item.inventario_id,
+                    cantidad_producto=float(item.cantidad),
+                )
 
             # 4. TESORERÍA
             if metodo_pago != "credito":
