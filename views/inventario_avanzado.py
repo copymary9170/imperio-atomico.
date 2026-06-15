@@ -323,26 +323,32 @@ def _render_conteo_fisico(usuario: str) -> None:
 
 def _render_rentabilidad() -> None:
     st.subheader("💰 Rentabilidad por producto")
-    st.caption("Comparación rápida entre costo, precio y margen bruto por artículo.")
+    st.caption("Calcula margen usando el costo de receta cuando existe; si no hay receta activa, usa el costo unitario del inventario.")
 
     df = _safe_read_sql(
         """
         SELECT
-            sku,
-            nombre,
-            categoria,
-            unidad,
-            COALESCE(stock_actual, 0) AS stock_actual,
-            COALESCE(costo_unitario_usd, 0) AS costo_unitario_usd,
-            COALESCE(precio_venta_usd, 0) AS precio_venta_usd,
-            COALESCE(precio_venta_usd, 0) - COALESCE(costo_unitario_usd, 0) AS ganancia_unitaria_usd,
-            CASE
-                WHEN COALESCE(precio_venta_usd, 0) > 0
-                THEN ((COALESCE(precio_venta_usd, 0) - COALESCE(costo_unitario_usd, 0)) / COALESCE(precio_venta_usd, 0)) * 100
-                ELSE 0
-            END AS margen_pct
-        FROM inventario
-        ORDER BY margen_pct ASC, nombre COLLATE NOCASE
+            i.sku,
+            i.nombre,
+            i.categoria,
+            i.unidad,
+            COALESCE(i.tipo_item, 'producto_venta') AS tipo_item,
+            COALESCE(i.stock_actual, 0) AS stock_actual,
+            COALESCE(i.costo_unitario_usd, 0) AS costo_unitario_usd,
+            COALESCE(i.precio_venta_usd, 0) AS precio_venta_usd,
+            COALESCE(SUM(
+                CASE
+                    WHEN COALESCE(r.activo, 1) = 1
+                    THEN COALESCE(r.cantidad_insumo, 0) * (1 + (COALESCE(r.merma_pct, 0) / 100.0)) * COALESCE(ins.costo_unitario_usd, 0)
+                    ELSE 0
+                END
+            ), 0) AS costo_receta_usd,
+            COUNT(r.id) AS lineas_receta
+        FROM inventario i
+        LEFT JOIN recetas_consumo r ON r.producto_id = i.id AND COALESCE(r.activo, 1) = 1
+        LEFT JOIN inventario ins ON ins.id = r.insumo_id
+        GROUP BY i.id
+        ORDER BY i.nombre COLLATE NOCASE
         """
     )
 
@@ -350,14 +356,44 @@ def _render_rentabilidad() -> None:
         st.info("No hay productos para analizar.")
         return
 
+    df["costo_base_usd"] = df.apply(
+        lambda row: float(row["costo_receta_usd"] or 0) if float(row["costo_receta_usd"] or 0) > 0 else float(row["costo_unitario_usd"] or 0),
+        axis=1,
+    )
+    df["fuente_costo"] = df.apply(
+        lambda row: "Receta" if float(row["costo_receta_usd"] or 0) > 0 else "Inventario",
+        axis=1,
+    )
+    df["ganancia_unitaria_usd"] = df["precio_venta_usd"].astype(float) - df["costo_base_usd"].astype(float)
+    df["margen_pct"] = df.apply(
+        lambda row: ((float(row["ganancia_unitaria_usd"]) / float(row["precio_venta_usd"])) * 100) if float(row["precio_venta_usd"] or 0) > 0 else 0,
+        axis=1,
+    )
+
     bajo_costo = df[df["ganancia_unitaria_usd"] < 0]
     margen_bajo = df[(df["ganancia_unitaria_usd"] >= 0) & (df["margen_pct"] < 30)]
-    c1, c2, c3 = st.columns(3)
+    con_receta = df[df["fuente_costo"] == "Receta"]
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Artículos", len(df))
-    c2.metric("Por debajo del costo", len(bajo_costo))
-    c3.metric("Margen menor a 30%", len(margen_bajo))
+    c2.metric("Con costo por receta", len(con_receta))
+    c3.metric("Por debajo del costo", len(bajo_costo))
+    c4.metric("Margen menor a 30%", len(margen_bajo))
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    columnas = [
+        "sku",
+        "nombre",
+        "categoria",
+        "tipo_item",
+        "precio_venta_usd",
+        "costo_base_usd",
+        "costo_receta_usd",
+        "costo_unitario_usd",
+        "fuente_costo",
+        "ganancia_unitaria_usd",
+        "margen_pct",
+        "stock_actual",
+    ]
+    st.dataframe(df[columnas].sort_values("margen_pct", ascending=True), use_container_width=True, hide_index=True)
 
 
 def render_inventario_avanzado(usuario: str) -> None:
