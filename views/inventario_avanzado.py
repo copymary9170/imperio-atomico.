@@ -268,6 +268,55 @@ def _render_historial_consumos_receta() -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
+def _render_reposicion_inteligente() -> None:
+    st.subheader("🛒 Reposición inteligente")
+    st.caption("Sugiere qué comprar según stock actual, punto de reorden y stock ideal.")
+
+    df = _safe_read_sql(
+        """
+        SELECT sku, nombre, categoria, COALESCE(tipo_item, 'producto_venta') AS tipo_item,
+               COALESCE(unidad_base, unidad, 'unidad') AS unidad,
+               COALESCE(stock_actual, 0) AS stock_actual,
+               COALESCE(punto_reorden, 0) AS punto_reorden,
+               COALESCE(stock_ideal, 0) AS stock_ideal,
+               COALESCE(costo_unitario_usd, 0) AS costo_unitario_usd,
+               CASE
+                   WHEN COALESCE(stock_ideal, 0) > COALESCE(stock_actual, 0)
+                   THEN COALESCE(stock_ideal, 0) - COALESCE(stock_actual, 0)
+                   ELSE 0
+               END AS cantidad_sugerida
+        FROM inventario
+        WHERE COALESCE(punto_reorden, 0) > 0
+          AND COALESCE(stock_actual, 0) <= COALESCE(punto_reorden, 0)
+        ORDER BY (COALESCE(punto_reorden, 0) - COALESCE(stock_actual, 0)) DESC, nombre COLLATE NOCASE
+        """
+    )
+
+    if df.empty:
+        st.success("No hay artículos por debajo del punto de reorden.")
+        return
+
+    df["costo_estimado_reposicion_usd"] = df["cantidad_sugerida"].astype(float) * df["costo_unitario_usd"].astype(float)
+    criticos = df[df["stock_actual"].astype(float) <= 0]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Artículos a reponer", len(df))
+    c2.metric("Críticos sin stock", len(criticos))
+    c3.metric("Compra estimada", f"${float(df['costo_estimado_reposicion_usd'].sum()):,.2f}")
+
+    st.dataframe(
+        df[["sku", "nombre", "categoria", "tipo_item", "stock_actual", "punto_reorden", "stock_ideal", "cantidad_sugerida", "unidad", "costo_estimado_reposicion_usd"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.download_button(
+        "⬇️ Descargar lista de reposición CSV",
+        data=df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="reposicion_inteligente.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+
 def _render_conteo_fisico(usuario: str) -> None:
     st.subheader("📋 Conteo físico")
     st.caption("Registra diferencias entre el stock del sistema y lo contado físicamente.")
@@ -367,8 +416,8 @@ def _render_rentabilidad() -> None:
 
 
 def render_inventario_avanzado(usuario: str) -> None:
-    st.caption("Inventario avanzado: clasificación, recetas, simulación, conteo físico, rentabilidad y consumos.")
-    tabs = st.tabs(["🏷️ Clasificación", "🧪 Recetas", "🧮 Simulador", "📋 Conteo físico", "💰 Rentabilidad", "📜 Consumos"])
+    st.caption("Inventario avanzado: clasificación, recetas, simulación, conteo físico, rentabilidad, consumos y reposición.")
+    tabs = st.tabs(["🏷️ Clasificación", "🧪 Recetas", "🧮 Simulador", "🛒 Reposición", "📋 Conteo físico", "💰 Rentabilidad", "📜 Consumos"])
     with tabs[0]:
         _render_clasificacion(usuario)
     with tabs[1]:
@@ -376,8 +425,10 @@ def render_inventario_avanzado(usuario: str) -> None:
     with tabs[2]:
         _render_simulador_consumo()
     with tabs[3]:
-        _render_conteo_fisico(usuario)
+        _render_reposicion_inteligente()
     with tabs[4]:
-        _render_rentabilidad()
+        _render_conteo_fisico(usuario)
     with tabs[5]:
+        _render_rentabilidad()
+    with tabs[6]:
         _render_historial_consumos_receta()
