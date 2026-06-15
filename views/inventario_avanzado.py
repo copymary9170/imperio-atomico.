@@ -7,6 +7,17 @@ from database.connection import db_transaction
 from modules.kardex import add_inventory_movement_shared
 
 
+TIPOS_ITEM = {
+    "producto_venta": "Producto de venta",
+    "servicio": "Servicio",
+    "materia_prima": "Materia prima / insumo",
+    "producto_terminado": "Producto terminado",
+    "empaque": "Empaque",
+    "consumible": "Consumible interno",
+    "activo_menor": "Activo menor / herramienta",
+}
+
+
 def _safe_read_sql(query: str, params: tuple = ()) -> pd.DataFrame:
     try:
         with db_transaction() as conn:
@@ -26,7 +37,12 @@ def _load_inventory_options() -> pd.DataFrame:
             COALESCE(nombre, '') AS nombre,
             COALESCE(categoria, '') AS categoria,
             COALESCE(unidad, '') AS unidad,
+            COALESCE(tipo_item, 'producto_venta') AS tipo_item,
+            COALESCE(unidad_base, '') AS unidad_base,
+            COALESCE(unidad_compra, '') AS unidad_compra,
             COALESCE(stock_actual, 0) AS stock_actual,
+            COALESCE(stock_ideal, 0) AS stock_ideal,
+            COALESCE(punto_reorden, 0) AS punto_reorden,
             COALESCE(costo_unitario_usd, 0) AS costo_unitario_usd,
             COALESCE(precio_venta_usd, 0) AS precio_venta_usd
         FROM inventario
@@ -43,6 +59,73 @@ def _item_label(df: pd.DataFrame, item_id: int) -> str:
     sku = str(data.get("sku") or "").strip()
     nombre = str(data.get("nombre") or "").strip()
     return f"{nombre} ({sku})" if sku else nombre
+
+
+def _render_clasificacion(usuario: str) -> None:
+    st.subheader("🏷️ Clasificación de artículos")
+    st.caption("Define si un artículo es producto, servicio, materia prima, empaque o consumible. Esto controla cómo se descuenta en ventas.")
+
+    inv = _load_inventory_options()
+    if inv.empty:
+        st.info("Primero registra artículos en inventario.")
+        return
+
+    item_id = st.selectbox(
+        "Artículo",
+        inv["id"].tolist(),
+        format_func=lambda i: _item_label(inv, i),
+        key="clasificacion_item_id",
+    )
+    row = inv[inv["id"] == item_id].iloc[0]
+    tipo_actual = str(row.get("tipo_item") or "producto_venta")
+    tipo_keys = list(TIPOS_ITEM.keys())
+    tipo_index = tipo_keys.index(tipo_actual) if tipo_actual in tipo_keys else 0
+
+    with st.form("form_clasificacion_articulo"):
+        tipo_item = st.selectbox(
+            "Tipo de artículo",
+            tipo_keys,
+            index=tipo_index,
+            format_func=lambda value: TIPOS_ITEM.get(value, value),
+        )
+        c1, c2, c3 = st.columns(3)
+        unidad_base = c1.text_input("Unidad base", value=str(row.get("unidad_base") or row.get("unidad") or "unidad"))
+        unidad_compra = c2.text_input("Unidad de compra", value=str(row.get("unidad_compra") or ""))
+        punto_reorden = c3.number_input("Punto de reorden", min_value=0.0, value=float(row.get("punto_reorden") or 0), step=1.0)
+        stock_ideal = st.number_input("Stock ideal", min_value=0.0, value=float(row.get("stock_ideal") or 0), step=1.0)
+        guardar = st.form_submit_button("Guardar clasificación")
+
+    if guardar:
+        try:
+            with db_transaction() as conn:
+                conn.execute(
+                    """
+                    UPDATE inventario
+                    SET tipo_item = ?,
+                        unidad_base = ?,
+                        unidad_compra = ?,
+                        punto_reorden = ?,
+                        stock_ideal = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        tipo_item,
+                        unidad_base.strip(),
+                        unidad_compra.strip(),
+                        float(punto_reorden),
+                        float(stock_ideal),
+                        int(item_id),
+                    ),
+                )
+            st.success("Clasificación guardada.")
+            st.rerun()
+        except Exception as exc:
+            st.error("No se pudo guardar la clasificación.")
+            st.exception(exc)
+
+    resumen = inv[["sku", "nombre", "categoria", "tipo_item", "unidad_base", "unidad_compra", "stock_actual", "punto_reorden", "stock_ideal"]].copy()
+    resumen["tipo_item"] = resumen["tipo_item"].map(lambda value: TIPOS_ITEM.get(str(value), str(value)))
+    st.dataframe(resumen, use_container_width=True, hide_index=True)
 
 
 def _render_recetas(usuario: str) -> None:
@@ -242,11 +325,13 @@ def _render_rentabilidad() -> None:
 
 
 def render_inventario_avanzado(usuario: str) -> None:
-    st.caption("Inventario avanzado: recetas, conteo físico y rentabilidad. La base se prepara con migraciones seguras.")
-    tabs = st.tabs(["🧪 Recetas", "📋 Conteo físico", "💰 Rentabilidad"])
+    st.caption("Inventario avanzado: clasificación, recetas, conteo físico y rentabilidad.")
+    tabs = st.tabs(["🏷️ Clasificación", "🧪 Recetas", "📋 Conteo físico", "💰 Rentabilidad"])
     with tabs[0]:
-        _render_recetas(usuario)
+        _render_clasificacion(usuario)
     with tabs[1]:
-        _render_conteo_fisico(usuario)
+        _render_recetas(usuario)
     with tabs[2]:
+        _render_conteo_fisico(usuario)
+    with tabs[3]:
         _render_rentabilidad()
