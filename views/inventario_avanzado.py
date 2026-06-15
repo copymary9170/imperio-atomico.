@@ -61,6 +61,11 @@ def _item_label(df: pd.DataFrame, item_id: int) -> str:
     return f"{nombre} ({sku})" if sku else nombre
 
 
+def _set_receta_activa(receta_id: int, activo: int) -> None:
+    with db_transaction() as conn:
+        conn.execute("UPDATE recetas_consumo SET activo = ? WHERE id = ?", (int(activo), int(receta_id)))
+
+
 def _render_clasificacion(usuario: str) -> None:
     st.subheader("🏷️ Clasificación de artículos")
     st.caption("Define si un artículo es producto, servicio, materia prima, empaque o consumible. Esto controla cómo se descuenta en ventas.")
@@ -198,7 +203,38 @@ def _render_recetas(usuario: str) -> None:
         ORDER BY p.nombre, i.nombre
         """
     )
+
+    if recetas.empty:
+        st.info("Aún no hay recetas creadas.")
+        return
+
     st.dataframe(recetas, use_container_width=True, hide_index=True)
+    st.markdown("### Activar / desactivar recetas")
+    st.caption("Desactivar una receta evita que ventas consuma sus insumos, pero conserva el registro para historial.")
+
+    for _, receta in recetas.iterrows():
+        estado = "Activa" if int(receta["activo"] or 0) == 1 else "Inactiva"
+        label = f"#{int(receta['id'])} · {receta['producto']} → {receta['insumo']} · {receta['cantidad_insumo']} {receta['unidad'] or ''} · {estado}"
+        col_info, col_accion = st.columns([4, 1])
+        col_info.write(label)
+        if int(receta["activo"] or 0) == 1:
+            if col_accion.button("Desactivar", key=f"desactivar_receta_{int(receta['id'])}"):
+                try:
+                    _set_receta_activa(int(receta["id"]), 0)
+                    st.success("Receta desactivada.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error("No se pudo desactivar la receta.")
+                    st.exception(exc)
+        else:
+            if col_accion.button("Reactivar", key=f"reactivar_receta_{int(receta['id'])}"):
+                try:
+                    _set_receta_activa(int(receta["id"]), 1)
+                    st.success("Receta reactivada.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error("No se pudo reactivar la receta.")
+                    st.exception(exc)
 
 
 def _render_conteo_fisico(usuario: str) -> None:
