@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 from database.connection import db_transaction
 from services.inventory_service import InventoryMovement, InventoryService
@@ -18,6 +18,19 @@ class VentaItem:
     cantidad: float
     precio_unitario_usd: float
     costo_unitario_usd: float
+
+
+def _es_servicio(conn: Any, inventario_id: int) -> bool:
+    row = conn.execute(
+        """
+        SELECT COALESCE(tipo_item, 'producto_venta') AS tipo_item
+        FROM inventario
+        WHERE id = ?
+        """,
+        (int(inventario_id),),
+    ).fetchone()
+    tipo_item = str(row["tipo_item"] if row else "producto_venta").strip().lower()
+    return tipo_item == "servicio"
 
 
 class VentasService:
@@ -53,7 +66,8 @@ class VentasService:
 
             # 1. VALIDAR STOCK DEL PRODUCTO VENDIDO Y DE SUS INSUMOS DE RECETA
             for item in items:
-                validar_stock_para_salida(conn, item.inventario_id, float(item.cantidad))
+                if not _es_servicio(conn, item.inventario_id):
+                    validar_stock_para_salida(conn, item.inventario_id, float(item.cantidad))
                 validar_stock_receta(conn, item.inventario_id, float(item.cantidad))
 
             # 2. CREAR VENTA
@@ -99,20 +113,21 @@ class VentasService:
                     ),
                 )
 
-                ok, msg = self.inventory_service.procesar_movimiento(
-                    conn,
-                    InventoryMovement(
-                        item_id=item.inventario_id,
-                        tipo="VENTA",
-                        cantidad=float(item.cantidad),
-                        costo_unitario=float(item.costo_unitario_usd),
-                        motivo=f"Venta #{venta_id}",
-                        usuario=usuario,
-                    ),
-                )
+                if not _es_servicio(conn, item.inventario_id):
+                    ok, msg = self.inventory_service.procesar_movimiento(
+                        conn,
+                        InventoryMovement(
+                            item_id=item.inventario_id,
+                            tipo="VENTA",
+                            cantidad=float(item.cantidad),
+                            costo_unitario=float(item.costo_unitario_usd),
+                            motivo=f"Venta #{venta_id}",
+                            usuario=usuario,
+                        ),
+                    )
 
-                if not ok:
-                    raise ValueError(msg)
+                    if not ok:
+                        raise ValueError(msg)
 
                 consumir_receta_por_venta(
                     conn,
