@@ -213,10 +213,28 @@ CREATE TABLE IF NOT EXISTS inventario (
     nombre TEXT NOT NULL,
     categoria TEXT NOT NULL,
     unidad TEXT NOT NULL,
+
+    tipo_item TEXT NOT NULL DEFAULT 'producto_venta',
+    unidad_base TEXT,
+    unidad_compra TEXT,
+    factor_conversion_compra REAL NOT NULL DEFAULT 1,
+
     stock_actual REAL NOT NULL DEFAULT 0,
     stock_minimo REAL NOT NULL DEFAULT 0,
+    stock_ideal REAL NOT NULL DEFAULT 0,
+    punto_reorden REAL NOT NULL DEFAULT 0,
+    lead_time_dias INTEGER NOT NULL DEFAULT 0,
+
     costo_unitario_usd REAL NOT NULL DEFAULT 0,
     precio_venta_usd REAL NOT NULL DEFAULT 0,
+    margen_objetivo_pct REAL NOT NULL DEFAULT 0.40,
+    merma_estimada_pct REAL NOT NULL DEFAULT 0,
+
+    permite_stock_negativo INTEGER NOT NULL DEFAULT 0,
+    control_lote INTEGER NOT NULL DEFAULT 0,
+    ubicacion TEXT,
+    proveedor_preferido_id INTEGER,
+
     creado_por TEXT,
     creado_en TEXT,
     actualizado_por TEXT,
