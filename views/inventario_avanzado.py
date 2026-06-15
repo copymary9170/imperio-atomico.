@@ -237,6 +237,76 @@ def _render_recetas(usuario: str) -> None:
                     st.exception(exc)
 
 
+def _render_simulador_consumo() -> None:
+    st.subheader("🧮 Simulador de consumo")
+    st.caption("Vista previa de los insumos que se descontarían al vender un producto o servicio con receta.")
+
+    inv = _load_inventory_options()
+    if inv.empty:
+        st.info("Primero registra artículos y recetas.")
+        return
+
+    c1, c2 = st.columns([3, 1])
+    producto_id = c1.selectbox(
+        "Producto / servicio a vender",
+        inv["id"].tolist(),
+        format_func=lambda i: _item_label(inv, i),
+        key="simulador_producto_id",
+    )
+    cantidad = c2.number_input("Cantidad a vender", min_value=0.01, value=1.0, step=1.0, key="simulador_cantidad")
+
+    consumos = _safe_read_sql(
+        """
+        SELECT
+            i.sku,
+            i.nombre AS insumo,
+            COALESCE(r.cantidad_insumo, 0) AS cantidad_por_unidad,
+            COALESCE(r.merma_pct, 0) AS merma_pct,
+            COALESCE(r.unidad, i.unidad, '') AS unidad,
+            COALESCE(i.stock_actual, 0) AS stock_actual,
+            COALESCE(i.costo_unitario_usd, 0) AS costo_unitario_usd,
+            COALESCE(r.cantidad_insumo, 0) * ? AS cantidad_base,
+            COALESCE(r.cantidad_insumo, 0) * ? * (1 + (COALESCE(r.merma_pct, 0) / 100.0)) AS cantidad_total
+        FROM recetas_consumo r
+        JOIN inventario i ON i.id = r.insumo_id
+        WHERE r.producto_id = ?
+          AND COALESCE(r.activo, 1) = 1
+        ORDER BY i.nombre COLLATE NOCASE
+        """,
+        (float(cantidad), float(cantidad), int(producto_id)),
+    )
+
+    if consumos.empty:
+        st.info("Este producto o servicio no tiene receta activa. No se descontarán insumos por receta.")
+        return
+
+    consumos["costo_total_usd"] = consumos["cantidad_total"].astype(float) * consumos["costo_unitario_usd"].astype(float)
+    consumos["stock_despues"] = consumos["stock_actual"].astype(float) - consumos["cantidad_total"].astype(float)
+    consumos["estado_stock"] = consumos["stock_despues"].apply(lambda value: "OK" if float(value) >= 0 else "Insuficiente")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Insumos", len(consumos))
+    c2.metric("Costo estimado", f"${float(consumos['costo_total_usd'].sum()):,.2f}")
+    c3.metric("Alertas de stock", int((consumos["estado_stock"] == "Insuficiente").sum()))
+
+    st.dataframe(
+        consumos[[
+            "sku",
+            "insumo",
+            "cantidad_por_unidad",
+            "merma_pct",
+            "cantidad_total",
+            "unidad",
+            "stock_actual",
+            "stock_despues",
+            "estado_stock",
+            "costo_total_usd",
+        ]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 def _render_conteo_fisico(usuario: str) -> None:
     st.subheader("📋 Conteo físico")
     st.caption("Registra diferencias entre el stock del sistema y lo contado físicamente.")
@@ -397,13 +467,15 @@ def _render_rentabilidad() -> None:
 
 
 def render_inventario_avanzado(usuario: str) -> None:
-    st.caption("Inventario avanzado: clasificación, recetas, conteo físico y rentabilidad.")
-    tabs = st.tabs(["🏷️ Clasificación", "🧪 Recetas", "📋 Conteo físico", "💰 Rentabilidad"])
+    st.caption("Inventario avanzado: clasificación, recetas, simulación, conteo físico y rentabilidad.")
+    tabs = st.tabs(["🏷️ Clasificación", "🧪 Recetas", "🧮 Simulador", "📋 Conteo físico", "💰 Rentabilidad"])
     with tabs[0]:
         _render_clasificacion(usuario)
     with tabs[1]:
         _render_recetas(usuario)
     with tabs[2]:
-        _render_conteo_fisico(usuario)
+        _render_simulador_consumo()
     with tabs[3]:
+        _render_conteo_fisico(usuario)
+    with tabs[4]:
         _render_rentabilidad()
