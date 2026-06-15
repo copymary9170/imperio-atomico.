@@ -19,7 +19,7 @@ def render_dashboard():
     ])
 
     with tab_resumen:
-        render_panel_ejecutivo(usuario)
+        render_panel_ejecutivo(usuario, context_key="operativo_resumen")
 
     with tab_supervisor:
         render_modo_supervisor(usuario)
