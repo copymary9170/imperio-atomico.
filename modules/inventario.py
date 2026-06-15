@@ -448,6 +448,61 @@ def _save_uploaded_support_file(
 
 def _ensure_inventory_support_tables() -> None:
     with db_transaction() as conn:
+
+
+conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS recetas_consumo (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL,
+        insumo_id INTEGER NOT NULL,
+        cantidad_insumo REAL NOT NULL DEFAULT 0,
+        unidad TEXT,
+        merma_pct REAL DEFAULT 0,
+        activo INTEGER DEFAULT 1,
+        observaciones TEXT,
+        fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (producto_id) REFERENCES inventario(id),
+        FOREIGN KEY (insumo_id) REFERENCES inventario(id)
+    )
+    """
+)
+
+conn.execute(
+    """
+    CREATE INDEX IF NOT EXISTS idx_recetas_producto
+    ON recetas_consumo(producto_id)
+    """
+)
+
+conn.execute(
+    """
+    CREATE INDEX IF NOT EXISTS idx_recetas_insumo
+    ON recetas_consumo(insumo_id)
+    """
+)
+    inv_cols = {r[1] for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+
+extra_inventory_columns = {
+    "tipo_item": "TEXT DEFAULT 'producto_venta'",
+    "unidad_base": "TEXT",
+    "unidad_compra": "TEXT",
+    "factor_conversion_compra": "REAL DEFAULT 1",
+    "stock_ideal": "REAL DEFAULT 0",
+    "punto_reorden": "REAL DEFAULT 0",
+    "lead_time_dias": "INTEGER DEFAULT 0",
+    "margen_objetivo_pct": "REAL DEFAULT 0.40",
+    "merma_estimada_pct": "REAL DEFAULT 0",
+    "permite_stock_negativo": "INTEGER DEFAULT 0",
+    "control_lote": "INTEGER DEFAULT 0",
+    "ubicacion": "TEXT",
+    "proveedor_preferido_id": "INTEGER",
+}
+
+for name, ddl in extra_inventory_columns.items():
+    if name not in inv_cols:
+        conn.execute(f"ALTER TABLE inventario ADD COLUMN {name} {ddl}")
+        inv_cols.add(name)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS proveedores (
@@ -2252,6 +2307,33 @@ def _load_proveedores_full_df() -> pd.DataFrame:
 def _load_proveedor_items_df() -> pd.DataFrame:
     _ensure_inventory_support_tables()
 
+  conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS conteos_fisicos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        usuario TEXT NOT NULL,
+        estado TEXT DEFAULT 'cerrado',
+        observaciones TEXT
+    )
+    """
+)
+
+conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS conteos_fisicos_detalle (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conteo_id INTEGER NOT NULL,
+        inventario_id INTEGER NOT NULL,
+        stock_sistema REAL NOT NULL DEFAULT 0,
+        stock_contado REAL NOT NULL DEFAULT 0,
+        diferencia REAL NOT NULL DEFAULT 0,
+        motivo TEXT,
+        FOREIGN KEY (conteo_id) REFERENCES conteos_fisicos(id),
+        FOREIGN KEY (inventario_id) REFERENCES inventario(id)
+    )
+    """
+)  
     with db_transaction() as conn:
         rows = conn.execute(
             """
@@ -4413,6 +4495,216 @@ def _render_reposicion(df: pd.DataFrame) -> None:
     else:
         st.dataframe(plan, use_container_width=True, hide_index=True)
 
+necesita_reponer = stock_actual <= stock_minimo or stock_actual <= punto_reorden
+cantidad_sugerida = max(stock_ideal - stock_actual, 0)
+
+Stock actual
+Stock mínimo
+Punto reorden
+Stock ideal
+Cantidad sugerida
+Proveedor preferido
+Lead time
+
+def _render_rentabilidad_inventario(df: pd.DataFrame) -> None:
+    st.subheader("💰 Rentabilidad de inventario")
+
+    if df.empty:
+        st.info("No hay productos en inventario.")
+        return
+
+    data = df.copy()
+    data["costo_unitario_usd"] = pd.to_numeric(data.get("costo_unitario_usd", 0), errors="coerce").fillna(0)
+    data["precio_venta_usd"] = pd.to_numeric(data.get("precio_venta_usd", 0), errors="coerce").fillna(0)
+
+    data["utilidad_unitaria_usd"] = data["precio_venta_usd"] - data["costo_unitario_usd"]
+    data["margen_pct"] = data.apply(
+        lambda r: (r["utilidad_unitaria_usd"] / r["precio_venta_usd"]) if r["precio_venta_usd"] > 0 else 0,
+        axis=1,
+    )
+
+    data["precio_sugerido_40pct"] = data["costo_unitario_usd"].apply(
+        lambda c: round(c / 0.60, 4) if c > 0 else 0
+    )
+
+    st.dataframe(
+        data[
+            [
+                "sku",
+                "nombre",
+                "categoria",
+                "stock_actual",
+                "costo_unitario_usd",
+                "precio_venta_usd",
+                "utilidad_unitaria_usd",
+                "margen_pct",
+                "precio_sugerido_40pct",
+            ]
+        ],
+        use_container_width=True,
+    )def _render_recetas_consumo(usuario: str) -> None:
+    st.subheader("🧪 Recetas de consumo")
+
+    with db_transaction() as conn:
+        productos = conn.execute(
+            """
+            SELECT id, sku, nombre, tipo_item
+            FROM inventario
+            WHERE COALESCE(estado,'activo')='activo'
+            ORDER BY nombre
+            """
+        ).fetchall()
+
+    if not productos:
+        st.info("No hay productos.")
+        return
+
+    df_prod = pd.DataFrame(productos, columns=["id", "sku", "nombre", "tipo_item"])
+
+    producto_id = st.selectbox(
+        "Producto o servicio",
+        df_prod["id"].tolist(),
+        format_func=lambda i: f"{df_prod.loc[df_prod['id']==i, 'nombre'].iloc[0]}",
+    )
+
+    insumo_id = st.selectbox(
+        "Insumo que consume",
+        df_prod["id"].tolist(),
+        format_func=lambda i: f"{df_prod.loc[df_prod['id']==i, 'nombre'].iloc[0]}",
+    )
+
+    cantidad = st.number_input("Cantidad de insumo", min_value=0.0001, value=1.0)
+    unidad = st.text_input("Unidad", value="unidad")
+    merma_pct = st.number_input("Merma %", min_value=0.0, max_value=1.0, value=0.0)
+    observaciones = st.text_area("Observaciones")
+
+    if st.button("Guardar receta"):
+        if producto_id == insumo_id:
+            st.error("El producto no puede consumirse a sí mismo.")
+            return
+
+        with db_transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO recetas_consumo(
+                    producto_id, insumo_id, cantidad_insumo, unidad, merma_pct, observaciones
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(producto_id),
+                    int(insumo_id),
+                    float(cantidad),
+                    unidad,
+                    float(merma_pct),
+                    observaciones,
+                ),
+            )
+
+        st.success("Receta guardada.")
+
+
+def _render_conteo_fisico(usuario: str) -> None:
+    st.subheader("📋 Conteo físico")
+
+    with db_transaction() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, sku, nombre, stock_actual
+            FROM inventario
+            WHERE COALESCE(estado,'activo')='activo'
+            ORDER BY nombre
+            """
+        ).fetchall()
+
+    if not rows:
+        st.info("No hay productos para contar.")
+        return
+
+    df = pd.DataFrame(rows, columns=["id", "sku", "nombre", "stock_actual"])
+
+    producto_id = st.selectbox(
+        "Producto",
+        df["id"].tolist(),
+        format_func=lambda i: f"{df.loc[df['id']==i, 'nombre'].iloc[0]} ({df.loc[df['id']==i, 'sku'].iloc[0]})",
+    )
+
+    stock_sistema = float(df.loc[df["id"] == producto_id, "stock_actual"].iloc[0])
+    st.metric("Stock sistema", stock_sistema)
+
+    stock_contado = st.number_input("Stock contado físico", min_value=0.0, value=stock_sistema)
+    motivo = st.selectbox(
+        "Motivo",
+        [
+            "conteo_fisico",
+            "merma",
+            "daño",
+            "uso_interno",
+            "error_de_carga",
+            "robo_perdida",
+            "vencimiento",
+        ],
+    )
+
+    diferencia = stock_contado - stock_sistema
+    st.metric("Diferencia", diferencia)
+
+    if st.button("Aplicar ajuste físico"):
+        with db_transaction() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO conteos_fisicos(usuario, observaciones)
+                VALUES (?, ?)
+                """,
+                (usuario, motivo),
+            )
+            conteo_id = int(cur.lastrowid)
+
+            conn.execute(
+                """
+                INSERT INTO conteos_fisicos_detalle(
+                    conteo_id, inventario_id, stock_sistema, stock_contado, diferencia, motivo
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    conteo_id,
+                    int(producto_id),
+                    float(stock_sistema),
+                    float(stock_contado),
+                    float(diferencia),
+                    motivo,
+                ),
+            )
+
+            if diferencia != 0:
+                conn.execute(
+                    """
+                    INSERT INTO movimientos_inventario(
+                        usuario, inventario_id, tipo, cantidad, costo_unitario_usd, referencia
+                    )
+                    SELECT ?, id, 'ajuste', ?, costo_unitario_usd, ?
+                    FROM inventario
+                    WHERE id=?
+                    """,
+                    (
+                        usuario,
+                        float(diferencia),
+                        f"Conteo físico: {motivo}",
+                        int(producto_id),
+                    ),
+                )
+
+                conn.execute(
+                    """
+                    UPDATE inventario
+                    SET stock_actual = ?
+                    WHERE id=?
+                    """,
+                    (float(stock_contado), int(producto_id)),
+                )
+
+        st.success("Conteo físico aplicado.")
 
 def _render_ajustes(usuario: str) -> None:
     st.subheader("🔧 Ajustes de inventario")
@@ -4552,6 +4844,33 @@ def _render_reportes(df: pd.DataFrame) -> None:
 
 def _render_productos(usuario: str) -> None:
     st.subheader("📦 Productos")
+
+
+    tipo_item = st.selectbox(
+    "Tipo de ítem",
+    [
+        "producto_venta",
+        "materia_prima",
+        "producto_terminado",
+        "servicio",
+        "empaque",
+        "activo_menor",
+    ],
+)
+
+unidad_base = st.text_input("Unidad base", value="unidad")
+unidad_compra = st.text_input("Unidad de compra", value="unidad")
+factor_conversion_compra = st.number_input("Factor conversión compra", min_value=0.0001, value=1.0)
+
+stock_ideal = st.number_input("Stock ideal", min_value=0.0, value=0.0)
+punto_reorden = st.number_input("Punto de reorden", min_value=0.0, value=0.0)
+lead_time_dias = st.number_input("Lead time días", min_value=0, value=0)
+
+margen_objetivo_pct = st.number_input("Margen objetivo %", min_value=0.0, max_value=0.95, value=0.40)
+merma_estimada_pct = st.number_input("Merma estimada %", min_value=0.0, max_value=1.0, value=0.0)
+
+ubicacion = st.text_input("Ubicación física")
+
 
     df = _load_inventory_df(include_inactive=True)
 
