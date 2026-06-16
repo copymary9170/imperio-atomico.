@@ -7,7 +7,6 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
-from modules.clientes import render_clientes as clientes_module
 from modules.clientes_mejoras import render_mejoras_clientes
 from views.clientes_inteligencia import render_clientes_inteligencia
 from views.crm_avanzado import render_crm_avanzado
@@ -44,16 +43,6 @@ def _clean_clientes_inner_titles():
     finally:
         st.subheader = original_subheader
         st.caption = original_caption
-
-
-def _table_exists(conn, table_name: str) -> bool:
-    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
-
-
-def _columns(conn, table_name: str) -> set[str]:
-    if not _table_exists(conn, table_name):
-        return set()
-    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
 
 def _safe_df(sql: str, params: tuple = ()) -> pd.DataFrame:
@@ -179,8 +168,8 @@ def _render_alertas_clientes() -> None:
 
 
 def _render_maestro_cartera(usuario: str) -> None:
-    with _clean_clientes_inner_titles():
-        clientes_module(usuario)
+    # Fallback temporal: evita importar modules.clientes mientras tenga IndentationError.
+    render_mejoras_clientes(usuario)
 
 
 def _render_fidelizacion_wrapper(usuario: str) -> None:
@@ -191,10 +180,10 @@ def _render_fidelizacion_wrapper(usuario: str) -> None:
 
 def render_clientes(usuario):
     st.title("👥 Clientes")
-    st.caption("Clientes operativos, cartera, CRM, inteligencia comercial, datos comerciales y fidelización.")
+    st.caption("Clientes operativos, CRM, inteligencia comercial, datos comerciales y fidelización.")
 
     tab_maestro, tab_alertas, tab_crm, tab_inteligencia, tab_comercial, tab_fidelizacion = st.tabs([
-        "👤 Maestro / Cartera",
+        "👤 Maestro comercial",
         "🚨 Alertas comerciales",
         "🤝 CRM / Prospectos",
         "🧠 Inteligencia comercial",
