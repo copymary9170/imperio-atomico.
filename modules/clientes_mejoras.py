@@ -9,12 +9,7 @@ import streamlit as st
 from database.connection import db_transaction
 from modules.common import clean_text, require_text
 
-
-CATEGORIAS_CLIENTE = [
-    "General", "VIP", "Revendedor", "Estudiante", "Representante", "Docente",
-    "Negocio", "Emprendedor", "Mayorista", "Cliente de impresión",
-    "Cliente de papelería", "Cliente de sublimación",
-]
+CATEGORIAS_CLIENTE = ["General", "VIP", "Revendedor", "Estudiante", "Representante", "Docente", "Negocio", "Emprendedor", "Mayorista", "Cliente de impresión", "Cliente de papelería", "Cliente de sublimación"]
 ORIGENES_CLIENTE = ["No definido", "WhatsApp", "Instagram", "Facebook", "Referido", "Presencial", "Vecino", "Catálogo", "Estado de WhatsApp", "Cliente antiguo", "Otro"]
 SERVICIOS_INTERES = ["No definido", "Impresiones", "Copias", "Papelería", "Papelería creativa", "Sublimación", "Fotos carnet", "Títulos / fondo negro", "Diseño gráfico", "Encuadernado", "Servicios digitales", "Otro"]
 COMPORTAMIENTOS_PAGO = ["No definido", "Buen pagador", "Paga tarde", "Deudor frecuente", "Solo contado", "Crédito aprobado", "Crédito suspendido"]
@@ -40,30 +35,28 @@ def _add_missing_columns(conn: Any, table_name: str, definitions: dict[str, str]
 
 
 def ensure_clientes_mejoras_schema() -> None:
-    """Amplía tablas existentes sin romper SQLite antiguo."""
     with db_transaction() as conn:
         if not _table_exists(conn, "clientes"):
-            return
+            conn.execute("""
+                CREATE TABLE clientes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario TEXT DEFAULT '',
+                    nombre TEXT NOT NULL,
+                    fecha TEXT DEFAULT CURRENT_TIMESTAMP,
+                    telefono TEXT DEFAULT '',
+                    email TEXT DEFAULT '',
+                    direccion TEXT DEFAULT '',
+                    estado TEXT DEFAULT 'activo'
+                )
+            """)
         _add_missing_columns(conn, "clientes", {
-            "fecha": "TEXT DEFAULT CURRENT_TIMESTAMP",
-            "telefono": "TEXT DEFAULT ''",
-            "email": "TEXT DEFAULT ''",
-            "direccion": "TEXT DEFAULT ''",
-            "estado": "TEXT DEFAULT 'activo'",
-            "categoria": "TEXT DEFAULT 'General'",
-            "limite_credito_usd": "REAL DEFAULT 0",
-            "saldo_por_cobrar_usd": "REAL DEFAULT 0",
-            "origen": "TEXT DEFAULT 'No definido'",
-            "tipo_cliente": "TEXT DEFAULT 'General'",
-            "servicio_interes": "TEXT DEFAULT 'No definido'",
-            "comportamiento_pago": "TEXT DEFAULT 'No definido'",
-            "preferencia_contacto": "TEXT DEFAULT 'WhatsApp'",
-            "acepta_promociones": "INTEGER DEFAULT 1",
-            "cumpleanos": "TEXT DEFAULT ''",
-            "fecha_especial": "TEXT DEFAULT ''",
-            "observaciones_comerciales": "TEXT DEFAULT ''",
-            "descuento_pct": "REAL DEFAULT 0",
-            "lista_precio": "TEXT DEFAULT 'Normal'",
+            "usuario": "TEXT DEFAULT ''", "fecha": "TEXT DEFAULT CURRENT_TIMESTAMP", "telefono": "TEXT DEFAULT ''",
+            "email": "TEXT DEFAULT ''", "direccion": "TEXT DEFAULT ''", "estado": "TEXT DEFAULT 'activo'",
+            "categoria": "TEXT DEFAULT 'General'", "limite_credito_usd": "REAL DEFAULT 0", "saldo_por_cobrar_usd": "REAL DEFAULT 0",
+            "origen": "TEXT DEFAULT 'No definido'", "tipo_cliente": "TEXT DEFAULT 'General'", "servicio_interes": "TEXT DEFAULT 'No definido'",
+            "comportamiento_pago": "TEXT DEFAULT 'No definido'", "preferencia_contacto": "TEXT DEFAULT 'WhatsApp'", "acepta_promociones": "INTEGER DEFAULT 1",
+            "cumpleanos": "TEXT DEFAULT ''", "fecha_especial": "TEXT DEFAULT ''", "observaciones_comerciales": "TEXT DEFAULT ''",
+            "descuento_pct": "REAL DEFAULT 0", "lista_precio": "TEXT DEFAULT 'Normal'",
         })
 
 
@@ -101,31 +94,43 @@ def validar_cliente_duplicado(nombre: str, telefono: str, cliente_id: int | None
     return alertas
 
 
+def crear_cliente_comercial(usuario: str, nombre: str, telefono: str, email: str = "", direccion: str = "", categoria: str = "General", origen: str = "No definido", tipo_cliente: str = "General", servicio_interes: str = "No definido") -> int:
+    ensure_clientes_mejoras_schema()
+    nombre = require_text(nombre, "Nombre")
+    telefono = _normalizar_telefono(telefono)
+    alertas = validar_cliente_duplicado(nombre, telefono)
+    if alertas:
+        raise ValueError("\n".join(alertas))
+    with db_transaction() as conn:
+        cur = conn.execute("""
+            INSERT INTO clientes (usuario, nombre, telefono, email, direccion, categoria, origen, tipo_cliente, servicio_interes, estado)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')
+        """, (clean_text(usuario), nombre, telefono, clean_text(email), clean_text(direccion), clean_text(categoria), clean_text(origen), clean_text(tipo_cliente), clean_text(servicio_interes)))
+        return int(cur.lastrowid)
+
+
 def cargar_clientes_mejorados() -> pd.DataFrame:
     ensure_clientes_mejoras_schema()
     with db_transaction() as conn:
-        if not _table_exists(conn, "clientes"):
-            return pd.DataFrame()
         ventas_join = ""
         ventas_fields = "0 AS operaciones, 0 AS total_ventas_usd, c.fecha AS ultima_compra"
         if _table_exists(conn, "ventas") and {"cliente_id", "fecha"}.issubset(_columns(conn, "ventas")):
             vcols = _columns(conn, "ventas")
             total_col = "total_usd" if "total_usd" in vcols else "total" if "total" in vcols else None
             if total_col:
-                ventas_join = f"""
-                LEFT JOIN ventas v
-                    ON v.cliente_id = c.id
-                   AND COALESCE(v.estado,'registrada') NOT IN ('anulada','cancelada')
-                """
-                ventas_fields = f"COALESCE(COUNT(v.id),0) AS operaciones, COALESCE(SUM(v.{total_col}),0) AS total_ventas_usd, COALESCE(MAX(v.fecha), c.fecha) AS ultima_compra"
+                estado_filter = "AND COALESCE(v.estado,'registrada') NOT IN ('anulada','cancelada')" if "estado" in vcols else ""
+                ventas_join = f"LEFT JOIN ventas v ON v.cliente_id = c.id {estado_filter}"
+                ventas_fields = f"COUNT(v.cliente_id) AS operaciones, COALESCE(SUM(v.{total_col}),0) AS total_ventas_usd, COALESCE(MAX(v.fecha), c.fecha) AS ultima_compra"
         cxc_join = ""
         cxc_field = "0 AS deuda_usd"
-        if _table_exists(conn, "cuentas_por_cobrar") and {"cliente_id", "saldo_usd", "estado"}.issubset(_columns(conn, "cuentas_por_cobrar")):
-            cxc_join = """
+        if _table_exists(conn, "cuentas_por_cobrar") and {"cliente_id", "saldo_usd"}.issubset(_columns(conn, "cuentas_por_cobrar")):
+            ccols = _columns(conn, "cuentas_por_cobrar")
+            estado_where = "WHERE estado IN ('pendiente','parcial','vencida','incobrable')" if "estado" in ccols else ""
+            cxc_join = f"""
             LEFT JOIN (
                 SELECT cliente_id, SUM(saldo_usd) AS deuda_total
                 FROM cuentas_por_cobrar
-                WHERE estado IN ('pendiente','parcial','vencida','incobrable')
+                {estado_where}
                 GROUP BY cliente_id
             ) pxc ON pxc.cliente_id = c.id
             """
@@ -142,8 +147,7 @@ def cargar_clientes_mejorados() -> pd.DataFrame:
                    COALESCE(c.cumpleanos,'') AS cumpleanos, COALESCE(c.fecha_especial,'') AS fecha_especial,
                    COALESCE(c.observaciones_comerciales,'') AS observaciones_comerciales,
                    COALESCE(c.descuento_pct,0) AS descuento_pct, COALESCE(c.lista_precio,'Normal') AS lista_precio,
-                   COALESCE(c.limite_credito_usd,0) AS limite_credito_usd,
-                   COALESCE(c.saldo_por_cobrar_usd,0) AS saldo_por_cobrar_usd,
+                   COALESCE(c.limite_credito_usd,0) AS limite_credito_usd, COALESCE(c.saldo_por_cobrar_usd,0) AS saldo_por_cobrar_usd,
                    {ventas_fields}, {cxc_field}
             FROM clientes c
             {ventas_join}
@@ -159,9 +163,7 @@ def actualizar_datos_comerciales_cliente(cliente_id: int, *, categoria: str, tip
     with db_transaction() as conn:
         conn.execute("""
             UPDATE clientes
-            SET categoria=?, tipo_cliente=?, origen=?, servicio_interes=?, comportamiento_pago=?,
-                preferencia_contacto=?, acepta_promociones=?, cumpleanos=?, fecha_especial=?,
-                observaciones_comerciales=?, descuento_pct=?, lista_precio=?
+            SET categoria=?, tipo_cliente=?, origen=?, servicio_interes=?, comportamiento_pago=?, preferencia_contacto=?, acepta_promociones=?, cumpleanos=?, fecha_especial=?, observaciones_comerciales=?, descuento_pct=?, lista_precio=?
             WHERE id=?
         """, (clean_text(categoria), clean_text(tipo_cliente), clean_text(origen), clean_text(servicio_interes), clean_text(comportamiento_pago), clean_text(preferencia_contacto), 1 if acepta_promociones else 0, clean_text(cumpleanos), clean_text(fecha_especial), clean_text(observaciones_comerciales), max(float(descuento_pct or 0), 0), clean_text(lista_precio) or "Normal", int(cliente_id)))
 
@@ -169,17 +171,44 @@ def actualizar_datos_comerciales_cliente(cliente_id: int, *, categoria: str, tip
 def render_mejoras_clientes(usuario: str = "Sistema") -> None:
     ensure_clientes_mejoras_schema()
     st.subheader("🧩 Datos comerciales avanzados")
-    st.caption("Origen, tipo, servicio principal, comportamiento de pago, promociones y reactivación.")
+    st.caption("Registro, origen, tipo, servicio principal, comportamiento de pago, promociones y reactivación.")
     try:
         df = cargar_clientes_mejorados()
     except Exception as exc:
         st.error("No se pudieron cargar los datos comerciales avanzados.")
         st.exception(exc)
         return
+
+    tab_registrar, tab_editar, tab_reportes, tab_reactivar, tab_calidad = st.tabs(["Registrar cliente", "Editar ficha comercial", "Reportes comerciales", "Reactivación", "Calidad de datos"])
+
+    with tab_registrar:
+        with st.form("form_registro_cliente_comercial"):
+            c1, c2, c3 = st.columns(3)
+            nombre = c1.text_input("Nombre")
+            telefono = c2.text_input("WhatsApp")
+            categoria = c3.selectbox("Categoría", CATEGORIAS_CLIENTE)
+            c4, c5, c6 = st.columns(3)
+            origen = c4.selectbox("Origen", ORIGENES_CLIENTE)
+            tipo_cliente = c5.selectbox("Tipo de cliente", CATEGORIAS_CLIENTE)
+            servicio_interes = c6.selectbox("Servicio principal", SERVICIOS_INTERES)
+            email = st.text_input("Email")
+            direccion = st.text_area("Dirección")
+            guardar_nuevo = st.form_submit_button("Guardar cliente")
+        if guardar_nuevo:
+            try:
+                cid = crear_cliente_comercial(usuario, nombre, telefono, email, direccion, categoria, origen, tipo_cliente, servicio_interes)
+                st.success(f"Cliente #{cid} registrado")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error("No se pudo registrar el cliente.")
+                st.exception(exc)
+
     if df.empty:
-        st.info("No hay clientes activos para mejorar.")
+        st.info("No hay clientes activos para analizar. Registra el primero en la pestaña Registrar cliente.")
         return
-    tab_editar, tab_reportes, tab_reactivar, tab_calidad = st.tabs(["Editar ficha comercial", "Reportes comerciales", "Reactivación", "Calidad de datos"])
+
     with tab_editar:
         cliente_id = st.selectbox("Cliente", df["id"].astype(int).tolist(), format_func=lambda x: df.loc[df["id"].eq(x), "nombre"].iloc[0], key="cliente_mejoras_id")
         row = df[df["id"].eq(cliente_id)].iloc[0]
@@ -205,6 +234,7 @@ def render_mejoras_clientes(usuario: str = "Sistema") -> None:
             actualizar_datos_comerciales_cliente(int(cliente_id), categoria=categoria, tipo_cliente=tipo_cliente, origen=origen, servicio_interes=servicio_interes, comportamiento_pago=comportamiento_pago, preferencia_contacto=preferencia_contacto, acepta_promociones=acepta_promociones, cumpleanos=cumpleanos, fecha_especial=fecha_especial, observaciones_comerciales=observaciones, descuento_pct=float(descuento_pct), lista_precio=lista_precio)
             st.success("Ficha comercial actualizada")
             st.rerun()
+
     with tab_reportes:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Clientes", len(df)); c2.metric("Ventas históricas", f"$ {float(df['total_ventas_usd'].sum()):,.2f}"); c3.metric("Deuda", f"$ {float(df['deuda_usd'].sum()):,.2f}"); c4.metric("Aceptan promociones", int(df["acepta_promociones"].fillna(0).astype(int).sum()))
@@ -212,6 +242,7 @@ def render_mejoras_clientes(usuario: str = "Sistema") -> None:
             st.markdown(f"#### {titulo}")
             resumen = df.groupby(campo, as_index=False).agg(clientes=("id", "count"), ventas=("total_ventas_usd", "sum"), deuda=("deuda_usd", "sum")).sort_values("ventas", ascending=False)
             st.dataframe(resumen, use_container_width=True, hide_index=True)
+
     with tab_reactivar:
         work = df.copy(); work["ultima_compra"] = pd.to_datetime(work["ultima_compra"], errors="coerce"); work["fecha"] = pd.to_datetime(work["fecha"], errors="coerce")
         work["dias_sin_compra"] = (pd.Timestamp(datetime.now()) - work["ultima_compra"].fillna(work["fecha"])).dt.days.fillna(999).astype(int)
@@ -220,6 +251,7 @@ def render_mejoras_clientes(usuario: str = "Sistema") -> None:
         cols = ["id", "nombre", "whatsapp", "origen", "servicio_interes", "ultima_compra", "dias_sin_compra", "total_ventas_usd", "preferencia_contacto"]
         st.dataframe(reactivar[[c for c in cols if c in reactivar.columns]].sort_values("dias_sin_compra", ascending=False), use_container_width=True, hide_index=True)
         st.download_button("📥 Exportar reactivación CSV", reactivar.to_csv(index=False).encode("utf-8"), f"clientes_reactivar_{rango}_dias.csv", "text/csv")
+
     with tab_calidad:
         telefono_norm = df["whatsapp"].astype(str).str.replace(r"\D+", "", regex=True)
         duplicados_tel = df[telefono_norm.ne("") & telefono_norm.duplicated(keep=False)].copy(); sin_tel = df[telefono_norm.eq("")].copy(); sin_origen = df[df["origen"].fillna("No definido").eq("No definido")].copy(); sin_servicio = df[df["servicio_interes"].fillna("No definido").eq("No definido")].copy()
