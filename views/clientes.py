@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import Any
-
 import pandas as pd
 import streamlit as st
 
@@ -11,38 +8,6 @@ from modules.clientes_mejoras import render_mejoras_clientes
 from views.clientes_inteligencia import render_clientes_inteligencia
 from views.crm_avanzado import render_crm_avanzado
 from views.erp_nuevos_modulos import render_fidelizacion
-
-
-@contextmanager
-def _clean_clientes_inner_titles():
-    """Adapta títulos heredados del módulo operativo para que no parezca otro CRM."""
-    original_subheader = st.subheader
-    original_caption = st.caption
-
-    def patched_subheader(body: Any, *args: Any, **kwargs: Any):
-        replacements = {
-            "👥 CRM Profesional de Clientes": "👤 Maestro de clientes / cartera",
-            "➕ Registro y edición": "Registro y edición de clientes",
-            "🔎 Búsqueda y filtros": "Búsqueda, filtros y cartera",
-            "💳 Cuentas por cobrar y cobranza": "💳 Cobranza por cliente",
-        }
-        body_clean = str(body).strip()
-        if body_clean in replacements:
-            return original_subheader(replacements[body_clean], *args, **kwargs)
-        return original_subheader(body, *args, **kwargs)
-
-    def patched_caption(body: Any, *args: Any, **kwargs: Any):
-        if str(body).strip() == "ERP • Finanzas • Inteligencia Comercial":
-            return original_caption("Maestro operativo, crédito, contacto, cartera y cobranza por cliente.", *args, **kwargs)
-        return original_caption(body, *args, **kwargs)
-
-    st.subheader = patched_subheader
-    st.caption = patched_caption
-    try:
-        yield
-    finally:
-        st.subheader = original_subheader
-        st.caption = original_caption
 
 
 def _safe_df(sql: str, params: tuple = ()) -> pd.DataFrame:
@@ -141,13 +106,7 @@ def _render_alertas_clientes() -> None:
     else:
         st.success("Sin alertas comerciales críticas con la información disponible.")
 
-    tabs = st.tabs([
-        "Duplicados",
-        "Sin contacto",
-        "Crédito / cobranza",
-        "CRM vencido",
-        "Categorías",
-    ])
+    tabs = st.tabs(["Duplicados", "Sin contacto", "Crédito / cobranza", "CRM vencido", "Categorías"])
     with tabs[0]:
         st.dataframe(duplicados_tel, use_container_width=True, hide_index=True) if not duplicados_tel.empty else st.success("Sin teléfonos duplicados.")
     with tabs[1]:
@@ -167,11 +126,6 @@ def _render_alertas_clientes() -> None:
         st.dataframe(sin_categoria, use_container_width=True, hide_index=True) if not sin_categoria.empty else st.success("Todos los clientes tienen categoría específica.")
 
 
-def _render_maestro_cartera(usuario: str) -> None:
-    # Fallback temporal: evita importar modules.clientes mientras tenga IndentationError.
-    render_mejoras_clientes(usuario)
-
-
 def _render_fidelizacion_wrapper(usuario: str) -> None:
     st.subheader("⭐ Fidelización")
     st.caption("Plantilla rescatada: pendiente de convertir a programa operativo de puntos, referidos, cupones y beneficios VIP.")
@@ -182,17 +136,16 @@ def render_clientes(usuario):
     st.title("👥 Clientes")
     st.caption("Clientes operativos, CRM, inteligencia comercial, datos comerciales y fidelización.")
 
-    tab_maestro, tab_alertas, tab_crm, tab_inteligencia, tab_comercial, tab_fidelizacion = st.tabs([
+    tab_maestro, tab_alertas, tab_crm, tab_inteligencia, tab_fidelizacion = st.tabs([
         "👤 Maestro comercial",
         "🚨 Alertas comerciales",
         "🤝 CRM / Prospectos",
         "🧠 Inteligencia comercial",
-        "🧩 Datos comerciales",
         "⭐ Fidelización / plantilla",
     ])
 
     with tab_maestro:
-        _render_maestro_cartera(usuario)
+        render_mejoras_clientes(usuario)
 
     with tab_alertas:
         _render_alertas_clientes()
@@ -202,9 +155,6 @@ def render_clientes(usuario):
 
     with tab_inteligencia:
         render_clientes_inteligencia(usuario)
-
-    with tab_comercial:
-        render_mejoras_clientes(usuario)
 
     with tab_fidelizacion:
         _render_fidelizacion_wrapper(usuario)
