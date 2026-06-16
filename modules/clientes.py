@@ -9,6 +9,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.common import as_positive, clean_text, require_text
+from modules.clientes_mejoras import validar_cliente_duplicado
 from services.cxc_cobranza_service import (
     CobranzaInput,
     marcar_cuenta_incobrable,
@@ -155,6 +156,11 @@ def render_clientes(usuario: str) -> None:
                     st.error("Cliente ya existe")
                     return
 
+                alertas_dup = validar_cliente_duplicado(nombre, whatsapp)
+                    if alertas_dup:
+                        st.error("Posible cliente duplicado:\n" + "\n".join(f"- {a}" for a in alertas_dup))
+                        return
+    
                 cid = create_cliente(
                     usuario=usuario,
                     nombre=nombre,
@@ -233,6 +239,12 @@ def render_clientes(usuario: str) -> None:
                         st.error("Ya existe otro cliente con ese nombre")
                         return
 
+
+                    alertas_dup = validar_cliente_duplicado(nombre_n, whatsapp_n, int(cliente_id))
+                        if alertas_dup:
+                            st.error("Posible cliente duplicado:\n" + "\n".join(f"- {a}" for a in alertas_dup))
+                        return
+    
                     conn.execute(
                         """
                         UPDATE clientes
