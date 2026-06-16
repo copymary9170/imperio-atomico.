@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from modules.clientes import render_clientes as clientes_module
+from modules.clientes_mejoras import render_mejoras_clientes
 from views.clientes_inteligencia import render_clientes_inteligencia
 from views.crm_avanzado import render_crm_avanzado
 from views.erp_nuevos_modulos import render_fidelizacion
@@ -190,13 +191,14 @@ def _render_fidelizacion_wrapper(usuario: str) -> None:
 
 def render_clientes(usuario):
     st.title("👥 Clientes")
-    st.caption("Clientes operativos, cartera, CRM, inteligencia comercial y fidelización.")
+    st.caption("Clientes operativos, cartera, CRM, inteligencia comercial, datos comerciales y fidelización.")
 
-    tab_maestro, tab_alertas, tab_crm, tab_inteligencia, tab_fidelizacion = st.tabs([
+    tab_maestro, tab_alertas, tab_crm, tab_inteligencia, tab_comercial, tab_fidelizacion = st.tabs([
         "👤 Maestro / Cartera",
         "🚨 Alertas comerciales",
         "🤝 CRM / Prospectos",
         "🧠 Inteligencia comercial",
+        "🧩 Datos comerciales",
         "⭐ Fidelización / plantilla",
     ])
 
@@ -211,6 +213,9 @@ def render_clientes(usuario):
 
     with tab_inteligencia:
         render_clientes_inteligencia(usuario)
+
+    with tab_comercial:
+        render_mejoras_clientes(usuario)
 
     with tab_fidelizacion:
         _render_fidelizacion_wrapper(usuario)
