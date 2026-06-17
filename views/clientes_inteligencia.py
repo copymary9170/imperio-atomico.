@@ -7,41 +7,41 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from modules.clientes_mejoras import ensure_clientes_mejoras_schema
 
 
 def _table_exists(conn: Any, table_name: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-        (table_name,),
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone()
     return row is not None
 
 
 def _columns(conn: Any, table_name: str) -> set[str]:
     if not _table_exists(conn, table_name):
         return set()
-    return {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
 
 def _load_customer_intelligence() -> pd.DataFrame:
+    ensure_clientes_mejoras_schema()
     with db_transaction() as conn:
         if not _table_exists(conn, "clientes"):
             return pd.DataFrame()
+
         ventas_join = ""
-        ventas_fields = "0 AS operaciones, 0 AS total_ventas_usd, NULL AS ultima_compra"
+        ventas_fields = "0 AS operaciones, 0 AS total_ventas_usd, c.fecha AS ultima_compra"
         if _table_exists(conn, "ventas"):
             ventas_cols = _columns(conn, "ventas")
             total_col = "total_usd" if "total_usd" in ventas_cols else "total" if "total" in ventas_cols else None
-            fecha_col = "fecha" if "fecha" in ventas_cols else None
-            if total_col and fecha_col and "cliente_id" in ventas_cols:
+            if total_col and "fecha" in ventas_cols and "cliente_id" in ventas_cols:
+                estado_filter = "WHERE COALESCE(estado,'registrada') NOT IN ('anulada','cancelada')" if "estado" in ventas_cols else ""
                 ventas_join = f"""
                 LEFT JOIN (
                     SELECT cliente_id,
                            COUNT(*) AS operaciones,
                            COALESCE(SUM({total_col}), 0) AS total_ventas_usd,
-                           MAX({fecha_col}) AS ultima_compra
+                           MAX(fecha) AS ultima_compra
                     FROM ventas
-                    WHERE COALESCE(estado,'') NOT IN ('anulada','cancelada')
+                    {estado_filter}
                     GROUP BY cliente_id
                 ) v ON v.cliente_id = c.id
                 """
@@ -51,14 +51,16 @@ def _load_customer_intelligence() -> pd.DataFrame:
         cxc_fields = "0 AS deuda_usd, 0 AS cuentas_vencidas"
         if _table_exists(conn, "cuentas_por_cobrar"):
             cxc_cols = _columns(conn, "cuentas_por_cobrar")
-            if {"cliente_id", "saldo_usd", "estado"}.issubset(cxc_cols):
-                cxc_join = """
+            if {"cliente_id", "saldo_usd"}.issubset(cxc_cols):
+                estado_select = "SUM(CASE WHEN estado='vencida' THEN 1 ELSE 0 END) AS cuentas_vencidas" if "estado" in cxc_cols else "0 AS cuentas_vencidas"
+                estado_where = "WHERE estado IN ('pendiente','parcial','vencida','incobrable')" if "estado" in cxc_cols else ""
+                cxc_join = f"""
                 LEFT JOIN (
                     SELECT cliente_id,
                            COALESCE(SUM(saldo_usd),0) AS deuda_usd,
-                           SUM(CASE WHEN estado='vencida' THEN 1 ELSE 0 END) AS cuentas_vencidas
+                           {estado_select}
                     FROM cuentas_por_cobrar
-                    WHERE estado IN ('pendiente','parcial','vencida','incobrable')
+                    {estado_where}
                     GROUP BY cliente_id
                 ) cx ON cx.cliente_id = c.id
                 """
@@ -67,7 +69,7 @@ def _load_customer_intelligence() -> pd.DataFrame:
         return pd.read_sql_query(
             f"""
             SELECT c.id,
-                   c.fecha,
+                   COALESCE(c.fecha,'') AS fecha,
                    c.nombre,
                    COALESCE(c.telefono,'') AS whatsapp,
                    COALESCE(c.email,'') AS email,
@@ -146,20 +148,10 @@ def render_clientes_inteligencia(usuario: str = "Sistema") -> None:
     c8.metric("Riesgo cobranza", int(df["segmento_inteligente"].eq("Riesgo cobranza").sum()))
 
     st.divider()
-
-    tab_seg, tab_riesgo, tab_reactivar, tab_top = st.tabs([
-        "Segmentación",
-        "Riesgo y crédito",
-        "Reactivación",
-        "Top clientes",
-    ])
+    tab_seg, tab_riesgo, tab_reactivar, tab_top = st.tabs(["Segmentación", "Riesgo y crédito", "Reactivación", "Top clientes"])
 
     with tab_seg:
-        resumen = df.groupby("segmento_inteligente", as_index=False).agg(
-            clientes=("id", "count"),
-            ventas=("total_ventas_usd", "sum"),
-            deuda=("deuda_usd", "sum"),
-        )
+        resumen = df.groupby("segmento_inteligente", as_index=False).agg(clientes=("id", "count"), ventas=("total_ventas_usd", "sum"), deuda=("deuda_usd", "sum"))
         st.dataframe(resumen, use_container_width=True, hide_index=True)
         st.bar_chart(resumen.set_index("segmento_inteligente")["clientes"])
 
