@@ -7,6 +7,7 @@ st.set_page_config(page_title="Imperio Atómico ERP", layout="wide", page_icon="
 from database.schema import init_schema
 from database.auto_migrations import run_auto_migrations
 from database.transactional_core import ensure_transactional_core_schema
+from database.rate_config_defaults import ensure_rate_config_defaults
 from security.permission_extensions import ensure_extended_permissions
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
@@ -16,6 +17,7 @@ from services.backup_service import create_daily_backup_if_needed
 init_schema()
 run_auto_migrations()
 ensure_transactional_core_schema()
+ensure_rate_config_defaults()
 ensure_extended_permissions()
 restore_session_snapshot()
 try:
@@ -232,6 +234,7 @@ if not visible_menu:
     st.stop()
 
 try:
+    ensure_rate_config_defaults()
     config = get_current_config()
 except Exception:
     config = DEFAULT_CONFIG
