@@ -33,6 +33,14 @@ RATE_FIELDS = [
 ]
 
 RATE_HISTORY_KEYS = "'tasa_bcv','tasa_binance','tasa_euro','tasa_menudeo','tasa_kontigo','iva_perc','igtf_perc','banco_perc','kontigo_perc','kontigo_perc_entrada','kontigo_perc_salida','kontigo_pago_movil_envio_perc','kontigo_tarjeta_envio_perc','kontigo_tarjeta_envio_fija_usd','menudeo_comision_perc','menudeo_comision_fija_usd','menudeo_minimo_usd'"
+DEFAULT_RATE_VALUES = {
+    "tasa_bcv": 36.50,
+    "tasa_binance": 38.00,
+    "tasa_euro": 0.0,
+    "tasa_menudeo": 0.0,
+    "tasa_kontigo": 0.0,
+    "menudeo_minimo_usd": 10.0,
+}
 
 
 def _secret_exists(name: str) -> bool:
@@ -63,22 +71,30 @@ def _safe_config() -> dict:
     except Exception:
         config = dict(DEFAULT_CONFIG)
     for key, _label, _unit, _freq, _dec in RATE_FIELDS:
-        config.setdefault(key, 10.0 if key == "menudeo_minimo_usd" else 0.0)
+        config.setdefault(key, DEFAULT_RATE_VALUES.get(key, 0.0))
     return config
 
 
 def _to_float_value(config: dict, key: str, default: float = 0.0) -> float:
+    fallback = DEFAULT_RATE_VALUES.get(key, DEFAULT_CONFIG.get(key, default))
     try:
-        return float(config.get(key, DEFAULT_CONFIG.get(key, default)) or 0)
+        return float(config.get(key, fallback) or 0)
     except Exception:
-        return float(DEFAULT_CONFIG.get(key, default) or 0)
+        return float(fallback or 0)
+
+
+def _clear_rate_widget_state() -> None:
+    for key, *_rest in RATE_FIELDS:
+        for stale_key in [f"editar_{key}", f"tasas_editor_{key}"]:
+            try:
+                st.session_state.pop(stale_key, None)
+            except Exception:
+                pass
 
 
 def _save_config_safely(values: dict, usuario: str, backup_reason: str) -> None:
-    """Save first, then try backup without blocking the saved configuration."""
     set_config_values(values, usuario)
-    for key, value in values.items():
-        st.session_state[key] = value
+    _clear_rate_widget_state()
     try:
         create_backup(backup_reason, upload_external=True)
         st.success("✅ Configuración guardada y respaldo creado.")
@@ -168,7 +184,7 @@ def _render_estado_general() -> None:
 def _render_metric_grid(fields: list[tuple[str, str, str, str, int]], config: dict) -> None:
     cols = st.columns(3)
     for idx, (key, label, unit, _frecuencia, decimales) in enumerate(fields):
-        value = _to_float_value(config, key, 10.0 if key == "menudeo_minimo_usd" else 0.0)
+        value = _to_float_value(config, key, DEFAULT_RATE_VALUES.get(key, 0.0))
         ultima = _ultima_actualizacion(key)
         horas = _horas_desde(ultima)
         ayuda = "Sin historial" if horas is None else f"Actualizada hace {horas:.1f} h"
@@ -181,14 +197,13 @@ def _render_number_inputs(fields: list[tuple[str, str, str, str, int]], config: 
     nuevos = {}
     for idx, (key, label, unit, _frecuencia, decimales) in enumerate(fields):
         col = columns[idx % len(columns)]
-        default = 10.0 if key == "menudeo_minimo_usd" else 0.0
+        default = DEFAULT_RATE_VALUES.get(key, 0.0)
         nuevos[key] = col.number_input(
             f"{label} ({unit})",
             min_value=0.0,
             value=float(_to_float_value(config, key, default)),
             step=0.01 if decimales <= 2 else 0.001,
             format=f"%.{decimales}f",
-            key=f"editar_{key}",
         )
     return nuevos
 
