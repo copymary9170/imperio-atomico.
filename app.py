@@ -13,11 +13,13 @@ from ui.session_persistence import restore_session_snapshot, save_session_snapsh
 from security.permissions import has_permission, set_session_role_from_db
 from services.alert_service import get_alert_summary
 from services.backup_service import create_daily_backup_if_needed
+from services.persistent_config_service import restore_persistent_rates_to_db
 
 init_schema()
 run_auto_migrations()
 ensure_transactional_core_schema()
 ensure_rate_config_defaults()
+restore_persistent_rates_to_db("Sistema")
 ensure_extended_permissions()
 restore_session_snapshot()
 try:
@@ -235,6 +237,7 @@ if not visible_menu:
 
 try:
     ensure_rate_config_defaults()
+    restore_persistent_rates_to_db("Sistema")
     config = get_current_config()
 except Exception:
     config = DEFAULT_CONFIG
