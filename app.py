@@ -243,13 +243,15 @@ rate_cols = st.columns(6)
 rate_fields = [
     ("tasa_bcv", "BCV", "Bs/$", "%.2f"),
     ("tasa_binance", "Binance", "Bs/$", "%.2f"),
-    ("iva_perc", "IVA", "%", "%.2f"),
-    ("igtf_perc", "IGTF", "%", "%.2f"),
-    ("banco_perc", "Banco", "%", "%.3f"),
-    ("tasa_kontigo", "Kontigo", "Bs/$", "%.2f"),
+    ("tasa_euro", "Euro", "Bs/€", "%.2f"),
+    ("tasa_menudeo", "Menudeo", "Bs/$", "%.2f"),
+    ("tasa_kontigo_entrada", "Kontigo entrada", "Bs/$", "%.2f"),
+    ("tasa_kontigo_salida", "Kontigo salida", "Bs/$", "%.2f"),
 ]
+legacy_kontigo = _to_float(config, "tasa_kontigo", 0.0)
 for col, (key, label, unit, fmt) in zip(rate_cols, rate_fields):
-    value = _to_float(config, key, float(DEFAULT_CONFIG.get(key, 0)))
+    fallback = legacy_kontigo if key in {"tasa_kontigo_entrada", "tasa_kontigo_salida"} else float(DEFAULT_CONFIG.get(key, 0))
+    value = _to_float(config, key, fallback)
     col.metric(label, f"{fmt % value} {unit}")
 
 cols = st.columns([1, 1, 5])
