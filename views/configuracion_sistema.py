@@ -9,6 +9,7 @@ import streamlit as st
 from database.connection import db_transaction
 from modules.configuracion import get_current_config, DEFAULT_CONFIG, set_config_values
 from services.backup_service import get_backup_status, create_backup
+from views.planeacion_financiera import _render_fondo_monetario
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -17,11 +18,15 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 RATE_FIELDS = [
     ("tasa_bcv", "BCV", "Bs/$", "diaria", 2),
     ("tasa_binance", "Binance", "Bs/$", "variable", 2),
+    ("tasa_euro", "Euro", "Bs/€", "variable", 2),
     ("iva_perc", "IVA", "%", "legal", 2),
     ("igtf_perc", "IGTF", "%", "legal", 2),
     ("banco_perc", "Banco", "%", "variable", 3),
     ("kontigo_perc", "Kontigo", "%", "variable", 3),
 ]
+
+
+RATE_HISTORY_KEYS = "'tasa_bcv','tasa_binance','tasa_euro','iva_perc','igtf_perc','banco_perc','kontigo_perc'"
 
 
 def _secret_exists(name: str) -> bool:
@@ -66,10 +71,10 @@ def _historial_config(limit: int = 50) -> pd.DataFrame:
             if not _table_exists(conn, "historial_config"):
                 return pd.DataFrame()
             return pd.read_sql_query(
-                """
+                f"""
                 SELECT parametro, valor_anterior, valor_nuevo, usuario, fecha
                 FROM historial_config
-                WHERE parametro IN ('tasa_bcv','tasa_binance','iva_perc','igtf_perc','banco_perc','kontigo_perc')
+                WHERE parametro IN ({RATE_HISTORY_KEYS})
                 ORDER BY fecha DESC
                 LIMIT ?
                 """,
@@ -170,9 +175,10 @@ def _render_tasas(usuario: str) -> None:
             )
 
         st.markdown("#### Atajos")
-        a1, a2 = st.columns(2)
+        a1, a2, a3 = st.columns(3)
         usar_binance = a1.checkbox("Usar Binance como referencia para BCV")
         usar_bcv = a2.checkbox("Usar BCV como referencia para Binance")
+        usar_bcv_euro = a3.checkbox("Usar BCV como referencia para Euro")
 
         submitted = st.form_submit_button("💾 Guardar tasas y comisiones", type="primary", use_container_width=True)
         if submitted:
@@ -180,6 +186,8 @@ def _render_tasas(usuario: str) -> None:
                 nuevos["tasa_bcv"] = nuevos["tasa_binance"]
             if usar_bcv:
                 nuevos["tasa_binance"] = nuevos["tasa_bcv"]
+            if usar_bcv_euro:
+                nuevos["tasa_euro"] = nuevos["tasa_bcv"]
             set_config_values(nuevos, usuario)
             create_backup("cambio_tasas", upload_external=True)
             st.success("Tasas actualizadas y respaldo creado.")
@@ -247,6 +255,9 @@ def _render_base_datos() -> None:
         "ventas",
         "cotizaciones",
         "movimientos_tesoreria",
+        "fondos_monetarios",
+        "movimientos_fondos",
+        "conversiones_monetarias",
         "cuentas_por_cobrar",
         "cuentas_por_pagar_proveedores",
         "servicios",
@@ -292,9 +303,10 @@ def render_configuracion_sistema(usuario: str = "Sistema") -> None:
     st.title("⚙️ Configuración del sistema")
     st.caption("Centro de control técnico y administrativo del ERP de Copy Mary.")
 
-    tab_estado, tab_tasas, tab_secrets, tab_negocio, tab_db, tab_mantenimiento = st.tabs([
+    tab_estado, tab_tasas, tab_fondo, tab_secrets, tab_negocio, tab_db, tab_mantenimiento = st.tabs([
         "Estado general",
         "💱 Tasas",
+        "💼 Fondo Monetario",
         "Secrets",
         "Negocio",
         "Base de datos",
@@ -305,6 +317,8 @@ def render_configuracion_sistema(usuario: str = "Sistema") -> None:
         _render_estado_general()
     with tab_tasas:
         _render_tasas(usuario)
+    with tab_fondo:
+        _render_fondo_monetario(usuario)
     with tab_secrets:
         _render_secrets()
     with tab_negocio:
