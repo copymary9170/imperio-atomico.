@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import sqlite3
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -13,7 +14,7 @@ try:
 except Exception:  # pragma: no cover
     st = None
 
-from modules.configuracion import set_config_values
+from database.connection import db_transaction
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 LOCAL_CONFIG_PATH = APP_ROOT / "data" / "persistent_rates_config.json"
@@ -102,6 +103,60 @@ def _normalize_payload(values: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ensure_minimal_config_tables() -> None:
+    with db_transaction() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS configuracion (
+                parametro TEXT PRIMARY KEY,
+                valor TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS historial_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parametro TEXT NOT NULL,
+                valor_anterior TEXT,
+                valor_nuevo TEXT,
+                usuario TEXT,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+
+def _upsert_rates_direct(values: dict[str, Any], usuario: str) -> None:
+    """Direct DB upsert used during app boot so config defaults cannot raise IntegrityError."""
+    if not values:
+        return
+    _ensure_minimal_config_tables()
+    with db_transaction() as conn:
+        for key, value in values.items():
+            if key not in RATE_CONFIG_KEYS:
+                continue
+            new_value = str(value)
+            old = conn.execute("SELECT valor FROM configuracion WHERE parametro=?", (key,)).fetchone()
+            old_value = old["valor"] if old and old["valor"] is not None else None
+            conn.execute(
+                """
+                INSERT INTO configuracion (parametro, valor)
+                VALUES (?, ?)
+                ON CONFLICT(parametro) DO UPDATE SET valor=excluded.valor
+                """,
+                (key, new_value),
+            )
+            if old_value != new_value:
+                conn.execute(
+                    """
+                    INSERT INTO historial_config (parametro, valor_anterior, valor_nuevo, usuario)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (key, old_value, new_value, usuario),
+                )
+
+
 def save_persistent_rates(values: dict[str, Any]) -> tuple[bool, str]:
     """Save rate configuration locally and, when secrets exist, to GitHub."""
     payload = _normalize_payload(values)
@@ -156,5 +211,13 @@ def load_persistent_rates() -> dict[str, Any]:
 
 def restore_persistent_rates_to_db(usuario: str = "Sistema") -> None:
     rates = load_persistent_rates()
-    if rates:
-        set_config_values(rates, usuario)
+    if not rates:
+        return
+    try:
+        _upsert_rates_direct(rates, usuario)
+    except sqlite3.IntegrityError:
+        # A concurrent boot can insert the same defaults. Ignore and let the app continue.
+        pass
+    except Exception:
+        # Rate restore must never stop the ERP from starting.
+        pass
