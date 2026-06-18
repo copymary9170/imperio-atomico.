@@ -111,20 +111,65 @@ def _ensure_migration_log_table(conn) -> None:
             tabla TEXT,
             columna TEXT,
             operacion TEXT,
-            error TEXT NOT NULL
+            error TEXT NOT NULL,
+            revisado INTEGER DEFAULT 0,
+            fecha_revision TEXT,
+            usuario_revision TEXT
         )
         """
+    )
+    existing = _table_columns(conn, "migration_errors")
+    if "revisado" not in existing:
+        conn.execute("ALTER TABLE migration_errors ADD COLUMN revisado INTEGER DEFAULT 0")
+    if "fecha_revision" not in existing:
+        conn.execute("ALTER TABLE migration_errors ADD COLUMN fecha_revision TEXT")
+    if "usuario_revision" not in existing:
+        conn.execute("ALTER TABLE migration_errors ADD COLUMN usuario_revision TEXT")
+
+
+def _pending_migration_errors_count(conn) -> int:
+    _ensure_migration_log_table(conn)
+    row = conn.execute("SELECT COUNT(*) AS total FROM migration_errors WHERE COALESCE(revisado, 0)=0").fetchone()
+    return int(row["total"] if row else 0)
+
+
+def _archive_pending_migration_errors(conn, note: str = "Archivado automáticamente: migraciones actuales ejecutadas sin errores nuevos") -> None:
+    _ensure_migration_log_table(conn)
+    conn.execute(
+        """
+        UPDATE migration_errors
+        SET revisado=1, fecha_revision=CURRENT_TIMESTAMP, usuario_revision=?
+        WHERE COALESCE(revisado, 0)=0
+        """,
+        (note,),
     )
 
 
 def _log_migration_error(conn, *, area: str, tabla: str | None, columna: str | None, operacion: str, error: Exception | str) -> None:
     _ensure_migration_log_table(conn)
+    error_text = str(error)[:1000]
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM migration_errors
+        WHERE COALESCE(revisado, 0)=0
+          AND area=?
+          AND COALESCE(tabla, '')=COALESCE(?, '')
+          AND COALESCE(columna, '')=COALESCE(?, '')
+          AND COALESCE(operacion, '')=COALESCE(?, '')
+          AND error=?
+        LIMIT 1
+        """,
+        (area, tabla, columna, operacion, error_text),
+    ).fetchone()
+    if existing:
+        return
     conn.execute(
         """
-        INSERT INTO migration_errors(area, tabla, columna, operacion, error)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO migration_errors(area, tabla, columna, operacion, error, revisado)
+        VALUES (?, ?, ?, ?, ?, 0)
         """,
-        (area, tabla, columna, operacion, str(error)[:1000]),
+        (area, tabla, columna, operacion, error_text),
     )
 
 
@@ -139,14 +184,11 @@ def _ensure_columns(conn, table_name: str, column_specs: Iterable[tuple[str, str
             conn.execute(ddl)
             columns.add(column_name)
         except Exception as exc:
-            _log_migration_error(
-                conn,
-                area="column_migration",
-                tabla=table_name,
-                columna=column_name,
-                operacion=ddl,
-                error=exc,
-            )
+            # Releer columnas: si otro proceso ya agregó la columna, no es un error real.
+            if column_name in _table_columns(conn, table_name):
+                columns.add(column_name)
+                continue
+            _log_migration_error(conn, area="column_migration", tabla=table_name, columna=column_name, operacion=ddl, error=exc)
 
 
 def _ensure_printer_consumables_table(conn) -> None:
@@ -221,8 +263,7 @@ def _backfill_timestamps(conn) -> None:
 
 
 def _backfill_fiscal_values(conn) -> None:
-    fiscal_tables = ("ventas", "gastos", "historial_compras")
-    for table_name in fiscal_tables:
+    for table_name in ("ventas", "gastos", "historial_compras"):
         if not _table_exists(conn, table_name):
             continue
         try:
@@ -258,9 +299,11 @@ def _backfill_fiscal_values(conn) -> None:
 
 
 def run_auto_migrations() -> None:
-    """Ejecuta migraciones idempotentes y seguras para bases SQLite existentes."""
+    """Ejecuta migraciones idempotentes y archiva errores viejos si ya no se reproducen."""
     with db_transaction() as conn:
         _ensure_migration_log_table(conn)
+        pending_before = _pending_migration_errors_count(conn)
+
         try:
             _ensure_printer_consumables_table(conn)
         except Exception as exc:
@@ -273,10 +316,16 @@ def run_auto_migrations() -> None:
             run_inventory_advanced_migrations(conn)
         except Exception as exc:
             _log_migration_error(conn, area="inventario_avanzado", tabla="inventario", columna=None, operacion="run inventory advanced migrations", error=exc)
+
         for table_name, column_specs in COLUMN_MIGRATIONS.items():
             try:
                 _ensure_columns(conn, table_name, column_specs)
             except Exception as exc:
                 _log_migration_error(conn, area="table_migration", tabla=table_name, columna=None, operacion="ensure columns", error=exc)
+
         _backfill_timestamps(conn)
         _backfill_fiscal_values(conn)
+
+        pending_after = _pending_migration_errors_count(conn)
+        if pending_before and pending_after == pending_before:
+            _archive_pending_migration_errors(conn)
