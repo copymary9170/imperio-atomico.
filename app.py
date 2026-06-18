@@ -246,10 +246,10 @@ rate_fields = [
     ("iva_perc", "IVA", "%", "%.2f"),
     ("igtf_perc", "IGTF", "%", "%.2f"),
     ("banco_perc", "Banco", "%", "%.3f"),
-    ("kontigo_perc", "Kontigo", "%", "%.3f"),
+    ("tasa_kontigo", "Kontigo", "Bs/$", "%.2f"),
 ]
 for col, (key, label, unit, fmt) in zip(rate_cols, rate_fields):
-    value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
+    value = _to_float(config, key, float(DEFAULT_CONFIG.get(key, 0)))
     col.metric(label, f"{fmt % value} {unit}")
 
 cols = st.columns([1, 1, 5])
