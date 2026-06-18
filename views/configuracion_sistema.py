@@ -9,6 +9,7 @@ import streamlit as st
 from database.connection import db_transaction
 from modules.configuracion import get_current_config, DEFAULT_CONFIG, set_config_values
 from services.backup_service import get_backup_status, create_backup
+from services.persistent_config_service import save_persistent_rates
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 
@@ -73,7 +74,6 @@ def _safe_config() -> dict:
         config = get_current_config()
     except Exception:
         config = dict(DEFAULT_CONFIG)
-    # Compatibilidad: si ya existía una sola tasa_kontigo, úsala como valor inicial.
     tasa_kontigo_legacy = config.get("tasa_kontigo", DEFAULT_RATE_VALUES.get("tasa_kontigo", 0.0))
     config.setdefault("tasa_kontigo_entrada", tasa_kontigo_legacy)
     config.setdefault("tasa_kontigo_salida", tasa_kontigo_legacy)
@@ -101,12 +101,19 @@ def _clear_rate_widget_state() -> None:
 
 def _save_config_safely(values: dict, usuario: str, backup_reason: str) -> None:
     set_config_values(values, usuario)
+    ok_persist, persist_msg = save_persistent_rates(values)
     _clear_rate_widget_state()
     try:
         create_backup(backup_reason, upload_external=True)
-        st.success("✅ Configuración guardada y respaldo creado.")
+        if ok_persist:
+            st.success(f"✅ Configuración guardada, persistida y respaldada. {persist_msg}")
+        else:
+            st.warning(f"✅ Configuración guardada en la base. ⚠️ Persistencia externa: {persist_msg}")
     except Exception as exc:
-        st.warning("✅ Configuración guardada. ⚠️ El respaldo falló, pero el cambio de tasa sí quedó registrado.")
+        if ok_persist:
+            st.warning(f"✅ Configuración guardada y persistida. ⚠️ El respaldo falló. {persist_msg}")
+        else:
+            st.warning(f"✅ Configuración guardada en la base. ⚠️ Persistencia externa falló: {persist_msg}")
         st.caption(f"Detalle respaldo: {exc}")
 
 
