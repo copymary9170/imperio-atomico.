@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -19,18 +19,22 @@ RATE_FIELDS = [
     ("tasa_binance", "Binance", "Bs/$", "variable", 2),
     ("tasa_euro", "Euro", "Bs/€", "variable", 2),
     ("tasa_menudeo", "Menudeo", "Bs/$", "variable", 2),
+    ("tasa_kontigo", "Kontigo", "Bs/$", "variable", 2),
     ("iva_perc", "IVA", "%", "legal", 2),
     ("igtf_perc", "IGTF", "%", "legal", 2),
     ("banco_perc", "Banco", "%", "variable", 3),
-    ("kontigo_perc", "Kontigo", "%", "variable", 3),
+    ("kontigo_perc", "Kontigo general", "%", "variable", 3),
     ("kontigo_perc_entrada", "Kontigo entrada", "%", "variable", 3),
     ("kontigo_perc_salida", "Kontigo salida", "%", "variable", 3),
+    ("kontigo_pago_movil_envio_perc", "Pago móvil → Kontigo", "%", "variable", 3),
+    ("kontigo_tarjeta_envio_perc", "Kontigo → tarjeta", "%", "variable", 3),
+    ("kontigo_tarjeta_envio_fija_usd", "Kontigo → tarjeta fija", "$", "variable", 2),
     ("menudeo_comision_perc", "Menudeo comisión", "%", "variable", 3),
     ("menudeo_comision_fija_usd", "Menudeo comisión fija", "$", "variable", 2),
     ("menudeo_minimo_usd", "Menudeo mínimo", "$", "variable", 2),
 ]
 
-RATE_HISTORY_KEYS = "'tasa_bcv','tasa_binance','tasa_euro','tasa_menudeo','iva_perc','igtf_perc','banco_perc','kontigo_perc','kontigo_perc_entrada','kontigo_perc_salida','menudeo_comision_perc','menudeo_comision_fija_usd','menudeo_minimo_usd'"
+RATE_HISTORY_KEYS = "'tasa_bcv','tasa_binance','tasa_euro','tasa_menudeo','tasa_kontigo','iva_perc','igtf_perc','banco_perc','kontigo_perc','kontigo_perc_entrada','kontigo_perc_salida','kontigo_pago_movil_envio_perc','kontigo_tarjeta_envio_perc','kontigo_tarjeta_envio_fija_usd','menudeo_comision_perc','menudeo_comision_fija_usd','menudeo_minimo_usd'"
 
 
 def _secret_exists(name: str) -> bool:
@@ -163,15 +167,72 @@ def _render_number_inputs(fields: list[tuple[str, str, str, str, int]], config: 
     nuevos = {}
     for idx, (key, label, unit, _frecuencia, decimales) in enumerate(fields):
         col = columns[idx % len(columns)]
+        default = 10.0 if key == "menudeo_minimo_usd" else 0.0
         nuevos[key] = col.number_input(
             f"{label} ({unit})",
             min_value=0.0,
-            value=float(_to_float_value(config, key, 10.0 if key == "menudeo_minimo_usd" else 0.0)),
+            value=float(_to_float_value(config, key, default)),
             step=0.01 if decimales <= 2 else 0.001,
             format=f"%.{decimales}f",
             key=f"editar_{key}",
         )
     return nuevos
+
+
+def _render_kontigo_calculator(config: dict) -> None:
+    st.markdown("##### Simulador de ruta Kontigo")
+    st.caption("Esto no registra dinero; solo muestra cuál comisión aplica según el origen o destino.")
+
+    c1, c2, c3 = st.columns(3)
+    ruta = c1.selectbox(
+        "Ruta",
+        [
+            "Efectivo USD → Kontigo",
+            "Pago móvil Bs → Kontigo",
+            "Kontigo → tarjeta compras online",
+        ],
+        key="simulador_ruta_kontigo",
+    )
+    monto = c2.number_input("Monto", min_value=0.0, step=1.0, format="%.2f", key="simulador_monto_kontigo")
+    tasa = c3.number_input(
+        "Tasa Kontigo Bs/$",
+        min_value=0.0,
+        step=0.01,
+        format="%.2f",
+        value=_to_float_value(config, "tasa_kontigo", _to_float_value(config, "tasa_binance", 0.0)),
+        key="simulador_tasa_kontigo",
+    )
+
+    entrada_pct = _to_float_value(config, "kontigo_perc_entrada", _to_float_value(config, "kontigo_perc", 0.0))
+    pago_movil_pct = _to_float_value(config, "kontigo_pago_movil_envio_perc", 0.0)
+    tarjeta_pct = _to_float_value(config, "kontigo_tarjeta_envio_perc", 0.0)
+    tarjeta_fija = _to_float_value(config, "kontigo_tarjeta_envio_fija_usd", 0.0)
+
+    if ruta == "Efectivo USD → Kontigo":
+        bruto_usd = monto
+        comision_entrada = bruto_usd * entrada_pct / 100
+        total_comision = comision_entrada
+        neto = max(bruto_usd - total_comision, 0)
+        detalle = "Solo aplica comisión de entrada a Kontigo."
+    elif ruta == "Pago móvil Bs → Kontigo":
+        bruto_usd = monto / tasa if tasa else 0.0
+        comision_envio = bruto_usd * pago_movil_pct / 100
+        comision_entrada = bruto_usd * entrada_pct / 100
+        total_comision = comision_envio + comision_entrada
+        neto = max(bruto_usd - total_comision, 0)
+        detalle = "Aplica comisión de enviar pago móvil a Kontigo + comisión de entrada."
+    else:
+        bruto_usd = monto
+        comision_tarjeta = bruto_usd * tarjeta_pct / 100
+        total_comision = comision_tarjeta + tarjeta_fija
+        neto = max(bruto_usd - total_comision, 0)
+        detalle = "Aplica comisión para enviar de Kontigo a tarjeta de compras online."
+
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Bruto USD", f"$ {bruto_usd:,.2f}")
+    r2.metric("Comisiones", f"$ {total_comision:,.2f}")
+    r3.metric("Neto estimado", f"$ {neto:,.2f}")
+    st.info(detalle)
 
 
 def _render_tasas(usuario: str) -> None:
@@ -184,6 +245,7 @@ def _render_tasas(usuario: str) -> None:
         ("tasa_binance", "Binance", "Bs/$", "variable", 2),
         ("tasa_euro", "Euro", "Bs/€", "variable", 2),
         ("tasa_menudeo", "Menudeo", "Bs/$", "variable", 2),
+        ("tasa_kontigo", "Kontigo", "Bs/$", "variable", 2),
     ]
     comisiones_generales = [
         ("iva_perc", "IVA", "%", "legal", 2),
@@ -192,8 +254,11 @@ def _render_tasas(usuario: str) -> None:
     ]
     comisiones_kontigo = [
         ("kontigo_perc", "Kontigo general", "%", "variable", 3),
-        ("kontigo_perc_entrada", "Kontigo entrada", "%", "variable", 3),
-        ("kontigo_perc_salida", "Kontigo salida", "%", "variable", 3),
+        ("kontigo_perc_entrada", "Entrada a Kontigo", "%", "variable", 3),
+        ("kontigo_perc_salida", "Salida de Kontigo", "%", "variable", 3),
+        ("kontigo_pago_movil_envio_perc", "Pago móvil Bs → Kontigo", "%", "variable", 3),
+        ("kontigo_tarjeta_envio_perc", "Kontigo → tarjeta", "%", "variable", 3),
+        ("kontigo_tarjeta_envio_fija_usd", "Kontigo → tarjeta fija", "$", "variable", 2),
     ]
     comisiones_menudeo = [
         ("menudeo_comision_perc", "Menudeo comisión", "%", "variable", 3),
@@ -209,13 +274,13 @@ def _render_tasas(usuario: str) -> None:
         nuevos = {}
 
         st.markdown("##### Tasas")
-        nuevos.update(_render_number_inputs(tasas_base, config, st.columns(4)))
+        nuevos.update(_render_number_inputs(tasas_base, config, st.columns(5)))
 
         st.markdown("##### Impuestos y banco")
         nuevos.update(_render_number_inputs(comisiones_generales, config, st.columns(3)))
 
-        st.markdown("##### Kontigo")
-        st.caption("Solo parámetros de configuración. El saldo y los movimientos de Kontigo se registran en Finanzas.")
+        st.markdown("##### Kontigo por ruta")
+        st.caption("Efectivo USD → Kontigo usa solo entrada. Pago móvil Bs → Kontigo usa envío de pago móvil + entrada. Kontigo → tarjeta usa comisión de tarjeta.")
         nuevos.update(_render_number_inputs(comisiones_kontigo, config, st.columns(3)))
 
         st.markdown("##### Menudeo")
@@ -223,11 +288,12 @@ def _render_tasas(usuario: str) -> None:
         nuevos.update(_render_number_inputs(comisiones_menudeo, config, st.columns(3)))
 
         st.markdown("#### Atajos")
-        a1, a2, a3, a4 = st.columns(4)
+        a1, a2, a3, a4, a5 = st.columns(5)
         usar_binance = a1.checkbox("Binance → BCV")
         usar_bcv = a2.checkbox("BCV → Binance")
         usar_bcv_euro = a3.checkbox("BCV → Euro")
         usar_binance_menudeo = a4.checkbox("Binance → Menudeo")
+        usar_binance_kontigo = a5.checkbox("Binance → Kontigo")
 
         submitted = st.form_submit_button("💾 Guardar tasas y comisiones", type="primary", use_container_width=True)
         if submitted:
@@ -239,10 +305,14 @@ def _render_tasas(usuario: str) -> None:
                 nuevos["tasa_euro"] = nuevos["tasa_bcv"]
             if usar_binance_menudeo:
                 nuevos["tasa_menudeo"] = nuevos["tasa_binance"]
+            if usar_binance_kontigo:
+                nuevos["tasa_kontigo"] = nuevos["tasa_binance"]
             set_config_values(nuevos, usuario)
             create_backup("cambio_tasas", upload_external=True)
             st.success("Tasas y comisiones actualizadas con respaldo.")
             st.rerun()
+
+    _render_kontigo_calculator(_safe_config())
 
     st.markdown("#### Alertas de actualización")
     alertas = []
@@ -277,11 +347,7 @@ def _render_secrets() -> None:
         ("APP_SECRET_KEY", "Llave interna de seguridad del ERP."),
         ("DATABASE_URL", "Base externa PostgreSQL/Supabase, opcional."),
     ]:
-        rows.append({
-            "secret": name,
-            "estado": "✅ Configurado" if _secret_exists(name) else "❌ Falta",
-            "uso": desc,
-        })
+        rows.append({"secret": name, "estado": "✅ Configurado" if _secret_exists(name) else "❌ Falta", "uso": desc})
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.caption("Los valores no se muestran por seguridad. Solo se valida si existen.")
 
@@ -289,34 +355,22 @@ def _render_secrets() -> None:
 def _render_negocio() -> None:
     st.subheader("Datos del negocio")
     config = _safe_config()
-
     c1, c2 = st.columns(2)
     c1.text_input("Nombre comercial", value=str(config.get("nombre_negocio", config.get("empresa_nombre", "Copy Mary"))), disabled=True)
     c2.text_input("Sistema", value="Imperio Atómico ERP", disabled=True)
-
     st.info("La edición de datos del negocio puede agregarse después. Las tasas ya se editan en la pestaña 💱 Tasas.")
 
 
 def _render_base_datos() -> None:
     st.subheader("Base de datos y tablas")
     tablas = [
-        "clientes",
-        "proveedores",
-        "inventario",
-        "ventas",
-        "cotizaciones",
-        "movimientos_tesoreria",
-        "fondos_monetarios",
-        "movimientos_fondos",
-        "conversiones_monetarias",
-        "cuentas_por_cobrar",
-        "cuentas_por_pagar_proveedores",
-        "servicios",
-        "stock",
+        "clientes", "proveedores", "inventario", "ventas", "cotizaciones",
+        "movimientos_tesoreria", "fondos_monetarios", "movimientos_fondos",
+        "conversiones_monetarias", "cuentas_por_cobrar", "cuentas_por_pagar_proveedores",
+        "servicios", "stock",
     ]
     rows = [{"tabla": t, "registros": _count_table(t)} for t in tablas]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
     backup = get_backup_status()
     st.markdown("#### Información técnica")
     st.code(
@@ -341,7 +395,6 @@ def _render_mantenimiento() -> None:
         5. Revisar errores en Streamlit Cloud si la app no inicia.
         """
     )
-
     if st.button("🧪 Crear respaldo de mantenimiento", use_container_width=True):
         nuevo = create_backup("mantenimiento", upload_external=True)
         if nuevo:
@@ -353,16 +406,9 @@ def _render_mantenimiento() -> None:
 def render_configuracion_sistema(usuario: str = "Sistema") -> None:
     st.title("⚙️ Configuración del sistema")
     st.caption("Centro de control técnico y administrativo del ERP de Copy Mary.")
-
     tab_estado, tab_tasas, tab_secrets, tab_negocio, tab_db, tab_mantenimiento = st.tabs([
-        "Estado general",
-        "💱 Tasas y comisiones",
-        "Secrets",
-        "Negocio",
-        "Base de datos",
-        "Mantenimiento",
+        "Estado general", "💱 Tasas y comisiones", "Secrets", "Negocio", "Base de datos", "Mantenimiento"
     ])
-
     with tab_estado:
         _render_estado_general()
     with tab_tasas:
