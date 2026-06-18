@@ -17,13 +17,14 @@ RATE_FIELDS = [
     ("tasa_binance", "Binance", "Bs/$", "variable", 2),
     ("tasa_euro", "Euro", "Bs/€", "variable", 2),
     ("tasa_menudeo", "Menudeo", "Bs/$", "variable", 2),
-    ("tasa_kontigo", "Kontigo", "Bs/$", "variable", 2),
+    ("tasa_kontigo_entrada", "Kontigo entrada", "Bs/$", "variable", 2),
+    ("tasa_kontigo_salida", "Kontigo salida", "Bs/$", "variable", 2),
     ("iva_perc", "IVA", "%", "legal", 2),
     ("igtf_perc", "IGTF", "%", "legal", 2),
     ("banco_perc", "Banco", "%", "variable", 3),
     ("kontigo_perc", "Kontigo general", "%", "variable", 3),
-    ("kontigo_perc_entrada", "Kontigo entrada", "%", "variable", 3),
-    ("kontigo_perc_salida", "Kontigo salida", "%", "variable", 3),
+    ("kontigo_perc_entrada", "Kontigo comisión entrada", "%", "variable", 3),
+    ("kontigo_perc_salida", "Kontigo comisión salida", "%", "variable", 3),
     ("kontigo_pago_movil_envio_perc", "Pago móvil → Kontigo", "%", "variable", 3),
     ("kontigo_tarjeta_envio_perc", "Kontigo → tarjeta", "%", "variable", 3),
     ("kontigo_tarjeta_envio_fija_usd", "Kontigo → tarjeta fija", "$", "variable", 2),
@@ -32,13 +33,15 @@ RATE_FIELDS = [
     ("menudeo_minimo_usd", "Menudeo mínimo", "$", "variable", 2),
 ]
 
-RATE_HISTORY_KEYS = "'tasa_bcv','tasa_binance','tasa_euro','tasa_menudeo','tasa_kontigo','iva_perc','igtf_perc','banco_perc','kontigo_perc','kontigo_perc_entrada','kontigo_perc_salida','kontigo_pago_movil_envio_perc','kontigo_tarjeta_envio_perc','kontigo_tarjeta_envio_fija_usd','menudeo_comision_perc','menudeo_comision_fija_usd','menudeo_minimo_usd'"
+RATE_HISTORY_KEYS = "'tasa_bcv','tasa_binance','tasa_euro','tasa_menudeo','tasa_kontigo','tasa_kontigo_entrada','tasa_kontigo_salida','iva_perc','igtf_perc','banco_perc','kontigo_perc','kontigo_perc_entrada','kontigo_perc_salida','kontigo_pago_movil_envio_perc','kontigo_tarjeta_envio_perc','kontigo_tarjeta_envio_fija_usd','menudeo_comision_perc','menudeo_comision_fija_usd','menudeo_minimo_usd'"
 DEFAULT_RATE_VALUES = {
     "tasa_bcv": 36.50,
     "tasa_binance": 38.00,
     "tasa_euro": 0.0,
     "tasa_menudeo": 0.0,
     "tasa_kontigo": 0.0,
+    "tasa_kontigo_entrada": 0.0,
+    "tasa_kontigo_salida": 0.0,
     "menudeo_minimo_usd": 10.0,
 }
 
@@ -70,6 +73,10 @@ def _safe_config() -> dict:
         config = get_current_config()
     except Exception:
         config = dict(DEFAULT_CONFIG)
+    # Compatibilidad: si ya existía una sola tasa_kontigo, úsala como valor inicial.
+    tasa_kontigo_legacy = config.get("tasa_kontigo", DEFAULT_RATE_VALUES.get("tasa_kontigo", 0.0))
+    config.setdefault("tasa_kontigo_entrada", tasa_kontigo_legacy)
+    config.setdefault("tasa_kontigo_salida", tasa_kontigo_legacy)
     for key, _label, _unit, _freq, _dec in RATE_FIELDS:
         config.setdefault(key, DEFAULT_RATE_VALUES.get(key, 0.0))
     return config
@@ -210,39 +217,37 @@ def _render_number_inputs(fields: list[tuple[str, str, str, str, int]], config: 
 
 def _render_kontigo_calculator(config: dict) -> None:
     st.markdown("##### Simulador de ruta Kontigo")
-    st.caption("Esto no registra dinero; solo muestra cuál comisión aplica según el origen o destino.")
-    c1, c2, c3 = st.columns(3)
+    st.caption("Esto no registra dinero; solo muestra cuál tasa y comisión aplica según el origen o destino.")
+    c1, c2 = st.columns(2)
     ruta = c1.selectbox("Ruta", ["Efectivo USD → Kontigo", "Pago móvil Bs → Kontigo", "Kontigo → tarjeta compras online"], key="simulador_ruta_kontigo")
     monto = c2.number_input("Monto", min_value=0.0, step=1.0, format="%.2f", key="simulador_monto_kontigo")
-    tasa = c3.number_input(
-        "Tasa Kontigo Bs/$",
-        min_value=0.0,
-        step=0.01,
-        format="%.2f",
-        value=_to_float_value(config, "tasa_kontigo", _to_float_value(config, "tasa_binance", 0.0)),
-        key="simulador_tasa_kontigo",
-    )
+    tasa_entrada = _to_float_value(config, "tasa_kontigo_entrada", _to_float_value(config, "tasa_kontigo", 0.0))
+    tasa_salida = _to_float_value(config, "tasa_kontigo_salida", _to_float_value(config, "tasa_kontigo", 0.0))
     entrada_pct = _to_float_value(config, "kontigo_perc_entrada", _to_float_value(config, "kontigo_perc", 0.0))
     pago_movil_pct = _to_float_value(config, "kontigo_pago_movil_envio_perc", 0.0)
     tarjeta_pct = _to_float_value(config, "kontigo_tarjeta_envio_perc", 0.0)
     tarjeta_fija = _to_float_value(config, "kontigo_tarjeta_envio_fija_usd", 0.0)
     if ruta == "Efectivo USD → Kontigo":
         bruto_usd = monto
+        tasa_usada = tasa_entrada
         total_comision = bruto_usd * entrada_pct / 100
-        detalle = "Solo aplica comisión de entrada a Kontigo."
+        detalle = "Usa tasa Kontigo entrada. Solo aplica comisión de entrada a Kontigo."
     elif ruta == "Pago móvil Bs → Kontigo":
-        bruto_usd = monto / tasa if tasa else 0.0
+        tasa_usada = tasa_entrada
+        bruto_usd = monto / tasa_usada if tasa_usada else 0.0
         total_comision = (bruto_usd * pago_movil_pct / 100) + (bruto_usd * entrada_pct / 100)
-        detalle = "Aplica comisión de enviar pago móvil a Kontigo + comisión de entrada."
+        detalle = "Usa tasa Kontigo entrada. Aplica comisión de enviar pago móvil a Kontigo + comisión de entrada."
     else:
+        tasa_usada = tasa_salida
         bruto_usd = monto
         total_comision = (bruto_usd * tarjeta_pct / 100) + tarjeta_fija
-        detalle = "Aplica comisión para enviar de Kontigo a tarjeta de compras online."
+        detalle = "Usa tasa Kontigo salida. Aplica comisión para enviar de Kontigo a tarjeta de compras online."
     neto = max(bruto_usd - total_comision, 0)
-    r1, r2, r3 = st.columns(3)
-    r1.metric("Bruto USD", f"$ {bruto_usd:,.2f}")
-    r2.metric("Comisiones", f"$ {total_comision:,.2f}")
-    r3.metric("Neto estimado", f"$ {neto:,.2f}")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Tasa usada", f"{tasa_usada:,.2f} Bs/$")
+    r2.metric("Bruto USD", f"$ {bruto_usd:,.2f}")
+    r3.metric("Comisiones", f"$ {total_comision:,.2f}")
+    r4.metric("Neto estimado", f"$ {neto:,.2f}")
     st.info(detalle)
 
 
@@ -255,13 +260,14 @@ def _render_tasas(usuario: str) -> None:
         ("tasa_binance", "Binance", "Bs/$", "variable", 2),
         ("tasa_euro", "Euro", "Bs/€", "variable", 2),
         ("tasa_menudeo", "Menudeo", "Bs/$", "variable", 2),
-        ("tasa_kontigo", "Kontigo", "Bs/$", "variable", 2),
+        ("tasa_kontigo_entrada", "Kontigo entrada", "Bs/$", "variable", 2),
+        ("tasa_kontigo_salida", "Kontigo salida", "Bs/$", "variable", 2),
     ]
     comisiones_generales = [("iva_perc", "IVA", "%", "legal", 2), ("igtf_perc", "IGTF", "%", "legal", 2), ("banco_perc", "Banco", "%", "variable", 3)]
     comisiones_kontigo = [
         ("kontigo_perc", "Kontigo general", "%", "variable", 3),
-        ("kontigo_perc_entrada", "Entrada a Kontigo", "%", "variable", 3),
-        ("kontigo_perc_salida", "Salida de Kontigo", "%", "variable", 3),
+        ("kontigo_perc_entrada", "Comisión entrada", "%", "variable", 3),
+        ("kontigo_perc_salida", "Comisión salida", "%", "variable", 3),
         ("kontigo_pago_movil_envio_perc", "Pago móvil Bs → Kontigo", "%", "variable", 3),
         ("kontigo_tarjeta_envio_perc", "Kontigo → tarjeta", "%", "variable", 3),
         ("kontigo_tarjeta_envio_fija_usd", "Kontigo → tarjeta fija", "$", "variable", 2),
@@ -273,22 +279,23 @@ def _render_tasas(usuario: str) -> None:
     with st.form("form_editar_tasas"):
         nuevos = {}
         st.markdown("##### Tasas")
-        nuevos.update(_render_number_inputs(tasas_base, config, st.columns(5)))
+        nuevos.update(_render_number_inputs(tasas_base, config, st.columns(3)))
         st.markdown("##### Impuestos y banco")
         nuevos.update(_render_number_inputs(comisiones_generales, config, st.columns(3)))
         st.markdown("##### Kontigo por ruta")
-        st.caption("Efectivo USD → Kontigo usa solo entrada. Pago móvil Bs → Kontigo usa envío de pago móvil + entrada. Kontigo → tarjeta usa comisión de tarjeta.")
+        st.caption("Entrada: cuando metes efectivo USD o pago móvil Bs a Kontigo. Salida: cuando sacas de Kontigo o envías a tarjeta para compras online.")
         nuevos.update(_render_number_inputs(comisiones_kontigo, config, st.columns(3)))
         st.markdown("##### Menudeo")
         st.caption("Úsalo para calcular compras por menudeo: tasa, comisión fija, comisión porcentual y mínimo requerido.")
         nuevos.update(_render_number_inputs(comisiones_menudeo, config, st.columns(3)))
         st.markdown("#### Atajos")
-        a1, a2, a3, a4, a5 = st.columns(5)
+        a1, a2, a3, a4, a5, a6 = st.columns(6)
         usar_binance = a1.checkbox("Binance → BCV")
         usar_bcv = a2.checkbox("BCV → Binance")
         usar_bcv_euro = a3.checkbox("BCV → Euro")
         usar_binance_menudeo = a4.checkbox("Binance → Menudeo")
-        usar_binance_kontigo = a5.checkbox("Binance → Kontigo")
+        usar_binance_kontigo_entrada = a5.checkbox("Binance → K entrada")
+        usar_binance_kontigo_salida = a6.checkbox("Binance → K salida")
         submitted = st.form_submit_button("💾 Guardar tasas y comisiones", type="primary", use_container_width=True)
         if submitted:
             if usar_binance:
@@ -299,8 +306,10 @@ def _render_tasas(usuario: str) -> None:
                 nuevos["tasa_euro"] = nuevos["tasa_bcv"]
             if usar_binance_menudeo:
                 nuevos["tasa_menudeo"] = nuevos["tasa_binance"]
-            if usar_binance_kontigo:
-                nuevos["tasa_kontigo"] = nuevos["tasa_binance"]
+            if usar_binance_kontigo_entrada:
+                nuevos["tasa_kontigo_entrada"] = nuevos["tasa_binance"]
+            if usar_binance_kontigo_salida:
+                nuevos["tasa_kontigo_salida"] = nuevos["tasa_binance"]
             _save_config_safely(nuevos, usuario, "cambio_tasas")
             st.rerun()
     _render_kontigo_calculator(_safe_config())
