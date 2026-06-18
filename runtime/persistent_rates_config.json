@@ -1,0 +1,24 @@
+{
+  "format": "imperio-atomico-persistent-rates-v1",
+  "updated_at": "2026-06-18T22:44:22",
+  "rates": {
+    "tasa_bcv": 602.33,
+    "tasa_binance": 38.0,
+    "tasa_euro": 0.0,
+    "tasa_menudeo": 0.0,
+    "tasa_kontigo_entrada": 0.0,
+    "tasa_kontigo_salida": 0.0,
+    "iva_perc": 16.0,
+    "igtf_perc": 3.0,
+    "banco_perc": 0.5,
+    "kontigo_perc": 5.0,
+    "kontigo_perc_entrada": 5.0,
+    "kontigo_perc_salida": 5.0,
+    "kontigo_pago_movil_envio_perc": 0.0,
+    "kontigo_tarjeta_envio_perc": 0.0,
+    "kontigo_tarjeta_envio_fija_usd": 0.0,
+    "menudeo_comision_perc": 0.0,
+    "menudeo_comision_fija_usd": 0.0,
+    "menudeo_minimo_usd": 10.0
+  }
+}
