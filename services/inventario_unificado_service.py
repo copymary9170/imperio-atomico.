@@ -13,14 +13,35 @@ UNIDADES_BASE = [
     "g", "kg", "mg", "ml", "L", "cm", "m", "cm²", "m²", "cm³", "m³",
 ]
 
+CAMPOS_FICHA_AVANZADA: dict[str, str] = {
+    "marca": "TEXT",
+    "color": "TEXT",
+    "tamano": "TEXT",
+    "gramaje": "TEXT",
+    "acabado": "TEXT",
+    "unidad_compra": "TEXT",
+    "contenido_compra": "REAL NOT NULL DEFAULT 0",
+    "proveedor_principal": "TEXT",
+    "ubicacion": "TEXT",
+    "stock_ideal": "REAL NOT NULL DEFAULT 0",
+    "stock_maximo": "REAL NOT NULL DEFAULT 0",
+    "punto_reorden": "REAL NOT NULL DEFAULT 0",
+    "observaciones": "TEXT",
+}
+
+
+def _table_columns(conn: Any, table_name: str) -> set[str]:
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
 
 def ensure_inventario_unificado_schema() -> None:
     with db_transaction() as conn:
-        cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+        cols = _table_columns(conn, "inventario")
         migrations = {
             "tipo_uso": "TEXT NOT NULL DEFAULT 'Ambos'",
             "unidad_base": "TEXT",
             "permite_fraccionamiento": "INTEGER NOT NULL DEFAULT 1",
+            **CAMPOS_FICHA_AVANZADA,
         }
         for name, ddl in migrations.items():
             if name not in cols:
@@ -61,6 +82,19 @@ def listar_inventario_unificado(activos_only: bool = True) -> pd.DataFrame:
                    COALESCE(stock_minimo,0) AS stock_minimo,
                    COALESCE(costo_unitario_usd,0) AS costo_unitario_usd,
                    COALESCE(precio_venta_usd,0) AS precio_venta_usd,
+                   COALESCE(marca,'') AS marca,
+                   COALESCE(color,'') AS color,
+                   COALESCE(tamano,'') AS tamano,
+                   COALESCE(gramaje,'') AS gramaje,
+                   COALESCE(acabado,'') AS acabado,
+                   COALESCE(unidad_compra,'') AS unidad_compra,
+                   COALESCE(contenido_compra,0) AS contenido_compra,
+                   COALESCE(proveedor_principal,'') AS proveedor_principal,
+                   COALESCE(ubicacion,'') AS ubicacion,
+                   COALESCE(stock_ideal,0) AS stock_ideal,
+                   COALESCE(stock_maximo,0) AS stock_maximo,
+                   COALESCE(punto_reorden,0) AS punto_reorden,
+                   COALESCE(observaciones,'') AS observaciones,
                    COALESCE(estado,'activo') AS estado
             FROM inventario
             {where}
@@ -112,14 +146,23 @@ def crear_item_unificado(data: dict[str, Any], usuario: str) -> int:
             INSERT INTO inventario(
                 usuario, sku, nombre, categoria, unidad, unidad_base, tipo_uso,
                 permite_fraccionamiento, stock_actual, stock_minimo,
-                costo_unitario_usd, precio_venta_usd, estado
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')
+                costo_unitario_usd, precio_venta_usd, marca, color, tamano,
+                gramaje, acabado, unidad_compra, contenido_compra,
+                proveedor_principal, ubicacion, stock_ideal, stock_maximo,
+                punto_reorden, observaciones, estado
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')
             """,
             (
                 usuario, sku, nombre, clean_text(data.get("categoria") or "General"),
                 unidad, unidad, tipo_uso, 1 if data.get("permite_fraccionamiento", True) else 0,
                 float(data.get("stock_actual") or 0), float(data.get("stock_minimo") or 0),
                 float(data.get("costo_unitario_usd") or 0), float(data.get("precio_venta_usd") or 0),
+                clean_text(data.get("marca")), clean_text(data.get("color")), clean_text(data.get("tamano")),
+                clean_text(data.get("gramaje")), clean_text(data.get("acabado")), clean_text(data.get("unidad_compra")),
+                float(data.get("contenido_compra") or 0), clean_text(data.get("proveedor_principal")),
+                clean_text(data.get("ubicacion")), float(data.get("stock_ideal") or 0),
+                float(data.get("stock_maximo") or 0), float(data.get("punto_reorden") or 0),
+                clean_text(data.get("observaciones")),
             ),
         )
         return int(cur.lastrowid)
