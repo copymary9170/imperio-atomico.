@@ -17,6 +17,28 @@ from services.facturas_compra_service import (
 from services.materia_prima_service import listar_materia_prima
 from services.reventa_service import listar_mercancia_reventa
 
+UNIDADES_FACTURA = [
+    "unidad",
+    "paquete",
+    "caja",
+    "resma",
+    "hoja",
+    "pliego",
+    "rollo",
+    "g",
+    "kg",
+    "mg",
+    "ml",
+    "L",
+    "cm",
+    "m",
+    "cm²",
+    "m²",
+    "cm³",
+    "m³",
+    "otro",
+]
+
 
 def _label_materia_prima(row: pd.Series) -> str:
     return f"#{int(row['id'])} · {row['nombre']} · stock {float(row['stock_actual'] or 0):g} {row['unidad']}"
@@ -24,6 +46,14 @@ def _label_materia_prima(row: pd.Series) -> str:
 
 def _label_reventa(row: pd.Series) -> str:
     return f"#{int(row['id'])} · {row['nombre']} · stock {float(row['stock_actual'] or 0):g} {row['unidad']}"
+
+
+def _unidad_options(unidad_default: str) -> list[str]:
+    unidad = str(unidad_default or "unidad").strip() or "unidad"
+    opciones = list(UNIDADES_FACTURA)
+    if unidad not in opciones:
+        opciones.insert(0, unidad)
+    return opciones
 
 
 def _render_registrar_abono_cxp(usuario: str, cxp: pd.DataFrame) -> int | None:
@@ -115,15 +145,30 @@ def render_facturas_compra(usuario: str) -> None:
             else:
                 st.warning("No hay mercancía para reventa creada. Créala primero en Inventario / Almacén → Mercancía reventa.")
 
-        c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
+        c1, c2, c3, c4 = st.columns([3, 1, 1.2, 1])
         descripcion = c1.text_input("Descripción", value=descripcion_default, placeholder="Ej: lápices, foami, papel bond, impresora HP 580")
         cantidad = c2.number_input("Cantidad", min_value=0.0001, value=1.0, step=1.0, format="%.4f", key="fc_cantidad")
-        unidad = c3.text_input("Unidad", value=unidad_default)
+        unidad_opciones = _unidad_options(unidad_default)
+        unidad_seleccion = c3.selectbox(
+            "Unidad",
+            unidad_opciones,
+            index=unidad_opciones.index(str(unidad_default or "unidad")) if str(unidad_default or "unidad") in unidad_opciones else 0,
+            key="fc_unidad_select",
+            help="Puedes registrar por unidad, gramos, kg, ml, litros, cm, metros, m², cm², etc.",
+        )
+        if unidad_seleccion == "otro":
+            unidad = c3.text_input("Unidad personalizada", placeholder="Ej: yardas, docena, pieza", key="fc_unidad_otro")
+        else:
+            unidad = unidad_seleccion
         subtotal_linea = c4.number_input("Subtotal USD", min_value=0.0, value=0.0, step=1.0, format="%.4f", key="fc_subtotal_linea")
+
+        st.caption("Unidades disponibles: g, kg, ml, L, cm, m, cm², m², cm³, m³, unidad, hoja, pliego, resma, rollo y más.")
 
         if st.button("➕ Agregar línea", use_container_width=True):
             if not descripcion.strip() or subtotal_linea <= 0:
                 st.error("La línea necesita descripción y subtotal mayor a cero.")
+            elif not str(unidad or "").strip():
+                st.error("Indica la unidad de medida de la línea.")
             elif tipo_linea == "Materia prima" and not inventario_id:
                 st.error("Selecciona una materia prima válida.")
             elif tipo_linea == "Mercancia para reventa" and not mercancia_reventa_id:
@@ -137,7 +182,7 @@ def render_facturas_compra(usuario: str) -> None:
                         "descripcion": descripcion,
                         "item": descripcion,
                         "cantidad": float(cantidad),
-                        "unidad": unidad,
+                        "unidad": str(unidad).strip(),
                         "subtotal_usd": float(subtotal_linea),
                     }
                 )
@@ -250,29 +295,13 @@ def render_facturas_compra(usuario: str) -> None:
                 st.info("Aún no hay abonos registrados.")
             else:
                 st.dataframe(historial_abonos, use_container_width=True, hide_index=True)
+            return
+
+        st.dataframe(cxp, use_container_width=True, hide_index=True)
+        _render_registrar_abono_cxp(usuario, cxp)
+        historial_abonos = listar_abonos_factura_compra(limit=100)
+        st.markdown("##### Historial reciente de abonos")
+        if historial_abonos.empty:
+            st.info("Aún no hay abonos registrados.")
         else:
-            total_pendiente = float(pd.to_numeric(cxp["pendiente_usd"], errors="coerce").fillna(0).sum())
-            c1, c2 = st.columns(2)
-            c1.metric("Facturas pendientes", len(cxp))
-            c2.metric("Total por pagar", f"${total_pendiente:,.2f}")
-            st.dataframe(cxp, use_container_width=True, hide_index=True)
-            factura_seleccionada_id = _render_registrar_abono_cxp(usuario, cxp)
-
-            st.markdown("##### Historial de abonos")
-            col_hist_1, col_hist_2 = st.columns([1, 2])
-            filtro = col_hist_1.selectbox("Ver", ["Todos los abonos", "Solo factura seleccionada"], key="cxp_historial_abonos_filtro")
-            if filtro == "Solo factura seleccionada" and factura_seleccionada_id:
-                historial_abonos = listar_abonos_factura_compra(int(factura_seleccionada_id), limit=100)
-                col_hist_2.caption(f"Mostrando abonos de la factura #{factura_seleccionada_id}")
-            else:
-                historial_abonos = listar_abonos_factura_compra(limit=100)
-                col_hist_2.caption("Mostrando los últimos 100 abonos registrados")
-
-            if historial_abonos.empty:
-                st.info("Aún no hay abonos registrados.")
-            else:
-                total_abonado = float(pd.to_numeric(historial_abonos["monto_usd"], errors="coerce").fillna(0).sum())
-                st.metric("Total abonado mostrado", f"${total_abonado:,.2f}")
-                st.dataframe(historial_abonos, use_container_width=True, hide_index=True)
-
-    st.caption(f"Usuario: {usuario}")
+            st.dataframe(historial_abonos, use_container_width=True, hide_index=True)
