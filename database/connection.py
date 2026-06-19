@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator, Iterable
+from typing import Generator
 
 
 def resolve_db_path() -> Path:
@@ -43,13 +43,26 @@ def get_connection() -> sqlite3.Connection:
 
 @contextmanager
 def db_transaction() -> Generator[sqlite3.Connection, None, None]:
-    """Atomic transaction helper with rollback on any failure."""
+    """Atomic transaction helper with rollback and remote persistence after writes."""
     conn = get_connection()
+    changed = False
     try:
+        before = conn.total_changes
         yield conn
         conn.commit()
+        changed = conn.total_changes > before
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
+
+    if changed and os.getenv("IMPERIO_DISABLE_AUTO_PERSIST", "0") != "1":
+        try:
+            from services.backup_service import persist_database_snapshot
+
+            persist_database_snapshot("auto_cambio")
+        except Exception:
+            # El cambio local ya fue confirmado. El estado del respaldo se mostrará
+            # en la pantalla de Respaldo para que el usuario pueda reintentarlo.
+            pass
