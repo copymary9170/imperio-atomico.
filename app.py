@@ -4,7 +4,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Imperio Atómico ERP", layout="wide", page_icon="⚛️")
 
-from services.backup_service import restore_remote_database_if_needed
+from services.backup_service import create_daily_backup_if_needed, restore_remote_database_if_needed
 
 try:
     restore_remote_database_if_needed()
@@ -19,7 +19,6 @@ from security.permission_extensions import ensure_extended_permissions
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
 from services.alert_service import get_alert_summary
-from services.backup_service import create_daily_backup_if_needed
 from services.persistent_config_service import restore_persistent_rates_to_db
 
 init_schema()
@@ -101,15 +100,9 @@ from views.legal_hub import render_legal_hub
 from views.nomina_trabajadores import render_nomina_trabajadores
 from views.publicaciones_marketing import render_publicaciones_marketing
 from views.dia_caja import render_dia_caja
-from views.nucleo_transaccional import render_nucleo_transaccional
 from modules.mermas import render_mermas
 from modules.configuracion import get_current_config, DEFAULT_CONFIG, _to_float
-from views.erp_nuevos_modulos import (
-    render_costeo_industrial,
-    render_mantenimiento_activos,
-    render_control_calidad,
-    render_rrhh,
-)
+from views.erp_nuevos_modulos import render_costeo_industrial, render_mantenimiento_activos, render_control_calidad, render_rrhh
 
 usuario = st.session_state.get("usuario", "Sistema")
 user_role = st.session_state.get("rol", "Operator")
@@ -146,106 +139,119 @@ def render_produccion_unificada(usuario: str) -> None:
 
 def render_costeo_margenes_unificado(usuario: str) -> None:
     st.title("🧮 Costeo y Márgenes")
-    tab_simple, tab_real, tab_industrial, tab_bom, tab_rentabilidad = st.tabs([
-        "Costeo simple", "🖨️ Costeo real por impresora", "Costeo industrial", "📝 BOM", "📈 Rentabilidad"
-    ])
-    with tab_simple:
-        render_costeo(usuario)
-    with tab_real:
-        render_costeo_impresion_real(usuario)
-    with tab_industrial:
-        render_costeo_industrial(usuario)
-    with tab_bom:
-        render_fichas_tecnicas_bom(usuario)
-    with tab_rentabilidad:
-        render_rentabilidad(usuario)
+    tab_simple, tab_real, tab_industrial, tab_bom, tab_rentabilidad = st.tabs(["Costeo simple", "🖨️ Costeo real por impresora", "Costeo industrial", "📝 BOM", "📈 Rentabilidad"])
+    with tab_simple: render_costeo(usuario)
+    with tab_real: render_costeo_impresion_real(usuario)
+    with tab_industrial: render_costeo_industrial(usuario)
+    with tab_bom: render_fichas_tecnicas_bom(usuario)
+    with tab_rentabilidad: render_rentabilidad(usuario)
 
 
 def render_activos_unificado(usuario: str) -> None:
     st.title("🏗️ Activos")
-    tab_operacion, tab_comprados, tab_consumibles, tab_mantenimiento, tab_patrimonial = st.tabs([
-        "🖥️ Equipos", "🧾 Comprados por factura", "🔗 Consumibles por impresora", "🛠️ Mantenimiento", "🧾 Patrimonio"
-    ])
-    with tab_operacion:
-        render_activos(usuario)
-    with tab_comprados:
-        render_activos_comprados(usuario)
-    with tab_consumibles:
-        render_impresora_consumibles(usuario)
-    with tab_mantenimiento:
-        render_mantenimiento_activos(usuario)
-    with tab_patrimonial:
-        render_activos_patrimonial(usuario)
+    tab_operacion, tab_comprados, tab_consumibles, tab_mantenimiento, tab_patrimonial = st.tabs(["🖥️ Equipos", "🧾 Comprados por factura", "🔗 Consumibles por impresora", "🛠️ Mantenimiento", "🧾 Patrimonio"])
+    with tab_operacion: render_activos(usuario)
+    with tab_comprados: render_activos_comprados(usuario)
+    with tab_consumibles: render_impresora_consumibles(usuario)
+    with tab_mantenimiento: render_mantenimiento_activos(usuario)
+    with tab_patrimonial: render_activos_patrimonial(usuario)
 
 
 def render_finanzas_unificado(usuario: str) -> None:
     st.title("💼 Finanzas")
-    tab_plan, tab_estado, tab_cxc, tab_cxp, tab_gastos, tab_presupuesto = st.tabs([
-        "Planeación", "📊 Estado de resultados", "💰 Cuentas por cobrar", "💸 Cuentas por pagar", "📌 Gastos operativos", "📅 Presupuesto / Equilibrio"
-    ])
-    with tab_plan:
-        render_planeacion_financiera(usuario)
-    with tab_estado:
-        render_estado_resultados(usuario)
-    with tab_cxc:
-        render_cuentas_por_cobrar(usuario)
-    with tab_cxp:
-        render_cuentas_por_pagar(usuario)
-    with tab_gastos:
-        render_gastos_operativos(usuario)
-    with tab_presupuesto:
-        render_presupuesto_equilibrio(usuario)
+    tabs = st.tabs(["Planeación", "📊 Estado", "💰 CXC", "💸 CXP", "📌 Gastos", "📅 Presupuesto"])
+    with tabs[0]: render_planeacion_financiera(usuario)
+    with tabs[1]: render_estado_resultados(usuario)
+    with tabs[2]: render_cuentas_por_cobrar(usuario)
+    with tabs[3]: render_cuentas_por_pagar(usuario)
+    with tabs[4]: render_gastos_operativos(usuario)
+    with tabs[5]: render_presupuesto_equilibrio(usuario)
 
 
-def render_contactos_unificado(usuario: str) -> None:
-    st.title("👥 Contactos")
-    tab_clientes, tab_contactos = st.tabs(["Clientes", "Contactos"])
-    with tab_clientes:
-        render_clientes(usuario)
-    with tab_contactos:
-        render_contactos(usuario)
+def render_marketing_unificado(usuario: str) -> None:
+    st.title("📣 Marketing")
+    render_publicaciones_marketing(usuario)
 
 
-def render_configuracion_unificada(usuario: str) -> None:
-    st.title("⚙️ Configuración")
-    tab_sistema, tab_respaldo = st.tabs(["Sistema", "💾 Respaldo"])
-    with tab_sistema:
-        render_configuracion_sistema(usuario)
-    with tab_respaldo:
-        render_respaldo(usuario)
+st.markdown("""
+<style>
+section[data-testid="stSidebar"] {display:none !important;}
+.block-container {padding-top:1rem; max-width:1540px;}
+div[role="radiogroup"] {gap:.45rem; flex-wrap:wrap; align-items:center;}
+div[role="radiogroup"] label {border:1px solid #dce5ef;border-radius:999px;padding:.42rem .92rem;background:#fff;}
+.top-shell {background:linear-gradient(135deg,#073b63,#0f4c81,#20b8b8);color:white;border-radius:24px;padding:1.25rem 1.35rem;margin-bottom:1rem;}
+.top-header {display:flex;align-items:center;justify-content:space-between;gap:1rem;}
+.brand-wrap {display:flex;align-items:center;gap:.9rem;}
+.brand-icon {width:48px;height:48px;border-radius:18px;background:#fff;color:#073b63;display:grid;place-items:center;font-size:1.35rem;font-weight:900;}
+.top-brand {font-size:1.35rem;font-weight:900;}
+.top-subtitle {font-size:.82rem;opacity:.82;margin-top:.25rem;}
+.top-actions {font-size:.85rem;background:rgba(255,255,255,.13);padding:.55rem .75rem;border-radius:999px;}
+.rate-title {font-size:.85rem;font-weight:800;color:#334155;margin:.6rem 0 .2rem;}
+[data-testid="stMetric"] {background:#fff;border:1px solid #e7edf5;border-radius:18px;padding:1rem;}
+</style>
+""", unsafe_allow_html=True)
 
-
-MENU = {
-    "🏠 Dashboard": lambda: render_dashboard_unificado(usuario),
-    "📦 Inventario / Almacén": lambda: render_inventario_almacen_unificado(usuario),
-    "🏭 Producción": lambda: render_produccion_unificada(usuario),
-    "💵 Ventas": lambda: render_ventas(usuario),
-    "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
-    "🧮 Costeo y Márgenes": lambda: render_costeo_margenes_unificado(usuario),
-    "💼 Finanzas": lambda: render_finanzas_unificado(usuario),
-    "🏗️ Activos": lambda: render_activos_unificado(usuario),
-    "👥 Contactos": lambda: render_contactos_unificado(usuario),
-    "🧑‍⚖️ Legal": lambda: render_legal_hub(usuario),
-    "👩‍💼 RRHH": lambda: render_rrhh(usuario),
-    "📣 Marketing": lambda: render_publicaciones_marketing(usuario),
-    "📊 Reportes": lambda: render_reportes(usuario),
-    "⚙️ Configuración": lambda: render_configuracion_unificada(usuario),
+MENU_ROUTES = {
+    "🌅 Día / Caja": (("dashboard.view", "caja.view"), lambda: render_dia_caja(usuario)),
+    "📊 Panel de control": ("dashboard.view", lambda: render_dashboard_unificado(usuario)),
+    "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
+    "🏗️ Activos": (("activos.view", "mantenimiento.view"), lambda: render_activos_unificado(usuario)),
+    "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
+    "📇 Contactos": (("clientes.view", "inventario.view", "dashboard.view"), lambda: render_contactos(usuario)),
+    "📊 Reportes": (("dashboard.view", "reportes.export", "contabilidad.view"), lambda: render_reportes(usuario)),
+    "💾 Respaldo": (("dashboard.view", "config.view", "reportes.export"), lambda: render_respaldo(usuario)),
+    "⚙️ Configuración": (("dashboard.view", "config.view", "reportes.export"), lambda: render_configuracion_sistema(usuario)),
+    "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
+    "💰 Cuentas por cobrar": (("ventas.view", "clientes.view", "dashboard.view"), lambda: render_cuentas_por_cobrar(usuario)),
+    "💸 Cuentas por pagar": (("tesoreria.view", "cxp.view", "contabilidad.view", "dashboard.view"), lambda: render_cuentas_por_pagar(usuario)),
+    "📅 Presupuesto / Equilibrio": (("dashboard.view", "contabilidad.view", "presupuesto.view"), lambda: render_presupuesto_equilibrio(usuario)),
+    "♻️ Mermas / Desperdicio": (("inventario.view", "dashboard.view", "produccion.scrap"), lambda: render_mermas(usuario)),
+    "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
+    "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_marketing_unificado(usuario)),
+    "🏭 Producción": (("produccion.plan", "produccion.execute", "produccion.route", "produccion.quality", "produccion.scrap"), lambda: render_produccion_unificada(usuario)),
+    "💼 Finanzas": (("tesoreria.view", "dashboard.view", "gastos.view", "caja.view", "cxp.view", "contabilidad.view", "conciliacion.view", "impuestos.view", "presupuesto.view"), lambda: render_finanzas_unificado(usuario)),
+    "🗂️ Administración": (("dashboard.view", "config.view", "security.view", "reportes.export"), lambda: render_area_empresarial("Administración", usuario)),
+    "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
+    "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
+    "⚖️ Legal": (("dashboard.view", "config.view"), lambda: render_legal_hub(usuario)),
+    "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
+    "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
+    "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
 }
 
-st.sidebar.title("⚛️ Imperio Atómico")
-menu_options = [name for name in MENU if has_permission(name)]
-selected = st.sidebar.radio("Navegación", menu_options)
+VISIBLE_MENU = {label: callback for label, (permiso, callback) in MENU_ROUTES.items() if (has_permission(permiso) if isinstance(permiso, str) else any(has_permission(p) for p in permiso))}
+if not VISIBLE_MENU:
+    st.error("🚫 Tu usuario no tiene acceso a módulos habilitados.")
+    save_session_snapshot()
+    st.stop()
 
 try:
-    alertas = get_alert_summary(usuario)
-    st.sidebar.metric("Alertas pendientes", alertas.get("total", 0))
+    config = get_current_config()
 except Exception:
-    pass
+    config = DEFAULT_CONFIG
 
-config = get_current_config()
-st.sidebar.caption(
-    f"Tasa BCV: {_to_float(config.get('tasa_bcv'), DEFAULT_CONFIG['tasa_bcv']):,.2f} Bs/USD"
-)
-st.sidebar.caption(f"Usuario: {usuario} · Rol: {user_role}")
+st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
 
-MENU[selected]()
+st.markdown('<div class="rate-title">Tasas, impuestos y comisiones activas</div>', unsafe_allow_html=True)
+rate_fields = [("tasa_bcv", "BCV", "Bs/$", "%.2f"), ("tasa_binance", "Binance", "Bs/$", "%.2f"), ("iva_perc", "IVA", "%", "%.2f"), ("igtf_perc", "IGTF", "%", "%.2f"), ("banco_perc", "Banco", "%", "%.3f"), ("kontigo_perc", "Kontigo", "%", "%.3f")]
+for col, (key, label, unit, fmt) in zip(st.columns(len(rate_fields)), rate_fields):
+    value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
+    col.metric(label, f"{fmt % value} {unit}")
+
+cols = st.columns([1, 1, 6])
+with cols[0]:
+    if st.button("🚪 Cerrar sesión", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
+with cols[1]:
+    try:
+        alert_summary = get_alert_summary(usuario)
+        total_alertas = alert_summary.get("total", 0) if isinstance(alert_summary, dict) else getattr(alert_summary, "total", 0)
+        st.warning(f"🚨 {total_alertas} alertas") if total_alertas else st.success("✅ Sin alertas")
+    except Exception:
+        st.info("Alertas no disponibles")
+
+menu = st.radio("Menú principal", list(VISIBLE_MENU.keys()), horizontal=True, label_visibility="collapsed", key="menu_principal_superior")
+st.divider()
+VISIBLE_MENU[menu]()
+save_session_snapshot()
