@@ -4,6 +4,13 @@ import streamlit as st
 
 st.set_page_config(page_title="Imperio Atómico ERP", layout="wide", page_icon="⚛️")
 
+from services.backup_service import restore_remote_database_if_needed
+
+try:
+    restore_remote_database_if_needed()
+except Exception:
+    pass
+
 from database.schema import init_schema
 from database.auto_migrations import run_auto_migrations
 from database.transactional_core import ensure_transactional_core_schema
@@ -190,95 +197,55 @@ def render_finanzas_unificado(usuario: str) -> None:
         render_presupuesto_equilibrio(usuario)
 
 
-MENU_ROUTES = {
-    "🌅 Día / Caja": (("dashboard.view", "caja.view"), lambda: render_dia_caja(usuario)),
-    "📊 Panel de control": ("dashboard.view", lambda: render_dashboard_unificado(usuario)),
-    "⚛️ Núcleo transaccional": ("dashboard.view", lambda: render_nucleo_transaccional(usuario)),
-    "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
-    "🏗️ Activos": (("activos.view", "mantenimiento.view"), lambda: render_activos_unificado(usuario)),
-    "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
-    "📇 Contactos": (("clientes.view", "inventario.view", "dashboard.view"), lambda: render_contactos(usuario)),
-    "📊 Reportes": (("dashboard.view", "reportes.export", "contabilidad.view"), lambda: render_reportes(usuario)),
-    "💾 Respaldo": (("dashboard.view", "config.view", "reportes.export"), lambda: render_respaldo(usuario)),
-    "⚙️ Configuración": (("dashboard.view", "config.view", "reportes.export"), lambda: render_configuracion_sistema(usuario)),
-    "💰 Ventas": ("ventas.view", lambda: render_ventas(usuario)),
-    "💰 Cuentas por cobrar": (("ventas.view", "clientes.view", "dashboard.view"), lambda: render_cuentas_por_cobrar(usuario)),
-    "💸 Cuentas por pagar": (("tesoreria.view", "cxp.view", "contabilidad.view", "dashboard.view"), lambda: render_cuentas_por_pagar(usuario)),
-    "📅 Presupuesto / Equilibrio": (("dashboard.view", "contabilidad.view", "presupuesto.view"), lambda: render_presupuesto_equilibrio(usuario)),
-    "♻️ Mermas / Desperdicio": (("inventario.view", "dashboard.view", "produccion.scrap"), lambda: render_mermas(usuario)),
-    "📝 Cotizaciones": ("cotizaciones.view", lambda: render_cotizaciones(usuario)),
-    "📣 Marketing": (("crm.view", "publicaciones.view"), lambda: render_publicaciones_marketing(usuario)),
-    "🏭 Producción": (("produccion.plan", "produccion.execute", "produccion.route", "produccion.quality", "produccion.scrap"), lambda: render_produccion_unificada(usuario)),
-    "💼 Finanzas": (("tesoreria.view", "dashboard.view", "gastos.view", "caja.view", "cxp.view", "contabilidad.view", "conciliacion.view", "impuestos.view", "presupuesto.view"), lambda: render_finanzas_unificado(usuario)),
-    "🗂️ Administración": (("dashboard.view", "config.view", "security.view", "reportes.export", "manuales.view", "auditoria.view", "calendario_operativo.view"), lambda: render_area_empresarial("Administración", usuario)),
-    "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
-    "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
-    "⚖️ Legal": (("dashboard.view", "config.view"), lambda: render_legal_hub(usuario)),
-    "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
-    "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
-    "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
+def render_contactos_unificado(usuario: str) -> None:
+    st.title("👥 Contactos")
+    tab_clientes, tab_contactos = st.tabs(["Clientes", "Contactos"])
+    with tab_clientes:
+        render_clientes(usuario)
+    with tab_contactos:
+        render_contactos(usuario)
+
+
+def render_configuracion_unificada(usuario: str) -> None:
+    st.title("⚙️ Configuración")
+    tab_sistema, tab_respaldo = st.tabs(["Sistema", "💾 Respaldo"])
+    with tab_sistema:
+        render_configuracion_sistema(usuario)
+    with tab_respaldo:
+        render_respaldo(usuario)
+
+
+MENU = {
+    "🏠 Dashboard": lambda: render_dashboard_unificado(usuario),
+    "📦 Inventario / Almacén": lambda: render_inventario_almacen_unificado(usuario),
+    "🏭 Producción": lambda: render_produccion_unificada(usuario),
+    "💵 Ventas": lambda: render_ventas(usuario),
+    "📝 Cotizaciones": lambda: render_cotizaciones(usuario),
+    "🧮 Costeo y Márgenes": lambda: render_costeo_margenes_unificado(usuario),
+    "💼 Finanzas": lambda: render_finanzas_unificado(usuario),
+    "🏗️ Activos": lambda: render_activos_unificado(usuario),
+    "👥 Contactos": lambda: render_contactos_unificado(usuario),
+    "🧑‍⚖️ Legal": lambda: render_legal_hub(usuario),
+    "👩‍💼 RRHH": lambda: render_rrhh(usuario),
+    "📣 Marketing": lambda: render_publicaciones_marketing(usuario),
+    "📊 Reportes": lambda: render_reportes(usuario),
+    "⚙️ Configuración": lambda: render_configuracion_unificada(usuario),
 }
 
-
-def _can_access_menu_route(permission_rule):
-    if isinstance(permission_rule, str):
-        return has_permission(permission_rule)
-    if isinstance(permission_rule, (tuple, list, set)):
-        return any(has_permission(permission_code) for permission_code in permission_rule)
-    return False
-
-
-visible_menu = {label: callback for label, (permiso, callback) in MENU_ROUTES.items() if _can_access_menu_route(permiso)}
-
-if not visible_menu:
-    st.error("🚫 Tu usuario no tiene acceso a módulos habilitados.")
-    save_session_snapshot()
-    st.stop()
+st.sidebar.title("⚛️ Imperio Atómico")
+menu_options = [name for name in MENU if has_permission(name)]
+selected = st.sidebar.radio("Navegación", menu_options)
 
 try:
-    ensure_rate_config_defaults()
-    restore_persistent_rates_to_db("Sistema")
-    config = get_current_config()
+    alertas = get_alert_summary(usuario)
+    st.sidebar.metric("Alertas pendientes", alertas.get("total", 0))
 except Exception:
-    config = DEFAULT_CONFIG
+    pass
 
-st.title("⚛️ Imperio Atómico ERP")
-st.caption(f"Centro administrativo y operativo de Copy Mary · Usuario: {usuario} · Rol: {user_role}")
+config = get_current_config()
+st.sidebar.caption(
+    f"Tasa BCV: {_to_float(config.get('tasa_bcv'), DEFAULT_CONFIG['tasa_bcv']):,.2f} Bs/USD"
+)
+st.sidebar.caption(f"Usuario: {usuario} · Rol: {user_role}")
 
-rate_cols = st.columns(6)
-rate_fields = [
-    ("tasa_bcv", "BCV", "Bs/$", "%.2f"),
-    ("tasa_binance", "Binance", "Bs/$", "%.2f"),
-    ("tasa_euro", "Euro", "Bs/€", "%.2f"),
-    ("tasa_menudeo", "Menudeo", "Bs/$", "%.2f"),
-    ("tasa_kontigo_entrada", "Kontigo entrada", "Bs/$", "%.2f"),
-    ("tasa_kontigo_salida", "Kontigo salida", "Bs/$", "%.2f"),
-]
-legacy_kontigo = _to_float(config, "tasa_kontigo", 0.0)
-for col, (key, label, unit, fmt) in zip(rate_cols, rate_fields):
-    fallback = legacy_kontigo if key in {"tasa_kontigo_entrada", "tasa_kontigo_salida"} else float(DEFAULT_CONFIG.get(key, 0))
-    value = _to_float(config, key, fallback)
-    col.metric(label, f"{fmt % value} {unit}")
-
-cols = st.columns([1, 1, 5])
-with cols[0]:
-    if st.button("🚪 Cerrar sesión", use_container_width=True):
-        snapshot_path = Path(__file__).resolve().parent / "data" / "session_snapshot.json"
-        try:
-            snapshot_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-with cols[1]:
-    alert_summary = get_alert_summary()
-    if alert_summary.total:
-        st.warning(f"🚨 {alert_summary.total} alertas")
-    else:
-        st.success("✅ Sin alertas")
-
-menu = st.radio("Menú principal", list(visible_menu.keys()), horizontal=True, label_visibility="collapsed", key="menu_principal_superior")
-st.divider()
-visible_menu[menu]()
-save_session_snapshot()
+MENU[selected]()
