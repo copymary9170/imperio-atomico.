@@ -4,9 +4,11 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import shutil
 import sqlite3
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -20,8 +22,11 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = APP_ROOT / "data"
 BACKUP_DIR = DATA_DIR / "backups"
 BACKUP_META = BACKUP_DIR / "backup_meta.json"
+REMOTE_LATEST_PATH = "backups/latest.protected.json"
+DEFAULT_BACKUP_BRANCH = "data-backups"
 
 DB_CANDIDATES = [
+    DATA_DIR / "imperio.db",
     DATA_DIR / "imperio_atomico.db",
     DATA_DIR / "app.db",
     DATA_DIR / "database.db",
@@ -31,6 +36,11 @@ DB_CANDIDATES = [
 
 
 def get_database_path() -> Path | None:
+    configured = os.getenv("IMPERIO_DB_PATH")
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if configured_path.exists():
+            return configured_path
     for path in DB_CANDIDATES:
         if path.exists():
             return path
@@ -39,6 +49,13 @@ def get_database_path() -> Path | None:
         if found:
             return found[0]
     return None
+
+
+def get_target_database_path() -> Path:
+    configured = os.getenv("IMPERIO_DB_PATH")
+    if configured:
+        return Path(configured).expanduser()
+    return DATA_DIR / "imperio.db"
 
 
 def ensure_backup_dir() -> None:
@@ -65,7 +82,7 @@ def _secret(name: str, default: str = "") -> str:
             return str(st.secrets.get(name, default)).strip()
     except Exception:
         pass
-    return default
+    return os.getenv(name, default).strip()
 
 
 def _xor_protect(data: bytes, password: str) -> bytes:
@@ -75,77 +92,160 @@ def _xor_protect(data: bytes, password: str) -> bytes:
     return bytes(byte ^ key[i % len(key)] for i, byte in enumerate(data))
 
 
-def _protected_payload(path: Path, password: str) -> bytes:
-    raw = path.read_bytes()
-    salt = datetime.now().strftime("%Y%m%d%H%M%S").encode("utf-8")
-    signature = hmac.new(password.encode("utf-8"), raw, hashlib.sha256).hexdigest().encode("utf-8") if password else b""
-    encrypted = _xor_protect(raw, password)
+def _build_protected_payload(raw: bytes, original_name: str, password: str) -> bytes:
+    signature = hmac.new(password.encode("utf-8"), raw, hashlib.sha256).hexdigest() if password else ""
     envelope = {
         "format": "copy-mary-backup-v1",
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "original_name": path.name,
+        "original_name": original_name,
         "note": "Respaldo protegido. Restaurar desde el ERP con BACKUP_PASSWORD.",
-        "salt": salt.decode("utf-8"),
-        "signature_sha256_hmac": signature.decode("utf-8") if signature else "",
-        "payload_base64": base64.b64encode(encrypted).decode("ascii"),
+        "signature_sha256_hmac": signature,
+        "payload_base64": base64.b64encode(_xor_protect(raw, password)).decode("ascii"),
     }
     return json.dumps(envelope, ensure_ascii=False, indent=2).encode("utf-8")
 
 
-def _github_upload_bytes(content: bytes, repo: str, token: str, remote_path: str, message: str) -> tuple[bool, str]:
-    owner_repo = repo.strip().strip("/")
-    if "/" not in owner_repo:
-        return False, "Repositorio inválido."
-    api_url = f"https://api.github.com/repos/{owner_repo}/contents/{remote_path}"
-    payload = {
-        "message": message,
-        "content": base64.b64encode(content).decode("ascii"),
-    }
+def _protected_payload(path: Path, password: str) -> bytes:
+    return _build_protected_payload(path.read_bytes(), path.name, password)
+
+
+def _decode_protected_payload(payload: bytes, password: str) -> bytes:
+    envelope = json.loads(payload.decode("utf-8"))
+    if envelope.get("format") != "copy-mary-backup-v1":
+        raise ValueError("Formato de respaldo no reconocido.")
+    encrypted = base64.b64decode(envelope.get("payload_base64", ""))
+    raw = _xor_protect(encrypted, password)
+    expected = str(envelope.get("signature_sha256_hmac", ""))
+    actual = hmac.new(password.encode("utf-8"), raw, hashlib.sha256).hexdigest() if password else ""
+    if expected and not hmac.compare_digest(expected, actual):
+        raise ValueError("La contraseña del respaldo no coincide.")
+    if not raw.startswith(b"SQLite format 3"):
+        raise ValueError("El respaldo no contiene una base SQLite válida.")
+    return raw
+
+
+def _github_request(url: str, token: str, *, method: str = "GET", payload: dict | None = None) -> tuple[int, bytes]:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(
-        api_url,
-        data=json.dumps(payload).encode("utf-8"),
+        url,
+        data=data,
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
             "Content-Type": "application/json",
         },
-        method="PUT",
+        method=method,
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            if 200 <= resp.status < 300:
-                return True, remote_path
-            return False, f"GitHub respondió estado {resp.status}."
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            return int(resp.status), resp.read()
     except urllib.error.HTTPError as exc:
-        try:
-            detail = exc.read().decode("utf-8")[:500]
-        except Exception:
-            detail = str(exc)
-        return False, f"Error GitHub {exc.code}: {detail}"
-    except Exception as exc:
-        return False, str(exc)
+        return int(exc.code), exc.read()
 
 
-def upload_backup_to_github(backup_path: Path) -> tuple[bool, str]:
+def _ensure_backup_branch(repo: str, token: str, branch: str) -> tuple[bool, str]:
+    base = f"https://api.github.com/repos/{repo}"
+    status, body = _github_request(f"{base}/git/ref/heads/{urllib.parse.quote(branch, safe='')}", token)
+    if status == 200:
+        return True, branch
+    status, body = _github_request(base, token)
+    if status != 200:
+        return False, "No se pudo consultar el repositorio."
+    repo_info = json.loads(body.decode("utf-8"))
+    default_branch = repo_info.get("default_branch", "main")
+    status, body = _github_request(f"{base}/git/ref/heads/{urllib.parse.quote(default_branch, safe='')}", token)
+    if status != 200:
+        return False, "No se pudo consultar la rama principal."
+    sha = json.loads(body.decode("utf-8"))["object"]["sha"]
+    status, body = _github_request(
+        f"{base}/git/refs",
+        token,
+        method="POST",
+        payload={"ref": f"refs/heads/{branch}", "sha": sha},
+    )
+    if status in (200, 201, 422):
+        return True, branch
+    return False, f"No se pudo crear la rama de respaldos: {status}."
+
+
+def _github_put_content(content: bytes, repo: str, token: str, remote_path: str, message: str, branch: str) -> tuple[bool, str]:
+    owner_repo = repo.strip().strip("/")
+    if "/" not in owner_repo:
+        return False, "Repositorio inválido."
+    ok, detail = _ensure_backup_branch(owner_repo, token, branch)
+    if not ok:
+        return False, detail
+    api_url = f"https://api.github.com/repos/{owner_repo}/contents/{remote_path}"
+    query_url = f"{api_url}?ref={urllib.parse.quote(branch, safe='')}"
+    status, body = _github_request(query_url, token)
+    existing_sha = None
+    if status == 200:
+        existing_sha = json.loads(body.decode("utf-8")).get("sha")
+    payload = {
+        "message": message,
+        "content": base64.b64encode(content).decode("ascii"),
+        "branch": branch,
+    }
+    if existing_sha:
+        payload["sha"] = existing_sha
+    status, body = _github_request(api_url, token, method="PUT", payload=payload)
+    if status in (200, 201):
+        return True, f"{branch}:{remote_path}"
+    try:
+        detail = json.loads(body.decode("utf-8")).get("message", body.decode("utf-8")[:300])
+    except Exception:
+        detail = body.decode("utf-8", errors="ignore")[:300]
+    return False, f"Error GitHub {status}: {detail}"
+
+
+def _github_get_content(repo: str, token: str, remote_path: str, branch: str) -> bytes | None:
+    api_url = f"https://api.github.com/repos/{repo}/contents/{remote_path}?ref={urllib.parse.quote(branch, safe='')}"
+    status, body = _github_request(api_url, token)
+    if status != 200:
+        return None
+    info = json.loads(body.decode("utf-8"))
+    encoded = str(info.get("content", "")).replace("\n", "")
+    return base64.b64decode(encoded) if encoded else None
+
+
+def upload_backup_to_github(backup_path: Path, *, archive: bool = True) -> tuple[bool, str]:
     token = _secret("GITHUB_TOKEN")
     repo = _secret("GITHUB_REPO")
     password = _secret("BACKUP_PASSWORD")
+    branch = _secret("BACKUP_BRANCH", DEFAULT_BACKUP_BRANCH)
     if not token or not repo:
         return False, "Faltan GITHUB_TOKEN o GITHUB_REPO en Secrets."
+    if not password:
+        return False, "Falta BACKUP_PASSWORD en Secrets."
     protected = _protected_payload(backup_path, password)
-    remote_name = backup_path.with_suffix(".protected.json").name
-    remote_path = f"backups/{datetime.now().strftime('%Y/%m')}/{remote_name}"
-    return _github_upload_bytes(
+    ok, message = _github_put_content(
         protected,
         repo,
         token,
-        remote_path,
-        f"Respaldo automatico {backup_path.name}",
+        REMOTE_LATEST_PATH,
+        f"Actualizar respaldo persistente {backup_path.name}",
+        branch,
     )
+    if not ok:
+        return False, message
+    if archive:
+        remote_name = backup_path.with_suffix(".protected.json").name
+        archive_path = f"backups/{datetime.now().strftime('%Y/%m')}/{remote_name}"
+        archive_ok, archive_message = _github_put_content(
+            protected,
+            repo,
+            token,
+            archive_path,
+            f"Archivar respaldo {backup_path.name}",
+            branch,
+        )
+        if not archive_ok:
+            return False, archive_message
+    return True, message
 
 
-def create_backup(reason: str = "manual", upload_external: bool = True) -> Path | None:
+def create_backup(reason: str = "manual", upload_external: bool = True, *, archive: bool = True) -> Path | None:
     ensure_backup_dir()
     db_path = get_database_path()
     if not db_path or not db_path.exists():
@@ -167,16 +267,46 @@ def create_backup(reason: str = "manual", upload_external: bool = True) -> Path 
     meta["last_backup_reason"] = reason
     meta["last_backup_file"] = backup_path.name
     meta["last_backup_day"] = datetime.now().strftime("%Y-%m-%d")
-
     if upload_external:
-        ok, message = upload_backup_to_github(backup_path)
+        ok, message = upload_backup_to_github(backup_path, archive=archive)
         meta["last_external_backup_ok"] = ok
         meta["last_external_backup_message"] = message
         meta["last_external_backup_at"] = datetime.now().isoformat(timespec="seconds")
-
     _write_meta(meta)
     prune_backups(keep=20)
     return backup_path
+
+
+def persist_database_snapshot(reason: str = "auto_cambio") -> tuple[bool, str]:
+    backup = create_backup(reason, upload_external=True, archive=False)
+    if not backup:
+        return False, "No se detectó la base de datos."
+    meta = _read_meta()
+    return bool(meta.get("last_external_backup_ok")), str(meta.get("last_external_backup_message", ""))
+
+
+def restore_remote_database_if_needed(force: bool = False) -> tuple[bool, str]:
+    target = get_target_database_path()
+    if target.exists() and target.stat().st_size > 100:
+        if not force:
+            return False, "La base local ya existe."
+    token = _secret("GITHUB_TOKEN")
+    repo = _secret("GITHUB_REPO")
+    password = _secret("BACKUP_PASSWORD")
+    branch = _secret("BACKUP_BRANCH", DEFAULT_BACKUP_BRANCH)
+    if not token or not repo or not password:
+        return False, "Faltan Secrets para restauración automática."
+    payload = _github_get_content(repo, token, REMOTE_LATEST_PATH, branch)
+    if not payload:
+        return False, "Todavía no existe un respaldo remoto persistente."
+    raw = _decode_protected_payload(payload, password)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(raw)
+    meta = _read_meta()
+    meta["last_restore_at"] = datetime.now().isoformat(timespec="seconds")
+    meta["last_restore_file"] = f"{branch}:{REMOTE_LATEST_PATH}"
+    _write_meta(meta)
+    return True, "Base restaurada automáticamente desde el respaldo remoto."
 
 
 def create_daily_backup_if_needed() -> Path | None:
@@ -184,7 +314,7 @@ def create_daily_backup_if_needed() -> Path | None:
     today = datetime.now().strftime("%Y-%m-%d")
     if meta.get("last_backup_day") == today:
         return None
-    return create_backup("auto_diario", upload_external=True)
+    return create_backup("auto_diario", upload_external=True, archive=True)
 
 
 def list_backups() -> list[Path]:
@@ -202,17 +332,16 @@ def prune_backups(keep: int = 20) -> None:
 
 
 def restore_backup(uploaded_file) -> bool:
-    db_path = get_database_path()
-    if db_path is None:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        db_path = DATA_DIR / "imperio_atomico.db"
-    create_backup("antes_restaurar", upload_external=True)
+    db_path = get_target_database_path()
+    create_backup("antes_restaurar", upload_external=True, archive=True)
     try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(uploaded_file.getvalue())
         meta = _read_meta()
         meta["last_restore_at"] = datetime.now().isoformat(timespec="seconds")
         meta["last_restore_file"] = getattr(uploaded_file, "name", "respaldo_subido.db")
         _write_meta(meta)
+        persist_database_snapshot("restaurado")
         return True
     except Exception:
         return False
@@ -234,5 +363,6 @@ def get_backup_status() -> dict:
         "last_external_backup_ok": meta.get("last_external_backup_ok", False),
         "last_external_backup_message": meta.get("last_external_backup_message", "Sin respaldo externo todavía"),
         "last_external_backup_at": meta.get("last_external_backup_at", "Nunca"),
-        "github_configured": bool(_secret("GITHUB_TOKEN") and _secret("GITHUB_REPO")),
+        "github_configured": bool(_secret("GITHUB_TOKEN") and _secret("GITHUB_REPO") and _secret("BACKUP_PASSWORD")),
+        "backup_branch": _secret("BACKUP_BRANCH", DEFAULT_BACKUP_BRANCH),
     }
