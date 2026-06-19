@@ -9,6 +9,7 @@ from services.backup_service import (
     list_backups,
     restore_backup,
 )
+from services.protected_backup_restore import restore_protected_backup
 
 
 def render_respaldo(usuario: str = "Sistema") -> None:
@@ -58,7 +59,7 @@ def render_respaldo(usuario: str = "Sistema") -> None:
         st.subheader("Historial de respaldos")
         backups = list_backups()
         if not backups:
-            st.info("Aún no hay respaldos creados.")
+            st.info("Aún no hay respaldos locales disponibles.")
         else:
             rows = []
             for p in backups:
@@ -83,7 +84,11 @@ def render_respaldo(usuario: str = "Sistema") -> None:
     with tab_restaurar:
         st.subheader("Restaurar respaldo")
         st.warning("Restaurar reemplaza la base actual. Antes de restaurar, el sistema crea un respaldo automático de seguridad.")
-        uploaded = st.file_uploader("Subir archivo .db de respaldo", type=["db", "sqlite", "sqlite3"])
+        st.info("Puedes subir un respaldo local .db o un respaldo protegido .json descargado desde GitHub.")
+        uploaded = st.file_uploader(
+            "Subir archivo de respaldo",
+            type=["db", "sqlite", "sqlite3", "json"],
+        )
         confirmar = st.checkbox("Confirmo que deseo reemplazar la base actual por este respaldo")
         if st.button("♻️ Restaurar respaldo", type="primary", use_container_width=True):
             if not uploaded:
@@ -91,11 +96,20 @@ def render_respaldo(usuario: str = "Sistema") -> None:
             elif not confirmar:
                 st.error("Debes confirmar la restauración.")
             else:
-                ok = restore_backup(uploaded)
-                if ok:
-                    st.success("Respaldo restaurado. Reinicia la app para cargar los datos restaurados.")
+                nombre = str(getattr(uploaded, "name", "")).lower()
+                if nombre.endswith(".json"):
+                    ok, mensaje = restore_protected_backup(uploaded)
+                    if ok:
+                        st.success(mensaje)
+                        st.info("Reinicia la app para cargar los datos restaurados.")
+                    else:
+                        st.error(mensaje)
                 else:
-                    st.error("No se pudo restaurar el respaldo.")
+                    ok = restore_backup(uploaded)
+                    if ok:
+                        st.success("Respaldo restaurado. Reinicia la app para cargar los datos restaurados.")
+                    else:
+                        st.error("No se pudo restaurar el respaldo.")
 
     with tab_ayuda:
         st.subheader("Notas importantes")
@@ -104,7 +118,8 @@ def render_respaldo(usuario: str = "Sistema") -> None:
             - El sistema crea un respaldo automático diario al abrir la app.
             - También crea respaldos antes de restaurar una base.
             - Conserva los 20 respaldos locales más recientes.
+            - Los respaldos externos protegidos se guardan en GitHub cuando los Secrets están configurados.
             - En Streamlit Cloud, el almacenamiento local puede perderse si el servidor se reinicia o redeploya.
-            - Para protección total, descarga respaldos regularmente o conecta una base externa como Supabase/PostgreSQL.
+            - Descarga respaldos importantes regularmente aunque también exista copia externa.
             """
         )
