@@ -19,6 +19,15 @@ CAMPOS_FICHA_AVANZADA: dict[str, str] = {
     "tamano": "TEXT",
     "gramaje": "TEXT",
     "acabado": "TEXT",
+    "ancho_cm": "REAL NOT NULL DEFAULT 0",
+    "alto_cm": "REAL NOT NULL DEFAULT 0",
+    "margen_izquierdo_cm": "REAL NOT NULL DEFAULT 0",
+    "margen_derecho_cm": "REAL NOT NULL DEFAULT 0",
+    "margen_superior_cm": "REAL NOT NULL DEFAULT 0",
+    "margen_inferior_cm": "REAL NOT NULL DEFAULT 0",
+    "separacion_cm": "REAL NOT NULL DEFAULT 0",
+    "sangrado_cm": "REAL NOT NULL DEFAULT 0",
+    "merma_base_pct": "REAL NOT NULL DEFAULT 0",
     "unidad_compra": "TEXT",
     "contenido_compra": "REAL NOT NULL DEFAULT 0",
     "proveedor_principal": "TEXT",
@@ -87,6 +96,23 @@ def listar_inventario_unificado(activos_only: bool = True) -> pd.DataFrame:
                    COALESCE(tamano,'') AS tamano,
                    COALESCE(gramaje,'') AS gramaje,
                    COALESCE(acabado,'') AS acabado,
+                   COALESCE(ancho_cm,0) AS ancho_cm,
+                   COALESCE(alto_cm,0) AS alto_cm,
+                   COALESCE(margen_izquierdo_cm,0) AS margen_izquierdo_cm,
+                   COALESCE(margen_derecho_cm,0) AS margen_derecho_cm,
+                   COALESCE(margen_superior_cm,0) AS margen_superior_cm,
+                   COALESCE(margen_inferior_cm,0) AS margen_inferior_cm,
+                   COALESCE(separacion_cm,0) AS separacion_cm,
+                   COALESCE(sangrado_cm,0) AS sangrado_cm,
+                   COALESCE(merma_base_pct,0) AS merma_base_pct,
+                   ROUND(COALESCE(ancho_cm,0) * COALESCE(alto_cm,0), 4) AS area_total_cm2,
+                   ROUND(MAX(COALESCE(ancho_cm,0)-COALESCE(margen_izquierdo_cm,0)-COALESCE(margen_derecho_cm,0),0)
+                         * MAX(COALESCE(alto_cm,0)-COALESCE(margen_superior_cm,0)-COALESCE(margen_inferior_cm,0),0), 4) AS area_util_cm2,
+                   CASE WHEN COALESCE(ancho_cm,0) * COALESCE(alto_cm,0) > 0 THEN
+                       ROUND(100 - ((MAX(COALESCE(ancho_cm,0)-COALESCE(margen_izquierdo_cm,0)-COALESCE(margen_derecho_cm,0),0)
+                         * MAX(COALESCE(alto_cm,0)-COALESCE(margen_superior_cm,0)-COALESCE(margen_inferior_cm,0),0))
+                         / (COALESCE(ancho_cm,0) * COALESCE(alto_cm,0)) * 100), 2)
+                   ELSE 0 END AS merma_dimensional_pct,
                    COALESCE(unidad_compra,'') AS unidad_compra,
                    COALESCE(contenido_compra,0) AS contenido_compra,
                    COALESCE(proveedor_principal,'') AS proveedor_principal,
@@ -147,10 +173,12 @@ def crear_item_unificado(data: dict[str, Any], usuario: str) -> int:
                 usuario, sku, nombre, categoria, unidad, unidad_base, tipo_uso,
                 permite_fraccionamiento, stock_actual, stock_minimo,
                 costo_unitario_usd, precio_venta_usd, marca, color, tamano,
-                gramaje, acabado, unidad_compra, contenido_compra,
-                proveedor_principal, ubicacion, stock_ideal, stock_maximo,
-                punto_reorden, observaciones, estado
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')
+                gramaje, acabado, ancho_cm, alto_cm, margen_izquierdo_cm,
+                margen_derecho_cm, margen_superior_cm, margen_inferior_cm,
+                separacion_cm, sangrado_cm, merma_base_pct,
+                unidad_compra, contenido_compra, proveedor_principal, ubicacion,
+                stock_ideal, stock_maximo, punto_reorden, observaciones, estado
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')
             """,
             (
                 usuario, sku, nombre, clean_text(data.get("categoria") or "General"),
@@ -158,7 +186,12 @@ def crear_item_unificado(data: dict[str, Any], usuario: str) -> int:
                 float(data.get("stock_actual") or 0), float(data.get("stock_minimo") or 0),
                 float(data.get("costo_unitario_usd") or 0), float(data.get("precio_venta_usd") or 0),
                 clean_text(data.get("marca")), clean_text(data.get("color")), clean_text(data.get("tamano")),
-                clean_text(data.get("gramaje")), clean_text(data.get("acabado")), clean_text(data.get("unidad_compra")),
+                clean_text(data.get("gramaje")), clean_text(data.get("acabado")),
+                float(data.get("ancho_cm") or 0), float(data.get("alto_cm") or 0),
+                float(data.get("margen_izquierdo_cm") or 0), float(data.get("margen_derecho_cm") or 0),
+                float(data.get("margen_superior_cm") or 0), float(data.get("margen_inferior_cm") or 0),
+                float(data.get("separacion_cm") or 0), float(data.get("sangrado_cm") or 0),
+                float(data.get("merma_base_pct") or 0), clean_text(data.get("unidad_compra")),
                 float(data.get("contenido_compra") or 0), clean_text(data.get("proveedor_principal")),
                 clean_text(data.get("ubicacion")), float(data.get("stock_ideal") or 0),
                 float(data.get("stock_maximo") or 0), float(data.get("punto_reorden") or 0),
