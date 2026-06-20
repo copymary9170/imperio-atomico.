@@ -11,6 +11,18 @@ from typing import Generator
 
 
 _CORRUPT_HANDLED = False
+_RECOVERY_CHECKED = False
+
+BUSINESS_TABLES = (
+    "inventario",
+    "clientes",
+    "proveedores",
+    "ventas",
+    "cotizaciones",
+    "facturas_compra",
+    "movimientos_inventario",
+    "kardex",
+)
 
 
 def resolve_db_path() -> Path:
@@ -35,6 +47,23 @@ def resolve_db_path() -> Path:
 DB_PATH = resolve_db_path()
 
 
+def _local_has_business_data() -> bool:
+    if not DB_PATH.exists() or DB_PATH.stat().st_size < 100:
+        return False
+    try:
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            for table in BUSINESS_TABLES:
+                if table not in tables:
+                    continue
+                total = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                if int(total or 0) > 0:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
 def _quarantine_bad_database(reason: str = "corrupta") -> None:
     """Aparta una base dañada para que SQLite no intente abrirla otra vez."""
     if not DB_PATH.exists():
@@ -50,14 +79,29 @@ def _quarantine_bad_database(reason: str = "corrupta") -> None:
             pass
 
 
-def _try_remote_recovery() -> None:
-    """Intenta traer el último respaldo de GitHub antes de crear una base vacía."""
+def _try_remote_recovery(force: bool = True) -> None:
+    """Intenta traer el mejor respaldo remoto antes de crear una base vacía."""
     try:
-        from services.backup_service import restore_remote_database_if_needed
+        from services.backup_recovery_service import restore_best_remote_backup
 
-        restore_remote_database_if_needed(force=True)
+        restore_best_remote_backup(force=force)
     except Exception:
-        pass
+        try:
+            from services.backup_service import restore_remote_database_if_needed
+
+            restore_remote_database_if_needed(force=force)
+        except Exception:
+            pass
+
+
+def _restore_if_local_empty() -> None:
+    global _RECOVERY_CHECKED
+    if _RECOVERY_CHECKED:
+        return
+    _RECOVERY_CHECKED = True
+    if _local_has_business_data():
+        return
+    _try_remote_recovery(force=True)
 
 
 def _open_connection() -> sqlite3.Connection:
@@ -71,13 +115,9 @@ def _open_connection() -> sqlite3.Connection:
 
 
 def get_connection() -> sqlite3.Connection:
-    """Create a SQLite connection configured for transactional ERP workloads.
-
-    Si Streamlit arranca con un archivo imperio.db vacío o dañado, SQLite puede
-    fallar incluso antes de crear las tablas. En ese caso apartamos el archivo,
-    intentamos restaurar el último respaldo remoto y volvemos a abrir la base.
-    """
+    """Create a SQLite connection configured for transactional ERP workloads."""
     global _CORRUPT_HANDLED
+    _restore_if_local_empty()
     try:
         return _open_connection()
     except sqlite3.DatabaseError:
@@ -85,7 +125,7 @@ def get_connection() -> sqlite3.Connection:
             raise
         _CORRUPT_HANDLED = True
         _quarantine_bad_database("corrupta")
-        _try_remote_recovery()
+        _try_remote_recovery(force=True)
         return _open_connection()
 
 
