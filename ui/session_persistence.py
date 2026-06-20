@@ -16,6 +16,26 @@ NON_PERSISTENT_KEYS = {
     RESTORE_FLAG,
     CODE_SIGNATURE_KEY,
 }
+NON_PERSISTENT_PREFIXES = (
+    "FormSubmitter",
+)
+NON_PERSISTENT_EXACT = {
+    "kdx_guardar_ajuste",
+}
+NON_PERSISTENT_CONTAINS = (
+    "guardar_",
+    "btn_",
+    "button_",
+)
+
+
+def _is_non_persistent_key(key: Any) -> bool:
+    key_text = str(key)
+    if key_text in NON_PERSISTENT_KEYS or key_text in NON_PERSISTENT_EXACT:
+        return True
+    if key_text.startswith(NON_PERSISTENT_PREFIXES):
+        return True
+    return any(fragment in key_text for fragment in NON_PERSISTENT_CONTAINS)
 
 
 def _project_code_signature() -> str:
@@ -76,6 +96,8 @@ def restore_session_snapshot() -> None:
         payload = raw.get("data", {})
         if isinstance(payload, dict):
             for key, value in payload.items():
+                if _is_non_persistent_key(key):
+                    continue
                 st.session_state.setdefault(key, value)
 
         st.session_state[CODE_SIGNATURE_KEY] = current_signature
@@ -91,9 +113,7 @@ def save_session_snapshot() -> None:
 
     data: dict[str, Any] = {}
     for key, value in st.session_state.items():
-        if key in NON_PERSISTENT_KEYS:
-            continue
-        if str(key).startswith("FormSubmitter"):
+        if _is_non_persistent_key(key):
             continue
         if _is_json_serializable(value):
             data[str(key)] = value
