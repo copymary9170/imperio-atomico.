@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 import tempfile
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Generator
+
+
+_CORRUPT_HANDLED = False
 
 
 def resolve_db_path() -> Path:
@@ -30,8 +35,32 @@ def resolve_db_path() -> Path:
 DB_PATH = resolve_db_path()
 
 
-def get_connection() -> sqlite3.Connection:
-    """Create a SQLite connection configured for transactional ERP workloads."""
+def _quarantine_bad_database(reason: str = "corrupta") -> None:
+    """Aparta una base dañada para que SQLite no intente abrirla otra vez."""
+    if not DB_PATH.exists():
+        return
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    target = DB_PATH.with_name(f"{DB_PATH.stem}_{reason}_{stamp}{DB_PATH.suffix}")
+    try:
+        shutil.move(str(DB_PATH), str(target))
+    except Exception:
+        try:
+            DB_PATH.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _try_remote_recovery() -> None:
+    """Intenta traer el último respaldo de GitHub antes de crear una base vacía."""
+    try:
+        from services.backup_service import restore_remote_database_if_needed
+
+        restore_remote_database_if_needed(force=True)
+    except Exception:
+        pass
+
+
+def _open_connection() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -39,6 +68,25 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA synchronous = NORMAL;")
     return conn
+
+
+def get_connection() -> sqlite3.Connection:
+    """Create a SQLite connection configured for transactional ERP workloads.
+
+    Si Streamlit arranca con un archivo imperio.db vacío o dañado, SQLite puede
+    fallar incluso antes de crear las tablas. En ese caso apartamos el archivo,
+    intentamos restaurar el último respaldo remoto y volvemos a abrir la base.
+    """
+    global _CORRUPT_HANDLED
+    try:
+        return _open_connection()
+    except sqlite3.DatabaseError:
+        if _CORRUPT_HANDLED:
+            raise
+        _CORRUPT_HANDLED = True
+        _quarantine_bad_database("corrupta")
+        _try_remote_recovery()
+        return _open_connection()
 
 
 @contextmanager
