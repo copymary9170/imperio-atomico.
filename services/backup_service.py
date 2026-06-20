@@ -24,6 +24,16 @@ BACKUP_DIR = DATA_DIR / "backups"
 BACKUP_META = BACKUP_DIR / "backup_meta.json"
 REMOTE_LATEST_PATH = "backups/latest.protected.json"
 DEFAULT_BACKUP_BRANCH = "data-backups"
+BUSINESS_TABLES = (
+    "inventario",
+    "clientes",
+    "proveedores",
+    "ventas",
+    "cotizaciones",
+    "facturas_compra",
+    "movimientos_inventario",
+    "kardex",
+)
 
 DB_CANDIDATES = [
     DATA_DIR / "imperio.db",
@@ -35,7 +45,19 @@ DB_CANDIDATES = [
 ]
 
 
+def _runtime_db_path() -> Path | None:
+    try:
+        from database.connection import DB_PATH
+
+        return Path(DB_PATH)
+    except Exception:
+        return None
+
+
 def get_database_path() -> Path | None:
+    runtime_path = _runtime_db_path()
+    if runtime_path and runtime_path.exists():
+        return runtime_path
     configured = os.getenv("IMPERIO_DB_PATH")
     if configured:
         configured_path = Path(configured).expanduser()
@@ -52,6 +74,9 @@ def get_database_path() -> Path | None:
 
 
 def get_target_database_path() -> Path:
+    runtime_path = _runtime_db_path()
+    if runtime_path:
+        return runtime_path
     configured = os.getenv("IMPERIO_DB_PATH")
     if configured:
         return Path(configured).expanduser()
@@ -124,6 +149,35 @@ def _decode_protected_payload(payload: bytes, password: str) -> bytes:
     return raw
 
 
+def _sqlite_tables(path: Path) -> set[str]:
+    if not path.exists() or path.stat().st_size < 100:
+        return set()
+    try:
+        with sqlite3.connect(str(path)) as conn:
+            rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        return {str(row[0]) for row in rows}
+    except Exception:
+        return set()
+
+
+def database_has_business_data(path: Path | None = None) -> bool:
+    db_path = path or get_database_path()
+    if not db_path or not db_path.exists() or db_path.stat().st_size < 100:
+        return False
+    tables = _sqlite_tables(db_path)
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            for table in BUSINESS_TABLES:
+                if table not in tables:
+                    continue
+                total = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                if int(total or 0) > 0:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
 def _github_request(url: str, token: str, *, method: str = "GET", payload: dict | None = None) -> tuple[int, bytes]:
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(
@@ -146,7 +200,7 @@ def _github_request(url: str, token: str, *, method: str = "GET", payload: dict 
 
 def _ensure_backup_branch(repo: str, token: str, branch: str) -> tuple[bool, str]:
     base = f"https://api.github.com/repos/{repo}"
-    status, body = _github_request(f"{base}/git/ref/heads/{urllib.parse.quote(branch, safe='')}", token)
+    status, _body = _github_request(f"{base}/git/ref/heads/{urllib.parse.quote(branch, safe='')}", token)
     if status == 200:
         return True, branch
     status, body = _github_request(base, token)
@@ -158,7 +212,7 @@ def _ensure_backup_branch(repo: str, token: str, branch: str) -> tuple[bool, str
     if status != 200:
         return False, "No se pudo consultar la rama principal."
     sha = json.loads(body.decode("utf-8"))["object"]["sha"]
-    status, body = _github_request(
+    status, _body = _github_request(
         f"{base}/git/refs",
         token,
         method="POST",
@@ -207,6 +261,15 @@ def _github_get_content(repo: str, token: str, remote_path: str, branch: str) ->
     info = json.loads(body.decode("utf-8"))
     encoded = str(info.get("content", "")).replace("\n", "")
     return base64.b64decode(encoded) if encoded else None
+
+
+def _remote_latest_exists() -> bool:
+    token = _secret("GITHUB_TOKEN")
+    repo = _secret("GITHUB_REPO")
+    branch = _secret("BACKUP_BRANCH", DEFAULT_BACKUP_BRANCH)
+    if not token or not repo:
+        return False
+    return _github_get_content(repo, token, REMOTE_LATEST_PATH, branch) is not None
 
 
 def upload_backup_to_github(backup_path: Path, *, archive: bool = True) -> tuple[bool, str]:
@@ -267,7 +330,16 @@ def create_backup(reason: str = "manual", upload_external: bool = True, *, archi
     meta["last_backup_reason"] = reason
     meta["last_backup_file"] = backup_path.name
     meta["last_backup_day"] = datetime.now().strftime("%Y-%m-%d")
-    if upload_external:
+
+    external_allowed = upload_external
+    if upload_external and reason in {"auto_cambio", "auto_diario"} and not database_has_business_data(backup_path):
+        if _remote_latest_exists():
+            external_allowed = False
+            meta["last_external_backup_ok"] = False
+            meta["last_external_backup_message"] = "Respaldo remoto protegido: la base local no tiene datos de negocio."
+            meta["last_external_backup_at"] = datetime.now().isoformat(timespec="seconds")
+
+    if external_allowed:
         ok, message = upload_backup_to_github(backup_path, archive=archive)
         meta["last_external_backup_ok"] = ok
         meta["last_external_backup_message"] = message
@@ -287,9 +359,9 @@ def persist_database_snapshot(reason: str = "auto_cambio") -> tuple[bool, str]:
 
 def restore_remote_database_if_needed(force: bool = False) -> tuple[bool, str]:
     target = get_target_database_path()
-    if target.exists() and target.stat().st_size > 100:
-        if not force:
-            return False, "La base local ya existe."
+    local_has_data = database_has_business_data(target)
+    if target.exists() and target.stat().st_size > 100 and local_has_data and not force:
+        return False, "La base local ya tiene datos."
     token = _secret("GITHUB_TOKEN")
     repo = _secret("GITHUB_REPO")
     password = _secret("BACKUP_PASSWORD")
@@ -306,7 +378,7 @@ def restore_remote_database_if_needed(force: bool = False) -> tuple[bool, str]:
     meta["last_restore_at"] = datetime.now().isoformat(timespec="seconds")
     meta["last_restore_file"] = f"{branch}:{REMOTE_LATEST_PATH}"
     _write_meta(meta)
-    return True, "Base restaurada automáticamente desde el respaldo remoto."
+    return True, "Base restaurada desde el respaldo remoto."
 
 
 def create_daily_backup_if_needed() -> Path | None:
@@ -341,7 +413,8 @@ def restore_backup(uploaded_file) -> bool:
         meta["last_restore_at"] = datetime.now().isoformat(timespec="seconds")
         meta["last_restore_file"] = getattr(uploaded_file, "name", "respaldo_subido.db")
         _write_meta(meta)
-        persist_database_snapshot("restaurado")
+        if database_has_business_data(db_path):
+            persist_database_snapshot("restaurado")
         return True
     except Exception:
         return False
@@ -354,6 +427,7 @@ def get_backup_status() -> dict:
     return {
         "db_path": str(db_path) if db_path else "No detectada",
         "db_exists": bool(db_path and db_path.exists()),
+        "db_has_business_data": database_has_business_data(db_path),
         "backup_dir": str(BACKUP_DIR),
         "total_backups": len(backups),
         "last_backup_at": meta.get("last_backup_at", "Nunca"),
