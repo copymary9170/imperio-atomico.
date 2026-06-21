@@ -197,7 +197,7 @@ MENU_ROUTES = {
     "📦 Inventario / Almacén": ("inventario.view", lambda: render_inventario_almacen_unificado(usuario)),
     "🏗️ Activos": (("activos.view", "mantenimiento.view"), lambda: render_activos_unificado(usuario)),
     "👥 Clientes": ("clientes.view", lambda: render_clientes(usuario)),
-    "📇 Contactos": (("clientes.view", "inventario.view", "dashboard.view"), lambda: render_contactos(usuario)),
+    "🏢 Proveedores": (("clientes.view", "inventario.view", "dashboard.view"), lambda: render_contactos(usuario)),
     "📊 Reportes": (("dashboard.view", "reportes.export", "contabilidad.view"), lambda: render_reportes(usuario)),
     "💾 Respaldo": (("dashboard.view", "config.view", "reportes.export"), lambda: render_respaldo(usuario)),
     "⚙️ Configuración": (("dashboard.view", "config.view", "reportes.export"), lambda: render_configuracion_sistema(usuario)),
@@ -233,25 +233,17 @@ except Exception:
 st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
 
 st.markdown('<div class="rate-title">Tasas, impuestos y comisiones activas</div>', unsafe_allow_html=True)
-rate_fields = [("tasa_bcv", "BCV", "Bs/$", "%.2f"), ("tasa_binance", "Binance", "Bs/$", "%.2f"), ("iva_perc", "IVA", "%", "%.2f"), ("igtf_perc", "IGTF", "%", "%.2f"), ("banco_perc", "Banco", "%", "%.3f"), ("kontigo_perc", "Kontigo", "%", "%.3f")]
-for col, (key, label, unit, fmt) in zip(st.columns(len(rate_fields)), rate_fields):
-    value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
-    col.metric(label, f"{fmt % value} {unit}")
+a, b, c, d = st.columns(4)
+a.metric("BCV", f"{_to_float(config.get('tasa_bcv'), DEFAULT_CONFIG['tasa_bcv']):,.2f} Bs/USD")
+b.metric("Paralelo", f"{_to_float(config.get('tasa_paralelo'), DEFAULT_CONFIG['tasa_paralelo']):,.2f} Bs/USD")
+c.metric("IVA", f"{_to_float(config.get('iva_pct'), DEFAULT_CONFIG['iva_pct'])*100:.2f}%")
+d.metric("IGTF", f"{_to_float(config.get('igtf_pct'), DEFAULT_CONFIG['igtf_pct'])*100:.2f}%")
 
-cols = st.columns([1, 1, 6])
-with cols[0]:
-    if st.button("🚪 Cerrar sesión", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
-with cols[1]:
-    try:
-        alert_summary = get_alert_summary(usuario)
-        total_alertas = alert_summary.get("total", 0) if isinstance(alert_summary, dict) else getattr(alert_summary, "total", 0)
-        st.warning(f"🚨 {total_alertas} alertas") if total_alertas else st.success("✅ Sin alertas")
-    except Exception:
-        st.info("Alertas no disponibles")
+alert_summary = get_alert_summary()
+if alert_summary["total"]:
+    st.warning(f"🚨 Alertas activas: {alert_summary['total']} · Stock bajo: {alert_summary['stock']} · CxC vencida: {alert_summary['cxc']} · CxP vencida: {alert_summary['cxp']}")
 
-menu = st.radio("Menú principal", list(VISIBLE_MENU.keys()), horizontal=True, label_visibility="collapsed", key="menu_principal_superior")
+menu = st.radio("Módulos", list(VISIBLE_MENU.keys()), horizontal=True, label_visibility="collapsed")
 st.divider()
 VISIBLE_MENU[menu]()
 save_session_snapshot()
