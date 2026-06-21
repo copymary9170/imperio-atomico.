@@ -241,9 +241,20 @@ b.metric("Paralelo", f"{_cfg_float('tasa_paralelo', _cfg_float('tasa_bcv', 0)):,
 c.metric("IVA", f"{_cfg_float('iva_pct', 0)*100:.2f}%")
 d.metric("IGTF", f"{_cfg_float('igtf_pct', 0)*100:.2f}%")
 
-alert_summary = get_alert_summary()
-if alert_summary["total"]:
-    st.warning(f"🚨 Alertas activas: {alert_summary['total']} · Stock bajo: {alert_summary['stock']} · CxC vencida: {alert_summary['cxc']} · CxP vencida: {alert_summary['cxp']}")
+try:
+    alert_summary = get_alert_summary()
+except Exception:
+    alert_summary = {}
+if not isinstance(alert_summary, dict):
+    alert_summary = {}
+alert_total = int(alert_summary.get("total", 0) or 0)
+if alert_total:
+    st.warning(
+        f"🚨 Alertas activas: {alert_total} · "
+        f"Stock bajo: {int(alert_summary.get('stock', 0) or 0)} · "
+        f"CxC vencida: {int(alert_summary.get('cxc', 0) or 0)} · "
+        f"CxP vencida: {int(alert_summary.get('cxp', 0) or 0)}"
+    )
 
 menu = st.radio("Módulos", list(VISIBLE_MENU.keys()), horizontal=True, label_visibility="collapsed")
 st.divider()
