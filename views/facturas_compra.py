@@ -14,6 +14,7 @@ from services.facturas_compra_service import (
     registrar_factura_compra,
 )
 from services.inventario_unificado_service import listar_inventario_unificado
+from services.proveedores_select_service import opciones_proveedores_con_manual
 
 TIPOS_LINEA = ["Inventario", "Activo / equipo", "Gasto", "Servicio"]
 UNIDADES = ["unidad", "paquete", "caja", "resma", "hoja", "pliego", "rollo", "g", "kg", "mg", "ml", "L", "cm", "m", "cm²", "m²", "cm³", "m³", "otro"]
@@ -41,6 +42,16 @@ def _render_abono(usuario: str, cxp: pd.DataFrame) -> None:
             st.rerun()
         except Exception as exc:
             st.error(f"No se pudo registrar el abono: {exc}")
+
+
+def _selector_proveedor_factura() -> str:
+    opciones, mapa = opciones_proveedores_con_manual()
+    seleccion = st.selectbox("Proveedor", opciones, key="fc_proveedor_select")
+    if seleccion == "Escribir manualmente":
+        return st.text_input("Proveedor manual", key="fc_proveedor_manual").strip()
+    if seleccion == "Sin proveedor":
+        st.caption("Registra tus proveedores en el módulo 🏢 Proveedores para seleccionarlos aquí.")
+    return mapa.get(seleccion, "")
 
 
 def render_facturas_compra(usuario: str) -> None:
@@ -114,7 +125,8 @@ def render_facturas_compra(usuario: str) -> None:
         subtotal = sum(float(x.get("subtotal_usd") or 0) for x in lineas)
         with st.form("form_nueva_factura_compra"):
             f1, f2, f3, f4 = st.columns(4)
-            proveedor = f1.text_input("Proveedor")
+            with f1:
+                proveedor = _selector_proveedor_factura()
             numero = f2.text_input("Numero de factura")
             fecha_factura = f3.date_input("Fecha de factura", value=None)
             vencimiento = f4.date_input("Vencimiento", value=None)
