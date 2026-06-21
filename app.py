@@ -234,10 +234,12 @@ st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-w
 
 st.markdown('<div class="rate-title">Tasas, impuestos y comisiones activas</div>', unsafe_allow_html=True)
 a, b, c, d = st.columns(4)
-a.metric("BCV", f"{_to_float(config.get('tasa_bcv'), DEFAULT_CONFIG['tasa_bcv']):,.2f} Bs/USD")
-b.metric("Paralelo", f"{_to_float(config.get('tasa_paralelo'), DEFAULT_CONFIG['tasa_paralelo']):,.2f} Bs/USD")
-c.metric("IVA", f"{_to_float(config.get('iva_pct'), DEFAULT_CONFIG['iva_pct'])*100:.2f}%")
-d.metric("IGTF", f"{_to_float(config.get('igtf_pct'), DEFAULT_CONFIG['igtf_pct'])*100:.2f}%")
+def _cfg_float(key: str, fallback: float) -> float:
+    return _to_float(config.get(key), float(DEFAULT_CONFIG.get(key, fallback)))
+a.metric("BCV", f"{_cfg_float('tasa_bcv', 0):,.2f} Bs/USD")
+b.metric("Paralelo", f"{_cfg_float('tasa_paralelo', _cfg_float('tasa_bcv', 0)):,.2f} Bs/USD")
+c.metric("IVA", f"{_cfg_float('iva_pct', 0)*100:.2f}%")
+d.metric("IGTF", f"{_cfg_float('igtf_pct', 0)*100:.2f}%")
 
 alert_summary = get_alert_summary()
 if alert_summary["total"]:
