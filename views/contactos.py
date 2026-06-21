@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from modules.clientes_mejoras import ensure_clientes_mejoras_schema
 
 
 def _table_exists(conn, table_name: str) -> bool:
@@ -43,6 +44,7 @@ def _safe_df(sql: str, table: str) -> pd.DataFrame:
 
 def _load_clientes() -> pd.DataFrame:
     try:
+        ensure_clientes_mejoras_schema()
         with db_transaction() as conn:
             if not _table_exists(conn, "clientes"):
                 return pd.DataFrame()
@@ -121,7 +123,7 @@ def _cxp_proveedores(): return _safe_df("SELECT * FROM cuentas_por_pagar_proveed
 def _cxc_clientes(): return _safe_df("SELECT * FROM cuentas_por_cobrar ORDER BY id DESC LIMIT 500", "cuentas_por_cobrar")
 
 
-def _render_registrar_cliente():
+def _render_registrar_cliente(usuario: str = "Sistema"):
     st.subheader("➕ Registrar cliente")
     with st.form("form_contacto_cliente"):
         a,b=st.columns(2)
@@ -138,8 +140,9 @@ def _render_registrar_cliente():
         if not nombre.strip():
             st.error("El nombre del cliente es obligatorio.")
             return
-        _insert_flexible("clientes", {"nombre":nombre.strip(),"telefono":telefono.strip(),"email":email.strip(),"rif":documento.strip(),"cedula":documento.strip(),"direccion":direccion.strip(),"categoria":categoria,"estado":"activo","limite_credito_usd":float(limite),"observaciones":obs.strip()})
-        st.success("Cliente registrado.")
+        ensure_clientes_mejoras_schema()
+        _insert_flexible("clientes", {"usuario": usuario, "nombre":nombre.strip(),"telefono":telefono.strip(),"email":email.strip(),"rif":documento.strip(),"cedula":documento.strip(),"direccion":direccion.strip(),"categoria":categoria,"estado":"activo","limite_credito_usd":float(limite),"observaciones":obs.strip(),"observaciones_comerciales":obs.strip(),"tipo_cliente":categoria,"origen":"No definido","servicio_interes":"No definido"})
+        st.success("Cliente registrado y conectado con Clientes.")
         st.rerun()
 
 
@@ -170,6 +173,7 @@ def _render_registrar_proveedor():
 
 
 def render_contactos(usuario: str = "Sistema") -> None:
+    ensure_clientes_mejoras_schema()
     st.title("📇 Contactos")
     st.caption("Agenda central de clientes y proveedores: registro, teléfonos, correos, documentos, dirección, crédito, cobranza y pagos.")
 
@@ -177,7 +181,7 @@ def render_contactos(usuario: str = "Sistema") -> None:
 
     with tab_registrar:
         col1,col2=st.columns(2)
-        with col1: _render_registrar_cliente()
+        with col1: _render_registrar_cliente(usuario)
         with col2: _render_registrar_proveedor()
 
     df=_unified_contacts()
