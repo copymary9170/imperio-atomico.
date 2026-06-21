@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from services.inventario_unificado_service import TIPOS_USO, UNIDADES_BASE, crear_item_unificado
-from services.proveedores_select_service import opciones_proveedores_con_manual
+from services.proveedores_select_service import listar_proveedores_activos, opciones_proveedores_con_manual
 import views.inventario_unificado as base
 
 
@@ -15,6 +15,27 @@ def _selector_proveedor_principal() -> str:
     if seleccion == "Sin proveedor":
         st.caption("Registra proveedores en el módulo 🏢 Proveedores para seleccionarlos aquí.")
     return mapa.get(seleccion, "")
+
+
+def _normalizar_proveedor_pegado(nombre: str) -> str:
+    proveedor = str(nombre or "").strip()
+    if not proveedor:
+        return ""
+    proveedores = listar_proveedores_activos()
+    if proveedores.empty:
+        raise ValueError(f"Proveedor '{proveedor}' no existe. Primero créalo en 🏢 Proveedores o deja Proveedor vacío.")
+    mapa = {str(row.get("nombre") or "").strip().casefold(): str(row.get("nombre") or "").strip() for _, row in proveedores.iterrows()}
+    encontrado = mapa.get(proveedor.casefold())
+    if encontrado:
+        return encontrado
+    disponibles = ", ".join([v for v in mapa.values()][:8])
+    raise ValueError(f"Proveedor '{proveedor}' no existe en 🏢 Proveedores. Usa el nombre exacto. Disponibles: {disponibles}")
+
+
+def _data_para_crear_validando_proveedor(item: dict) -> dict:
+    data = dict(item)
+    data["proveedor_principal"] = _normalizar_proveedor_pegado(data.get("proveedor_principal", ""))
+    return data
 
 
 def _render_form_crear_con_proveedor(usuario: str) -> None:
@@ -103,4 +124,5 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
 
 def render_inventario_unificado(usuario: str) -> None:
     base._render_form_crear = _render_form_crear_con_proveedor
+    base._data_para_crear = _data_para_crear_validando_proveedor
     base.render_inventario_unificado(usuario)
