@@ -76,8 +76,7 @@ def ensure_inventario_unificado_schema() -> None:
         )
 
 
-def listar_inventario_unificado(activos_only: bool = True) -> pd.DataFrame:
-    ensure_inventario_unificado_schema()
+def _query_inventario(activos_only: bool = True) -> pd.DataFrame:
     where = "WHERE lower(COALESCE(estado,'activo'))='activo'" if activos_only else ""
     with db_transaction() as conn:
         return pd.read_sql_query(
@@ -130,6 +129,33 @@ def listar_inventario_unificado(activos_only: bool = True) -> pd.DataFrame:
         )
 
 
+def _try_restore_inventory_json() -> None:
+    try:
+        from services.inventario_cloud_sync import restore_inventario_from_github_if_empty
+
+        restore_inventario_from_github_if_empty("Sistema")
+    except Exception:
+        pass
+
+
+def _try_export_inventory_json() -> None:
+    try:
+        from services.inventario_cloud_sync import export_inventario_to_github
+
+        export_inventario_to_github()
+    except Exception:
+        pass
+
+
+def listar_inventario_unificado(activos_only: bool = True) -> pd.DataFrame:
+    ensure_inventario_unificado_schema()
+    df = _query_inventario(activos_only)
+    if df.empty:
+        _try_restore_inventory_json()
+        df = _query_inventario(activos_only)
+    return df
+
+
 def guardar_clasificacion_inventario(
     inventario_id: int,
     *,
@@ -151,6 +177,7 @@ def guardar_clasificacion_inventario(
             """,
             (tipo, unidad, unidad, 1 if permite_fraccionamiento else 0, int(inventario_id)),
         )
+    _try_export_inventory_json()
 
 
 def crear_item_unificado(data: dict[str, Any], usuario: str) -> int:
@@ -163,6 +190,7 @@ def crear_item_unificado(data: dict[str, Any], usuario: str) -> int:
     if tipo_uso not in TIPOS_USO:
         raise ValueError("Tipo de uso inválido.")
     unidad = clean_text(data.get("unidad_base") or "unidad")
+    item_id = 0
     with db_transaction() as conn:
         existe = conn.execute("SELECT id FROM inventario WHERE lower(sku)=lower(?)", (sku,)).fetchone()
         if existe:
@@ -198,4 +226,6 @@ def crear_item_unificado(data: dict[str, Any], usuario: str) -> int:
                 clean_text(data.get("observaciones")),
             ),
         )
-        return int(cur.lastrowid)
+        item_id = int(cur.lastrowid)
+    _try_export_inventory_json()
+    return item_id
