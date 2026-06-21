@@ -7,7 +7,7 @@ from views.catalogo import render_catalogo
 from views.facturas_compra import render_facturas_compra
 from views.inventario import render_inventario
 from views.inventario_avanzado import render_inventario_avanzado
-from views.inventario_unificado import render_inventario_unificado
+from views.inventario_unificado_conectado import render_inventario_unificado as render_inventario_unificado
 from views.kardex import render_kardex
 from views.productos_terminados import render_productos_terminados
 from views.proveedores_compras import render_compras_suministro
