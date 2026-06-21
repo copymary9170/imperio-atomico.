@@ -10,7 +10,7 @@ from views.inventario_avanzado import render_inventario_avanzado
 from views.inventario_unificado import render_inventario_unificado
 from views.kardex import render_kardex
 from views.productos_terminados import render_productos_terminados
-from views.proveedores_compras import render_compras_suministro, render_proveedores
+from views.proveedores_compras import render_compras_suministro
 from views.stock_minimo import render_stock_minimo
 from views.unidades_fraccionadas import render_unidades_fraccionadas
 
@@ -26,7 +26,6 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
         "📏 Unidades",
         "🧾 Kardex",
         "🛒 Compras",
-        "👥 Proveedores",
         "🏬 Almacén",
         "🛍️ Catálogo",
         "🧪 Inventario avanzado",
@@ -48,10 +47,8 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
     with tabs[7]:
         render_compras_suministro(usuario)
     with tabs[8]:
-        render_proveedores(usuario)
-    with tabs[9]:
         render_almacen_avanzado(usuario)
-    with tabs[10]:
+    with tabs[9]:
         render_catalogo(usuario)
-    with tabs[11]:
+    with tabs[10]:
         render_inventario_avanzado(usuario)
