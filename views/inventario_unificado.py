@@ -18,7 +18,10 @@ from services.inventario_unificado_service import (
     listar_inventario_unificado,
 )
 
-CATEGORIAS_SUGERIDAS = ["Papel", "Cartulina", "Foami", "Carpetas", "Papelería", "Tinta", "Consumible", "Sublimación", "Empaque", "Herramienta", "General"]
+CATEGORIAS_SUGERIDAS = [
+    "Papel", "Cartulina", "Foami", "Carpetas", "Papelería", "Tinta",
+    "Consumible", "Sublimación", "Empaque", "Herramienta", "General",
+]
 
 PEGADO_EJEMPLO = """SKU=PAP-BOND-CARTA-75G
 Nombre=Papel bond carta 75 g
@@ -33,12 +36,12 @@ Gramaje=75 g
 Acabado=Mate
 Ancho=21.59
 Alto=27.94
-Merma base=2
-Margen izquierdo=0.30
-Margen derecho=0.30
-Margen superior=0.30
-Margen inferior=0.30
-Separación=0.20
+Merma base=0
+Margen izquierdo=0
+Margen derecho=0
+Margen superior=0
+Margen inferior=0
+Separación=0
 Sangrado=0
 Unidad compra=resma
 Contenido compra=500
@@ -51,7 +54,7 @@ Stock ideal=1000
 Stock máximo=5000
 Costo=0
 Precio=0
-Observaciones=Papel bond blanco tamaño carta de 75 g, utilizado para impresiones, copias, documentos y venta por hoja. Presentación de compra: resma de 500 hojas.
+Observaciones=Papel bond blanco tamaño carta de 75 g para impresiones, copias, documentos y venta por hoja.
 """
 
 ALIASES = {
@@ -100,7 +103,11 @@ DEFAULT_ITEM = {
     "costo_unitario_usd": 0.0, "precio_venta_usd": 0.0, "observaciones": "",
 }
 
-CSV_COLUMNS = ["sku", "nombre", "categoria", "marca", "color", "tamano", "ancho_cm", "alto_cm", "gramaje", "unidad_compra", "contenido_compra", "stock_minimo", "punto_reorden", "stock_ideal", "stock_maximo"]
+CSV_COLUMNS = [
+    "sku", "nombre", "categoria", "marca", "color", "tamano", "ancho_cm", "alto_cm",
+    "gramaje", "unidad_compra", "contenido_compra", "stock_minimo", "punto_reorden",
+    "stock_ideal", "stock_maximo",
+]
 
 
 def _to_float(value: Any) -> float:
@@ -139,19 +146,15 @@ def _normalize_item(data: dict[str, Any]) -> dict[str, Any]:
             item[key] = value if value in TIPOS_USO else "Ambos"
         else:
             item[key] = str(raw_value or "").strip()
-    if not item["categoria"]:
-        item["categoria"] = "General"
-    if not item["unidad_base"]:
-        item["unidad_base"] = "unidad"
-    if not item["tipo_uso"]:
-        item["tipo_uso"] = "Ambos"
+    item["categoria"] = item["categoria"] or "General"
+    item["unidad_base"] = item["unidad_base"] or "unidad"
+    item["tipo_uso"] = item["tipo_uso"] or "Ambos"
     return item
 
 
 def _is_key_value_text(text: str) -> bool:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
     count = 0
-    for line in lines:
+    for line in [line.strip() for line in text.splitlines() if line.strip()]:
         if "=" in line:
             key = line.split("=", 1)[0]
         elif ":" in line:
@@ -217,7 +220,6 @@ def _parse_pasted_items(text: str) -> list[dict[str, Any]]:
             return [_normalize_item(item) for item in loaded if isinstance(item, dict)]
     except Exception:
         pass
-    # IMPORTANTE: primero campo=valor. Las observaciones pueden tener comas y no deben convertir el texto en CSV.
     if _is_key_value_text(text):
         return _parse_key_value_text(text)
     return _parse_csv_text(text)
@@ -234,46 +236,43 @@ def _calcular_areas(values: dict) -> tuple[float, float, float]:
     return area_total, area_util, merma
 
 
-def _data_para_crear(item: dict[str, Any]) -> dict[str, Any]:
-    return dict(item)
-
-
-def _actualizar_articulo(item_id: int, values: dict, usuario: str) -> None:
+def _cambiar_estado(item_id: int, estado: str, usuario: str) -> None:
     with db_transaction() as conn:
-        duplicado = conn.execute("SELECT id FROM inventario WHERE lower(sku)=lower(?) AND id<>?", (values["sku"].strip(), int(item_id))).fetchone()
+        conn.execute(
+            "UPDATE inventario SET estado=?, actualizado_por=?, actualizado_en=CURRENT_TIMESTAMP WHERE id=?",
+            (estado, usuario, int(item_id)),
+        )
+
+
+def _actualizar_basico(item_id: int, values: dict, usuario: str) -> None:
+    with db_transaction() as conn:
+        duplicado = conn.execute(
+            "SELECT id FROM inventario WHERE lower(sku)=lower(?) AND id<>?",
+            (values["sku"].strip(), int(item_id)),
+        ).fetchone()
         if duplicado:
             raise ValueError("Ya existe otro artículo con ese SKU.")
         conn.execute(
             """
-            UPDATE inventario SET sku=?, nombre=?, categoria=?, unidad=?, unidad_base=?, tipo_uso=?,
-            permite_fraccionamiento=?, stock_minimo=?, punto_reorden=?, stock_ideal=?, stock_maximo=?,
-            costo_unitario_usd=?, precio_venta_usd=?, marca=?, color=?, tamano=?, gramaje=?, acabado=?,
-            ancho_cm=?, alto_cm=?, margen_izquierdo_cm=?, margen_derecho_cm=?, margen_superior_cm=?,
-            margen_inferior_cm=?, separacion_cm=?, sangrado_cm=?, merma_base_pct=?,
-            unidad_compra=?, contenido_compra=?, proveedor_principal=?, ubicacion=?, observaciones=?,
-            actualizado_por=?, actualizado_en=CURRENT_TIMESTAMP WHERE id=?
+            UPDATE inventario
+            SET sku=?, nombre=?, categoria=?, marca=?, color=?, tamano=?, observaciones=?,
+                actualizado_por=?, actualizado_en=CURRENT_TIMESTAMP
+            WHERE id=?
             """,
             (
-                values["sku"].strip(), values["nombre"].strip(), values["categoria"].strip(), values["unidad_base"],
-                values["unidad_base"], values["tipo_uso"], 1 if values["fraccionable"] else 0,
-                values["stock_minimo"], values["punto_reorden"], values["stock_ideal"], values["stock_maximo"],
-                values["costo"], values["precio"], values["marca"].strip(), values["color"].strip(),
-                values["tamano"].strip(), values["gramaje"].strip(), values["acabado"].strip(),
-                values["ancho_cm"], values["alto_cm"], values["margen_izquierdo_cm"], values["margen_derecho_cm"],
-                values["margen_superior_cm"], values["margen_inferior_cm"], values["separacion_cm"], values["sangrado_cm"],
-                values["merma_base_pct"], values["unidad_compra"], values["contenido_compra"], values["proveedor"].strip(),
-                values["ubicacion"].strip(), values["observaciones"].strip(), usuario, int(item_id),
+                values["sku"].strip(), values["nombre"].strip(), values["categoria"].strip(),
+                values["marca"].strip(), values["color"].strip(), values["tamano"].strip(),
+                values["observaciones"].strip(), usuario, int(item_id),
             ),
         )
 
 
-def _cambiar_estado(item_id: int, estado: str, usuario: str) -> None:
-    with db_transaction() as conn:
-        conn.execute("UPDATE inventario SET estado=?, actualizado_por=?, actualizado_en=CURRENT_TIMESTAMP WHERE id=?", (estado, usuario, int(item_id)))
+def _data_para_crear(item: dict[str, Any]) -> dict[str, Any]:
+    return dict(item)
 
 
 def _render_pegar_datos(usuario: str) -> None:
-    st.info("Pega datos en formato campo=valor, JSON o CSV. Las comas en observaciones ya no dañan la lectura.")
+    st.info("Pega datos en formato campo=valor, JSON o CSV. Luego revisa la vista previa y crea el artículo.")
     col_a, col_b = st.columns([2, 1])
     with col_a:
         texto = st.text_area("Pegar datos del artículo", height=360, placeholder=PEGADO_EJEMPLO, key="inventario_pegado_texto")
@@ -282,8 +281,7 @@ def _render_pegar_datos(usuario: str) -> None:
         st.code(PEGADO_EJEMPLO, language="text")
     if not texto.strip():
         return
-    items = _parse_pasted_items(texto)
-    items = [item for item in items if item.get("sku") or item.get("nombre")]
+    items = [item for item in _parse_pasted_items(texto) if item.get("sku") or item.get("nombre")]
     if not items:
         st.warning("No pude interpretar el texto. Usa formato SKU=..., Nombre=..., Categoría=...")
         return
@@ -399,9 +397,16 @@ def _render_editar(usuario: str) -> None:
     if df.empty:
         st.info("No hay artículos para editar.")
         return
-    opciones = {f"#{int(r['id'])} · {r['nombre']} · {r['sku']}": r for _, r in df.iterrows()}
+    ver_eliminados = st.checkbox("Ver artículos eliminados", value=False)
+    if not ver_eliminados:
+        df = df[df["estado"].fillna("activo").str.lower() != "eliminado"]
+    if df.empty:
+        st.info("No hay artículos disponibles con el filtro actual.")
+        return
+    opciones = {f"#{int(r['id'])} · {r['nombre']} · {r['sku']} · {r['estado']}": r for _, r in df.iterrows()}
     seleccion = st.selectbox("Artículo", list(opciones.keys()))
     row = opciones[seleccion]
+    estado_actual = str(row["estado"] or "activo").lower()
     st.write("Edita datos básicos. Para ajustes de stock usa Kardex o Facturas de compra.")
     with st.form("editar_basico_inventario"):
         sku = st.text_input("SKU", value=str(row["sku"] or ""))
@@ -414,23 +419,48 @@ def _render_editar(usuario: str) -> None:
         obs = st.text_area("Observaciones", value=str(row["observaciones"] or ""))
         guardar = st.form_submit_button("Guardar cambios", type="primary")
     if guardar:
-        with db_transaction() as conn:
-            conn.execute("UPDATE inventario SET sku=?, nombre=?, categoria=?, marca=?, color=?, tamano=?, observaciones=?, actualizado_por=?, actualizado_en=CURRENT_TIMESTAMP WHERE id=?", (sku, nombre, categoria, marca, color, tamano, obs, usuario, int(row["id"])))
-        st.success("Artículo actualizado.")
-        st.rerun()
-    estado_actual = str(row["estado"] or "activo").lower()
+        try:
+            _actualizar_basico(int(row["id"]), {
+                "sku": sku, "nombre": nombre, "categoria": categoria, "marca": marca,
+                "color": color, "tamano": tamano, "observaciones": obs,
+            }, usuario)
+            st.success("Artículo actualizado.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo actualizar: {exc}")
+
+    st.divider()
+    c1, c2, c3 = st.columns(3)
     if estado_actual == "activo":
-        if st.button("Desactivar artículo"):
+        if c1.button("Desactivar artículo", use_container_width=True):
             _cambiar_estado(int(row["id"]), "inactivo", usuario)
+            st.success("Artículo desactivado.")
             st.rerun()
-    else:
-        if st.button("Reactivar artículo"):
+    elif estado_actual == "inactivo":
+        if c1.button("Reactivar artículo", use_container_width=True):
             _cambiar_estado(int(row["id"]), "activo", usuario)
+            st.success("Artículo reactivado.")
             st.rerun()
+    elif estado_actual == "eliminado":
+        if c1.button("Restaurar eliminado", use_container_width=True):
+            _cambiar_estado(int(row["id"]), "activo", usuario)
+            st.success("Artículo restaurado.")
+            st.rerun()
+
+    st.warning("Eliminar oculta el artículo del inventario normal, pero conserva el historial. Úsalo para pruebas o productos creados por error.")
+    confirmar_eliminar = st.checkbox(
+        f"Confirmo que deseo eliminar el artículo {row['sku']}",
+        key=f"confirmar_eliminar_{int(row['id'])}",
+    )
+    if c3.button("🗑️ Eliminar artículo", type="primary", use_container_width=True, disabled=not confirmar_eliminar or estado_actual == "eliminado"):
+        _cambiar_estado(int(row["id"]), "eliminado", usuario)
+        st.success("Artículo eliminado de la vista normal.")
+        st.rerun()
 
 
 def _render_clasificar() -> None:
     df = listar_inventario_unificado(activos_only=False)
+    df = df[df["estado"].fillna("activo").str.lower() != "eliminado"]
     if df.empty:
         st.info("No hay artículos para clasificar.")
         return
@@ -459,6 +489,7 @@ def render_inventario_unificado(usuario: str) -> None:
     tab_lista, tab_pegar, tab_crear, tab_editar, tab_clasificar = st.tabs(["Existencias", "📋 Pegar datos", "Crear artículo", "Editar / desactivar", "Clasificar"])
     with tab_lista:
         df = listar_inventario_unificado(activos_only=False)
+        df = df[df["estado"].fillna("activo").str.lower() != "eliminado"]
         if df.empty:
             st.info("Aún no hay artículos.")
         else:
