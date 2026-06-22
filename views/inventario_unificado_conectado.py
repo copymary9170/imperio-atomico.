@@ -7,11 +7,15 @@ from services.proveedores_select_service import listar_proveedores_activos, opci
 import views.inventario_unificado as base
 
 TIPOS_MEDICION = [
-    "Hoja / material con medidas",
-    "Peso",
-    "Volumen",
+    "Hoja / plano con cm",
+    "Peso en g/kg",
+    "Volumen en ml/L/cm³",
     "Unidad simple",
 ]
+
+UNIDADES_PESO = {"g", "kg", "mg", "gramo", "gramos", "kilogramo", "kilogramos"}
+UNIDADES_VOLUMEN = {"ml", "l", "litro", "litros", "cm³", "cm3", "m³", "m3"}
+UNIDADES_PLANO = {"hoja", "pliego", "cm", "m", "cm²", "cm2", "m²", "m2"}
 
 
 def _selector_proveedor_principal() -> str:
@@ -25,13 +29,18 @@ def _selector_proveedor_principal() -> str:
 
 
 def _tipo_medicion_sugerido(categoria: str, unidad_base: str) -> str:
-    texto = f"{categoria} {unidad_base}".lower()
-    if any(x in texto for x in ["papel", "cartulina", "foami", "hoja", "pliego", "acetato", "opalina"]):
-        return "Hoja / material con medidas"
-    if any(x in texto for x in ["g", "kg", "gramo", "kilo"]):
-        return "Peso"
-    if any(x in texto for x in ["ml", "l", "litro", "tinta"]):
-        return "Volumen"
+    unidad = str(unidad_base or "").strip().lower()
+    categoria_txt = str(categoria or "").strip().lower()
+    if unidad in UNIDADES_VOLUMEN:
+        return "Volumen en ml/L/cm³"
+    if unidad in UNIDADES_PESO:
+        return "Peso en g/kg"
+    if unidad in UNIDADES_PLANO:
+        return "Hoja / plano con cm"
+    if any(x in categoria_txt for x in ["papel", "cartulina", "foami", "acetato", "opalina"]):
+        return "Hoja / plano con cm"
+    if "tinta" in categoria_txt:
+        return "Volumen en ml/L/cm³"
     return "Unidad simple"
 
 
@@ -74,7 +83,7 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
             "Cómo se mide este artículo",
             TIPOS_MEDICION,
             index=TIPOS_MEDICION.index(tipo_sugerido),
-            help="Usa medidas solo para hojas, pliegos, foami, cartulina o materiales que se cortan. Para tintas usa volumen; para polvo o material pesado usa peso.",
+            help="Elige según el material: papel/foami/cartulina usa cm; tintas o líquidos usan ml/L/cm³; polvos o material pesado usan g/kg; piezas usan unidad simple.",
         )
 
         st.markdown("#### Características")
@@ -83,19 +92,19 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
         color = a2.text_input("Color")
         tamano = a3.text_input("Presentación / tamaño comercial", placeholder="Ej.: carta, oficio, botella 70 ml, bolsa 1 kg")
         acabado = a4.text_input("Acabado / tipo", placeholder="Ej.: mate, brillante, pigmentada")
-        gramaje = ""
 
+        gramaje = ""
         ancho_cm = alto_cm = margen_izquierdo_cm = margen_derecho_cm = 0.0
         margen_superior_cm = margen_inferior_cm = separacion_cm = sangrado_cm = 0.0
         merma_base_pct = 0.0
 
-        if tipo_medicion == "Hoja / material con medidas":
-            st.markdown("#### Dimensiones y aprovechamiento")
+        if tipo_medicion == "Hoja / plano con cm":
+            st.markdown("#### Medidas para hojas, pliegos o materiales que se cortan")
             m1, m2, m3 = st.columns(3)
             ancho_cm = m1.number_input("Ancho del material (cm)", min_value=0.0, step=0.01, format="%.2f")
             alto_cm = m2.number_input("Alto del material (cm)", min_value=0.0, step=0.01, format="%.2f")
             gramaje = m3.text_input("Gramaje / grosor", placeholder="Ej.: 75 g, 180 g, 2 mm")
-            usar_margenes = st.checkbox("Usar márgenes, separación o sangrado", value=False)
+            usar_margenes = st.checkbox("Este material necesita márgenes, separación o sangrado", value=False)
             if usar_margenes:
                 n1, n2, n3, n4 = st.columns(4)
                 margen_izquierdo_cm = n1.number_input("Margen izquierdo (cm)", min_value=0.0, step=0.01, format="%.2f")
@@ -111,22 +120,26 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
             q1.metric("Área total", f"{area_total:.2f} cm²")
             q2.metric("Área útil", f"{area_util:.2f} cm²")
             q3.metric("Merma por márgenes", f"{merma_dimensional:.2f}%")
-        elif tipo_medicion == "Peso":
+        elif tipo_medicion == "Peso en g/kg":
             st.markdown("#### Medición por peso")
-            p1, p2 = st.columns(2)
-            gramaje = p1.text_input("Peso / presentación", placeholder="Ej.: 100 g, 1 kg, 25 kg")
-            merma_base_pct = p2.number_input("Pérdida o desperdicio opcional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
-            st.caption("No se piden centímetros, márgenes ni sangrado porque este artículo se controla por peso.")
-        elif tipo_medicion == "Volumen":
+            p1, p2, p3 = st.columns(3)
+            cantidad_peso = p1.number_input("Peso de presentación", min_value=0.0, step=1.0, format="%.4f")
+            unidad_peso = p2.selectbox("Unidad de peso", ["g", "kg", "mg"])
+            merma_base_pct = p3.number_input("Pérdida opcional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
+            gramaje = f"{cantidad_peso:g} {unidad_peso}" if cantidad_peso else unidad_peso
+            st.caption("Para peso no se usan cm, cm² ni cm³.")
+        elif tipo_medicion == "Volumen en ml/L/cm³":
             st.markdown("#### Medición por volumen")
-            p1, p2 = st.columns(2)
-            gramaje = p1.text_input("Volumen / presentación", placeholder="Ej.: 70 ml, 100 ml, 1 L")
-            merma_base_pct = p2.number_input("Pérdida o desperdicio opcional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
-            st.caption("No se piden centímetros, márgenes ni sangrado porque este artículo se controla por volumen.")
+            p1, p2, p3 = st.columns(3)
+            cantidad_volumen = p1.number_input("Volumen de presentación", min_value=0.0, step=1.0, format="%.4f")
+            unidad_volumen = p2.selectbox("Unidad de volumen", ["ml", "L", "cm³", "m³"])
+            merma_base_pct = p3.number_input("Pérdida opcional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
+            gramaje = f"{cantidad_volumen:g} {unidad_volumen}" if cantidad_volumen else unidad_volumen
+            st.caption("Usa esto para tinta, líquidos, resina, pegamento o material medido por volumen. Aquí sí aparece cm³.")
         else:
             st.markdown("#### Medición por unidad")
             gramaje = st.text_input("Presentación opcional", placeholder="Ej.: paquete de 12, caja, pieza individual")
-            st.caption("No se piden medidas ni merma. Úsalo para carpetas, bolígrafos, grapadoras, equipos o artículos por unidad.")
+            st.caption("Para artículos por unidad no se piden cm, cm², cm³, márgenes ni merma.")
 
         st.markdown("#### Compra y almacenamiento")
         b1, b2, b3, b4 = st.columns(4)
