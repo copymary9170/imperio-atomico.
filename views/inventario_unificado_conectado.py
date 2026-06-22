@@ -6,6 +6,13 @@ from services.inventario_unificado_service import TIPOS_USO, UNIDADES_BASE, crea
 from services.proveedores_select_service import listar_proveedores_activos, opciones_proveedores_con_manual
 import views.inventario_unificado as base
 
+TIPOS_MEDICION = [
+    "Hoja / material con medidas",
+    "Peso",
+    "Volumen",
+    "Unidad simple",
+]
+
 
 def _selector_proveedor_principal() -> str:
     opciones, mapa = opciones_proveedores_con_manual()
@@ -15,6 +22,17 @@ def _selector_proveedor_principal() -> str:
     if seleccion == "Sin proveedor":
         st.caption("Registra proveedores en el módulo 🏢 Proveedores para seleccionarlos aquí.")
     return mapa.get(seleccion, "")
+
+
+def _tipo_medicion_sugerido(categoria: str, unidad_base: str) -> str:
+    texto = f"{categoria} {unidad_base}".lower()
+    if any(x in texto for x in ["papel", "cartulina", "foami", "hoja", "pliego", "acetato", "opalina"]):
+        return "Hoja / material con medidas"
+    if any(x in texto for x in ["g", "kg", "gramo", "kilo"]):
+        return "Peso"
+    if any(x in texto for x in ["ml", "l", "litro", "tinta"]):
+        return "Volumen"
+    return "Unidad simple"
 
 
 def _normalizar_proveedor_pegado(nombre: str) -> str:
@@ -51,32 +69,64 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
         unidad_base = d2.selectbox("Unidad base", UNIDADES_BASE)
         fraccionable = d3.checkbox("Permite fraccionamiento", value=True)
 
+        tipo_sugerido = _tipo_medicion_sugerido(categoria, unidad_base)
+        tipo_medicion = st.selectbox(
+            "Cómo se mide este artículo",
+            TIPOS_MEDICION,
+            index=TIPOS_MEDICION.index(tipo_sugerido),
+            help="Usa medidas solo para hojas, pliegos, foami, cartulina o materiales que se cortan. Para tintas usa volumen; para polvo o material pesado usa peso.",
+        )
+
         st.markdown("#### Características")
-        a1, a2, a3, a4, a5 = st.columns(5)
+        a1, a2, a3, a4 = st.columns(4)
         marca = a1.text_input("Marca")
         color = a2.text_input("Color")
-        tamano = a3.text_input("Nombre comercial del tamaño")
-        gramaje = a4.text_input("Gramaje / grosor")
-        acabado = a5.text_input("Acabado")
+        tamano = a3.text_input("Presentación / tamaño comercial", placeholder="Ej.: carta, oficio, botella 70 ml, bolsa 1 kg")
+        acabado = a4.text_input("Acabado / tipo", placeholder="Ej.: mate, brillante, pigmentada")
+        gramaje = ""
 
-        st.markdown("#### Dimensiones y aprovechamiento")
-        m1, m2, m3 = st.columns(3)
-        ancho_cm = m1.number_input("Ancho del material (cm)", min_value=0.0, step=0.01, format="%.2f")
-        alto_cm = m2.number_input("Alto del material (cm)", min_value=0.0, step=0.01, format="%.2f")
-        merma_base_pct = m3.number_input("Merma base adicional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
-        n1, n2, n3, n4 = st.columns(4)
-        margen_izquierdo_cm = n1.number_input("Margen izquierdo (cm)", min_value=0.0, step=0.01, format="%.2f")
-        margen_derecho_cm = n2.number_input("Margen derecho (cm)", min_value=0.0, step=0.01, format="%.2f")
-        margen_superior_cm = n3.number_input("Margen superior (cm)", min_value=0.0, step=0.01, format="%.2f")
-        margen_inferior_cm = n4.number_input("Margen inferior (cm)", min_value=0.0, step=0.01, format="%.2f")
-        p1, p2 = st.columns(2)
-        separacion_cm = p1.number_input("Separación entre piezas (cm)", min_value=0.0, step=0.01, format="%.2f")
-        sangrado_cm = p2.number_input("Sangrado por lado (cm)", min_value=0.0, step=0.01, format="%.2f")
-        area_total, area_util, merma_dimensional = base._calcular_areas(locals())
-        q1, q2, q3 = st.columns(3)
-        q1.metric("Área total", f"{area_total:.2f} cm²")
-        q2.metric("Área útil", f"{area_util:.2f} cm²")
-        q3.metric("Merma por márgenes", f"{merma_dimensional:.2f}%")
+        ancho_cm = alto_cm = margen_izquierdo_cm = margen_derecho_cm = 0.0
+        margen_superior_cm = margen_inferior_cm = separacion_cm = sangrado_cm = 0.0
+        merma_base_pct = 0.0
+
+        if tipo_medicion == "Hoja / material con medidas":
+            st.markdown("#### Dimensiones y aprovechamiento")
+            m1, m2, m3 = st.columns(3)
+            ancho_cm = m1.number_input("Ancho del material (cm)", min_value=0.0, step=0.01, format="%.2f")
+            alto_cm = m2.number_input("Alto del material (cm)", min_value=0.0, step=0.01, format="%.2f")
+            gramaje = m3.text_input("Gramaje / grosor", placeholder="Ej.: 75 g, 180 g, 2 mm")
+            usar_margenes = st.checkbox("Usar márgenes, separación o sangrado", value=False)
+            if usar_margenes:
+                n1, n2, n3, n4 = st.columns(4)
+                margen_izquierdo_cm = n1.number_input("Margen izquierdo (cm)", min_value=0.0, step=0.01, format="%.2f")
+                margen_derecho_cm = n2.number_input("Margen derecho (cm)", min_value=0.0, step=0.01, format="%.2f")
+                margen_superior_cm = n3.number_input("Margen superior (cm)", min_value=0.0, step=0.01, format="%.2f")
+                margen_inferior_cm = n4.number_input("Margen inferior (cm)", min_value=0.0, step=0.01, format="%.2f")
+                p1, p2 = st.columns(2)
+                separacion_cm = p1.number_input("Separación entre piezas (cm)", min_value=0.0, step=0.01, format="%.2f")
+                sangrado_cm = p2.number_input("Sangrado por lado (cm)", min_value=0.0, step=0.01, format="%.2f")
+            merma_base_pct = st.number_input("Merma adicional opcional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
+            area_total, area_util, merma_dimensional = base._calcular_areas(locals())
+            q1, q2, q3 = st.columns(3)
+            q1.metric("Área total", f"{area_total:.2f} cm²")
+            q2.metric("Área útil", f"{area_util:.2f} cm²")
+            q3.metric("Merma por márgenes", f"{merma_dimensional:.2f}%")
+        elif tipo_medicion == "Peso":
+            st.markdown("#### Medición por peso")
+            p1, p2 = st.columns(2)
+            gramaje = p1.text_input("Peso / presentación", placeholder="Ej.: 100 g, 1 kg, 25 kg")
+            merma_base_pct = p2.number_input("Pérdida o desperdicio opcional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
+            st.caption("No se piden centímetros, márgenes ni sangrado porque este artículo se controla por peso.")
+        elif tipo_medicion == "Volumen":
+            st.markdown("#### Medición por volumen")
+            p1, p2 = st.columns(2)
+            gramaje = p1.text_input("Volumen / presentación", placeholder="Ej.: 70 ml, 100 ml, 1 L")
+            merma_base_pct = p2.number_input("Pérdida o desperdicio opcional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
+            st.caption("No se piden centímetros, márgenes ni sangrado porque este artículo se controla por volumen.")
+        else:
+            st.markdown("#### Medición por unidad")
+            gramaje = st.text_input("Presentación opcional", placeholder="Ej.: paquete de 12, caja, pieza individual")
+            st.caption("No se piden medidas ni merma. Úsalo para carpetas, bolígrafos, grapadoras, equipos o artículos por unidad.")
 
         st.markdown("#### Compra y almacenamiento")
         b1, b2, b3, b4 = st.columns(4)
