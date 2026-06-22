@@ -7,18 +7,28 @@ from services.proveedores_select_service import listar_proveedores_activos, opci
 import views.inventario_unificado as base
 
 TIPOS_FISICOS = [
-    "Lámina / hoja / pliego",
-    "Volumen",
-    "Peso",
+    "Lámina / hoja / pliego (cm y cm²)",
+    "Volumen (ml, L, cm³)",
+    "Peso (g, kg)",
     "Unidad / pieza",
     "Paquete / caja",
 ]
+
+UNIDADES_BASE_UI = [
+    "unidad", "hoja", "pliego", "resma", "paquete", "caja", "rollo",
+    "ml", "L", "cm³", "m³",
+    "g", "kg", "mg",
+    "cm", "m", "cm²", "m²",
+]
+for _u in UNIDADES_BASE:
+    if _u not in UNIDADES_BASE_UI:
+        UNIDADES_BASE_UI.append(_u)
 
 UNIDADES_LAMINA = {"hoja", "pliego", "rollo", "cm", "m", "cm²", "cm2", "m²", "m2"}
 UNIDADES_VOLUMEN = {"ml", "l", "litro", "litros", "cm³", "cm3", "m³", "m3"}
 UNIDADES_PESO = {"g", "kg", "mg", "gramo", "gramos", "kilogramo", "kilogramos"}
 UNIDADES_PAQUETE = {"resma", "paquete", "caja"}
-UNIDADES_COMPRA = ["", "resma", "paquete", "caja", "bolsa", "botella", "envase", "rollo"] + [u for u in UNIDADES_BASE if u not in {"resma", "paquete", "caja", "rollo"}]
+UNIDADES_COMPRA = ["", "resma", "paquete", "caja", "bolsa", "botella", "envase", "rollo"] + [u for u in UNIDADES_BASE_UI if u not in {"resma", "paquete", "caja", "rollo"}]
 
 
 def _selector_proveedor_principal() -> str:
@@ -35,17 +45,17 @@ def _tipo_fisico_sugerido(unidad_base: str, categoria: str) -> str:
     unidad = str(unidad_base or "").strip().lower()
     categoria_txt = str(categoria or "").strip().lower()
     if unidad in UNIDADES_VOLUMEN:
-        return "Volumen"
+        return "Volumen (ml, L, cm³)"
     if unidad in UNIDADES_PESO:
-        return "Peso"
+        return "Peso (g, kg)"
     if unidad in UNIDADES_LAMINA:
-        return "Lámina / hoja / pliego"
+        return "Lámina / hoja / pliego (cm y cm²)"
     if unidad in UNIDADES_PAQUETE:
         return "Paquete / caja"
     if any(x in categoria_txt for x in ["papel", "cartulina", "foami", "acetato", "opalina", "vinil", "adhesivo"]):
-        return "Lámina / hoja / pliego"
+        return "Lámina / hoja / pliego (cm y cm²)"
     if any(x in categoria_txt for x in ["tinta", "pega", "silic"]):
-        return "Volumen"
+        return "Volumen (ml, L, cm³)"
     return "Unidad / pieza"
 
 
@@ -71,7 +81,6 @@ def _data_para_crear_validando_proveedor(item: dict) -> dict:
 
 
 def _tipo_uso_desde_checks(usa_servicios: bool, usa_reventa: bool, usa_manualidades: bool) -> str:
-    # El esquema actual solo acepta Insumo/Reventa/Ambos. Manualidades queda documentado en observaciones.
     if usa_servicios and usa_reventa:
         return "Ambos"
     if usa_reventa and not usa_servicios:
@@ -98,7 +107,11 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
 
         st.markdown("#### 3. Unidad y tipo físico")
         d1, d2 = st.columns(2)
-        unidad_base = d1.selectbox("Unidad base / cómo descuenta stock", UNIDADES_BASE, help="Ej.: hoja, pliego, ml, g, unidad. Para papel comprado por resma, usa hoja como unidad base.")
+        unidad_base = d1.selectbox(
+            "Unidad base / cómo descuenta stock",
+            UNIDADES_BASE_UI,
+            help="Ej.: hoja, pliego, cm, cm², ml, L, cm³, g, kg, unidad. Para papel comprado por resma, usa hoja como unidad base.",
+        )
         tipo_sugerido = _tipo_fisico_sugerido(unidad_base, categoria)
         tipo_fisico = d2.selectbox("Tipo físico del artículo", TIPOS_FISICOS, index=TIPOS_FISICOS.index(tipo_sugerido))
 
@@ -114,7 +127,7 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
         margen_superior_cm = margen_inferior_cm = separacion_cm = sangrado_cm = 0.0
         merma_base_pct = 0.0
 
-        if tipo_fisico == "Lámina / hoja / pliego":
+        if tipo_fisico == "Lámina / hoja / pliego (cm y cm²)":
             st.markdown("#### 5. Medidas de lámina")
             m1, m2, m3 = st.columns(3)
             ancho_cm = m1.number_input("Ancho (cm)", min_value=0.0, step=0.01, format="%.2f")
@@ -136,15 +149,15 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
             q1.metric("Área por unidad", f"{area_total:.2f} cm²")
             q2.metric("Área útil", f"{area_util:.2f} cm²")
             q3.metric("Merma por márgenes", f"{merma_dimensional:.2f}%")
-        elif tipo_fisico == "Volumen":
+        elif tipo_fisico == "Volumen (ml, L, cm³)":
             st.markdown("#### 5. Medición por volumen")
             v1, v2, v3 = st.columns(3)
             cantidad_vol = v1.number_input("Contenido del envase", min_value=0.0, step=1.0, format="%.4f")
             unidad_vol = v2.selectbox("Unidad de volumen", ["ml", "L", "cm³", "m³"])
             merma_base_pct = v3.number_input("Pérdida opcional (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f")
             gramaje = f"{cantidad_vol:g} {unidad_vol}" if cantidad_vol else unidad_vol
-            st.caption("Para tintas, pega, silicón, resina o líquidos. No se muestran cm de ancho/alto.")
-        elif tipo_fisico == "Peso":
+            st.caption("Para tintas, pega, silicón, resina o líquidos. Aquí sí puedes usar cm³.")
+        elif tipo_fisico == "Peso (g, kg)":
             st.markdown("#### 5. Medición por peso")
             p1, p2, p3 = st.columns(3)
             cantidad_peso = p1.number_input("Peso de presentación", min_value=0.0, step=1.0, format="%.4f")
@@ -156,7 +169,7 @@ def _render_form_crear_con_proveedor(usuario: str) -> None:
             st.markdown("#### 5. Contenido del paquete")
             pc1, pc2, pc3 = st.columns(3)
             contenido_pack = pc1.number_input("Cantidad contenida", min_value=0.0, step=1.0, format="%.4f")
-            unidad_contenida = pc2.selectbox("Unidad contenida", ["unidad", "hoja", "pliego", "ml", "g", "kg", "otro"])
+            unidad_contenida = pc2.selectbox("Unidad contenida", ["unidad", "hoja", "pliego", "ml", "L", "cm³", "g", "kg", "cm", "cm²", "otro"])
             gramaje = pc3.text_input("Descripción del contenido", placeholder="Ej.: caja de 12 bolígrafos")
             if not gramaje and contenido_pack:
                 gramaje = f"{contenido_pack:g} {unidad_contenida}"
