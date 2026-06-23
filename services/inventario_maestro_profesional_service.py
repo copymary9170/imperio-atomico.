@@ -10,8 +10,8 @@ from services.inventario_profesional_service import ensure_schema as ensure_prof
 UNIDADES_CONTROL = ["unidad", "hoja", "pliego", "cm", "m", "cm²", "m²", "ml", "L", "g", "kg"]
 
 
-def _cols(conn: Any) -> set[str]:
-    return {str(r[1]) for r in conn.execute("PRAGMA table_info(inventario)").fetchall()}
+def _cols(conn: Any, table: str = "inventario") -> set[str]:
+    return {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
 def ensure_schema() -> None:
@@ -30,34 +30,77 @@ def ensure_schema() -> None:
                 conn.execute(f"ALTER TABLE inventario ADD COLUMN {name} {ddl}")
 
 
+def _expr(cols: set[str], name: str, default: str, alias: str | None = None) -> str:
+    out = alias or name
+    return f"COALESCE(i.{name}, {default}) AS {out}" if name in cols else f"{default} AS {out}"
+
+
 def listar_maestro() -> pd.DataFrame:
     ensure_schema()
     with db_transaction() as conn:
-        return pd.read_sql_query("""
-            SELECT i.id,i.sku,i.nombre,i.categoria,COALESCE(i.tipo_fisico,'unidad') tipo_fisico,
-                   COALESCE(i.unidad_base,i.unidad,'unidad') unidad_base,
-                   COALESCE(i.unidad_control,i.unidad_base,i.unidad,'unidad') unidad_control,
-                   COALESCE(i.unidad_compra_profesional,i.unidad_compra,'unidad') unidad_compra,
-                   COALESCE(i.factor_compra_base,CASE WHEN COALESCE(i.contenido_compra,0)>0 THEN i.contenido_compra ELSE 1 END) factor_compra_base,
-                   COALESCE(i.stock_actual,0) stock_actual,
-                   COALESCE((SELECT SUM(r.cantidad) FROM reservas_inventario r WHERE r.inventario_id=i.id AND r.estado='activa'),0) reservado,
-                   COALESCE(i.stock_minimo_operativo,0) minimo_operativo,
-                   COALESCE(i.stock_seguridad,0) stock_seguridad,
-                   COALESCE(i.punto_reorden,0) punto_reorden,
-                   COALESCE(i.stock_ideal,0) stock_ideal,
-                   COALESCE(i.stock_maximo,0) stock_maximo,
-                   COALESCE(i.consumo_promedio_diario,0) consumo_diario,
-                   COALESCE(i.dias_reposicion,0) dias_reposicion,
-                   COALESCE(i.ancho_cm,0) ancho_cm,COALESCE(i.alto_cm,0) alto_cm,
-                   COALESCE(i.gramaje,'') gramaje,COALESCE(i.merma_base_pct,0) merma_pct,
-                   COALESCE(i.bloquear_si_critico,1) bloquear_si_critico,
-                   COALESCE(i.costo_unitario_usd,0) costo_unitario_usd,
-                   COALESCE(p.nombre,i.proveedor_principal,'') proveedor
-            FROM inventario i
-            LEFT JOIN proveedores p ON p.id=i.proveedor_principal_id
-            WHERE lower(COALESCE(i.estado,'activo'))='activo'
-            ORDER BY i.nombre COLLATE NOCASE
-        """, conn)
+        cols = _cols(conn)
+        reservas_existe = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reservas_inventario'"
+        ).fetchone() is not None
+
+        unidad_base = (
+            "COALESCE(NULLIF(i.unidad_base,''), NULLIF(i.unidad,''), 'unidad') AS unidad_base"
+            if "unidad_base" in cols and "unidad" in cols
+            else _expr(cols, "unidad_base", "'unidad'") if "unidad_base" in cols
+            else _expr(cols, "unidad", "'unidad'", "unidad_base")
+        )
+        unidad_control = (
+            "COALESCE(NULLIF(i.unidad_control,''), NULLIF(i.unidad_base,''), NULLIF(i.unidad,''), 'unidad') AS unidad_control"
+            if {"unidad_control", "unidad_base", "unidad"}.issubset(cols)
+            else "'unidad' AS unidad_control"
+        )
+        unidad_compra = (
+            "COALESCE(NULLIF(i.unidad_compra_profesional,''), NULLIF(i.unidad_compra,''), 'unidad') AS unidad_compra"
+            if {"unidad_compra_profesional", "unidad_compra"}.issubset(cols)
+            else _expr(cols, "unidad_compra_profesional", "'unidad'", "unidad_compra")
+        )
+        factor_compra = (
+            "COALESCE(NULLIF(i.factor_compra_base,0), NULLIF(i.contenido_compra,0), 1) AS factor_compra_base"
+            if {"factor_compra_base", "contenido_compra"}.issubset(cols)
+            else _expr(cols, "factor_compra_base", "1", "factor_compra_base")
+        )
+        reservado = (
+            "COALESCE((SELECT SUM(r.cantidad) FROM reservas_inventario r WHERE r.inventario_id=i.id AND r.estado='activa'),0) AS reservado"
+            if reservas_existe else "0 AS reservado"
+        )
+        proveedor = _expr(cols, "proveedor_principal", "''", "proveedor")
+
+        selected = [
+            _expr(cols, "id", "0"),
+            _expr(cols, "sku", "''"),
+            _expr(cols, "nombre", "''"),
+            _expr(cols, "categoria", "''"),
+            _expr(cols, "tipo_fisico", "'unidad'"),
+            unidad_base,
+            unidad_control,
+            unidad_compra,
+            factor_compra,
+            _expr(cols, "stock_actual", "0"),
+            reservado,
+            _expr(cols, "stock_minimo_operativo", "0", "minimo_operativo"),
+            _expr(cols, "stock_seguridad", "0"),
+            _expr(cols, "punto_reorden", "0"),
+            _expr(cols, "stock_ideal", "0"),
+            _expr(cols, "stock_maximo", "0"),
+            _expr(cols, "consumo_promedio_diario", "0", "consumo_diario"),
+            _expr(cols, "dias_reposicion", "0"),
+            _expr(cols, "ancho_cm", "0"),
+            _expr(cols, "alto_cm", "0"),
+            _expr(cols, "gramaje", "''"),
+            _expr(cols, "merma_base_pct", "0", "merma_pct"),
+            _expr(cols, "bloquear_si_critico", "1"),
+            _expr(cols, "costo_unitario_usd", "0"),
+            proveedor,
+        ]
+        where = "WHERE lower(COALESCE(i.estado,'activo'))='activo'" if "estado" in cols else ""
+        order = "ORDER BY i.nombre COLLATE NOCASE" if "nombre" in cols else "ORDER BY i.id"
+        sql = f"SELECT {', '.join(selected)} FROM inventario i {where} {order}"
+        return pd.read_sql_query(sql, conn)
 
 
 def guardar_ficha(
@@ -112,12 +155,18 @@ def resumen_alertas() -> pd.DataFrame:
     if df.empty:
         return df
     df["disponible"] = df["stock_actual"] - df["reservado"]
+
     def estado(r: pd.Series) -> str:
-        if r["disponible"] <= 0: return "AGOTADO"
-        if r["minimo_operativo"] > 0 and r["disponible"] <= r["minimo_operativo"]: return "CRITICO"
-        if r["punto_reorden"] > 0 and r["disponible"] <= r["punto_reorden"]: return "REORDEN"
-        if r["reservado"] > 0 and r["reservado"] >= r["stock_actual"] * 0.5: return "COMPROMETIDO"
+        if r["disponible"] <= 0:
+            return "AGOTADO"
+        if r["minimo_operativo"] > 0 and r["disponible"] <= r["minimo_operativo"]:
+            return "CRITICO"
+        if r["punto_reorden"] > 0 and r["disponible"] <= r["punto_reorden"]:
+            return "REORDEN"
+        if r["reservado"] > 0 and r["stock_actual"] > 0 and r["reservado"] >= r["stock_actual"] * 0.5:
+            return "COMPROMETIDO"
         return "SUFICIENTE"
+
     df["estado"] = df.apply(estado, axis=1)
     df["compra_sugerida"] = (df["stock_ideal"] - df["disponible"]).clip(lower=0)
     return df
