@@ -5,6 +5,11 @@ from typing import Any, Sequence
 
 from database.connection import db_transaction
 from services.inventory_service import InventoryMovement, InventoryService
+from services.inventario_venta_integracion import (
+    cerrar_reservas_referencia,
+    consumir_receta_producto,
+    validar_receta_producto,
+)
 from services.recetas_consumo_service import consumir_receta_por_venta, validar_stock_receta
 from services.tesoreria_service import registrar_ingreso
 from services.contabilidad_service import contabilizar_venta
@@ -22,19 +27,14 @@ class VentaItem:
 
 def _es_servicio(conn: Any, inventario_id: int) -> bool:
     row = conn.execute(
-        """
-        SELECT COALESCE(tipo_item, 'producto_venta') AS tipo_item
-        FROM inventario
-        WHERE id = ?
-        """,
+        "SELECT COALESCE(tipo_item, 'producto_venta') AS tipo_item FROM inventario WHERE id=?",
         (int(inventario_id),),
     ).fetchone()
-    tipo_item = str(row["tipo_item"] if row else "producto_venta").strip().lower()
-    return tipo_item == "servicio"
+    return str(row["tipo_item"] if row else "producto_venta").strip().lower() == "servicio"
 
 
 class VentasService:
-    """Servicio transaccional para registrar ventas COMPLETAS (inventario + tesorería + contabilidad)."""
+    """Registra ventas completas e integra inventario, recetas, reservas, tesorería y contabilidad."""
 
     def __init__(self, inventory_service: InventoryService):
         self.inventory_service = inventory_service
@@ -48,53 +48,38 @@ class VentasService:
         tasa_cambio: float,
         items: Sequence[VentaItem],
         impuesto_usd: float = 0.0,
+        referencia_pedido: str = "",
     ) -> int:
-
         if not items:
             raise ValueError("La venta debe tener al menos un item")
-
         metodo_pago = str(metodo_pago or "").lower().strip()
-
         subtotal = round(sum(float(i.cantidad) * float(i.precio_unitario_usd) for i in items), 2)
         total = round(subtotal + float(impuesto_usd), 2)
         total_bs = round(total * float(tasa_cambio), 2)
-
         if total <= 0:
             raise ValueError("El total de la venta debe ser mayor a cero")
 
         with db_transaction() as conn:
-
-            # 1. VALIDAR STOCK DEL PRODUCTO VENDIDO Y DE SUS INSUMOS DE RECETA
+            recetas_operativas: dict[int, bool] = {}
             for item in items:
                 if not _es_servicio(conn, item.inventario_id):
                     validar_stock_para_salida(conn, item.inventario_id, float(item.cantidad))
-                validar_stock_receta(conn, item.inventario_id, float(item.cantidad))
+                usa_receta_nueva = validar_receta_producto(conn, item.inventario_id, float(item.cantidad))
+                recetas_operativas[int(item.inventario_id)] = usa_receta_nueva
+                if not usa_receta_nueva:
+                    validar_stock_receta(conn, item.inventario_id, float(item.cantidad))
 
-            # 2. CREAR VENTA
             cur = conn.execute(
                 """
                 INSERT INTO ventas
                 (usuario, cliente_id, moneda, tasa_cambio, metodo_pago, subtotal_usd, impuesto_usd, total_usd, total_bs, estado)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'registrado')
                 """,
-                (
-                    usuario,
-                    cliente_id,
-                    moneda,
-                    tasa_cambio,
-                    metodo_pago,
-                    subtotal,
-                    impuesto_usd,
-                    total,
-                    total_bs,
-                ),
+                (usuario, cliente_id, moneda, tasa_cambio, metodo_pago, subtotal, impuesto_usd, total, total_bs),
             )
-
             venta_id = int(cur.lastrowid)
 
-            # 3. DETALLE + INVENTARIO + CONSUMO DE RECETAS
             for item in items:
-
                 conn.execute(
                     """
                     INSERT INTO ventas_detalle
@@ -102,13 +87,8 @@ class VentasService:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        usuario,
-                        venta_id,
-                        item.inventario_id,
-                        item.descripcion,
-                        item.cantidad,
-                        item.precio_unitario_usd,
-                        item.costo_unitario_usd,
+                        usuario, venta_id, item.inventario_id, item.descripcion, item.cantidad,
+                        item.precio_unitario_usd, item.costo_unitario_usd,
                         round(float(item.cantidad) * float(item.precio_unitario_usd), 2),
                     ),
                 )
@@ -125,20 +105,30 @@ class VentasService:
                             usuario=usuario,
                         ),
                     )
-
                     if not ok:
                         raise ValueError(msg)
 
-                consumir_receta_por_venta(
-                    conn,
-                    inventory_service=self.inventory_service,
-                    usuario=usuario,
-                    venta_id=venta_id,
-                    producto_id=item.inventario_id,
-                    cantidad_producto=float(item.cantidad),
-                )
+                if recetas_operativas.get(int(item.inventario_id), False):
+                    consumir_receta_producto(
+                        conn,
+                        producto_id=item.inventario_id,
+                        cantidad=float(item.cantidad),
+                        usuario=usuario,
+                        referencia=f"Venta #{venta_id}",
+                    )
+                else:
+                    consumir_receta_por_venta(
+                        conn,
+                        inventory_service=self.inventory_service,
+                        usuario=usuario,
+                        venta_id=venta_id,
+                        producto_id=item.inventario_id,
+                        cantidad_producto=float(item.cantidad),
+                    )
 
-            # 4. TESORERÍA
+            if referencia_pedido:
+                cerrar_reservas_referencia(conn, referencia_pedido)
+
             if metodo_pago != "credito":
                 registrar_ingreso(
                     conn,
@@ -152,28 +142,17 @@ class VentasService:
                     metodo_pago=metodo_pago,
                     usuario=usuario,
                 )
-
-            # 5. CUENTAS POR COBRAR
             else:
                 if not cliente_id:
                     raise ValueError("Venta a crédito requiere cliente")
-
                 conn.execute(
                     """
                     INSERT INTO cuentas_por_cobrar
                     (usuario, cliente_id, venta_id, tipo_documento, monto_original_usd, monto_cobrado_usd, saldo_usd, estado, dias_vencimiento)
                     VALUES (?, ?, ?, 'venta', ?, 0, ?, 'pendiente', 30)
                     """,
-                    (
-                        usuario,
-                        cliente_id,
-                        venta_id,
-                        total,
-                        total,
-                    ),
+                    (usuario, cliente_id, venta_id, total, total),
                 )
 
-            # 6. CONTABILIDAD
             contabilizar_venta(conn, venta_id=venta_id, usuario=usuario)
-
         return venta_id
