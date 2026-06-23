@@ -1,10 +1,10 @@
 {
   "format": "imperio-atomico-persistent-rates-v1",
-  "updated_at": "2026-06-18T23:17:08",
+  "updated_at": "2026-06-23T12:53:49",
   "rates": {
-    "tasa_bcv": 602.33,
-    "tasa_binance": 804.84,
-    "tasa_euro": 697.36,
+    "tasa_bcv": 617.64,
+    "tasa_binance": 795.07,
+    "tasa_euro": 706.92,
     "tasa_menudeo": 0.0,
     "tasa_kontigo_entrada": 0.0,
     "tasa_kontigo_salida": 0.0,
