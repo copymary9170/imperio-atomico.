@@ -14,6 +14,10 @@ def _cols(conn: Any, table: str = "inventario") -> set[str]:
     return {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
+def _table_exists(conn: Any, table: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
+
+
 def ensure_schema() -> None:
     ensure_profesional_schema()
     with db_transaction() as conn:
@@ -39,10 +43,7 @@ def listar_maestro() -> pd.DataFrame:
     ensure_schema()
     with db_transaction() as conn:
         cols = _cols(conn)
-        reservas_existe = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reservas_inventario'"
-        ).fetchone() is not None
-
+        reservas_existe = _table_exists(conn, "reservas_inventario")
         unidad_base = (
             "COALESCE(NULLIF(i.unidad_base,''), NULLIF(i.unidad,''), 'unidad') AS unidad_base"
             if "unidad_base" in cols and "unidad" in cols
@@ -69,38 +70,22 @@ def listar_maestro() -> pd.DataFrame:
             if reservas_existe else "0 AS reservado"
         )
         proveedor = _expr(cols, "proveedor_principal", "''", "proveedor")
-
         selected = [
-            _expr(cols, "id", "0"),
-            _expr(cols, "sku", "''"),
-            _expr(cols, "nombre", "''"),
-            _expr(cols, "categoria", "''"),
-            _expr(cols, "tipo_fisico", "'unidad'"),
-            unidad_base,
-            unidad_control,
-            unidad_compra,
-            factor_compra,
-            _expr(cols, "stock_actual", "0"),
-            reservado,
+            _expr(cols, "id", "0"), _expr(cols, "sku", "''"), _expr(cols, "nombre", "''"),
+            _expr(cols, "categoria", "''"), _expr(cols, "tipo_fisico", "'unidad'"), unidad_base,
+            unidad_control, unidad_compra, factor_compra, _expr(cols, "stock_actual", "0"), reservado,
             _expr(cols, "stock_minimo_operativo", "0", "minimo_operativo"),
-            _expr(cols, "stock_seguridad", "0"),
-            _expr(cols, "punto_reorden", "0"),
-            _expr(cols, "stock_ideal", "0"),
-            _expr(cols, "stock_maximo", "0"),
+            _expr(cols, "stock_seguridad", "0"), _expr(cols, "punto_reorden", "0"),
+            _expr(cols, "stock_ideal", "0"), _expr(cols, "stock_maximo", "0"),
             _expr(cols, "consumo_promedio_diario", "0", "consumo_diario"),
-            _expr(cols, "dias_reposicion", "0"),
-            _expr(cols, "ancho_cm", "0"),
-            _expr(cols, "alto_cm", "0"),
-            _expr(cols, "gramaje", "''"),
+            _expr(cols, "dias_reposicion", "0"), _expr(cols, "ancho_cm", "0"),
+            _expr(cols, "alto_cm", "0"), _expr(cols, "gramaje", "''"),
             _expr(cols, "merma_base_pct", "0", "merma_pct"),
-            _expr(cols, "bloquear_si_critico", "1"),
-            _expr(cols, "costo_unitario_usd", "0"),
-            proveedor,
+            _expr(cols, "bloquear_si_critico", "1"), _expr(cols, "costo_unitario_usd", "0"), proveedor,
         ]
         where = "WHERE lower(COALESCE(i.estado,'activo'))='activo'" if "estado" in cols else ""
         order = "ORDER BY i.nombre COLLATE NOCASE" if "nombre" in cols else "ORDER BY i.id"
-        sql = f"SELECT {', '.join(selected)} FROM inventario i {where} {order}"
-        return pd.read_sql_query(sql, conn)
+        return pd.read_sql_query(f"SELECT {', '.join(selected)} FROM inventario i {where} {order}", conn)
 
 
 def guardar_ficha(
@@ -125,6 +110,41 @@ def guardar_ficha(
             punto, float(stock_ideal or 0), float(stock_maximo or 0), 1 if bloquear_si_critico else 0,
             int(inventario_id),
         ))
+
+
+def eliminar_articulo(inventario_id: int) -> str:
+    """Elimina artículos sin historial; si tienen relaciones, los archiva para conservar trazabilidad."""
+    ensure_schema()
+    with db_transaction() as conn:
+        item = conn.execute("SELECT id,nombre,COALESCE(stock_actual,0) stock_actual FROM inventario WHERE id=?", (int(inventario_id),)).fetchone()
+        if not item:
+            raise ValueError("Artículo no encontrado.")
+        referencias = [
+            ("movimientos_inventario", "inventario_id"),
+            ("reservas_inventario", "inventario_id"),
+            ("mermas_inventario", "inventario_id"),
+            ("conteos_inventario", "inventario_id"),
+            ("recetas_inventario_detalle", "insumo_id"),
+            ("recetas_inventario", "producto_inventario_id"),
+            ("ventas_detalle", "inventario_id"),
+        ]
+        tiene_historial = abs(float(item["stock_actual"] or 0)) > 0.000001
+        for table, column in referencias:
+            if not _table_exists(conn, table) or column not in _cols(conn, table):
+                continue
+            if conn.execute(f"SELECT 1 FROM {table} WHERE {column}=? LIMIT 1", (int(inventario_id),)).fetchone():
+                tiene_historial = True
+                break
+        if tiene_historial:
+            cols = _cols(conn)
+            if "estado" not in cols:
+                conn.execute("ALTER TABLE inventario ADD COLUMN estado TEXT NOT NULL DEFAULT 'activo'")
+            conn.execute("UPDATE inventario SET estado='inactivo' WHERE id=?", (int(inventario_id),))
+            return "archivado"
+        if _table_exists(conn, "inventario_usos"):
+            conn.execute("DELETE FROM inventario_usos WHERE inventario_id=?", (int(inventario_id),))
+        conn.execute("DELETE FROM inventario WHERE id=?", (int(inventario_id),))
+        return "eliminado"
 
 
 def registrar_compra(
@@ -155,18 +175,12 @@ def resumen_alertas() -> pd.DataFrame:
     if df.empty:
         return df
     df["disponible"] = df["stock_actual"] - df["reservado"]
-
     def estado(r: pd.Series) -> str:
-        if r["disponible"] <= 0:
-            return "AGOTADO"
-        if r["minimo_operativo"] > 0 and r["disponible"] <= r["minimo_operativo"]:
-            return "CRITICO"
-        if r["punto_reorden"] > 0 and r["disponible"] <= r["punto_reorden"]:
-            return "REORDEN"
-        if r["reservado"] > 0 and r["stock_actual"] > 0 and r["reservado"] >= r["stock_actual"] * 0.5:
-            return "COMPROMETIDO"
+        if r["disponible"] <= 0: return "AGOTADO"
+        if r["minimo_operativo"] > 0 and r["disponible"] <= r["minimo_operativo"]: return "CRITICO"
+        if r["punto_reorden"] > 0 and r["disponible"] <= r["punto_reorden"]: return "REORDEN"
+        if r["reservado"] > 0 and r["stock_actual"] > 0 and r["reservado"] >= r["stock_actual"] * 0.5: return "COMPROMETIDO"
         return "SUFICIENTE"
-
     df["estado"] = df.apply(estado, axis=1)
     df["compra_sugerida"] = (df["stock_ideal"] - df["disponible"]).clip(lower=0)
     return df
