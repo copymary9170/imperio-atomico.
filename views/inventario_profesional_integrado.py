@@ -4,16 +4,17 @@ import streamlit as st
 
 from services.capacidad_profesional import listar_capacidad
 from services.inventario_maestro_profesional_service import guardar_ficha, listar_maestro, registrar_compra, resumen_alertas
+from services.inventario_operativo_service import listar_mermas, registrar_conteo, registrar_merma
 from views.inventario_operativo_copy_mary import render_inventario_operativo_copy_mary
 from views.inventario_unificado_v2 import render_inventario_unificado
 from views.kardex import render_kardex
 from views.pedidos_inventario import render_pedidos_inventario
 
 
-def _selector(df, key: str):
+def _selector(df, key: str, label: str = 'Artículo'):
     ids=[int(x) for x in df['id'].tolist()]
     etiquetas={int(r['id']):f"{r['sku']} · {r['nombre']}" for _,r in df.iterrows()}
-    return st.selectbox('Artículo',ids,format_func=lambda x:etiquetas[x],key=key)
+    return st.selectbox(label,ids,format_func=lambda x:etiquetas[x],key=key)
 
 
 def render_inventario_profesional_integrado(usuario: str) -> None:
@@ -95,5 +96,34 @@ def render_inventario_profesional_integrado(usuario: str) -> None:
     with tabs[5]:
         render_kardex(usuario)
     with tabs[6]:
-        st.info('Usa las pestañas Mermas y Conteo físico del control operativo para ajustar existencias con trazabilidad.')
-        render_inventario_operativo_copy_mary(usuario)
+        df=listar_maestro()
+        if df.empty:
+            st.info('No hay artículos activos.')
+        else:
+            sub=st.tabs(['Registrar merma','Conteo físico','Historial de mermas'])
+            with sub[0]:
+                item_id=_selector(df,'merma_integrada_item','Artículo perdido')
+                with st.form('merma_integrada_form'):
+                    c1,c2=st.columns(2)
+                    cantidad=c1.number_input('Cantidad perdida',min_value=0.0001,step=1.0)
+                    motivo=c2.selectbox('Motivo',['Impresión incorrecta','Corte incorrecto','Atasco','Sublimación dañada','Material manchado','Prueba','Humedad','Vencimiento','Otro'])
+                    referencia=st.text_input('Pedido o detalle')
+                    ok=st.form_submit_button('Registrar merma',type='primary')
+                if ok:
+                    try:
+                        registrar_merma(inventario_id=item_id,cantidad=cantidad,motivo=motivo,referencia=referencia,usuario=usuario)
+                        st.success('Merma registrada.'); st.rerun()
+                    except Exception as exc: st.error(str(exc))
+            with sub[1]:
+                item_id=_selector(df,'conteo_integrado_item','Artículo contado')
+                with st.form('conteo_integrado_form'):
+                    stock_fisico=st.number_input('Cantidad física encontrada',min_value=0.0,step=1.0)
+                    motivo=st.text_input('Observación',value='Conteo periódico')
+                    ok=st.form_submit_button('Guardar conteo y ajustar',type='primary')
+                if ok:
+                    try:
+                        diferencia=registrar_conteo(inventario_id=item_id,stock_fisico=stock_fisico,motivo=motivo,usuario=usuario)
+                        st.success(f'Diferencia aplicada: {diferencia:+.2f}'); st.rerun()
+                    except Exception as exc: st.error(str(exc))
+            with sub[2]:
+                st.dataframe(listar_mermas(),use_container_width=True,hide_index=True)
