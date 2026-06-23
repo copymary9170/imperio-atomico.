@@ -232,14 +232,15 @@ except Exception:
 
 st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
 
-st.markdown('<div class="rate-title">Tasas, impuestos y comisiones activas</div>', unsafe_allow_html=True)
-a, b, c, d = st.columns(4)
+st.markdown('<div class="rate-title">Tasas de cambio activas</div>', unsafe_allow_html=True)
+a, b, c, d, e = st.columns(5)
 def _cfg_float(key: str, fallback: float) -> float:
     return _to_float(config, key, float(DEFAULT_CONFIG.get(key, fallback)))
 a.metric("BCV", f"{_cfg_float('tasa_bcv', 0):,.2f} Bs/USD")
 b.metric("Binance", f"{_cfg_float('tasa_binance', 0):,.2f} Bs/USD")
-c.metric("IVA", f"{_cfg_float('iva_perc', 0):.2f}%")
-d.metric("IGTF", f"{_cfg_float('igtf_perc', 0):.2f}%")
+c.metric("Kontigo entrada", f"{_cfg_float('tasa_kontigo_entrada', 0):,.2f} Bs/USD")
+d.metric("Kontigo salida", f"{_cfg_float('tasa_kontigo_salida', 0):,.2f} Bs/USD")
+e.metric("Euro", f"{_cfg_float('tasa_euro', 0):,.2f} Bs/EUR")
 
 try:
     alert_summary = get_alert_summary()
