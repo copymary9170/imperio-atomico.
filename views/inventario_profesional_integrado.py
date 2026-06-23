@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from services.capacidad_profesional import listar_capacidad
-from services.inventario_maestro_profesional_service import guardar_ficha, listar_maestro, registrar_compra, resumen_alertas
+from services.inventario_maestro_profesional_service import eliminar_articulo, guardar_ficha, listar_maestro, registrar_compra, resumen_alertas
 from services.inventario_operativo_service import listar_mermas, registrar_conteo, registrar_merma
 from views.inventario_operativo_copy_mary import render_inventario_operativo_copy_mary
 from views.inventario_unificado_v2 import render_inventario_unificado
@@ -68,6 +68,20 @@ def render_inventario_profesional_integrado(usuario: str) -> None:
                     guardar_ficha(item_id,unidad_control=unidad_control,unidad_compra=unidad_compra,factor_compra_base=factor,minimo_operativo=minimo,stock_seguridad=seguridad,consumo_diario=consumo,dias_reposicion=reposicion,stock_ideal=ideal,stock_maximo=maximo,bloquear_si_critico=bloquear)
                     st.success('Ficha actualizada.'); st.rerun()
                 except Exception as exc: st.error(str(exc))
+
+            st.markdown('#### Zona de eliminación')
+            st.warning('Los artículos con movimientos, reservas, recetas, ventas o stock serán archivados para conservar el historial. Solo los artículos sin uso se borran definitivamente.')
+            confirmar=st.checkbox(f"Confirmo que deseo borrar o archivar: {row['nombre']}",key='confirmar_borrado_maestro')
+            if st.button('🗑️ Borrar artículo',type='secondary',disabled=not confirmar,use_container_width=True):
+                try:
+                    resultado=eliminar_articulo(item_id)
+                    if resultado=='eliminado':
+                        st.success('Artículo eliminado definitivamente.')
+                    else:
+                        st.success('Artículo archivado porque tenía historial o existencias.')
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
 
     with tabs[2]:
         st.markdown('### Recepción de compras con conversión automática')
