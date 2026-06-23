@@ -8,6 +8,7 @@ from views.facturas_compra import render_facturas_compra
 from views.inventario import render_inventario
 from views.inventario_avanzado import render_inventario_avanzado
 from views.inventario_operativo_copy_mary import render_inventario_operativo_copy_mary
+from views.inventario_profesional import render_inventario_profesional
 from views.inventario_unificado_v2 import render_inventario_unificado
 from views.kardex import render_kardex
 from views.pedidos_inventario import render_pedidos_inventario
@@ -22,6 +23,7 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
     tabs = st.tabs([
         "🧾 Facturas de compra",
         "📦 Inventario unificado",
+        "📐 Inventario profesional",
         "📋 Pedidos y reservas",
         "🏭 Control operativo",
         "🧩 Productos terminados",
@@ -39,24 +41,26 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
     with tabs[1]:
         render_inventario_unificado(usuario)
     with tabs[2]:
-        render_pedidos_inventario(usuario)
+        render_inventario_profesional(usuario)
     with tabs[3]:
-        render_inventario_operativo_copy_mary(usuario)
+        render_pedidos_inventario(usuario)
     with tabs[4]:
-        render_productos_terminados(usuario)
+        render_inventario_operativo_copy_mary(usuario)
     with tabs[5]:
-        render_inventario(usuario)
+        render_productos_terminados(usuario)
     with tabs[6]:
-        render_stock_minimo(usuario)
+        render_inventario(usuario)
     with tabs[7]:
-        render_unidades_fraccionadas(usuario)
+        render_stock_minimo(usuario)
     with tabs[8]:
-        render_kardex(usuario)
+        render_unidades_fraccionadas(usuario)
     with tabs[9]:
-        render_compras_suministro(usuario)
+        render_kardex(usuario)
     with tabs[10]:
-        render_almacen_avanzado(usuario)
+        render_compras_suministro(usuario)
     with tabs[11]:
-        render_catalogo(usuario)
+        render_almacen_avanzado(usuario)
     with tabs[12]:
+        render_catalogo(usuario)
+    with tabs[13]:
         render_inventario_avanzado(usuario)
