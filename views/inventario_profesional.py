@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 
-from services.inventario_profesional_service import capacidad_recetas, guardar_parametros, inventario_fisico
+from services.capacidad_profesional import listar_capacidad
+from services.inventario_profesional_service import guardar_parametros, inventario_fisico
 
 
 def render_inventario_profesional(usuario: str) -> None:
@@ -52,7 +53,7 @@ def render_inventario_profesional(usuario: str) -> None:
                     st.error(str(exc))
 
     with tabs[2]:
-        capacidad = capacidad_recetas()
+        capacidad = listar_capacidad()
         if capacidad.empty:
             st.info("Crea recetas con materiales para calcular capacidad de producción.")
         else:
