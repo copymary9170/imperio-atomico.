@@ -5,13 +5,12 @@ from datetime import date, timedelta
 import streamlit as st
 
 from services.facturas_compra_service import listar_facturas_compra
-from services.inventario_factura_lote_service import registrar_lote_con_factura
+from services.inventario_factura_lote_service import listar_lotes_con_factura, registrar_lote_con_factura
 from services.inventario_operativo_service import listar_recetas
 from services.inventario_tipo_panaderia_service import (
     CLASES_ARTICULO,
     guardar_clasificacion,
     listar_articulos_clasificados,
-    listar_lotes,
     listar_produccion_diaria,
     registrar_produccion_diaria,
     resumen_panaderia,
@@ -162,7 +161,7 @@ def render_inventario_tipo_panaderia(usuario: str) -> None:
                 except Exception as exc:
                     st.error(str(exc))
 
-        lotes = listar_lotes()
+        lotes = listar_lotes_con_factura()
         if lotes.empty:
             st.info("Todavía no hay lotes registrados.")
         else:
