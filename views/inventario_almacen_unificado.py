@@ -6,6 +6,7 @@ from services.inventario_demo_cleanup import eliminar_articulos_demo
 from views.almacen_avanzado import render_almacen_avanzado
 from views.facturas_compra import render_facturas_compra
 from views.inventario_calidad_elite import render_inventario_calidad_elite
+from views.inventario_costeo_elite import render_inventario_costeo_elite
 from views.inventario_profesional_integrado import render_inventario_profesional_integrado
 from views.inventario_tipo_panaderia import render_inventario_tipo_panaderia
 from views.proveedores_compras import render_compras_suministro
@@ -22,14 +23,23 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
     )
 
     st.info(
-        "La primera pestaña audita la calidad del inventario y muestra exactamente qué "
-        "datos faltan. La existencia oficial se controla únicamente desde este módulo."
+        "El sistema controla cantidad, medidas, peso, volumen, delivery, impuestos, "
+        "comisiones, merma y costo real puesto en almacén."
     )
 
-    tab_elite, tab_operacion, tab_panaderia, tab_facturas, tab_compras, tab_historicos = st.tabs(
+    (
+        tab_elite,
+        tab_operacion,
+        tab_costeo,
+        tab_panaderia,
+        tab_facturas,
+        tab_compras,
+        tab_historicos,
+    ) = st.tabs(
         [
             "🏆 Panel elite",
             "📊 Operación y existencias",
+            "📐 Costeo técnico",
             "🥖 Producción y lotes",
             "🧾 Facturas de compra",
             "🛒 Compras y proveedores",
@@ -43,13 +53,16 @@ def render_inventario_almacen_unificado(usuario: str) -> None:
     with tab_operacion:
         render_inventario_profesional_integrado(usuario)
 
+    with tab_costeo:
+        render_inventario_costeo_elite(usuario)
+
     with tab_panaderia:
         render_inventario_tipo_panaderia(usuario)
 
     with tab_facturas:
         st.subheader("Facturas y recepción documental")
         st.caption(
-            "Registra el soporte de cada compra y distribuye sus costos reales entre los artículos recibidos."
+            "Registra cada compra y distribuye delivery, impuestos, comisiones y otros gastos entre los artículos recibidos."
         )
         render_facturas_compra(usuario)
 
