@@ -13,6 +13,7 @@ from views.facturas_compra import render_facturas_compra
 from views.inventario_calidad_elite import render_inventario_calidad_elite
 from views.inventario_control_contable import render_inventario_control_contable
 from views.inventario_costeo_elite import render_inventario_costeo_elite
+from views.inventario_gobernanza import render_inventario_gobernanza
 from views.inventario_operativo_copy_mary import render_inventario_operativo_copy_mary
 from views.inventario_profesional_integrado import render_inventario_profesional_integrado
 from views.inventario_tipo_panaderia import render_inventario_tipo_panaderia
@@ -79,26 +80,30 @@ def _render_compras(usuario: str) -> None:
     )
     opcion = st.radio(
         "Etapa",
-        ["Registrar factura y recepción", "Planificar compra y proveedores"],
+        ["Registrar factura y recepción", "Planificar compra y proveedores", "Devoluciones y anulaciones"],
         horizontal=True,
         key="inventario_compra_etapa",
     )
     if opcion == "Registrar factura y recepción":
         render_facturas_compra(usuario)
-    else:
+    elif opcion == "Planificar compra y proveedores":
         render_compras_suministro(usuario)
+    else:
+        render_inventario_gobernanza(usuario)
 
 
 def _render_control(usuario: str) -> None:
     st.subheader("🔍 Control y auditoría")
     opcion = st.radio(
         "Herramienta",
-        ["Kardex", "Auditoría contable y cierres", "Calidad de datos", "Mermas y desperdicio"],
+        ["Kardex", "Aprobaciones y gobernanza", "Auditoría contable y cierres", "Calidad de datos", "Mermas y desperdicio"],
         horizontal=True,
         key="inventario_control_herramienta",
     )
     if opcion == "Kardex":
         render_kardex(usuario)
+    elif opcion == "Aprobaciones y gobernanza":
+        render_inventario_gobernanza(usuario)
     elif opcion == "Auditoría contable y cierres":
         render_inventario_control_contable(usuario)
     elif opcion == "Calidad de datos":
@@ -111,7 +116,7 @@ def render_inventario_centro_elite(usuario: str) -> None:
     st.title("📦 Centro de Inventario Elite")
     st.caption(
         "Una sola fuente de verdad para compras, existencias, lotes, producción, costos, "
-        "reservas, mermas, conteos y trazabilidad de Copy Mary."
+        "reservas, mermas, conteos, aprobaciones y trazabilidad de Copy Mary."
     )
 
     seccion = st.radio(
