@@ -4,6 +4,8 @@ from datetime import date, timedelta
 
 import streamlit as st
 
+from services.facturas_compra_service import listar_facturas_compra
+from services.inventario_factura_lote_service import registrar_lote_con_factura
 from services.inventario_operativo_service import listar_recetas
 from services.inventario_tipo_panaderia_service import (
     CLASES_ARTICULO,
@@ -11,7 +13,6 @@ from services.inventario_tipo_panaderia_service import (
     listar_articulos_clasificados,
     listar_lotes,
     listar_produccion_diaria,
-    registrar_lote,
     registrar_produccion_diaria,
     resumen_panaderia,
 )
@@ -95,15 +96,27 @@ def render_inventario_tipo_panaderia(usuario: str) -> None:
             st.dataframe(vista, use_container_width=True, hide_index=True)
 
     with tabs[1]:
-        st.markdown("### Entrada por lote")
+        st.markdown("### Entrada por lote y factura")
         st.info(
-            "Úsalo para tintas, adhesivos, papel fotográfico, productos sensibles a humedad "
-            "o cualquier compra que quieras rastrear por fecha y proveedor."
+            "Primero registra la factura de compra. Después selecciona aquí esa factura para "
+            "crear el lote sin duplicar la entrada de stock."
         )
         if articulos.empty:
             st.info("No hay artículos activos.")
         else:
+            facturas = listar_facturas_compra(limit=200)
+            factura_opciones = {"Sin factura registrada": None}
+            if not facturas.empty:
+                for _, factura in facturas.iterrows():
+                    etiqueta = (
+                        f"#{int(factura['id'])} · {factura.get('numero_factura') or 'S/N'} · "
+                        f"{factura.get('proveedor') or 'Proveedor N/D'} · ${float(factura.get('total_usd') or 0):,.2f}"
+                    )
+                    factura_opciones[etiqueta] = int(factura["id"])
+
             with st.form("entrada_lote_panaderia"):
+                factura_label = st.selectbox("Factura de compra", list(factura_opciones.keys()))
+                factura_id = factura_opciones[factura_label]
                 item_id = _selector_articulo(articulos, "Artículo recibido", "pan_lote_item")
                 c1, c2, c3 = st.columns(3)
                 codigo = c1.text_input("Código de lote *", placeholder="LOT-2026-001")
@@ -118,14 +131,21 @@ def render_inventario_tipo_panaderia(usuario: str) -> None:
                     disabled=sin_vencimiento,
                 )
                 c6, c7 = st.columns(2)
-                proveedor = c6.text_input("Proveedor")
+                proveedor = c6.text_input("Proveedor opcional")
                 ubicacion = c7.text_input("Ubicación física", placeholder="Estante A · Nivel 2 · Caja 3")
+                stock_ya_contabilizado = st.checkbox(
+                    "La factura ya agregó esta compra al inventario",
+                    value=bool(factura_id),
+                    disabled=not bool(factura_id),
+                    help="Déjalo activo para evitar que la misma compra aumente el stock dos veces.",
+                )
                 observaciones = st.text_area("Observaciones")
-                ok = st.form_submit_button("Registrar lote y entrada", type="primary")
+                ok = st.form_submit_button("Registrar lote vinculado", type="primary")
             if ok:
                 try:
-                    lote_id = registrar_lote(
+                    lote_id = registrar_lote_con_factura(
                         item_id,
+                        factura_id=factura_id,
                         codigo_lote=codigo,
                         cantidad=cantidad,
                         costo_unitario_usd=costo,
@@ -135,8 +155,9 @@ def render_inventario_tipo_panaderia(usuario: str) -> None:
                         ubicacion=ubicacion,
                         observaciones=observaciones,
                         usuario=usuario,
+                        stock_ya_contabilizado=stock_ya_contabilizado,
                     )
-                    st.success(f"Lote #{lote_id} registrado y stock actualizado.")
+                    st.success(f"Lote #{lote_id} registrado y vinculado a la factura.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
