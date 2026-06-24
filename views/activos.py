@@ -8,5 +8,11 @@ from modules.activos_financieros import render_activos_financieros
 
 def render_activos(usuario: str):
     st.caption(f"Vista renovada de activos · {ACTIVOS_UI_VERSION}")
-    render_activos_modern(usuario)
-    render_activos_financieros(usuario)
+    tab_tecnico, tab_financiero = st.tabs([
+        "🧰 Control técnico",
+        "💼 Finanzas y patrimonio",
+    ])
+    with tab_tecnico:
+        render_activos_modern(usuario)
+    with tab_financiero:
+        render_activos_financieros(usuario)
