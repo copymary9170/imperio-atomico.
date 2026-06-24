@@ -150,6 +150,10 @@ def render_inventario_tipo_panaderia(usuario: str) -> None:
 
     with tabs[2]:
         st.markdown("### Registro del día")
+        st.info(
+            "Al procesar automáticamente, el sistema descuenta los materiales de la receta, "
+            "consume primero los lotes próximos a vencer y agrega al stock únicamente la cantidad buena."
+        )
         recetas = listar_recetas()
         receta_ids = [None] + ([int(x) for x in recetas["id"].tolist()] if not recetas.empty else [])
         receta_nombre = {None: "Producción manual / sin receta"}
@@ -161,6 +165,10 @@ def render_inventario_tipo_panaderia(usuario: str) -> None:
             producto_nombre.update({int(r["id"]): str(r["nombre"]) for _, r in articulos.iterrows()})
 
         with st.form("produccion_diaria_panaderia"):
+            procesar_inventario = st.checkbox(
+                "Descontar materiales y aumentar producto terminado automáticamente",
+                value=True,
+            )
             c1, c2 = st.columns(2)
             receta_id = c1.selectbox("Receta o ficha", receta_ids, format_func=lambda value: receta_nombre[value])
             producto_id = c2.selectbox("Producto terminado", producto_ids, format_func=lambda value: producto_nombre[value])
@@ -169,10 +177,16 @@ def render_inventario_tipo_panaderia(usuario: str) -> None:
             referencia = c4.text_input("Pedido o referencia")
             c5, c6, c7 = st.columns(3)
             planificada = c5.number_input("Cantidad planificada", min_value=0.0, step=1.0)
-            producida = c6.number_input("Cantidad procesada", min_value=0.0, step=1.0)
+            producida = c6.number_input("Cantidad procesada", min_value=0.0001, step=1.0)
             buena = c7.number_input("Cantidad buena", min_value=0.0, step=1.0)
-            costo_total = st.number_input("Costo total del lote USD", min_value=0.0, step=0.01)
-            ok = st.form_submit_button("Guardar producción del día", type="primary")
+            costo_total = st.number_input(
+                "Costo total manual USD",
+                min_value=0.0,
+                step=0.01,
+                disabled=procesar_inventario,
+                help="Cuando el procesamiento automático está activo, el costo se calcula desde los materiales consumidos.",
+            )
+            ok = st.form_submit_button("Procesar producción del día", type="primary")
         if ok:
             try:
                 registro_id = registrar_produccion_diaria(
@@ -185,8 +199,12 @@ def render_inventario_tipo_panaderia(usuario: str) -> None:
                     costo_total_usd=costo_total,
                     referencia=referencia,
                     usuario=usuario,
+                    procesar_inventario=procesar_inventario,
                 )
-                st.success(f"Producción diaria #{registro_id} registrada.")
+                st.success(
+                    f"Producción #{registro_id} procesada. Materiales, lotes, costo y producto terminado quedaron actualizados."
+                    if procesar_inventario else f"Producción diaria #{registro_id} registrada sin modificar existencias."
+                )
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
