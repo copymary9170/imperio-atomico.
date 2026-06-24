@@ -6,6 +6,7 @@ import pandas as pd
 
 from database.connection import db_transaction
 from services.inventory_service import InventoryMovement, InventoryService
+from services.inventario_operativo_service import ensure_schema as ensure_operativo_schema
 
 
 CLASES_ARTICULO = ["Materia prima", "Empaque", "Producto terminado", "Mercancía para reventa", "Herramienta"]
@@ -17,6 +18,7 @@ def _columns(conn: Any, table: str) -> set[str]:
 
 
 def ensure_schema() -> None:
+    ensure_operativo_schema()
     with db_transaction() as conn:
         cols = _columns(conn, "inventario")
         nuevos = {
@@ -181,6 +183,30 @@ def listar_lotes() -> pd.DataFrame:
         """, conn)
 
 
+def _consumir_lotes_fefo(conn: Any, inventario_id: int, cantidad: float) -> None:
+    pendiente = float(cantidad)
+    lotes = conn.execute("""
+        SELECT id, cantidad_disponible
+        FROM inventario_lotes
+        WHERE inventario_id=? AND cantidad_disponible>0
+          AND lower(COALESCE(estado,'disponible'))='disponible'
+          AND (fecha_vencimiento IS NULL OR date(fecha_vencimiento)>=date('now'))
+        ORDER BY CASE WHEN fecha_vencimiento IS NULL THEN 1 ELSE 0 END,
+                 fecha_vencimiento, fecha_entrada, id
+    """, (int(inventario_id),)).fetchall()
+    for lote in lotes:
+        if pendiente <= 0:
+            break
+        disponible = float(lote["cantidad_disponible"] or 0)
+        uso = min(disponible, pendiente)
+        nuevo = disponible - uso
+        conn.execute(
+            "UPDATE inventario_lotes SET cantidad_disponible=?, estado=? WHERE id=?",
+            (round(nuevo, 6), "agotado" if nuevo <= 0 else "disponible", int(lote["id"])),
+        )
+        pendiente -= uso
+
+
 def registrar_produccion_diaria(
     *,
     receta_id: int | None,
@@ -192,12 +218,83 @@ def registrar_produccion_diaria(
     costo_total_usd: float,
     referencia: str,
     usuario: str,
+    procesar_inventario: bool = True,
 ) -> int:
     ensure_schema()
-    if cantidad_producida < 0 or cantidad_buena < 0 or cantidad_buena > cantidad_producida:
+    if cantidad_producida <= 0 or cantidad_buena < 0 or cantidad_buena > cantidad_producida:
         raise ValueError("Las cantidades de producción no son válidas.")
+    if procesar_inventario and not receta_id:
+        raise ValueError("Selecciona una receta para descontar materiales automáticamente.")
+
     merma = float(cantidad_producida) - float(cantidad_buena)
+    codigo = str(codigo_lote or "").strip()
+    referencia_limpia = str(referencia or "").strip()
+
     with db_transaction() as conn:
+        costo_calculado = 0.0
+        producto_final_id = int(producto_id) if producto_id else None
+
+        if procesar_inventario:
+            receta = conn.execute(
+                "SELECT * FROM recetas_inventario WHERE id=? AND activo=1",
+                (int(receta_id),),
+            ).fetchone()
+            if not receta:
+                raise ValueError("Receta no encontrada o inactiva.")
+            if not producto_final_id and receta["producto_inventario_id"]:
+                producto_final_id = int(receta["producto_inventario_id"])
+
+            factor = float(cantidad_producida) / float(receta["rendimiento"] or 1)
+            detalles = conn.execute("""
+                SELECT d.insumo_id, d.cantidad, d.merma_pct,
+                       i.nombre, COALESCE(i.stock_actual,0) AS stock,
+                       COALESCE(i.costo_unitario_usd,0) AS costo
+                FROM recetas_inventario_detalle d
+                JOIN inventario i ON i.id=d.insumo_id
+                WHERE d.receta_id=?
+            """, (int(receta_id),)).fetchall()
+            if not detalles:
+                raise ValueError("La receta no tiene materiales configurados.")
+
+            requeridos: list[tuple[Any, float]] = []
+            for detalle in detalles:
+                requerido = float(detalle["cantidad"] or 0) * factor * (1 + float(detalle["merma_pct"] or 0) / 100)
+                if requerido > float(detalle["stock"] or 0):
+                    raise ValueError(f"Stock insuficiente de {detalle['nombre']}.")
+                requeridos.append((detalle, requerido))
+
+            for detalle, requerido in requeridos:
+                ok, msg = InventoryService().procesar_movimiento(conn, InventoryMovement(
+                    item_id=int(detalle["insumo_id"]), tipo="SALIDA", cantidad=requerido,
+                    costo_unitario=float(detalle["costo"] or 0),
+                    motivo=f"Producción {referencia_limpia or codigo or receta['nombre']}", usuario=usuario,
+                ))
+                if not ok:
+                    raise ValueError(msg)
+                _consumir_lotes_fefo(conn, int(detalle["insumo_id"]), requerido)
+                costo_calculado += requerido * float(detalle["costo"] or 0)
+
+            if producto_final_id and cantidad_buena > 0:
+                costo_unitario = costo_calculado / float(cantidad_buena)
+                ok, msg = InventoryService().procesar_movimiento(conn, InventoryMovement(
+                    item_id=producto_final_id, tipo="ENTRADA", cantidad=float(cantidad_buena),
+                    costo_unitario=costo_unitario,
+                    motivo=f"Producto terminado {referencia_limpia or codigo or receta['nombre']}", usuario=usuario,
+                ))
+                if not ok:
+                    raise ValueError(msg)
+                if codigo:
+                    conn.execute("""
+                        INSERT INTO inventario_lotes(
+                            inventario_id,codigo_lote,fecha_entrada,cantidad_inicial,
+                            cantidad_disponible,costo_unitario_usd,estado,observaciones,usuario
+                        ) VALUES(?,?,CURRENT_DATE,?,?,?,?,?,?)
+                    """, (
+                        producto_final_id, codigo, float(cantidad_buena), float(cantidad_buena),
+                        costo_unitario, "disponible", f"Producción: {referencia_limpia}", usuario,
+                    ))
+
+        costo_final = costo_calculado if procesar_inventario else float(costo_total_usd or 0)
         cur = conn.execute("""
             INSERT INTO produccion_diaria(
                 receta_id,producto_inventario_id,codigo_lote,cantidad_planificada,
@@ -206,10 +303,10 @@ def registrar_produccion_diaria(
             ) VALUES(?,?,?,?,?,?,?,?,?,?)
         """, (
             int(receta_id) if receta_id else None,
-            int(producto_id) if producto_id else None,
-            str(codigo_lote or "").strip(), float(cantidad_planificada or 0),
+            producto_final_id,
+            codigo, float(cantidad_planificada or 0),
             float(cantidad_producida), float(cantidad_buena), merma,
-            float(costo_total_usd or 0), str(referencia or "").strip(), usuario,
+            round(costo_final, 6), referencia_limpia, usuario,
         ))
         return int(cur.lastrowid)
 
