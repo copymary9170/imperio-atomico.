@@ -35,6 +35,7 @@ def ensure_factura_lote_schema() -> None:
                 conn.execute(f"ALTER TABLE inventario_lotes ADD COLUMN {campo} {ddl}")
                 cols.add(campo)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_lotes_factura ON inventario_lotes(factura_compra_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_lotes_factura_item ON inventario_lotes(factura_compra_id,inventario_id)")
 
 
 def registrar_lote_con_factura(
@@ -73,11 +74,13 @@ def registrar_lote_con_factura(
 
     with db_transaction() as conn:
         factura = conn.execute(
-            "SELECT id, numero_factura, proveedor FROM facturas_compra WHERE id=?",
+            "SELECT id, numero_factura, proveedor, estado FROM facturas_compra WHERE id=?",
             (int(factura_id),),
         ).fetchone()
         if not factura:
             raise ValueError("La factura seleccionada no existe.")
+        if str(factura["estado"] or "").lower() == "anulada":
+            raise ValueError("No se pueden registrar lotes sobre una factura anulada.")
 
         linea = conn.execute("""
             SELECT id, cantidad, costo_unitario_real_usd
@@ -87,6 +90,27 @@ def registrar_lote_con_factura(
         """, (int(factura_id), int(inventario_id))).fetchone()
         if not linea:
             raise ValueError("La factura seleccionada no contiene este artículo de inventario.")
+
+        duplicado = conn.execute("""
+            SELECT id FROM inventario_lotes
+            WHERE factura_compra_id=? AND inventario_id=? AND lower(codigo_lote)=lower(?)
+            LIMIT 1
+        """, (int(factura_id), int(inventario_id), codigo)).fetchone()
+        if duplicado:
+            raise ValueError("Ese código de lote ya fue registrado para este artículo y factura.")
+
+        ya_vinculado = conn.execute("""
+            SELECT COALESCE(SUM(cantidad_inicial),0) total
+            FROM inventario_lotes
+            WHERE factura_compra_id=? AND inventario_id=?
+        """, (int(factura_id), int(inventario_id))).fetchone()
+        cantidad_facturada = float(linea["cantidad"] or 0)
+        cantidad_acumulada = float(ya_vinculado["total"] or 0)
+        if cantidad_acumulada + float(cantidad) > cantidad_facturada + 0.000001:
+            disponible = max(cantidad_facturada - cantidad_acumulada, 0)
+            raise ValueError(
+                f"La factura solo permite vincular {disponible:.4f} unidades adicionales para este artículo."
+            )
 
         numero = str(factura["numero_factura"] or "").strip()
         proveedor_final = str(proveedor or factura["proveedor"] or "").strip()
