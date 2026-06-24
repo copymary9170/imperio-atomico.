@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
+
 from database.connection import db_transaction
 from services.inventario_tipo_panaderia_service import ensure_schema, registrar_lote
 
@@ -106,3 +108,32 @@ def registrar_lote_con_factura(
                 raise ValueError(msg)
 
         return int(cur.lastrowid)
+
+
+def listar_lotes_con_factura() -> pd.DataFrame:
+    ensure_factura_lote_schema()
+    with db_transaction() as conn:
+        return pd.read_sql_query("""
+            SELECT l.id, i.sku, i.nombre, l.codigo_lote,
+                   l.factura_compra_id AS factura_id,
+                   COALESCE(NULLIF(l.numero_factura,''),'S/N') AS numero_factura,
+                   COALESCE(fc.proveedor,l.proveedor,'') AS proveedor,
+                   l.fecha_entrada, l.fecha_vencimiento,
+                   l.cantidad_inicial, l.cantidad_disponible,
+                   COALESCE(i.unidad_base,i.unidad,'unidad') AS unidad,
+                   l.costo_unitario_usd, l.ubicacion,
+                   CASE WHEN COALESCE(l.stock_contabilizado_por_factura,0)=1
+                        THEN 'Sí' ELSE 'No' END AS stock_desde_factura,
+                   CASE
+                     WHEN l.fecha_vencimiento IS NOT NULL AND date(l.fecha_vencimiento) < date('now') THEN 'VENCIDO'
+                     WHEN l.fecha_vencimiento IS NOT NULL AND date(l.fecha_vencimiento) <= date('now','+30 day') THEN 'POR VENCER'
+                     WHEN l.cantidad_disponible <= 0 THEN 'AGOTADO'
+                     ELSE upper(l.estado)
+                   END AS alerta
+            FROM inventario_lotes l
+            JOIN inventario i ON i.id=l.inventario_id
+            LEFT JOIN facturas_compra fc ON fc.id=l.factura_compra_id
+            ORDER BY
+                CASE WHEN l.fecha_vencimiento IS NULL THEN 1 ELSE 0 END,
+                l.fecha_vencimiento, i.nombre
+        """, conn)
