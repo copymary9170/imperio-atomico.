@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -14,10 +13,6 @@ def _table_exists(conn: Any, table: str) -> bool:
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
         (table,),
     ).fetchone() is not None
-
-
-def _columns(conn: Any, table: str) -> set[str]:
-    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
 def ensure_schema() -> None:
@@ -156,6 +151,11 @@ def crear_cierre(periodo: str, usuario: str, observaciones: str = "") -> int:
     if len(periodo_limpio) != 7 or periodo_limpio[4] != "-":
         raise ValueError("El período debe tener formato AAAA-MM.")
 
+    hallazgos = auditar_integridad()
+    criticos = hallazgos[hallazgos["severidad"] == "CRÍTICA"] if not hallazgos.empty else hallazgos
+    if not criticos.empty:
+        raise ValueError("No se puede cerrar mientras existan hallazgos críticos de integridad.")
+
     with db_transaction() as conn:
         existente = conn.execute(
             "SELECT id FROM inventario_cierres WHERE periodo=?",
@@ -163,11 +163,6 @@ def crear_cierre(periodo: str, usuario: str, observaciones: str = "") -> int:
         ).fetchone()
         if existente:
             raise ValueError("Ese período ya tiene un cierre registrado.")
-
-        hallazgos = auditar_integridad()
-        criticos = hallazgos[hallazgos["severidad"] == "CRÍTICA"] if not hallazgos.empty else hallazgos
-        if not criticos.empty:
-            raise ValueError("No se puede cerrar mientras existan hallazgos críticos de integridad.")
 
         filas = conn.execute("""
             SELECT id,sku,nombre,COALESCE(stock_actual,0) cantidad,
