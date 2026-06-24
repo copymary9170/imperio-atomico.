@@ -15,20 +15,27 @@ class InventoryMovement:
 
 
 class InventoryService:
-    """
-    Motor central de inventario compatible con schema actual.
-
-    Usa:
-    - inventario.stock_actual
-    - inventario.costo_unitario_usd
-    - movimientos_inventario
-    """
+    """Motor central y auditable de movimientos del inventario."""
 
     TIPOS_ENTRADA = {"ENTRADA", "COMPRA", "AJUSTE_ENTRADA"}
     TIPOS_SALIDA = {"SALIDA", "VENTA", "MERMA", "AJUSTE_SALIDA"}
 
+    @staticmethod
+    def _periodo_actual_cerrado(conn: Any) -> bool:
+        tabla = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventario_cierres'"
+        ).fetchone()
+        if not tabla:
+            return False
+        return conn.execute(
+            "SELECT 1 FROM inventario_cierres WHERE periodo=strftime('%Y-%m','now','localtime') LIMIT 1"
+        ).fetchone() is not None
+
     def procesar_movimiento(self, conn: Any, movement: InventoryMovement) -> tuple[bool, str]:
         try:
+            if self._periodo_actual_cerrado(conn):
+                return False, "El período actual está cerrado. No se permiten movimientos de inventario."
+
             item_id = int(movement.item_id)
             tipo = str(movement.tipo or "").upper().strip()
             cantidad = float(movement.cantidad or 0)
