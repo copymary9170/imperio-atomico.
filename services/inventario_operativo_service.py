@@ -92,11 +92,17 @@ def listar_articulos() -> pd.DataFrame:
         """, conn)
 
 
-def registrar_movimiento(*, inventario_id: int, tipo: str, cantidad: float, costo_unitario: float, motivo: str, usuario: str) -> None:
+def registrar_movimiento(*, inventario_id: int, tipo: str, cantidad: float, costo_unitario: float, motivo: str, usuario: str) -> int | None:
     ensure_schema()
     tipo = str(tipo).upper().strip()
     if tipo not in TIPOS_MOVIMIENTO:
         raise ValueError("Tipo de movimiento inválido.")
+    if tipo in {"AJUSTE_ENTRADA", "AJUSTE_SALIDA"}:
+        from services.inventario_gobernanza_service import solicitar_ajuste
+        return solicitar_ajuste(
+            inventario_id=int(inventario_id), tipo=tipo, cantidad=float(cantidad),
+            motivo=str(motivo or tipo), usuario=usuario,
+        )
     with db_transaction() as conn:
         ok, msg = InventoryService().procesar_movimiento(conn, InventoryMovement(
             item_id=int(inventario_id), tipo=tipo, cantidad=float(cantidad),
@@ -104,6 +110,7 @@ def registrar_movimiento(*, inventario_id: int, tipo: str, cantidad: float, cost
         ))
         if not ok:
             raise ValueError(msg)
+    return None
 
 
 def reservar(*, inventario_id: int, cantidad: float, referencia: str, usuario: str) -> int:
@@ -166,18 +173,20 @@ def registrar_conteo(*, inventario_id: int, stock_fisico: float, motivo: str, us
         row = conn.execute("SELECT stock_actual,costo_unitario_usd FROM inventario WHERE id=?", (int(inventario_id),)).fetchone()
         if not row:
             raise ValueError("Artículo no encontrado.")
-        sistema = float(row["stock_actual"] or 0); diferencia = float(stock_fisico)-sistema
-        if diferencia:
-            tipo = "AJUSTE_ENTRADA" if diferencia > 0 else "AJUSTE_SALIDA"
-            ok, msg = InventoryService().procesar_movimiento(conn, InventoryMovement(
-                item_id=int(inventario_id), tipo=tipo, cantidad=abs(diferencia), costo_unitario=float(row["costo_unitario_usd"] or 0),
-                motivo=f"Conteo físico: {motivo}", usuario=usuario,
-            ))
-            if not ok:
-                raise ValueError(msg)
+        sistema = float(row["stock_actual"] or 0)
+    diferencia = float(stock_fisico)-sistema
+    with db_transaction() as conn:
         conn.execute("INSERT INTO conteos_inventario(inventario_id,stock_sistema,stock_fisico,diferencia,motivo,usuario) VALUES(?,?,?,?,?,?)",
                      (int(inventario_id), sistema, float(stock_fisico), diferencia, motivo.strip(), usuario))
-        return diferencia
+    if diferencia:
+        from services.inventario_gobernanza_service import solicitar_ajuste
+        solicitar_ajuste(
+            inventario_id=int(inventario_id),
+            tipo="AJUSTE_ENTRADA" if diferencia > 0 else "AJUSTE_SALIDA",
+            cantidad=abs(diferencia), motivo=f"Conteo físico: {motivo}",
+            usuario=usuario, stock_fisico=float(stock_fisico),
+        )
+    return diferencia
 
 
 def crear_receta(*, nombre: str, producto_id: int | None, rendimiento: float, unidad: str, observaciones: str, usuario: str) -> int:
