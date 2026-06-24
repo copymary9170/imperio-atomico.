@@ -13,6 +13,7 @@ from services.facturas_compra_service import (
     registrar_abono_factura_compra,
     registrar_factura_compra,
 )
+from services.inventario_gobernanza_service import exigir_periodo_abierto
 from services.inventario_unificado_service import listar_inventario_unificado
 from services.proveedores_select_service import opciones_proveedores_con_manual
 
@@ -37,6 +38,7 @@ def _render_abono(usuario: str, cxp: pd.DataFrame) -> None:
         guardar = st.form_submit_button("Registrar abono", use_container_width=True)
     if guardar:
         try:
+            exigir_periodo_abierto(fecha_abono.isoformat())
             registrar_abono_factura_compra(usuario=usuario, factura_id=int(factura["id"]), monto_usd=float(monto), metodo_pago=metodo, referencia=referencia, notas=notas, fecha=fecha_abono.isoformat())
             st.success("Abono registrado.")
             st.rerun()
@@ -150,6 +152,8 @@ def render_facturas_compra(usuario: str) -> None:
 
         if registrar:
             try:
+                fecha_operacion = fecha_factura.isoformat() if fecha_factura else date.today().isoformat()
+                exigir_periodo_abierto(fecha_operacion)
                 resultado = registrar_factura_compra(usuario=usuario, proveedor=proveedor, numero_factura=numero, fecha_factura=fecha_factura.isoformat() if fecha_factura else "", fecha_vencimiento=vencimiento.isoformat() if vencimiento else "", lineas=lineas, descuento_total_usd=float(descuento), impuestos_pct=float(impuestos), delivery_total_usd=float(delivery), comision_total_usd=float(comision), otros_gastos_usd=float(otros), moneda_pago=moneda, tasa_cambio=float(tasa), metodo_pago=metodo, tipo_pago=tipo_pago, monto_pagado_inicial_usd=float(pagado) if pagado > 0 else None, observaciones=observaciones)
                 st.session_state["facturas_compra_lineas"] = []
                 st.success(f"Factura #{resultado['factura_id']} registrada. Total ${resultado['total_usd']:,.4f}.")
