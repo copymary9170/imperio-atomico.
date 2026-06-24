@@ -24,9 +24,40 @@ CAMPOS_CRITICOS = {
 }
 
 
+def _columns(conn, table: str = "inventario") -> set[str]:
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
 def ensure_schema() -> None:
     ensure_maestro_schema()
     ensure_panaderia_schema()
+    with db_transaction() as conn:
+        cols = _columns(conn)
+        migrations = {
+            "sku": "TEXT",
+            "nombre": "TEXT",
+            "categoria": "TEXT",
+            "unidad": "TEXT",
+            "unidad_base": "TEXT",
+            "estado": "TEXT NOT NULL DEFAULT 'activo'",
+            "ubicacion": "TEXT",
+            "proveedor_principal": "TEXT",
+            "costo_unitario_usd": "REAL NOT NULL DEFAULT 0",
+            "stock_actual": "REAL NOT NULL DEFAULT 0",
+            "stock_minimo_operativo": "REAL NOT NULL DEFAULT 0",
+            "punto_reorden": "REAL NOT NULL DEFAULT 0",
+            "stock_ideal": "REAL NOT NULL DEFAULT 0",
+            "stock_maximo": "REAL NOT NULL DEFAULT 0",
+            "factor_compra_base": "REAL NOT NULL DEFAULT 1",
+            "clase_articulo": "TEXT NOT NULL DEFAULT 'Materia prima'",
+            "controla_lotes": "INTEGER NOT NULL DEFAULT 0",
+            "controla_vencimiento": "INTEGER NOT NULL DEFAULT 0",
+            "dias_vida_util": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for campo, ddl in migrations.items():
+            if campo not in cols:
+                conn.execute(f"ALTER TABLE inventario ADD COLUMN {campo} {ddl}")
+                cols.add(campo)
 
 
 def diagnostico_calidad() -> pd.DataFrame:
@@ -45,13 +76,13 @@ def diagnostico_calidad() -> pd.DataFrame:
                    COALESCE(i.punto_reorden,0) AS punto_reorden,
                    COALESCE(i.stock_ideal,0) AS stock_ideal,
                    COALESCE(i.stock_maximo,0) AS stock_maximo,
-                   COALESCE(i.factor_compra_base,0) AS factor_compra_base,
+                   COALESCE(i.factor_compra_base,1) AS factor_compra_base,
                    COALESCE(i.controla_lotes,0) AS controla_lotes,
                    COALESCE(i.controla_vencimiento,0) AS controla_vencimiento,
                    COALESCE(i.dias_vida_util,0) AS dias_vida_util
             FROM inventario i
             WHERE lower(COALESCE(i.estado,'activo'))='activo'
-            ORDER BY i.nombre COLLATE NOCASE
+            ORDER BY COALESCE(i.nombre,'') COLLATE NOCASE
         """, conn)
     if df.empty:
         return df
