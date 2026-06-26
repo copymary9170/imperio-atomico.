@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
 from security.permissions import has_permission, require_permission
+from services.backup_service import create_backup, get_backup_status
+from services.persistent_config_service import save_persistent_rates
 
 
 # =========================================================
@@ -17,6 +20,23 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Tasas
     "tasa_bcv": 36.50,
     "tasa_binance": 38.00,
+    "tasa_euro": 40.00,
+    "tasa_menudeo": 38.00,
+    "tasa_kontigo": 38.00,
+    "tasa_kontigo_entrada": 38.00,
+    "tasa_kontigo_salida": 38.00,
+
+    # Comisiones
+    "banco_perc": 0.5,
+    "kontigo_perc": 5.0,
+    "kontigo_perc_entrada": 5.0,
+    "kontigo_perc_salida": 5.0,
+    "kontigo_pago_movil_envio_perc": 0.0,
+    "kontigo_tarjeta_envio_perc": 0.0,
+    "kontigo_tarjeta_envio_fija_usd": 0.0,
+    "menudeo_comision_perc": 0.0,
+    "menudeo_comision_fija_usd": 0.0,
+    "menudeo_minimo_usd": 0.0,
 
     # Costos / impresión
     "costo_tinta_ml": 0.10,
@@ -28,15 +48,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "margen_impresion": 30.0,
     "costo_kwh": 0.10,
     "recargo_urgente_pct": 0.0,
-
-    # Impuestos y comisiones
-    "iva_perc": 16.0,
-    "igtf_perc": 3.0,
-    "banco_perc": 0.5,
-    "kontigo_perc": 5.0,
-    "kontigo_perc_entrada": 5.0,
-    "kontigo_perc_salida": 5.0,
-    "kontigo_saldo": 0.0,
 
     # Empresa / ERP general
     "empresa_nombre": "Mi Empresa",
@@ -65,76 +76,30 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "finanzas_redondeo_monto": 2.0,
 }
 
-
-CONFIG_SECTIONS: Dict[str, List[str]] = {
-    "empresa": [
-        "empresa_nombre",
-        "empresa_rif",
-        "empresa_direccion",
-        "empresa_telefono",
-        "empresa_email",
-        "moneda_base",
-        "zona_horaria",
-    ],
-    "tasas": [
-        "tasa_bcv",
-        "tasa_binance",
-    ],
-    "costos": [
-        "costo_tinta_ml",
-        "costo_tinta_auto",
-        "factor_desperdicio_cmyk",
-        "desgaste_cabezal_ml",
-        "costo_bajada_plancha",
-        "costo_limpieza_cabezal",
-        "margen_impresion",
-        "costo_kwh",
-        "recargo_urgente_pct",
-    ],
-    "impuestos": [
-        "iva_perc",
-        "igtf_perc",
-        "banco_perc",
-        "kontigo_perc",
-        "kontigo_perc_entrada",
-        "kontigo_perc_salida",
-        "kontigo_saldo",
-    ],
-    "inventario": [
-        "inventario_permitir_stock_negativo",
-        "inventario_stock_minimo_default",
-        "inventario_metodo_costeo",
-    ],
-    "ventas": [
-        "cotizacion_vigencia_dias",
-        "ventas_descuento_max_perc",
-        "ventas_aprobar_descuento_mayor",
-    ],
-    "produccion": [
-        "produccion_merma_tolerancia_perc",
-        "produccion_reproceso_permitido",
-    ],
-    "finanzas": [
-        "finanzas_redondeo_monto",
-    ],
-}
-
-
-READONLY_RATE_FIELDS: List[Tuple[str, str, str, str]] = [
-    ("tasa_bcv", "Tasa BCV", "Bs/$", "%.2f"),
-    ("tasa_binance", "Tasa Binance", "Bs/$", "%.2f"),
-    ("iva_perc", "IVA", "%", "%.2f"),
-    ("igtf_perc", "IGTF", "%", "%.2f"),
-    ("banco_perc", "Comisión bancaria", "%", "%.3f"),
-    ("kontigo_perc", "Comisión Kontigo", "%", "%.3f"),
-    ("kontigo_perc_entrada", "Kontigo entrada", "%", "%.3f"),
-    ("kontigo_perc_salida", "Kontigo salida", "%", "%.3f"),
-    ("kontigo_saldo", "Saldo Kontigo", "$", "%.2f"),
+RATE_FIELDS = [
+    ("tasa_bcv", "BCV", "Bs/$", 2),
+    ("tasa_binance", "Binance", "Bs/$", 2),
+    ("tasa_euro", "Euro", "Bs/€", 2),
+    ("tasa_menudeo", "Menudeo", "Bs/$", 2),
+    ("tasa_kontigo_entrada", "Kontigo entrada", "Bs/$", 2),
+    ("tasa_kontigo_salida", "Kontigo salida", "Bs/$", 2),
+    ("banco_perc", "Comisión bancaria", "%", 3),
+    ("kontigo_perc", "Kontigo general", "%", 3),
+    ("kontigo_perc_entrada", "Kontigo comisión entrada", "%", 3),
+    ("kontigo_perc_salida", "Kontigo comisión salida", "%", 3),
+    ("kontigo_pago_movil_envio_perc", "Pago móvil → Kontigo", "%", 3),
+    ("kontigo_tarjeta_envio_perc", "Kontigo → tarjeta", "%", 3),
+    ("kontigo_tarjeta_envio_fija_usd", "Cargo fijo tarjeta", "$", 2),
+    ("menudeo_comision_perc", "Comisión menudeo", "%", 3),
+    ("menudeo_comision_fija_usd", "Cargo fijo menudeo", "$", 2),
+    ("menudeo_minimo_usd", "Mínimo menudeo", "$", 2),
 ]
+
+RATE_HISTORY_KEYS = tuple(field[0] for field in RATE_FIELDS)
 
 
 # =========================================================
-# Inicialización / compatibilidad DB
+# Base de datos y utilidades
 # =========================================================
 
 def ensure_config_tables() -> None:
@@ -159,201 +124,88 @@ def ensure_config_tables() -> None:
             )
             """
         )
+        for key, value in DEFAULT_CONFIG.items():
+            conn.execute(
+                """
+                INSERT INTO configuracion (parametro, valor)
+                VALUES (?, ?)
+                ON CONFLICT(parametro) DO NOTHING
+                """,
+                (key, str(value)),
+            )
 
-        for param, default_value in DEFAULT_CONFIG.items():
-            exists = conn.execute(
-                "SELECT 1 FROM configuracion WHERE parametro = ?",
-                (param,),
-            ).fetchone()
-            if not exists:
-                conn.execute(
-                    "INSERT INTO configuracion (parametro, valor) VALUES (?, ?)",
-                    (param, str(default_value)),
-                )
-
-
-# =========================================================
-# Helpers de conversión
-# =========================================================
-
-def _to_float(config: Dict[str, object], key: str, default: float) -> float:
-    try:
-        value = config.get(key, default)
-        if value in (None, ""):
-            return float(default)
-        return float(value)
-    except Exception:
-        return float(default)
-
-
-def _to_int(config: Dict[str, object], key: str, default: int) -> int:
-    try:
-        value = config.get(key, default)
-        if value in (None, ""):
-            return int(default)
-        return int(float(value))
-    except Exception:
-        return int(default)
-
-
-def _to_bool(config: Dict[str, object], key: str, default: bool) -> bool:
-    raw_default = 1 if default else 0
-    return bool(_to_int(config, key, raw_default))
-
-
-def _to_str(config: Dict[str, object], key: str, default: str) -> str:
-    try:
-        value = config.get(key, default)
-        if value is None:
-            return default
-        return str(value)
-    except Exception:
-        return default
-
-
-# =========================================================
-# Lectura / escritura configuración
-# =========================================================
 
 def get_current_config() -> Dict[str, object]:
     ensure_config_tables()
-
     with db_transaction() as conn:
-        rows = conn.execute(
-            """
-            SELECT parametro, valor
-            FROM configuracion
-            """
-        ).fetchall()
-
-    config = {r["parametro"]: r["valor"] for r in rows}
-
+        rows = conn.execute("SELECT parametro, valor FROM configuracion").fetchall()
+    config = {row["parametro"]: row["valor"] for row in rows}
     for key, value in DEFAULT_CONFIG.items():
         config.setdefault(key, value)
-
     return config
 
 
 def set_config_values(values: Dict[str, Any], usuario: str) -> None:
     ensure_config_tables()
-
     with db_transaction() as conn:
-        for param, nuevo_valor in values.items():
-            old_row = conn.execute(
+        for key, value in values.items():
+            old = conn.execute(
                 "SELECT valor FROM configuracion WHERE parametro = ?",
-                (param,),
+                (key,),
             ).fetchone()
-
-            valor_anterior = old_row["valor"] if old_row and old_row["valor"] is not None else None
-            valor_nuevo_str = str(nuevo_valor)
-
+            old_value = old["valor"] if old else None
+            new_value = str(value)
             conn.execute(
                 """
-                INSERT OR REPLACE INTO configuracion (parametro, valor)
+                INSERT INTO configuracion (parametro, valor)
                 VALUES (?, ?)
+                ON CONFLICT(parametro) DO UPDATE SET valor = excluded.valor
                 """,
-                (param, valor_nuevo_str),
+                (key, new_value),
             )
-
-            if valor_anterior != valor_nuevo_str:
+            if old_value != new_value:
                 conn.execute(
                     """
-                    INSERT INTO historial_config (parametro, valor_anterior, valor_nuevo, usuario)
+                    INSERT INTO historial_config
+                    (parametro, valor_anterior, valor_nuevo, usuario)
                     VALUES (?, ?, ?, ?)
                     """,
-                    (param, valor_anterior, valor_nuevo_str, usuario),
+                    (key, old_value, new_value, usuario),
                 )
 
 
-# =========================================================
-# Resumen / tablas
-# =========================================================
-
-def build_rates_dataframe(config: Dict[str, object]) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "Concepto": label,
-                "Valor": _to_float(config, key, float(DEFAULT_CONFIG[key]))
-                if isinstance(DEFAULT_CONFIG[key], (int, float))
-                else config.get(key, DEFAULT_CONFIG[key]),
-                "Unidad": unit,
-            }
-            for key, label, unit, _fmt in READONLY_RATE_FIELDS
-        ]
-    )
-
-
-def build_full_config_dataframe(config: Dict[str, object]) -> pd.DataFrame:
-    rows = []
-
-    for section, keys in CONFIG_SECTIONS.items():
-        for key in keys:
-            default = DEFAULT_CONFIG.get(key, "")
-            if isinstance(default, float):
-                value = _to_float(config, key, default)
-            elif isinstance(default, int):
-                value = _to_int(config, key, default)
-            else:
-                value = config.get(key, default)
-
-            rows.append(
-                {
-                    "Sección": section,
-                    "Parámetro": key,
-                    "Valor": value,
-                }
-            )
-
-    return pd.DataFrame(rows)
-
-
-def render_rates_overview(config: Dict[str, object]) -> None:
-    st.caption("Vista rápida de las tasas, impuestos y comisiones activas del sistema.")
-
-    for start in range(0, len(READONLY_RATE_FIELDS), 3):
-        columns = st.columns(3)
-        for column, (key, label, unit, fmt) in zip(columns, READONLY_RATE_FIELDS[start : start + 3]):
-            value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
-            prefix = "$ " if unit == "$" else ""
-            suffix = "" if unit == "$" else f" {unit}"
-            column.metric(label, f"{prefix}{fmt % value}{suffix}")
-
-    st.dataframe(build_rates_dataframe(config), use_container_width=True, hide_index=True)
-
-
-def render_sidebar_config_snapshot() -> None:
+def _to_float(config: Dict[str, object], key: str, default: float = 0.0) -> float:
     try:
-        config = get_current_config()
-    except Exception:
-        st.sidebar.warning("No se pudo cargar el resumen de configuración.")
-        return
-
-    with st.sidebar.expander("👀 Configuración activa", expanded=False):
-        st.caption("Resumen rápido de tasas y comisiones definidas en Configuración.")
-
-        snapshot_fields = [
-            ("tasa_bcv", "BCV", "Bs/$", "%.2f"),
-            ("tasa_binance", "Binance", "Bs/$", "%.2f"),
-            ("iva_perc", "IVA", "%", "%.2f"),
-            ("igtf_perc", "IGTF", "%", "%.2f"),
-            ("banco_perc", "Banco", "%", "%.3f"),
-            ("kontigo_perc", "Kontigo", "%", "%.3f"),
-        ]
-
-        for key, label, unit, fmt in snapshot_fields:
-            value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
-            st.sidebar.metric(label, f"{fmt % value} {unit}")
+        return float(config.get(key, default) or default)
+    except (TypeError, ValueError):
+        return float(default)
 
 
-# =========================================================
-# Integración inventario
-# =========================================================
+def _to_bool(config: Dict[str, object], key: str, default: bool = False) -> bool:
+    try:
+        return bool(int(float(config.get(key, 1 if default else 0))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_str(config: Dict[str, object], key: str, default: str = "") -> str:
+    value = config.get(key, default)
+    return default if value is None else str(value)
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone() is not None
+
 
 def _detectar_costo_tinta() -> Optional[float]:
     try:
         with db_transaction() as conn:
-            df_tintas = pd.read_sql_query(
+            if not _table_exists(conn, "inventario"):
+                return None
+            df = pd.read_sql_query(
                 """
                 SELECT costo_unitario_usd
                 FROM inventario
@@ -364,72 +216,340 @@ def _detectar_costo_tinta() -> Optional[float]:
                 """,
                 conn,
             )
-
-        if df_tintas.empty:
-            return None
-
-        return float(df_tintas["costo_unitario_usd"].mean())
+        return None if df.empty else float(df["costo_unitario_usd"].mean())
     except Exception:
         return None
 
 
-# =========================================================
-# Validaciones
-# =========================================================
+def _ultima_actualizacion(parametro: str) -> str:
+    try:
+        with db_transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT fecha
+                FROM historial_config
+                WHERE parametro = ?
+                ORDER BY fecha DESC
+                LIMIT 1
+                """,
+                (parametro,),
+            ).fetchone()
+        return str(row["fecha"]) if row else "Sin historial"
+    except Exception:
+        return "Sin historial"
 
-def _validar_config(values: Dict[str, Any]) -> List[str]:
+
+def _historial_tasas(limit: int = 100) -> pd.DataFrame:
+    placeholders = ",".join("?" for _ in RATE_HISTORY_KEYS)
+    try:
+        with db_transaction() as conn:
+            return pd.read_sql_query(
+                f"""
+                SELECT parametro, valor_anterior, valor_nuevo, usuario, fecha
+                FROM historial_config
+                WHERE parametro IN ({placeholders})
+                ORDER BY fecha DESC
+                LIMIT ?
+                """,
+                conn,
+                params=(*RATE_HISTORY_KEYS, limit),
+            )
+    except Exception:
+        return pd.DataFrame()
+
+
+def _horas_desde(fecha: str) -> Optional[float]:
+    if not fecha or fecha == "Sin historial":
+        return None
+    try:
+        dt = datetime.fromisoformat(str(fecha).replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return max((datetime.now() - dt).total_seconds() / 3600, 0.0)
+    except Exception:
+        return None
+
+
+def _validar(values: Dict[str, Any]) -> List[str]:
     errores: List[str] = []
+    positivos = [
+        "tasa_bcv", "tasa_binance", "tasa_euro", "tasa_menudeo",
+        "tasa_kontigo_entrada", "tasa_kontigo_salida",
+    ]
+    for key in positivos:
+        if float(values.get(key, 0) or 0) <= 0:
+            errores.append(f"{key} debe ser mayor que cero.")
 
-    def rango(nombre: str, minimo: float | None = None, maximo: float | None = None) -> None:
-        valor = values.get(nombre)
-        try:
-            v = float(valor)
-        except Exception:
-            errores.append(f"El parámetro '{nombre}' no tiene un valor válido.")
-            return
+    porcentajes = [
+        "banco_perc", "kontigo_perc", "kontigo_perc_entrada",
+        "kontigo_perc_salida", "kontigo_pago_movil_envio_perc",
+        "kontigo_tarjeta_envio_perc", "menudeo_comision_perc",
+        "ventas_descuento_max_perc", "produccion_merma_tolerancia_perc",
+        "recargo_urgente_pct",
+    ]
+    for key in porcentajes:
+        value = float(values.get(key, 0) or 0)
+        if value < 0 or value > 100:
+            errores.append(f"{key} debe estar entre 0 y 100.")
 
-        if minimo is not None and v < minimo:
-            errores.append(f"'{nombre}' no puede ser menor que {minimo}.")
-        if maximo is not None and v > maximo:
-            errores.append(f"'{nombre}' no puede ser mayor que {maximo}.")
-
-    rango("tasa_bcv", 0.0001, None)
-    rango("tasa_binance", 0.0001, None)
-    rango("costo_tinta_ml", 0.0, None)
-    rango("margen_impresion", 0.0, 1000.0)
-    rango("costo_kwh", 0.0, None)
-    rango("factor_desperdicio_cmyk", 1.0, 10.0)
-    rango("desgaste_cabezal_ml", 0.0, None)
-    rango("costo_bajada_plancha", 0.0, None)
-    rango("costo_limpieza_cabezal", 0.0, None)
-    rango("iva_perc", 0.0, 100.0)
-    rango("igtf_perc", 0.0, 100.0)
-    rango("banco_perc", 0.0, 100.0)
-    rango("kontigo_perc", 0.0, 100.0)
-    rango("kontigo_perc_entrada", 0.0, 100.0)
-    rango("kontigo_perc_salida", 0.0, 100.0)
-    rango("kontigo_saldo", 0.0, None)
-    rango("recargo_urgente_pct", 0.0, 100.0)
-    rango("inventario_stock_minimo_default", 0.0, None)
-    rango("cotizacion_vigencia_dias", 1.0, 365.0)
-    rango("ventas_descuento_max_perc", 0.0, 100.0)
-    rango("produccion_merma_tolerancia_perc", 0.0, 100.0)
-    rango("finanzas_redondeo_monto", 0.0, 6.0)
-
-    metodo_costeo = str(values.get("inventario_metodo_costeo", "PROMEDIO")).upper()
-    if metodo_costeo not in {"PROMEDIO", "FIFO", "MANUAL"}:
-        errores.append("El método de costeo debe ser PROMEDIO, FIFO o MANUAL.")
-
-    moneda_base = str(values.get("moneda_base", "USD")).upper()
-    if moneda_base not in {"USD", "VES", "EUR"}:
-        errores.append("La moneda base debe ser USD, VES o EUR.")
-
+    if float(values.get("factor_desperdicio_cmyk", 1) or 1) < 1:
+        errores.append("El factor de desperdicio CMYK no puede ser menor que 1.")
+    if str(values.get("inventario_metodo_costeo", "PROMEDIO")).upper() not in {"PROMEDIO", "FIFO", "MANUAL"}:
+        errores.append("Método de costeo inválido.")
     return errores
 
 
+def _guardar(values: Dict[str, Any], usuario: str) -> None:
+    errores = _validar(values)
+    if errores:
+        for error in errores:
+            st.error(error)
+        return
+
+    set_config_values(values, usuario)
+    ok_persist, persist_msg = save_persistent_rates(values)
+    try:
+        backup = create_backup("cambio_configuracion", upload_external=True)
+        backup_msg = f" Respaldo: {backup.name}." if backup else " No se detectó base para respaldo."
+    except Exception as exc:
+        backup_msg = f" El respaldo falló: {exc}"
+
+    if ok_persist:
+        st.success(f"Configuración guardada y persistida. {persist_msg}.{backup_msg}")
+    else:
+        st.warning(f"Configuración guardada. Persistencia externa: {persist_msg}.{backup_msg}")
+
+
 # =========================================================
-# UI principal
+# Vistas
 # =========================================================
+
+def _render_estado_general() -> None:
+    st.subheader("🩺 Estado general")
+    try:
+        status = get_backup_status()
+    except Exception as exc:
+        st.warning(f"No se pudo consultar el estado de respaldos: {exc}")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Base de datos", "Detectada" if status.get("db_exists") else "No detectada")
+    c2.metric("Respaldos locales", status.get("total_backups", 0))
+    c3.metric("GitHub Backup", "Configurado" if status.get("github_configured") else "No configurado")
+    c4.metric("Último respaldo", status.get("last_backup_at", "Nunca"))
+    st.caption(f"Ruta: {status.get('db_path', 'No detectada')}")
+
+    if st.button("💾 Probar respaldo ahora", use_container_width=True):
+        try:
+            backup = create_backup("prueba_configuracion", upload_external=True)
+            if backup:
+                st.success(f"Respaldo creado: {backup.name}")
+            else:
+                st.error("No se detectó la base de datos.")
+        except Exception as exc:
+            st.error(f"No se pudo crear el respaldo: {exc}")
+
+
+def _render_tasas(usuario: str, puede_editar: bool) -> None:
+    st.subheader("💱 Tasas y comisiones")
+    st.caption("IVA e IGTF fueron retirados. Aquí solo se administran tasas de cambio, comisiones operativas y mínimos.")
+
+    config = get_current_config()
+    cols = st.columns(3)
+    for idx, (key, label, unit, decimals) in enumerate(RATE_FIELDS[:6]):
+        value = _to_float(config, key, float(DEFAULT_CONFIG[key]))
+        fecha = _ultima_actualizacion(key)
+        horas = _horas_desde(fecha)
+        help_text = "Sin historial" if horas is None else f"Actualizada hace {horas:.1f} h"
+        prefix = "$ " if unit == "$" else ""
+        suffix = "" if unit == "$" else f" {unit}"
+        cols[idx % 3].metric(label, f"{prefix}{value:.{decimals}f}{suffix}", help_text)
+
+    with st.form("config_tasas_avanzadas"):
+        st.markdown("##### Tasas de cambio")
+        rate_cols = st.columns(3)
+        values: Dict[str, Any] = {}
+        for idx, (key, label, unit, decimals) in enumerate(RATE_FIELDS[:6]):
+            values[key] = rate_cols[idx % 3].number_input(
+                f"{label} ({unit})",
+                min_value=0.0001,
+                value=_to_float(config, key, float(DEFAULT_CONFIG[key])),
+                step=0.01,
+                format=f"%.{decimals}f",
+                disabled=not puede_editar,
+                key=f"rate_{key}",
+            )
+
+        st.markdown("##### Comisiones operativas")
+        fee_cols = st.columns(3)
+        for idx, (key, label, unit, decimals) in enumerate(RATE_FIELDS[6:]):
+            values[key] = fee_cols[idx % 3].number_input(
+                f"{label} ({unit})",
+                min_value=0.0,
+                value=_to_float(config, key, float(DEFAULT_CONFIG[key])),
+                step=0.01 if decimals <= 2 else 0.001,
+                format=f"%.{decimals}f",
+                disabled=not puede_editar,
+                key=f"fee_{key}",
+            )
+
+        submitted = st.form_submit_button("💾 Guardar tasas y comisiones", disabled=not puede_editar)
+        if submitted:
+            values["tasa_kontigo"] = values["tasa_kontigo_entrada"]
+            _guardar(values, usuario)
+
+    st.markdown("##### Simulador de ruta Kontigo")
+    s1, s2 = st.columns(2)
+    ruta = s1.selectbox(
+        "Ruta",
+        ["Efectivo USD → Kontigo", "Pago móvil Bs → Kontigo", "Kontigo → tarjeta"],
+    )
+    monto = s2.number_input("Monto", min_value=0.0, step=1.0, format="%.2f")
+    entrada = _to_float(config, "tasa_kontigo_entrada", 0.0)
+    salida = _to_float(config, "tasa_kontigo_salida", 0.0)
+    com_entrada = _to_float(config, "kontigo_perc_entrada", 0.0)
+    com_pago = _to_float(config, "kontigo_pago_movil_envio_perc", 0.0)
+    com_tarjeta = _to_float(config, "kontigo_tarjeta_envio_perc", 0.0)
+    fijo_tarjeta = _to_float(config, "kontigo_tarjeta_envio_fija_usd", 0.0)
+
+    if ruta == "Efectivo USD → Kontigo":
+        bruto = monto
+        tasa = entrada
+        comision = bruto * com_entrada / 100
+    elif ruta == "Pago móvil Bs → Kontigo":
+        tasa = entrada
+        bruto = monto / tasa if tasa else 0.0
+        comision = bruto * (com_pago + com_entrada) / 100
+    else:
+        bruto = monto
+        tasa = salida
+        comision = bruto * com_tarjeta / 100 + fijo_tarjeta
+
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Tasa usada", f"{tasa:,.2f} Bs/$")
+    r2.metric("Bruto", f"$ {bruto:,.2f}")
+    r3.metric("Comisiones", f"$ {comision:,.2f}")
+    r4.metric("Neto estimado", f"$ {max(bruto - comision, 0):,.2f}")
+
+    with st.expander("📜 Historial de tasas y comisiones"):
+        history = _historial_tasas()
+        if history.empty:
+            st.info("Todavía no hay cambios registrados.")
+        else:
+            st.dataframe(history, use_container_width=True, hide_index=True)
+
+
+def _render_config_general(usuario: str, puede_editar: bool) -> None:
+    config = get_current_config()
+    tinta_detectada = _detectar_costo_tinta()
+
+    with st.form("config_general"):
+        st.subheader("🏢 Empresa")
+        e1, e2, e3 = st.columns(3)
+        empresa_nombre = e1.text_input("Nombre empresa", _to_str(config, "empresa_nombre", "Mi Empresa"), disabled=not puede_editar)
+        empresa_rif = e2.text_input("RIF", _to_str(config, "empresa_rif"), disabled=not puede_editar)
+        empresa_telefono = e3.text_input("Teléfono", _to_str(config, "empresa_telefono"), disabled=not puede_editar)
+        e4, e5, e6 = st.columns(3)
+        empresa_email = e4.text_input("Email", _to_str(config, "empresa_email"), disabled=not puede_editar)
+        moneda = e5.selectbox("Moneda base", ["USD", "VES", "EUR"], index=["USD", "VES", "EUR"].index(_to_str(config, "moneda_base", "USD")), disabled=not puede_editar)
+        zona = e6.text_input("Zona horaria", _to_str(config, "zona_horaria", "America/Caracas"), disabled=not puede_editar)
+        direccion = st.text_area("Dirección fiscal", _to_str(config, "empresa_direccion"), disabled=not puede_editar)
+
+        st.divider()
+        st.subheader("🎨 Costos / Producción")
+        costo_auto = st.checkbox("Calcular costo de tinta desde inventario", _to_bool(config, "costo_tinta_auto", True), disabled=not puede_editar)
+        if costo_auto and tinta_detectada is not None:
+            costo_tinta = tinta_detectada
+            st.success(f"Costo detectado: $ {costo_tinta:.4f}/ml")
+        else:
+            costo_tinta = st.number_input("Costo tinta por ml ($)", min_value=0.0, value=_to_float(config, "costo_tinta_ml", 0.10), format="%.4f", disabled=not puede_editar)
+            if costo_auto and tinta_detectada is None:
+                st.warning("No hay tintas válidas en inventario; se mantiene el valor manual.")
+
+        c1, c2, c3 = st.columns(3)
+        margen = c1.number_input("Margen de ganancia (%)", min_value=0.0, value=_to_float(config, "margen_impresion", 30.0), disabled=not puede_editar)
+        kwh = c2.number_input("Costo electricidad kWh ($)", min_value=0.0, value=_to_float(config, "costo_kwh", 0.10), format="%.4f", disabled=not puede_editar)
+        desperdicio = c3.number_input("Factor desperdicio CMYK", min_value=1.0, value=_to_float(config, "factor_desperdicio_cmyk", 1.15), format="%.3f", disabled=not puede_editar)
+        c4, c5, c6 = st.columns(3)
+        desgaste = c4.number_input("Desgaste cabezal por ml ($)", min_value=0.0, value=_to_float(config, "desgaste_cabezal_ml", 0.005), format="%.4f", disabled=not puede_editar)
+        bajada = c5.number_input("Bajada de plancha ($/u)", min_value=0.0, value=_to_float(config, "costo_bajada_plancha", 0.03), format="%.3f", disabled=not puede_editar)
+        limpieza = c6.number_input("Limpieza cabezal por trabajo ($)", min_value=0.0, value=_to_float(config, "costo_limpieza_cabezal", 0.02), format="%.3f", disabled=not puede_editar)
+        c7, c8 = st.columns(2)
+        urgencia = c7.number_input("Recargo urgencia global (%)", min_value=0.0, max_value=100.0, value=_to_float(config, "recargo_urgente_pct", 0.0), disabled=not puede_editar)
+        merma = c8.number_input("Tolerancia merma producción (%)", min_value=0.0, max_value=100.0, value=_to_float(config, "produccion_merma_tolerancia_perc", 5.0), disabled=not puede_editar)
+        reproceso = st.checkbox("Permitir reproceso en producción", _to_bool(config, "produccion_reproceso_permitido", True), disabled=not puede_editar)
+
+        st.divider()
+        st.subheader("📦 Inventario")
+        i1, i2, i3 = st.columns(3)
+        stock_negativo = i1.checkbox("Permitir stock negativo", _to_bool(config, "inventario_permitir_stock_negativo"), disabled=not puede_editar)
+        stock_minimo = i2.number_input("Stock mínimo por defecto", min_value=0.0, value=_to_float(config, "inventario_stock_minimo_default", 0.0), disabled=not puede_editar)
+        metodos = ["PROMEDIO", "FIFO", "MANUAL"]
+        metodo_actual = _to_str(config, "inventario_metodo_costeo", "PROMEDIO").upper()
+        metodo = i3.selectbox("Método de costeo", metodos, index=metodos.index(metodo_actual) if metodo_actual in metodos else 0, disabled=not puede_editar)
+
+        st.divider()
+        st.subheader("💰 Ventas / Cotizaciones")
+        v1, v2, v3 = st.columns(3)
+        vigencia = v1.number_input("Vigencia cotización (días)", min_value=1.0, max_value=365.0, value=_to_float(config, "cotizacion_vigencia_dias", 7.0), disabled=not puede_editar)
+        descuento = v2.number_input("Descuento máximo (%)", min_value=0.0, max_value=100.0, value=_to_float(config, "ventas_descuento_max_perc", 20.0), disabled=not puede_editar)
+        aprobar = v3.checkbox("Exigir aprobación para descuentos altos", _to_bool(config, "ventas_aprobar_descuento_mayor", True), disabled=not puede_editar)
+        redondeo = st.number_input("Redondeo financiero (decimales)", min_value=0.0, max_value=6.0, value=_to_float(config, "finanzas_redondeo_monto", 2.0), format="%.0f", disabled=not puede_editar)
+
+        submitted = st.form_submit_button("💾 Guardar configuración general", disabled=not puede_editar)
+        if submitted:
+            values = {
+                "empresa_nombre": empresa_nombre,
+                "empresa_rif": empresa_rif,
+                "empresa_telefono": empresa_telefono,
+                "empresa_email": empresa_email,
+                "empresa_direccion": direccion,
+                "moneda_base": moneda,
+                "zona_horaria": zona,
+                "costo_tinta_auto": 1.0 if costo_auto else 0.0,
+                "costo_tinta_ml": costo_tinta,
+                "margen_impresion": margen,
+                "costo_kwh": kwh,
+                "factor_desperdicio_cmyk": desperdicio,
+                "desgaste_cabezal_ml": desgaste,
+                "costo_bajada_plancha": bajada,
+                "costo_limpieza_cabezal": limpieza,
+                "recargo_urgente_pct": urgencia,
+                "produccion_merma_tolerancia_perc": merma,
+                "produccion_reproceso_permitido": 1.0 if reproceso else 0.0,
+                "inventario_permitir_stock_negativo": 1.0 if stock_negativo else 0.0,
+                "inventario_stock_minimo_default": stock_minimo,
+                "inventario_metodo_costeo": metodo,
+                "cotizacion_vigencia_dias": vigencia,
+                "ventas_descuento_max_perc": descuento,
+                "ventas_aprobar_descuento_mayor": 1.0 if aprobar else 0.0,
+                "finanzas_redondeo_monto": redondeo,
+            }
+            _guardar(values, usuario)
+
+
+def render_rates_overview(config: Dict[str, object]) -> None:
+    fields = RATE_FIELDS[:6] + RATE_FIELDS[6:10]
+    rows = []
+    for key, label, unit, decimals in fields:
+        rows.append({
+            "Concepto": label,
+            "Valor": round(_to_float(config, key, float(DEFAULT_CONFIG[key])), decimals),
+            "Unidad": unit,
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def render_sidebar_config_snapshot() -> None:
+    try:
+        config = get_current_config()
+    except Exception:
+        st.sidebar.warning("No se pudo cargar la configuración.")
+        return
+    with st.sidebar.expander("👀 Configuración activa", expanded=False):
+        for key, label, unit, decimals in RATE_FIELDS[:6]:
+            st.metric(label, f"{_to_float(config, key):.{decimals}f} {unit}")
+
 
 def render_configuracion(usuario: str) -> None:
     if not require_permission("config.view", "🚫 No tienes acceso al módulo Configuración."):
@@ -439,414 +559,20 @@ def render_configuracion(usuario: str) -> None:
     puede_editar = has_permission("config.edit")
 
     st.subheader("⚙️ Configuración del Sistema")
-    st.info("Estos parámetros afectan cotizaciones, costos, inventario, producción y análisis financieros.")
+    st.info("Administra empresa, tasas, comisiones, costos, inventario, producción, ventas y respaldos.")
 
     if not puede_editar:
-        st.warning("Tienes permisos de solo lectura en Configuración.")
+        st.warning("Tienes permisos de solo lectura.")
 
-    try:
-        config = get_current_config()
-    except Exception as e:
-        st.error("Error cargando configuración.")
-        st.exception(e)
-        return
+    tab_estado, tab_tasas, tab_general = st.tabs([
+        "🩺 Estado y respaldos",
+        "💱 Tasas y comisiones",
+        "⚙️ Configuración general",
+    ])
 
-    costo_tinta_detectado = _detectar_costo_tinta()
-
-    with st.form("config_general"):
-        st.subheader("🏢 Empresa")
-        e1, e2, e3 = st.columns(3)
-        empresa_nombre = e1.text_input(
-            "Nombre empresa",
-            value=_to_str(config, "empresa_nombre", DEFAULT_CONFIG["empresa_nombre"]),
-            disabled=not puede_editar,
-        )
-        empresa_rif = e2.text_input(
-            "RIF",
-            value=_to_str(config, "empresa_rif", DEFAULT_CONFIG["empresa_rif"]),
-            disabled=not puede_editar,
-        )
-        empresa_telefono = e3.text_input(
-            "Teléfono",
-            value=_to_str(config, "empresa_telefono", DEFAULT_CONFIG["empresa_telefono"]),
-            disabled=not puede_editar,
-        )
-
-        e4, e5, e6 = st.columns(3)
-        empresa_email = e4.text_input(
-            "Email",
-            value=_to_str(config, "empresa_email", DEFAULT_CONFIG["empresa_email"]),
-            disabled=not puede_editar,
-        )
-        moneda_options = ["USD", "VES", "EUR"]
-        moneda_actual = _to_str(config, "moneda_base", "USD")
-        moneda_base = e5.selectbox(
-            "Moneda base",
-            moneda_options,
-            index=moneda_options.index(moneda_actual) if moneda_actual in moneda_options else 0,
-            disabled=not puede_editar,
-        )
-        zona_horaria = e6.text_input(
-            "Zona horaria",
-            value=_to_str(config, "zona_horaria", DEFAULT_CONFIG["zona_horaria"]),
-            disabled=not puede_editar,
-        )
-
-        empresa_direccion = st.text_area(
-            "Dirección fiscal",
-            value=_to_str(config, "empresa_direccion", DEFAULT_CONFIG["empresa_direccion"]),
-            disabled=not puede_editar,
-        )
-
-        st.divider()
-
-        st.subheader("💵 Tasas")
-        c1, c2 = st.columns(2)
-
-        tasa_bcv = c1.number_input(
-            "Tasa BCV (Bs/$)",
-            min_value=0.0001,
-            value=_to_float(config, "tasa_bcv", DEFAULT_CONFIG["tasa_bcv"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-
-        tasa_binance = c2.number_input(
-            "Tasa Binance (Bs/$)",
-            min_value=0.0001,
-            value=_to_float(config, "tasa_binance", DEFAULT_CONFIG["tasa_binance"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-
-        st.divider()
-
-        st.subheader("🎨 Costos / Producción")
-
-        costo_tinta_auto = st.checkbox(
-            "Calcular costo tinta desde inventario",
-            value=_to_bool(config, "costo_tinta_auto", True),
-            disabled=not puede_editar,
-        )
-
-        if costo_tinta_auto:
-            if costo_tinta_detectado is not None:
-                costo_tinta_ml = float(costo_tinta_detectado)
-                st.success(f"Costo de tinta detectado: $ {costo_tinta_ml:.4f} / ml")
-            else:
-                costo_tinta_ml = _to_float(config, "costo_tinta_ml", DEFAULT_CONFIG["costo_tinta_ml"])
-                st.warning("No hay tintas válidas en inventario. Se mantiene el último valor guardado.")
-        else:
-            costo_tinta_ml = st.number_input(
-                "Costo de tinta por ml ($)",
-                min_value=0.0,
-                value=_to_float(config, "costo_tinta_ml", DEFAULT_CONFIG["costo_tinta_ml"]),
-                step=0.0001,
-                format="%.4f",
-                disabled=not puede_editar,
-            )
-
-        c3, c4, c5 = st.columns(3)
-        margen = c3.number_input(
-            "Margen de ganancia (%)",
-            min_value=0.0,
-            value=_to_float(config, "margen_impresion", DEFAULT_CONFIG["margen_impresion"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-        costo_kwh = c4.number_input(
-            "Costo electricidad kWh ($)",
-            min_value=0.0,
-            value=_to_float(config, "costo_kwh", DEFAULT_CONFIG["costo_kwh"]),
-            format="%.4f",
-            disabled=not puede_editar,
-        )
-        factor_desperdicio = c5.number_input(
-            "Factor desperdicio CMYK",
-            min_value=1.0,
-            value=_to_float(config, "factor_desperdicio_cmyk", DEFAULT_CONFIG["factor_desperdicio_cmyk"]),
-            format="%.3f",
-            disabled=not puede_editar,
-        )
-
-        c6, c7, c8 = st.columns(3)
-        desgaste_cabezal = c6.number_input(
-            "Desgaste cabezal por ml ($)",
-            min_value=0.0,
-            value=_to_float(config, "desgaste_cabezal_ml", DEFAULT_CONFIG["desgaste_cabezal_ml"]),
-            format="%.4f",
-            disabled=not puede_editar,
-        )
-        costo_bajada = c7.number_input(
-            "Bajada de plancha ($/u)",
-            min_value=0.0,
-            value=_to_float(config, "costo_bajada_plancha", DEFAULT_CONFIG["costo_bajada_plancha"]),
-            format="%.3f",
-            disabled=not puede_editar,
-        )
-        costo_limpieza = c8.number_input(
-            "Limpieza cabezal por trabajo ($)",
-            min_value=0.0,
-            value=_to_float(config, "costo_limpieza_cabezal", DEFAULT_CONFIG["costo_limpieza_cabezal"]),
-            format="%.3f",
-            disabled=not puede_editar,
-        )
-
-        c9, c10 = st.columns(2)
-        urgencia_options = [0.0, 25.0, 50.0]
-        urgencia_actual = _to_float(config, "recargo_urgente_pct", DEFAULT_CONFIG["recargo_urgente_pct"])
-        recargo_urgente = c9.selectbox(
-            "Recargo urgencia global (%)",
-            urgencia_options,
-            index=urgencia_options.index(urgencia_actual) if urgencia_actual in urgencia_options else 0,
-            disabled=not puede_editar,
-        )
-        produccion_merma_tolerancia_perc = c10.number_input(
-            "Tolerancia merma producción (%)",
-            min_value=0.0,
-            value=_to_float(config, "produccion_merma_tolerancia_perc", DEFAULT_CONFIG["produccion_merma_tolerancia_perc"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-
-        produccion_reproceso_permitido = st.checkbox(
-            "Permitir reproceso en producción",
-            value=_to_bool(config, "produccion_reproceso_permitido", True),
-            disabled=not puede_editar,
-        )
-
-        st.divider()
-
-        st.subheader("🛡️ Impuestos y Comisiones")
-
-        p1, p2, p3, p4, p5 = st.columns(5)
-        iva_perc = p1.number_input(
-            "IVA (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_to_float(config, "iva_perc", DEFAULT_CONFIG["iva_perc"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-        igtf_perc = p2.number_input(
-            "IGTF (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_to_float(config, "igtf_perc", DEFAULT_CONFIG["igtf_perc"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-        banco_perc = p3.number_input(
-            "Comisión bancaria (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_to_float(config, "banco_perc", DEFAULT_CONFIG["banco_perc"]),
-            format="%.3f",
-            disabled=not puede_editar,
-        )
-        kontigo_perc = p4.number_input(
-            "Comisión Kontigo (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_to_float(config, "kontigo_perc", DEFAULT_CONFIG["kontigo_perc"]),
-            format="%.3f",
-            disabled=not puede_editar,
-        )
-        finanzas_redondeo_monto = p5.number_input(
-            "Redondeo montos (decimales)",
-            min_value=0.0,
-            max_value=6.0,
-            value=_to_float(config, "finanzas_redondeo_monto", DEFAULT_CONFIG["finanzas_redondeo_monto"]),
-            format="%.0f",
-            disabled=not puede_editar,
-        )
-
-        p6, p7, p8 = st.columns(3)
-        kontigo_entrada = p6.number_input(
-            "Kontigo entrada (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_to_float(config, "kontigo_perc_entrada", _to_float(config, "kontigo_perc", DEFAULT_CONFIG["kontigo_perc"])),
-            format="%.3f",
-            disabled=not puede_editar,
-        )
-        kontigo_salida = p7.number_input(
-            "Kontigo salida (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_to_float(config, "kontigo_perc_salida", _to_float(config, "kontigo_perc", DEFAULT_CONFIG["kontigo_perc"])),
-            format="%.3f",
-            disabled=not puede_editar,
-        )
-        kontigo_saldo = p8.number_input(
-            "Saldo cuenta Kontigo ($)",
-            min_value=0.0,
-            value=_to_float(config, "kontigo_saldo", DEFAULT_CONFIG["kontigo_saldo"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-
-        st.divider()
-
-        st.subheader("📦 Inventario")
-        i1, i2, i3 = st.columns(3)
-
-        inventario_permitir_stock_negativo = i1.checkbox(
-            "Permitir stock negativo",
-            value=_to_bool(config, "inventario_permitir_stock_negativo", False),
-            disabled=not puede_editar,
-        )
-        inventario_stock_minimo_default = i2.number_input(
-            "Stock mínimo por defecto",
-            min_value=0.0,
-            value=_to_float(config, "inventario_stock_minimo_default", DEFAULT_CONFIG["inventario_stock_minimo_default"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-        metodo_costeo_actual = _to_str(config, "inventario_metodo_costeo", "PROMEDIO").upper()
-        inventario_metodo_costeo = i3.selectbox(
-            "Método de costeo",
-            ["PROMEDIO", "FIFO", "MANUAL"],
-            index=["PROMEDIO", "FIFO", "MANUAL"].index(metodo_costeo_actual) if metodo_costeo_actual in ["PROMEDIO", "FIFO", "MANUAL"] else 0,
-            disabled=not puede_editar,
-        )
-
-        st.divider()
-
-        st.subheader("💰 Ventas / Cotizaciones")
-        v1, v2, v3 = st.columns(3)
-
-        cotizacion_vigencia_dias = v1.number_input(
-            "Vigencia cotización (días)",
-            min_value=1.0,
-            max_value=365.0,
-            value=_to_float(config, "cotizacion_vigencia_dias", DEFAULT_CONFIG["cotizacion_vigencia_dias"]),
-            format="%.0f",
-            disabled=not puede_editar,
-        )
-        ventas_descuento_max_perc = v2.number_input(
-            "Descuento máximo (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_to_float(config, "ventas_descuento_max_perc", DEFAULT_CONFIG["ventas_descuento_max_perc"]),
-            format="%.2f",
-            disabled=not puede_editar,
-        )
-        ventas_aprobar_descuento_mayor = v3.checkbox(
-            "Exigir aprobación para descuentos altos",
-            value=_to_bool(config, "ventas_aprobar_descuento_mayor", True),
-            disabled=not puede_editar,
-        )
-
-        guardar = st.form_submit_button(
-            "💾 Guardar cambios",
-            disabled=not puede_editar,
-        )
-
-    if guardar:
-        actualizaciones: Dict[str, Any] = {
-            "empresa_nombre": empresa_nombre.strip(),
-            "empresa_rif": empresa_rif.strip(),
-            "empresa_direccion": empresa_direccion.strip(),
-            "empresa_telefono": empresa_telefono.strip(),
-            "empresa_email": empresa_email.strip(),
-            "moneda_base": moneda_base,
-            "zona_horaria": zona_horaria.strip(),
-
-            "tasa_bcv": tasa_bcv,
-            "tasa_binance": tasa_binance,
-
-            "costo_tinta_ml": costo_tinta_ml,
-            "costo_tinta_auto": 1 if costo_tinta_auto else 0,
-            "margen_impresion": margen,
-            "costo_kwh": costo_kwh,
-            "factor_desperdicio_cmyk": factor_desperdicio,
-            "desgaste_cabezal_ml": desgaste_cabezal,
-            "costo_bajada_plancha": costo_bajada,
-            "costo_limpieza_cabezal": costo_limpieza,
-            "recargo_urgente_pct": recargo_urgente,
-            "produccion_merma_tolerancia_perc": produccion_merma_tolerancia_perc,
-            "produccion_reproceso_permitido": 1 if produccion_reproceso_permitido else 0,
-
-            "iva_perc": iva_perc,
-            "igtf_perc": igtf_perc,
-            "banco_perc": banco_perc,
-            "kontigo_perc": kontigo_perc,
-            "kontigo_perc_entrada": kontigo_entrada,
-            "kontigo_perc_salida": kontigo_salida,
-            "kontigo_saldo": kontigo_saldo,
-            "finanzas_redondeo_monto": int(finanzas_redondeo_monto),
-
-            "inventario_permitir_stock_negativo": 1 if inventario_permitir_stock_negativo else 0,
-            "inventario_stock_minimo_default": inventario_stock_minimo_default,
-            "inventario_metodo_costeo": inventario_metodo_costeo,
-
-            "cotizacion_vigencia_dias": int(cotizacion_vigencia_dias),
-            "ventas_descuento_max_perc": ventas_descuento_max_perc,
-            "ventas_aprobar_descuento_mayor": 1 if ventas_aprobar_descuento_mayor else 0,
-        }
-
-        errores = _validar_config(actualizaciones)
-        if errores:
-            st.error("No se pudo guardar la configuración. Revisa estos puntos:")
-            for err in errores:
-                st.write(f"- {err}")
-            return
-
-        try:
-            set_config_values(actualizaciones, usuario)
-
-            for key, value in actualizaciones.items():
-                st.session_state[key] = value
-
-            st.success("✅ Configuración actualizada y registrada en historial.")
-            st.rerun()
-
-        except Exception as e:
-            st.error("Error guardando configuración.")
-            st.exception(e)
-
-    st.divider()
-    st.subheader("📋 Tabla de control")
-
-    try:
-        config = get_current_config()
-        tabla_cfg = build_rates_dataframe(config)
-        tabla_cfg.loc[len(tabla_cfg)] = {
-            "Concepto": "Costo Tinta por ml",
-            "Valor": _to_float(config, "costo_tinta_ml", DEFAULT_CONFIG["costo_tinta_ml"]),
-            "Unidad": "$/ml",
-        }
-        st.dataframe(tabla_cfg, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.warning("No se pudo construir la tabla de control.")
-        st.exception(e)
-
-    with st.expander("🧾 Ver configuración completa"):
-        try:
-            config_full = get_current_config()
-            df_full = build_full_config_dataframe(config_full)
-            st.dataframe(df_full, use_container_width=True, hide_index=True)
-        except Exception as e:
-            st.warning("No se pudo cargar la configuración completa.")
-            st.exception(e)
-
-    with st.expander("📜 Ver historial de cambios"):
-        try:
-            with db_transaction() as conn:
-                historial = pd.read_sql_query(
-                    """
-                    SELECT fecha, parametro, valor_anterior, valor_nuevo, usuario
-                    FROM historial_config
-                    ORDER BY id DESC
-                    LIMIT 100
-                    """,
-                    conn,
-                )
-
-            if historial.empty:
-                st.info("Aún no hay cambios registrados.")
-            else:
-                st.dataframe(historial, use_container_width=True, hide_index=True)
-        except Exception:
-            st.info("Historial aún no disponible.")
+    with tab_estado:
+        _render_estado_general()
+    with tab_tasas:
+        _render_tasas(usuario, puede_editar)
+    with tab_general:
+        _render_config_general(usuario, puede_editar)
