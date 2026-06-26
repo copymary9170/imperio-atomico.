@@ -1,0 +1,2 @@
+Redeploy solicitado después de corregir los valores mínimos de Configuración.
+Commit funcional: d8817f22265e8fe216cf3a18ff0c7e9dfd2cecbb
