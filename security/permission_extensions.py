@@ -24,8 +24,18 @@ NEW_PERMISSION_CATALOG = (
     ("unidades_fraccionadas.edit", "Crear y editar conversiones de unidades fraccionadas."),
     ("caja.turno_close", "Registrar cierre de caja por turno."),
     ("reportes.export", "Exportar reportes operativos y financieros."),
+    ("legal.view", "Consultar el centro legal."),
+    ("legal.contracts.manage", "Crear, actualizar y cerrar contratos."),
+    ("legal.claims.manage", "Gestionar garantías y reclamos."),
+    ("legal.privacy.manage", "Gestionar políticas, privacidad y términos."),
+    ("legal.authorizations.manage", "Gestionar autorizaciones y consentimientos."),
+    ("legal.incidents.manage", "Gestionar incidentes legales y de privacidad."),
+    ("legal.documents.manage", "Gestionar documentos y expedientes legales."),
+    ("legal.audit.view", "Consultar auditoría legal."),
+    ("legal.export", "Exportar información legal."),
 )
 
+LEGAL_PERMISSIONS = tuple(code for code, _ in NEW_PERMISSION_CATALOG if code.startswith("legal."))
 ADMINISTRATION_NEW_PERMISSIONS = tuple(code for code, _ in NEW_PERMISSION_CATALOG)
 
 OPERATOR_NEW_PERMISSIONS = (
@@ -54,6 +64,10 @@ def ensure_extended_permissions() -> None:
         conn.executemany(
             "INSERT OR IGNORE INTO permisos (codigo, descripcion) VALUES (?, ?)",
             NEW_PERMISSION_CATALOG,
+        )
+        conn.executemany(
+            "INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo) VALUES ('Admin', ?)",
+            [(code,) for code in LEGAL_PERMISSIONS],
         )
         conn.executemany(
             "INSERT OR IGNORE INTO roles_permisos (rol, permiso_codigo) VALUES ('Administration', ?)",
