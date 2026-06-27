@@ -96,7 +96,7 @@ from views.activos_patrimonial import render_activos_patrimonial
 from views.despacho_entregas import render_despacho_entregas
 from views.disenos_aprobaciones import render_disenos_aprobaciones
 from views.fichas_tecnicas_bom import render_fichas_tecnicas_bom
-from views.legal_hub import render_legal_hub
+from views.legal_v2 import render_legal_v2
 from views.nomina_trabajadores import render_nomina_trabajadores
 from views.publicaciones_marketing import render_publicaciones_marketing
 from views.dia_caja import render_dia_caja
@@ -202,7 +202,7 @@ MENU_ROUTES = {
     "🗂️ Administración": (("dashboard.view", "config.view", "security.view", "reportes.export"), lambda: render_area_empresarial("Administración", usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
-    "⚖️ Legal ACTUALIZADO": (("dashboard.view", "config.view"), lambda: render_legal_hub(usuario)),
+    "⚖️ Legal V2": (("dashboard.view", "config.view"), lambda: render_legal_v2(usuario)),
     "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
@@ -219,7 +219,7 @@ try:
 except Exception:
     config = DEFAULT_CONFIG
 
-st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary · Legal actualizado</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
+st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary · Legal V2</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
 
 st.markdown('<div class="rate-title">Tasas de cambio activas</div>', unsafe_allow_html=True)
 a, b, c, d, e = st.columns(5)
