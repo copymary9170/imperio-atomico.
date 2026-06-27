@@ -120,18 +120,7 @@ def render_dashboard_unificado(usuario: str) -> None:
 
 def render_produccion_unificada(usuario: str) -> None:
     st.title("🏭 Producción")
-    secciones = {
-        "🧾 OT / Planificación": lambda: render_planificacion_produccion(usuario),
-        "📁 Diseños": lambda: render_disenos_aprobaciones(usuario),
-        "🖨️ CMYK": lambda: render_cmyk(usuario),
-        "🧭 Rutas / BOM": lambda: render_rutas_produccion(usuario),
-        "✂️ Corte": lambda: render_corte(usuario),
-        "🔥 Sublimación": lambda: render_sublimacion(usuario),
-        "🎨 Manual": lambda: render_produccion_manual(usuario),
-        "✅ Calidad": lambda: render_control_calidad(usuario),
-        "♻️ Mermas": lambda: render_mermas(usuario),
-        "🚚 Despacho": lambda: render_despacho_entregas(usuario),
-    }
+    secciones = {"🧾 OT / Planificación": lambda: render_planificacion_produccion(usuario), "📁 Diseños": lambda: render_disenos_aprobaciones(usuario), "🖨️ CMYK": lambda: render_cmyk(usuario), "🧭 Rutas / BOM": lambda: render_rutas_produccion(usuario), "✂️ Corte": lambda: render_corte(usuario), "🔥 Sublimación": lambda: render_sublimacion(usuario), "🎨 Manual": lambda: render_produccion_manual(usuario), "✅ Calidad": lambda: render_control_calidad(usuario), "♻️ Mermas": lambda: render_mermas(usuario), "🚚 Despacho": lambda: render_despacho_entregas(usuario)}
     seccion = st.radio("Sección de producción", list(secciones.keys()), horizontal=True)
     st.divider()
     secciones[seccion]()
@@ -213,7 +202,7 @@ MENU_ROUTES = {
     "🗂️ Administración": (("dashboard.view", "config.view", "security.view", "reportes.export"), lambda: render_area_empresarial("Administración", usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
-    "⚖️ Legal": (("dashboard.view", "config.view"), lambda: render_legal_hub(usuario)),
+    "⚖️ Legal ACTUALIZADO": (("dashboard.view", "config.view"), lambda: render_legal_hub(usuario)),
     "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
@@ -230,7 +219,7 @@ try:
 except Exception:
     config = DEFAULT_CONFIG
 
-st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
+st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary · Legal actualizado</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
 
 st.markdown('<div class="rate-title">Tasas de cambio activas</div>', unsafe_allow_html=True)
 a, b, c, d, e = st.columns(5)
@@ -250,12 +239,7 @@ if not isinstance(alert_summary, dict):
     alert_summary = {}
 alert_total = int(alert_summary.get("total", 0) or 0)
 if alert_total:
-    st.warning(
-        f"🚨 Alertas activas: {alert_total} · "
-        f"Stock bajo: {int(alert_summary.get('stock', 0) or 0)} · "
-        f"CxC vencida: {int(alert_summary.get('cxc', 0) or 0)} · "
-        f"CxP vencida: {int(alert_summary.get('cxp', 0) or 0)}"
-    )
+    st.warning(f"🚨 Alertas activas: {alert_total} · Stock bajo: {int(alert_summary.get('stock', 0) or 0)} · CxC vencida: {int(alert_summary.get('cxc', 0) or 0)} · CxP vencida: {int(alert_summary.get('cxp', 0) or 0)}")
 
 menu = st.radio("Módulos", list(VISIBLE_MENU.keys()), horizontal=True, label_visibility="collapsed")
 st.divider()
