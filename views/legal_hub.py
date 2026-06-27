@@ -8,6 +8,7 @@ import streamlit as st
 
 from database.connection import db_transaction
 from views.areas_empresariales import render_area_empresarial
+from views.legal_notice import render_legal_notice
 from views.manuales_sop import render_manuales_sop
 
 STATES = ["Borrador", "Pendiente", "Activo", "En revisión", "Cerrado", "Vencido", "Cancelado"]
@@ -137,10 +138,11 @@ def _alerts() -> None:
 
 
 def render_legal_hub(usuario: str="Sistema") -> None:
-    _ensure(); st.title("⚖️ Legal"); st.caption("Contratos, reclamos, privacidad, autorizaciones, incidentes, documentos, auditoría y alertas.")
-    options=["Resumen legal",*SECTIONS.keys(),"SOP legales","Alertas legales","Auditoría legal"]
+    _ensure(); st.title("⚖️ Legal"); st.caption("Departamento jurídico digital: avisos, contratos, reclamos, privacidad, documentos, auditoría y alertas.")
+    options=["📢 Aviso Legal","Resumen legal",*SECTIONS.keys(),"SOP legales","Alertas legales","Auditoría legal"]
     selected=st.radio("Sección legal",options,horizontal=True,key="legal_seccion_activa"); st.divider()
-    if selected=="Resumen legal": _summary()
+    if selected=="📢 Aviso Legal": render_legal_notice(usuario)
+    elif selected=="Resumen legal": _summary()
     elif selected=="SOP legales": render_manuales_sop(usuario)
     elif selected=="Alertas legales": _alerts()
     elif selected=="Auditoría legal":
