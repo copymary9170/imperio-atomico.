@@ -60,8 +60,6 @@ def verify_password(password: str, stored_hash: str) -> bool:
     if stored_value.startswith(f"{PBKDF2_PREFIX}$"):
         return _verify_pbkdf2(password_value, stored_value)
 
-    # Compatibilidad temporal con despliegues viejos donde se haya guardado texto plano
-    # o un sha256 manual. En un login exitoso se re-hashea automáticamente.
     if hmac.compare_digest(password_value, stored_value):
         return True
     sha256_candidate = hashlib.sha256(password_value.encode("utf-8")).hexdigest()
@@ -121,7 +119,7 @@ def authenticate_user(usuario: str, password: str) -> AuthResult:
             """
             SELECT usuario, hash_password, rol, estado
             FROM usuarios
-            WHERE usuario = ?
+            WHERE LOWER(TRIM(usuario)) = LOWER(TRIM(?))
             LIMIT 1
             """,
             (usuario_clean,),
@@ -131,28 +129,29 @@ def authenticate_user(usuario: str, password: str) -> AuthResult:
         _audit_login(usuario_clean, "login_failed", "Usuario no existe.")
         return AuthResult(False, usuario=usuario_clean, message="Credenciales inválidas.")
 
+    stored_usuario = str(row["usuario"] or "").strip()
     estado = str(row["estado"] or "activo").casefold()
     if estado not in {"activo", "active"}:
-        _audit_login(usuario_clean, "login_blocked", f"Usuario con estado '{row['estado']}'.")
-        return AuthResult(False, usuario=usuario_clean, message="Usuario inactivo o bloqueado.")
+        _audit_login(stored_usuario or usuario_clean, "login_blocked", f"Usuario con estado '{row['estado']}'.")
+        return AuthResult(False, usuario=stored_usuario or usuario_clean, message="Usuario inactivo o bloqueado.")
 
     if not verify_password(password_value, str(row["hash_password"] or "")):
-        _audit_login(usuario_clean, "login_failed", "Contraseña inválida.")
-        return AuthResult(False, usuario=usuario_clean, message="Credenciales inválidas.")
+        _audit_login(stored_usuario or usuario_clean, "login_failed", "Contraseña inválida.")
+        return AuthResult(False, usuario=stored_usuario or usuario_clean, message="Credenciales inválidas.")
 
     rol = normalize_role_name(row["rol"])
     with db_transaction() as conn:
-        conn.execute("UPDATE usuarios SET ultimo_login=CURRENT_TIMESTAMP WHERE usuario=?", (usuario_clean,))
+        conn.execute("UPDATE usuarios SET ultimo_login=CURRENT_TIMESTAMP WHERE usuario=?", (stored_usuario,))
         if not str(row["hash_password"] or "").startswith(f"{PBKDF2_PREFIX}$"):
-            conn.execute("UPDATE usuarios SET hash_password=? WHERE usuario=?", (hash_password(password_value), usuario_clean))
+            conn.execute("UPDATE usuarios SET hash_password=? WHERE usuario=?", (hash_password(password_value), stored_usuario))
         conn.execute(
             """
             INSERT INTO auditoria_seguridad (usuario, accion, detalle)
             VALUES (?, 'login_success', ?)
             """,
-            (usuario_clean, f"Inicio de sesión exitoso con rol '{rol}'."),
+            (stored_usuario, f"Inicio de sesión exitoso con rol '{rol}'."),
         )
-    return AuthResult(True, usuario=usuario_clean, rol=rol, message="OK")
+    return AuthResult(True, usuario=stored_usuario, rol=rol, message="OK")
 
 
 def configured_bootstrap_password() -> Optional[str]:
