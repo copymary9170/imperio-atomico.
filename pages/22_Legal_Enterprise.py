@@ -1,5 +1,6 @@
 import streamlit as st
-from views.legal_enterprise_phase2 import render_legal_enterprise_phase2
 
-st.set_page_config(page_title="Legal Enterprise", page_icon="🏛️", layout="wide")
-render_legal_enterprise_phase2(st.session_state.get("usuario", "Sistema"))
+from legal_v4.ui import render_legal_v4
+
+st.set_page_config(page_title="Legal V4.1 Enterprise", page_icon="⚖️", layout="wide")
+render_legal_v4(st.session_state.get("usuario", "Sistema"))
