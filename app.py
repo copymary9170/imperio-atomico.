@@ -16,7 +16,7 @@ from database.auto_migrations import run_auto_migrations
 from database.transactional_core import ensure_transactional_core_schema
 from database.rate_config_defaults import ensure_rate_config_defaults
 from security.permission_extensions import ensure_extended_permissions
-from ui.session_persistence import restore_session_snapshot, save_session_snapshot
+from ui.session_persistence import restore_session_snapshot, save_session_snapshot, clear_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
 from security.auth import authenticate_user, users_count, create_initial_admin
 from services.alert_service import get_alert_summary
@@ -47,7 +47,7 @@ def _render_login() -> None:
             admin_name = st.text_input("Nombre completo")
             admin_pass = st.text_input("Contraseña", type="password")
             admin_pass_2 = st.text_input("Confirmar contraseña", type="password")
-            crear = st.form_submit_button("Crear administrador")
+            crear = st.form_submit_button("Crear administrador", type="primary")
 
         if crear:
             if admin_pass != admin_pass_2:
@@ -56,20 +56,28 @@ def _render_login() -> None:
 
             try:
                 create_initial_admin(admin_user, admin_name, admin_pass)
+                clear_session_snapshot()
+                for key in ("authentication_status", "usuario", "rol"):
+                    st.session_state.pop(key, None)
                 st.success("Administrador creado. Ahora inicia sesión.")
                 st.rerun()
             except Exception as exc:
-                st.error(str(exc))
+                st.error(f"No se pudo crear el administrador: {exc}")
 
         return
 
     with st.form("login_form"):
         login_usuario = st.text_input("Usuario")
         login_password = st.text_input("Contraseña", type="password")
-        submit_login = st.form_submit_button("Entrar")
+        submit_login = st.form_submit_button("Entrar", type="primary")
 
     if submit_login:
-        result = authenticate_user(login_usuario, login_password)
+        try:
+            with st.spinner("Verificando credenciales..."):
+                result = authenticate_user(login_usuario, login_password)
+        except Exception as exc:
+            st.error(f"Error interno al iniciar sesión: {exc}")
+            return
 
         if not result.ok:
             st.error(result.message or "Credenciales inválidas.")
