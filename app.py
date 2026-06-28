@@ -247,7 +247,7 @@ MENU_ROUTES = {
     "🗂️ Administración": (("dashboard.view", "config.view", "security.view", "reportes.export"), lambda: render_area_empresarial("Administración", usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
-    "⚖️ Legal V2": ("legal.view", lambda: render_legal_v2(usuario)),
+    "⚖️ Legal V4.1": ("legal.view", lambda: render_legal_v2(usuario)),
     "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
@@ -264,7 +264,7 @@ try:
 except Exception:
     config = DEFAULT_CONFIG
 
-st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary · Legal V2</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
+st.markdown(f"<div class='top-shell'><div class='top-header'><div class='brand-wrap'><div class='brand-icon'>⚛️</div><div><div class='top-brand'>Imperio Atómico ERP</div><div class='top-subtitle'>Centro administrativo y operativo de Copy Mary · Legal V4.1 Enterprise</div></div></div><div class='top-actions'>Usuario: {usuario} · Rol: {user_role}</div></div></div>", unsafe_allow_html=True)
 
 st.markdown('<div class="rate-title">Tasas de cambio activas</div>', unsafe_allow_html=True)
 a, b, c, d, e = st.columns(5)
