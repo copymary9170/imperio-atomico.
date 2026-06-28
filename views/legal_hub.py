@@ -7,17 +7,28 @@ import pandas as pd
 import streamlit as st
 
 from database.connection import db_transaction
+from security.permissions import has_permission
 from views.areas_empresariales import render_area_empresarial
 from views.manuales_sop import render_manuales_sop
 
 STATES = ["Borrador", "Pendiente", "Activo", "En revisión", "Cerrado", "Vencido", "Cancelado"]
+SENSITIVE_STATES = {"Cerrado", "Vencido", "Cancelado"}
+TRANSITIONS = {
+    "Borrador": {"Borrador", "Pendiente", "En revisión", "Cancelado"},
+    "Pendiente": {"Pendiente", "Activo", "En revisión", "Cerrado", "Cancelado"},
+    "Activo": {"Activo", "En revisión", "Cerrado", "Vencido", "Cancelado"},
+    "En revisión": {"En revisión", "Pendiente", "Activo", "Cerrado", "Cancelado"},
+    "Vencido": {"Vencido", "En revisión", "Cerrado"},
+    "Cerrado": {"Cerrado", "En revisión"},
+    "Cancelado": {"Cancelado"},
+}
 SECTIONS = {
-    "Contratos": ("legal_contratos", "titulo", "fecha_vencimiento"),
-    "Garantías / reclamos": ("legal_reclamos_garantias", "descripcion", "fecha_limite"),
-    "Privacidad / políticas": ("legal_politicas", "titulo", "fecha_vigencia"),
-    "Autorizaciones": ("legal_autorizaciones", "persona_entidad", "fecha_vencimiento"),
-    "Incidentes legales": ("legal_incidentes", "asunto", "fecha_limite"),
-    "Documentos legales": ("legal_documentos", "titulo", "fecha_vigencia"),
+    "Contratos": ("legal_contratos", "titulo", "fecha_vencimiento", "legal.contracts.manage"),
+    "Garantías / reclamos": ("legal_reclamos_garantias", "descripcion", "fecha_limite", "legal.claims.manage"),
+    "Privacidad / políticas": ("legal_politicas", "titulo", "fecha_vigencia", "legal.privacy.manage"),
+    "Autorizaciones": ("legal_autorizaciones", "persona_entidad", "fecha_vencimiento", "legal.authorizations.manage"),
+    "Incidentes legales": ("legal_incidentes", "asunto", "fecha_limite", "legal.incidents.manage"),
+    "Documentos legales": ("legal_documentos", "titulo", "fecha_vigencia", "legal.documents.manage"),
 }
 
 
@@ -59,19 +70,30 @@ def _save(table: str, payload: dict, user: str) -> int:
         keys = list(data)
         cur = conn.execute(f"INSERT INTO {table} ({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})", [data[k] for k in keys])
         row_id = int(cur.lastrowid)
-        conn.execute("INSERT INTO legal_auditoria(usuario,entidad,entidad_id,accion,datos_json) VALUES (?,?,?,?,?)", (user, table, row_id, "crear", json.dumps(data, ensure_ascii=False, default=str)))
+        conn.execute("INSERT INTO legal_auditoria(usuario,entidad,entidad_id,accion,datos_json) VALUES (?,?,?,?,?)", (user, table, row_id, "crear", json.dumps({"antes": {}, "despues": data}, ensure_ascii=False, default=str)))
         return row_id
 
 
 def _update(table: str, row_id: int, state: str, owner: str, note: str, user: str) -> None:
     with db_transaction() as conn:
+        current = conn.execute(f"SELECT * FROM {table} WHERE id=?", (row_id,)).fetchone()
+        if not current:
+            raise ValueError("Registro legal no encontrado.")
+        before = dict(current)
+        current_state = str(before.get("estado") or "Borrador")
+        if state not in TRANSITIONS.get(current_state, {current_state}):
+            raise ValueError(f"Transición no permitida: {current_state} → {state}.")
+        if state in SENSITIVE_STATES and not note.strip():
+            raise ValueError(f"El motivo es obligatorio para cambiar a {state}.")
         cols = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})")}
         values = {"estado": state, "responsable": owner, "actualizado_en": pd.Timestamp.now().isoformat(), "actualizado_por": user}
         if table == "legal_reclamos_garantias": values["solucion"] = note
         if table == "legal_incidentes": values["accion_tomada"] = note
         values = {k: v for k, v in values.items() if k in cols}
         conn.execute(f"UPDATE {table} SET {', '.join(f'{k}=?' for k in values)} WHERE id=?", [values[k] for k in values] + [row_id])
-        conn.execute("INSERT INTO legal_auditoria(usuario,entidad,entidad_id,accion,datos_json,motivo) VALUES (?,?,?,?,?,?)", (user, table, row_id, "actualizar", json.dumps(values, ensure_ascii=False), note))
+        after = dict(before)
+        after.update(values)
+        conn.execute("INSERT INTO legal_auditoria(usuario,entidad,entidad_id,accion,datos_json,motivo) VALUES (?,?,?,?,?,?)", (user, table, row_id, "actualizar", json.dumps({"antes": before, "despues": after}, ensure_ascii=False, default=str), note))
 
 
 def _summary() -> None:
@@ -88,37 +110,49 @@ def _summary() -> None:
     if not due.empty: st.dataframe(due, use_container_width=True, hide_index=True)
 
 
-def _section(label: str, table: str, main_field: str, date_field: str, user: str) -> None:
+def _section(label: str, table: str, main_field: str, date_field: str, permission: str, user: str) -> None:
     st.subheader(label)
-    with st.form(f"new_{table}"):
-        code = st.text_input("Código", key=f"code_{table}")
-        title = st.text_input("Título / asunto / persona", key=f"title_{table}")
-        detail = st.text_area("Descripción / contenido", key=f"detail_{table}")
-        a,b,c = st.columns(3)
-        owner = a.text_input("Responsable", value=user, key=f"owner_{table}")
-        due = b.date_input("Fecha límite / vigencia", value=date.today()+timedelta(days=30), key=f"due_{table}")
-        state = c.selectbox("Estado", STATES, index=1, key=f"state_{table}")
-        reference = st.text_input("Documento / evidencia / referencia", key=f"ref_{table}")
-        submit = st.form_submit_button("Guardar", type="primary")
-    if submit:
-        if not title.strip(): st.error("El título o asunto es obligatorio.")
-        else:
-            payload = {"codigo":code, main_field:title, "responsable":owner or user, date_field:due.isoformat(), "estado":state, "created_by":user}
-            for field in ("descripcion","contenido","observaciones"):
-                if field in _read(table).columns or table in {"legal_reclamos_garantias","legal_autorizaciones","legal_incidentes"} and field=="descripcion": payload[field]=detail
-            if table=="legal_documentos": payload["referencia"]=reference
-            elif table=="legal_autorizaciones": payload["evidencia"]=reference
-            else: payload["documento_referencia"]=reference
-            st.success(f"Registro #{_save(table,payload,user)} guardado."); st.rerun()
+    can_manage = has_permission(permission) or has_permission("legal.admin")
+    if can_manage:
+        with st.form(f"new_{table}"):
+            code = st.text_input("Código", key=f"code_{table}")
+            title = st.text_input("Título / asunto / persona", key=f"title_{table}")
+            detail = st.text_area("Descripción / contenido", key=f"detail_{table}")
+            a,b,c = st.columns(3)
+            owner = a.text_input("Responsable", value=user, key=f"owner_{table}")
+            due = b.date_input("Fecha límite / vigencia", value=date.today()+timedelta(days=30), key=f"due_{table}")
+            state = c.selectbox("Estado", STATES, index=1, key=f"state_{table}")
+            reference = st.text_input("Documento / evidencia / referencia", key=f"ref_{table}")
+            submit = st.form_submit_button("Guardar", type="primary")
+        if submit:
+            if not title.strip(): st.error("El título o asunto es obligatorio.")
+            else:
+                payload = {"codigo":code, main_field:title, "responsable":owner or user, date_field:due.isoformat(), "estado":state, "created_by":user}
+                columns = set(_read(table).columns)
+                for field in ("descripcion","contenido","observaciones"):
+                    if field in columns: payload[field]=detail
+                if table=="legal_documentos": payload["referencia"]=reference
+                elif table=="legal_autorizaciones": payload["evidencia"]=reference
+                else: payload["documento_referencia"]=reference
+                st.success(f"Registro #{_save(table,payload,user)} guardado."); st.rerun()
+    else:
+        st.info("Vista de solo lectura. No tienes permiso para crear o modificar registros de esta sección.")
     df = _read(table)
     if not df.empty:
-        with st.expander("Actualizar seguimiento"):
-            row_id = st.selectbox("Registro", df["id"].astype(int).tolist(), key=f"edit_{table}")
-            new_state = st.selectbox("Nuevo estado", STATES, key=f"edit_state_{table}")
-            new_owner = st.text_input("Responsable", value=user, key=f"edit_owner_{table}")
-            note = st.text_area("Seguimiento / motivo", key=f"edit_note_{table}")
-            if st.button("Guardar actualización", key=f"edit_save_{table}"):
-                _update(table,int(row_id),new_state,new_owner,note,user); st.success("Actualizado con auditoría."); st.rerun()
+        if can_manage:
+            with st.expander("Actualizar seguimiento"):
+                row_id = st.selectbox("Registro", df["id"].astype(int).tolist(), key=f"edit_{table}")
+                selected = df[df["id"] == int(row_id)].iloc[0]
+                current_state = str(selected.get("estado") or "Borrador")
+                allowed_states = [s for s in STATES if s in TRANSITIONS.get(current_state, {current_state})]
+                new_state = st.selectbox("Nuevo estado", allowed_states, index=allowed_states.index(current_state) if current_state in allowed_states else 0, key=f"edit_state_{table}")
+                new_owner = st.text_input("Responsable", value=str(selected.get("responsable") or user), key=f"edit_owner_{table}")
+                note = st.text_area("Seguimiento / motivo", key=f"edit_note_{table}", help="Obligatorio para cerrar, cancelar o marcar como vencido.")
+                if st.button("Guardar actualización", key=f"edit_save_{table}"):
+                    try:
+                        _update(table,int(row_id),new_state,new_owner,note,user); st.success("Actualizado con auditoría."); st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
         st.dataframe(df,use_container_width=True,hide_index=True)
     else: st.info("No hay registros.")
     if table=="legal_documentos": render_area_empresarial("Legal",user,show_title=False)
@@ -126,7 +160,7 @@ def _section(label: str, table: str, main_field: str, date_field: str, user: str
 
 def _alerts() -> None:
     today = pd.Timestamp.today().normalize(); rows=[]
-    for label,(table,_,date_field) in SECTIONS.items():
+    for label,(table,_,date_field,_) in SECTIONS.items():
         df=_read(table)
         if df.empty or date_field not in df.columns: continue
         dates=pd.to_datetime(df[date_field],errors="coerce"); active=~df["estado"].isin(["Cerrado","Cancelado"])
@@ -138,7 +172,9 @@ def _alerts() -> None:
 
 def render_legal_hub(usuario: str="Sistema") -> None:
     _ensure(); st.title("⚖️ Legal"); st.caption("Contratos, reclamos, privacidad, autorizaciones, incidentes, documentos, auditoría y alertas.")
-    options=["Resumen legal",*SECTIONS.keys(),"SOP legales","Alertas legales","Auditoría legal"]
+    options=["Resumen legal",*SECTIONS.keys(),"SOP legales","Alertas legales"]
+    if has_permission("legal.audit.view") or has_permission("legal.admin"):
+        options.append("Auditoría legal")
     selected=st.radio("Sección legal",options,horizontal=True,key="legal_seccion_activa"); st.divider()
     if selected=="Resumen legal": _summary()
     elif selected=="SOP legales": render_manuales_sop(usuario)
@@ -146,4 +182,4 @@ def render_legal_hub(usuario: str="Sistema") -> None:
     elif selected=="Auditoría legal":
         df=_read("legal_auditoria"); st.dataframe(df,use_container_width=True,hide_index=True) if not df.empty else st.info("Sin auditoría todavía.")
     else:
-        table,field,date_field=SECTIONS[selected]; _section(selected,table,field,date_field,usuario)
+        table,field,date_field,permission=SECTIONS[selected]; _section(selected,table,field,date_field,permission,usuario)

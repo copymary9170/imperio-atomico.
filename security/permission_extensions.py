@@ -25,6 +25,16 @@ NEW_PERMISSION_CATALOG = (
     ("caja.turno_close", "Registrar cierre de caja por turno."),
     ("reportes.export", "Exportar reportes operativos y financieros."),
     ("legal.view", "Consultar el centro legal."),
+    ("legal.create", "Crear expedientes y registros legales."),
+    ("legal.edit", "Editar borradores y datos jurídicos autorizados."),
+    ("legal.review", "Revisar expedientes y solicitar cambios."),
+    ("legal.approve", "Aprobar expedientes y documentos jurídicos."),
+    ("legal.publish", "Publicar políticas y documentos jurídicos vigentes."),
+    ("legal.sign", "Registrar y validar firmas jurídicas."),
+    ("legal.files.upload", "Cargar archivos y evidencias jurídicas."),
+    ("legal.files.download", "Descargar archivos y evidencias jurídicas."),
+    ("legal.confidential.view", "Consultar información jurídica confidencial."),
+    ("legal.restricted.view", "Consultar información jurídica restringida."),
     ("legal.contracts.manage", "Crear, actualizar y cerrar contratos."),
     ("legal.claims.manage", "Gestionar garantías y reclamos."),
     ("legal.privacy.manage", "Gestionar políticas, privacidad y términos."),
@@ -33,6 +43,7 @@ NEW_PERMISSION_CATALOG = (
     ("legal.documents.manage", "Gestionar documentos y expedientes legales."),
     ("legal.audit.view", "Consultar auditoría legal."),
     ("legal.export", "Exportar información legal."),
+    ("legal.admin", "Administrar configuración, reglas y permisos jurídicos."),
 )
 
 LEGAL_PERMISSIONS = tuple(code for code, _ in NEW_PERMISSION_CATALOG if code.startswith("legal."))

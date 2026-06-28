@@ -202,7 +202,7 @@ MENU_ROUTES = {
     "🗂️ Administración": (("dashboard.view", "config.view", "security.view", "reportes.export"), lambda: render_area_empresarial("Administración", usuario)),
     "👨‍💼 Nómina y trabajadores": ("nomina.view", lambda: render_nomina_trabajadores(usuario)),
     "👥 RRHH": (("rrhh.view", "dashboard.view"), lambda: render_area_combinada("Recursos Humanos", render_rrhh, usuario)),
-    "⚖️ Legal V2": (("dashboard.view", "config.view"), lambda: render_legal_v2(usuario)),
+    "⚖️ Legal V2": ("legal.view", lambda: render_legal_v2(usuario)),
     "🧮 Costeo y Márgenes": (("costeo.view", "costeo_industrial.view"), lambda: render_costeo_margenes_unificado(usuario)),
     "🧮 Calculadora": ("dashboard.view", lambda: render_calculadora(usuario)),
     "🛠️ Otros procesos": ("dashboard.view", lambda: render_otros_procesos(usuario)),
