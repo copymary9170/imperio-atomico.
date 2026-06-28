@@ -12,6 +12,10 @@ from legal_v4.domain import CreateMatterCommand
 from legal_v4.schema import migrate
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone())
+
+
 class LegalService:
     def __init__(self) -> None:
         migrate()
@@ -56,6 +60,21 @@ class LegalService:
         with db_transaction() as conn:
             return pd.read_sql_query("SELECT * FROM legal_v4_matters ORDER BY id DESC", conn)
 
+    def list_documents(self) -> pd.DataFrame:
+        with db_transaction() as conn:
+            return pd.read_sql_query(
+                """SELECT d.*, m.code, m.title AS matter_title
+                   FROM legal_v4_documents d
+                   JOIN legal_v4_matters m ON m.id = d.matter_id
+                   WHERE d.active=1
+                   ORDER BY d.id DESC""",
+                conn,
+            )
+
+    def list_calendar(self) -> pd.DataFrame:
+        with db_transaction() as conn:
+            return pd.read_sql_query("SELECT * FROM legal_v4_calendar ORDER BY event_date ASC", conn)
+
     def dashboard(self) -> dict:
         matters = self.list_matters()
         if matters.empty:
@@ -70,11 +89,25 @@ class LegalService:
             "overdue": int((due.notna() & (due < today) & open_mask).sum()),
         }
 
+    def verify_audit_chain(self) -> dict:
+        with db_transaction() as conn:
+            rows = conn.execute("SELECT * FROM legal_v4_audit ORDER BY id ASC").fetchall()
+        previous = ""
+        for index, row in enumerate(rows, start=1):
+            payload = "|".join([
+                row["event_uuid"], row["actor"], row["action"], row["entity_type"], str(row["entity_id"] or ""),
+                row["before_json"], row["after_json"], row["context_json"], row["previous_hash"] or "",
+            ])
+            expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if row["previous_hash"] != previous or row["event_hash"] != expected:
+                return {"valid": False, "events": len(rows), "failed_at": index}
+            previous = row["event_hash"]
+        return {"valid": True, "events": len(rows), "failed_at": None}
+
     def migrate_legacy(self, actor: str) -> int:
         imported = 0
         with db_transaction() as conn:
-            exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='legal_enterprise_records'").fetchone()
-            if not exists:
+            if not _table_exists(conn, "legal_enterprise_records"):
                 return 0
             rows = conn.execute("SELECT * FROM legal_enterprise_records ORDER BY id").fetchall()
             for row in rows:
@@ -91,3 +124,56 @@ class LegalService:
         if imported:
             self._audit(actor, "MIGRATE_LEGACY", "legal_matter", None, after={"imported": imported})
         return imported
+
+    def migrate_legacy_operations(self, actor: str) -> dict:
+        counts = {"versions": 0, "documents": 0, "tasks": 0, "calendar": 0}
+        with db_transaction() as conn:
+            matter_map = {row["legacy_record_id"]: row["id"] for row in conn.execute("SELECT id, legacy_record_id FROM legal_v4_matters WHERE legacy_record_id IS NOT NULL")}
+            if _table_exists(conn, "legal_enterprise_versions"):
+                for row in conn.execute("SELECT * FROM legal_enterprise_versions ORDER BY id").fetchall():
+                    matter_id = matter_map.get(row["record_id"])
+                    if not matter_id or conn.execute("SELECT id FROM legal_v4_versions WHERE legacy_version_id=?", (row["id"],)).fetchone():
+                        continue
+                    conn.execute(
+                        """INSERT INTO legal_v4_versions(matter_id,legacy_version_id,version_number,status,content,change_reason,author,reviewer,approver,effective_date,created_at,is_current)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (matter_id, row["id"], row["version_number"], row["status"], row["content"] or "", row["change_reason"], row["author"], row["reviewer"], row["approver"], row["effective_date"], row["created_at"], row["is_current"]),
+                    )
+                    counts["versions"] += 1
+            version_map = {row["legacy_version_id"]: row["id"] for row in conn.execute("SELECT id, legacy_version_id FROM legal_v4_versions WHERE legacy_version_id IS NOT NULL")}
+            if _table_exists(conn, "legal_enterprise_files"):
+                for row in conn.execute("SELECT * FROM legal_enterprise_files ORDER BY id").fetchall():
+                    matter_id = matter_map.get(row["record_id"])
+                    if not matter_id or conn.execute("SELECT id FROM legal_v4_documents WHERE legacy_file_id=?", (row["id"],)).fetchone():
+                        continue
+                    conn.execute(
+                        """INSERT INTO legal_v4_documents(uuid,matter_id,version_id,legacy_file_id,document_type,original_name,stored_name,extension,mime_type,size_bytes,sha256,storage_path,mandatory,signed,active,uploaded_by,uploaded_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (str(uuid4()), matter_id, version_map.get(row["version_id"]), row["id"], row["document_type"], row["original_name"], row["stored_name"], row["extension"], row["mime_type"], row["size_bytes"], row["sha256"], row["storage_path"], row["mandatory"], row["signed"], row["active"], row["uploaded_by"], row["uploaded_at"]),
+                    )
+                    counts["documents"] += 1
+            if _table_exists(conn, "legal_enterprise_tasks"):
+                for row in conn.execute("SELECT * FROM legal_enterprise_tasks ORDER BY id").fetchall():
+                    matter_id = matter_map.get(row["record_id"])
+                    if conn.execute("SELECT id FROM legal_v4_tasks WHERE legacy_task_id=?", (row["id"],)).fetchone():
+                        continue
+                    conn.execute(
+                        """INSERT INTO legal_v4_tasks(matter_id,legacy_task_id,task_type,title,assigned_to,due_date,priority,status,created_by,created_at,completed_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                        (matter_id, row["id"], row["task_type"], row["title"], row["assigned_to"], row["due_date"], row["priority"], row["status"], row["created_by"], row["created_at"], row["completed_at"]),
+                    )
+                    counts["tasks"] += 1
+            if _table_exists(conn, "legal_enterprise_calendar"):
+                for row in conn.execute("SELECT * FROM legal_enterprise_calendar ORDER BY id").fetchall():
+                    matter_id = matter_map.get(row["record_id"])
+                    if conn.execute("SELECT id FROM legal_v4_calendar WHERE legacy_calendar_id=?", (row["id"],)).fetchone():
+                        continue
+                    conn.execute(
+                        """INSERT INTO legal_v4_calendar(matter_id,legacy_calendar_id,event_type,title,event_date,alert_days,owner,status,created_by,created_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                        (matter_id, row["id"], row["event_type"], row["title"], row["event_date"], row["alert_days"], row["owner"], row["status"], row["created_by"], row["created_at"]),
+                    )
+                    counts["calendar"] += 1
+        if any(counts.values()):
+            self._audit(actor, "MIGRATE_LEGACY_OPERATIONS", "legal_legacy", None, after=counts)
+        return counts
