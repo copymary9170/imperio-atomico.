@@ -4,6 +4,8 @@ from security.permissions import has_permission
 from views import legal_enterprise_phase2
 from views.legal_hub import render_legal_hub
 
+LEGAL_V2_RELEASE = "2026.06.28 · Seguridad y flujos jurídicos"
+
 
 def _validate_assignment(data: dict, user: str) -> None:
     creator = str(user or "").strip().casefold()
@@ -39,6 +41,19 @@ def render_legal_v2(user: str = "Sistema") -> None:
 
     st.title("⚖️ Departamento Jurídico")
     st.caption("Operación legal y arquitectura Enterprise visibles desde el mismo módulo.")
+    st.success(f"✅ Legal V2 actualizado: {LEGAL_V2_RELEASE}")
+
+    with st.expander("Controles activos en esta versión"):
+        st.markdown(
+            """
+- Acceso al módulo mediante `legal.view`.
+- Permisos separados por contratos, reclamos, privacidad, autorizaciones, incidentes y documentos.
+- Transiciones de estado controladas.
+- Motivo obligatorio para cerrar, cancelar o marcar como vencido.
+- Auditoría con datos anteriores y posteriores.
+- Segregación entre creador, revisor y aprobador en Enterprise.
+            """
+        )
 
     available_modes = ["Operación jurídica"]
     if has_permission("legal.admin"):
