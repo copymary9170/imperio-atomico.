@@ -1,8 +1,35 @@
 import streamlit as st
 
 from security.permissions import has_permission
-from views.legal_enterprise_phase2 import render_legal_enterprise_phase2
+from views import legal_enterprise_phase2
 from views.legal_hub import render_legal_hub
+
+
+def _validate_assignment(data: dict, user: str) -> None:
+    creator = str(user or "").strip().casefold()
+    reviewer = str(data.get("revisor") or "").strip().casefold()
+    approver = str(data.get("aprobador") or "").strip().casefold()
+
+    if reviewer and reviewer == creator:
+        raise ValueError("El creador y el revisor deben ser personas diferentes.")
+    if approver and approver == creator:
+        raise ValueError("El creador y el aprobador deben ser personas diferentes.")
+    if reviewer and approver and reviewer == approver:
+        raise ValueError("El revisor y el aprobador deben ser personas diferentes.")
+
+
+def _enable_assignment_validation() -> None:
+    if getattr(legal_enterprise_phase2, "assignment_validation_enabled", False):
+        return
+
+    create_case = legal_enterprise_phase2._create_case
+
+    def create_case_with_validation(data: dict, user: str) -> int:
+        _validate_assignment(data, user)
+        return create_case(data, user)
+
+    legal_enterprise_phase2._create_case = create_case_with_validation
+    legal_enterprise_phase2.assignment_validation_enabled = True
 
 
 def render_legal_v2(user: str = "Sistema") -> None:
@@ -26,6 +53,10 @@ def render_legal_v2(user: str = "Sistema") -> None:
     st.divider()
 
     if mode == "Enterprise":
-        render_legal_enterprise_phase2(user)
+        _enable_assignment_validation()
+        try:
+            legal_enterprise_phase2.render_legal_enterprise_phase2(user)
+        except ValueError as exc:
+            st.error(str(exc))
     else:
         render_legal_hub(user)
