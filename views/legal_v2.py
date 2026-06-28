@@ -4,7 +4,7 @@ from legal_v4.ui import render_legal_v4
 from security.permissions import has_permission
 from views.legal_hub import render_legal_hub
 
-LEGAL_RELEASE = "2026.06.28 - Legal V4 Enterprise"
+LEGAL_RELEASE = "2026.06.28 - Legal V4.1 Enterprise"
 
 
 def render_legal_v2(user: str = "Sistema") -> None:
@@ -13,14 +13,12 @@ def render_legal_v2(user: str = "Sistema") -> None:
         return
 
     st.success(f"Version activa: {LEGAL_RELEASE}")
-    available_modes = ["Operacion juridica"]
-    if has_permission("legal.admin"):
-        available_modes.append("Legal V4 Enterprise")
 
+    available_modes = ["Legal V4.1 Enterprise", "Operacion juridica legacy"]
     mode = st.radio("Vista", available_modes, horizontal=True, key="legal_visible_mode")
     st.divider()
 
-    if mode == "Legal V4 Enterprise":
+    if mode == "Legal V4.1 Enterprise":
         render_legal_v4(user)
     else:
         render_legal_hub(user)
