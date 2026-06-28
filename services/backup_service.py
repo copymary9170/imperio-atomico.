@@ -25,6 +25,7 @@ BACKUP_META = BACKUP_DIR / "backup_meta.json"
 REMOTE_LATEST_PATH = "backups/latest.protected.json"
 DEFAULT_BACKUP_BRANCH = "data-backups"
 BUSINESS_TABLES = (
+    "usuarios",
     "inventario",
     "clientes",
     "proveedores",
@@ -428,15 +429,15 @@ def get_backup_status() -> dict:
         "db_path": str(db_path) if db_path else "No detectada",
         "db_exists": bool(db_path and db_path.exists()),
         "db_has_business_data": database_has_business_data(db_path),
-        "backup_dir": str(BACKUP_DIR),
-        "total_backups": len(backups),
         "last_backup_at": meta.get("last_backup_at", "Nunca"),
-        "last_backup_reason": meta.get("last_backup_reason", ""),
-        "last_backup_file": meta.get("last_backup_file", ""),
-        "last_restore_at": meta.get("last_restore_at", "Nunca"),
-        "last_external_backup_ok": meta.get("last_external_backup_ok", False),
-        "last_external_backup_message": meta.get("last_external_backup_message", "Sin respaldo externo todavía"),
+        "last_backup_reason": meta.get("last_backup_reason", "—"),
+        "last_backup_file": meta.get("last_backup_file", "—"),
+        "last_external_backup_ok": meta.get("last_external_backup_ok"),
+        "last_external_backup_message": meta.get("last_external_backup_message", "Sin información"),
         "last_external_backup_at": meta.get("last_external_backup_at", "Nunca"),
-        "github_configured": bool(_secret("GITHUB_TOKEN") and _secret("GITHUB_REPO") and _secret("BACKUP_PASSWORD")),
+        "last_restore_at": meta.get("last_restore_at", "Nunca"),
+        "last_restore_file": meta.get("last_restore_file", "—"),
+        "remote_backup_configured": bool(_secret("GITHUB_TOKEN") and _secret("GITHUB_REPO") and _secret("BACKUP_PASSWORD")),
         "backup_branch": _secret("BACKUP_BRANCH", DEFAULT_BACKUP_BRANCH),
+        "local_backups": [str(path) for path in backups[:10]],
     }
