@@ -14,6 +14,7 @@ _CORRUPT_HANDLED = False
 _RECOVERY_CHECKED = False
 
 BUSINESS_TABLES = (
+    "usuarios",
     "inventario",
     "clientes",
     "proveedores",
@@ -151,6 +152,4 @@ def db_transaction() -> Generator[sqlite3.Connection, None, None]:
 
             persist_database_snapshot("auto_cambio")
         except Exception:
-            # El cambio local ya fue confirmado. El estado del respaldo se mostrará
-            # en la pantalla de Respaldo para que el usuario pueda reintentarlo.
             pass
