@@ -7,15 +7,14 @@ from views.legal_hub import render_legal_hub
 
 def render_legal_v2(user: str = "Sistema") -> None:
     if not has_permission("legal.view"):
-        st.error("🚫 No tienes permiso para acceder al Departamento Jurídico.")
-        st.caption("Solicita el permiso legal.view a un administrador del sistema.")
+        st.error("No tienes permiso para acceder al Departamento Jurídico.")
         return
 
     st.title("⚖️ Departamento Jurídico")
     st.caption("Operación legal y arquitectura Enterprise visibles desde el mismo módulo.")
 
     available_modes = ["Operación jurídica"]
-    if has_permission("legal.admin") or has_permission("legal.audit.view"):
+    if has_permission("legal.admin"):
         available_modes.append("Enterprise")
 
     mode = st.radio(
