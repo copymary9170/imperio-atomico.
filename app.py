@@ -18,6 +18,7 @@ from database.rate_config_defaults import ensure_rate_config_defaults
 from security.permission_extensions import ensure_extended_permissions
 from ui.session_persistence import restore_session_snapshot, save_session_snapshot
 from security.permissions import has_permission, set_session_role_from_db
+from security.auth import authenticate_user, users_count
 from services.alert_service import get_alert_summary
 from services.persistent_config_service import restore_persistent_rates_to_db
 
@@ -37,22 +38,29 @@ except Exception:
 def _render_login() -> None:
     st.title("⚛️ Imperio Atómico ERP")
     st.subheader("Iniciar sesión")
+
+    if users_count() == 0:
+        st.error("No existen usuarios registrados. Crea primero un usuario administrador.")
+        return
+
     with st.form("login_form"):
         login_usuario = st.text_input("Usuario")
-        st.text_input("Contraseña", type="password")
+        login_password = st.text_input("Contraseña", type="password")
         submit_login = st.form_submit_button("Entrar")
+
     if submit_login:
-        usuario_clean = str(login_usuario or "").strip()
-        if not usuario_clean:
-            st.error("Ingresa tu usuario.")
+        result = authenticate_user(login_usuario, login_password)
+
+        if not result.ok:
+            st.error(result.message or "Credenciales inválidas.")
             return
-        st.session_state["usuario"] = usuario_clean
-        st.session_state["rol"] = "Operator"
+
+        st.session_state["usuario"] = result.usuario
+        st.session_state["rol"] = result.rol
         st.session_state["authentication_status"] = True
         set_session_role_from_db()
         save_session_snapshot()
         st.rerun()
-
 
 if not st.session_state.get("authentication_status"):
     _render_login()
