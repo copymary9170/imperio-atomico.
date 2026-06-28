@@ -1,10 +1,10 @@
 import streamlit as st
 
 from security.permissions import has_permission
-from views.legal_enterprise_core import render_legal_enterprise_core
+from views.legal_enterprise_v3 import render_legal_enterprise_v3
 from views.legal_hub import render_legal_hub
 
-LEGAL_V2_RELEASE = "2026.06.28 · Núcleo jurídico Enterprise"
+LEGAL_V2_RELEASE = "2026.06.28 · Enterprise V3 endurecido"
 
 
 def render_legal_v2(user: str = "Sistema") -> None:
@@ -19,15 +19,17 @@ def render_legal_v2(user: str = "Sistema") -> None:
     with st.expander("Controles activos en esta versión"):
         st.markdown(
             """
-- Acceso mediante permisos jurídicos granulares.
-- Expediente maestro para todos los módulos legales obligatorios.
-- Workflows diferenciados para documentos, contratos, casos y riesgos.
-- Segregación entre creador, revisor y aprobador.
-- Gestión documental con formatos, tamaño máximo, hash SHA-256 y detección de duplicados.
-- Control de versiones con motivo obligatorio e historial.
-- Auditoría de acciones con antes, después, usuario, contexto de sesión y resultado.
-- Calendario jurídico, vencimientos, alertas y reportes exportables.
-- Reglas de bloqueo para documentos firmados y registros aprobados.
+- Acceso mediante permisos jurídicos granulares y permisos específicos para revisar, aprobar, publicar y firmar.
+- Expediente maestro con módulos jurídicos especializados y gestión contractual transversal.
+- Confidencialidad por registro para expedientes internos, confidenciales y restringidos.
+- Workflows diferenciados para documentos, contratos, casos, riesgos y registros oficiales.
+- Segregación efectiva entre creador, revisor y aprobador asignado.
+- Matriz documental obligatoria por módulo antes de publicar, firmar o declarar vigencia.
+- Gestión documental con formatos, tamaño máximo, hash SHA-256 y detección global de duplicados.
+- Control de versiones con comparación, restauración como nueva versión e historial.
+- Obligaciones contractuales y jurídicas vinculadas al expediente.
+- Auditoría encadenada con antes, después, usuario, contexto de sesión y hashes de integridad.
+- Automatización de tareas por vencimientos y reportes exportables a Excel y CSV.
             """
         )
 
@@ -44,6 +46,6 @@ def render_legal_v2(user: str = "Sistema") -> None:
     st.divider()
 
     if mode == "Enterprise":
-        render_legal_enterprise_core(user)
+        render_legal_enterprise_v3(user)
     else:
         render_legal_hub(user)
