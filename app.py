@@ -40,28 +40,28 @@ def _render_login() -> None:
     st.subheader("Iniciar sesión")
 
     if users_count() == 0:
-    st.warning("No existen usuarios registrados. Crea el primer administrador.")
+        st.warning("No existen usuarios registrados. Crea el primer administrador.")
 
-    with st.form("crear_admin_inicial"):
-        admin_user = st.text_input("Usuario administrador")
-        admin_name = st.text_input("Nombre completo")
-        admin_pass = st.text_input("Contraseña", type="password")
-        admin_pass_2 = st.text_input("Confirmar contraseña", type="password")
-        crear = st.form_submit_button("Crear administrador")
+        with st.form("crear_admin_inicial"):
+            admin_user = st.text_input("Usuario administrador")
+            admin_name = st.text_input("Nombre completo")
+            admin_pass = st.text_input("Contraseña", type="password")
+            admin_pass_2 = st.text_input("Confirmar contraseña", type="password")
+            crear = st.form_submit_button("Crear administrador")
 
-    if crear:
-        if admin_pass != admin_pass_2:
-            st.error("Las contraseñas no coinciden.")
-            return
+        if crear:
+            if admin_pass != admin_pass_2:
+                st.error("Las contraseñas no coinciden.")
+                return
 
-        try:
-            create_initial_admin(admin_user, admin_name, admin_pass)
-            st.success("Administrador creado. Ahora inicia sesión.")
-            st.rerun()
-        except Exception as exc:
-            st.error(str(exc))
+            try:
+                create_initial_admin(admin_user, admin_name, admin_pass)
+                st.success("Administrador creado. Ahora inicia sesión.")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
 
-    return
+        return
 
     with st.form("login_form"):
         login_usuario = st.text_input("Usuario")
@@ -81,6 +81,7 @@ def _render_login() -> None:
         set_session_role_from_db()
         save_session_snapshot()
         st.rerun()
+
 
 if not st.session_state.get("authentication_status"):
     _render_login()
