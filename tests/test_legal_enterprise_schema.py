@@ -8,10 +8,23 @@ def test_operational_migration_constants_are_versioned():
     assert MIGRATION_NAME == "legal_operational_domains"
 
 
+def test_legacy_migration_constants_are_versioned():
+    from legal.migrations.v102_legacy_v4_import import MIGRATION_NAME, MIGRATION_VERSION
+
+    assert MIGRATION_VERSION == 102
+    assert MIGRATION_NAME == "legacy_v4_import"
+
+
 def test_enterprise_migration_runner_imports():
     from legal.migrations import migrate_all
 
     assert callable(migrate_all)
+
+
+def test_enterprise_bootstrap_imports():
+    from legal.application.bootstrap import bootstrap_enterprise_legal
+
+    assert callable(bootstrap_enterprise_legal)
 
 
 def test_security_context_denies_by_default():
