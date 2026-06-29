@@ -1,0 +1,31 @@
+name: Python checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, codex/legal-v4-enterprise]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      IMPERIO_DISABLE_AUTO_PERSIST: "1"
+      IMPERIO_DB_PATH: /tmp/imperio-test.db
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: pytest -q
