@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from enum import StrEnum
+from enum import Enum
 
 
-class MatterStatus(StrEnum):
+class _TextEnum(str, Enum):
+    """String enum compatible with Python versions before StrEnum."""
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class MatterStatus(_TextEnum):
     """Controlled lifecycle states for any legal record."""
 
     DRAFT = "Borrador"
@@ -17,7 +24,7 @@ class MatterStatus(StrEnum):
     ARCHIVED = "Archivado"
 
 
-class RiskLevel(StrEnum):
+class RiskLevel(_TextEnum):
     """Enterprise legal risk scale."""
 
     LOW = "Bajo"
@@ -26,7 +33,7 @@ class RiskLevel(StrEnum):
     CRITICAL = "Critico"
 
 
-class Confidentiality(StrEnum):
+class Confidentiality(_TextEnum):
     """Document and matter confidentiality classes."""
 
     PUBLIC = "Publico"
@@ -35,7 +42,7 @@ class Confidentiality(StrEnum):
     RESTRICTED = "Restringido"
 
 
-class LegalArea(StrEnum):
+class LegalArea(_TextEnum):
     """Functional areas covered by the Legal Department."""
 
     PUBLIC_LEGAL = "Documentos publicos"
