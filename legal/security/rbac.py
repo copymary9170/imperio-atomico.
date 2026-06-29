@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 
 
-class LegalPermission(StrEnum):
+class _TextEnum(str, Enum):
+    """String enum compatible with Python versions before StrEnum."""
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class LegalPermission(_TextEnum):
     VIEW = "legal.view"
     CREATE = "legal.create"
     UPDATE = "legal.update"
