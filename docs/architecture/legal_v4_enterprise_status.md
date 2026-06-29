@@ -8,64 +8,63 @@ Base: `main`
 
 ## Implementado
 
-### Arquitectura y planificación
+- Plan de reconstrucción y auditoría de brechas.
+- Paquete nuevo `legal/` separado de `legal_v4/`.
+- Capas: dominio, aplicación, repositorios, seguridad, auditoría, infraestructura SQLite y UI.
+- Entidades y políticas base para expedientes jurídicos.
+- RBAC inicial con denegación por defecto.
+- Auditoría sellada con SHA-256.
+- Fachada de aplicación para que Streamlit no ejecute SQL directo.
+- Repositorios SQLite para expedientes y auditoría.
+- Unit of Work transaccional.
+- Bootstrap de migraciones.
+- Página Streamlit con feature flag: `IMPERIO_LEGAL_ENTERPRISE_UI=1`.
 
-- Auditoría de brechas de Legal V4/V4.1.
-- Plan de reconstrucción empresarial.
-- Criterios de aceptación antes de producción.
-- Estrategia de migración paralela sin romper tablas `legal_v4_*`.
+## Migraciones
 
-### Capas nuevas
+- V100: núcleo común Enterprise.
+- V101: dominios operativos.
+- V102: importación idempotente desde `legal_v4_matters`.
 
-- `legal/domain`: entidades, estados, errores y workflow.
-- `legal/application`: comandos, casos de uso y bootstrap.
-- `legal/repositories`: contratos de persistencia.
-- `legal/security`: contexto de seguridad y RBAC inicial.
-- `legal/audit`: evento auditado sellado con SHA-256.
-- `legal/infrastructure/sqlite`: esquema, repositorios y Unit of Work.
+## Tablas cubiertas
 
-### Datos y migración
+- Expedientes.
+- Partes.
+- Documentos.
+- Comentarios.
+- Timeline.
+- Contratos.
+- Obligaciones contractuales.
+- Privacidad.
+- Consentimientos.
+- Litigios.
+- Evidencias.
+- Cumplimiento.
+- Licencias.
+- Riesgos.
+- Gobierno corporativo.
+- Tareas.
+- Calendario.
+- Auditoría.
 
-Se agregó esquema paralelo `legal_*` con tablas para:
+## Pruebas agregadas
 
-- expedientes jurídicos;
-- partes y contrapartes;
-- relación expediente-parte;
-- documentos;
-- comentarios;
-- timeline;
-- contratos;
-- privacidad;
-- consentimientos;
-- litigios;
-- evidencias;
-- cumplimiento;
-- riesgos;
-- gobierno corporativo;
-- auditoría inmutable;
-- control de migraciones.
+- Dominio jurídico.
+- Segregación de funciones.
+- Transiciones de estado.
+- RBAC.
+- Auditoría hash.
+- Migraciones y bootstrap.
 
-### Pruebas agregadas
+## Pendiente antes de fusionar
 
-- Pruebas de dominio jurídico.
-- Pruebas de segregación de funciones.
-- Pruebas de transición de estados.
-- Pruebas de RBAC básico.
-- Pruebas de auditoría sellada con hash.
+- Ejecutar pruebas en checkout real.
+- Probar migración contra copia de `imperio.db`.
+- Completar casos de uso específicos por dominio.
+- Completar formularios operativos por dominio.
+- Implementar descarga documental autorizada.
+- Implementar firma digital real.
 
-## Pendiente
+## Riesgo
 
-- Ejecutar suite en un checkout real.
-- Corregir cualquier fallo de importación detectado por CI.
-- Completar conexión UI/navegación bajo feature flag.
-- Agregar migración de datos desde `legal_v4_*` hacia `legal_*`.
-- Agregar repositorios y casos de uso específicos para contratos, privacidad, litigios, cumplimiento, riesgos y gobierno.
-- Implementar descarga documental autorizada y auditada.
-- Implementar firma digital real mediante proveedor externo.
-- Ensayar migración sobre una copia de `imperio.db`.
-
-## Riesgos abiertos
-
-- El PR todavía es una base de reconstrucción, no un módulo productivo completo.
-- No debe fusionarse hasta ejecutar pruebas y migración de ensayo.
-- La coexistencia temporal de `legal_v4_*` y `legal_*` requiere feature flag y documentación de transición.
+Sigue siendo Draft. No debe fusionarse hasta validar pruebas, migración y seguridad.
